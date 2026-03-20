@@ -177,4 +177,101 @@ size_t MMapStorage::CondensedIndex(size_t n, size_t i, size_t j) {
     return n * i - i * (i + 1) / 2 + j - i - 1;
 }
 
+// SparseStorage implementation
+
+SparseStorage::SparseStorage(size_t n, double cutoff)
+    : n_(n), cutoff_(cutoff) {
+}
+
+void SparseStorage::Set(size_t i, size_t j, double value) {
+    // Only store values at or below cutoff
+    if (value > cutoff_) {
+        return;
+    }
+
+    // Ensure i < j for consistent storage
+    if (i > j) {
+        std::swap(i, j);
+    }
+    assert(i < j && "Set requires i < j after swap");
+
+    // Get the calling thread's buffer
+    std::thread::id tid = std::this_thread::get_id();
+
+    // Try with shared lock first (read access) to check if buffer exists
+    bool buffer_exists = false;
+    {
+        std::shared_lock<std::shared_mutex> lock(buffers_mutex_);
+        buffer_exists = thread_buffers_.find(tid) != thread_buffers_.end();
+    }
+
+    // Get unique lock for write access
+    std::unique_lock<std::shared_mutex> lock(buffers_mutex_);
+    thread_buffers_[tid].emplace_back(i, j, value);
+}
+
+double SparseStorage::Get(size_t i, size_t j) const {
+    // Diagonal is always zero
+    if (i == j) {
+        return 0.0;
+    }
+
+    // Ensure i < j for consistent lookup
+    if (i > j) {
+        std::swap(i, j);
+    }
+
+    size_t index = CondensedIndex(n_, i, j);
+    auto it = lookup_.find(index);
+    if (it != lookup_.end()) {
+        return it->second;
+    }
+    return 0.0;
+}
+
+size_t SparseStorage::NumItems() const {
+    return n_;
+}
+
+size_t SparseStorage::NumPairs() const {
+    return n_ * (n_ - 1) / 2;
+}
+
+double* SparseStorage::Data() {
+    return nullptr;
+}
+
+const double* SparseStorage::Data() const {
+    return nullptr;
+}
+
+void SparseStorage::Finalize() {
+    // Merge all per-thread buffers into merged_entries_
+    std::unique_lock<std::shared_mutex> lock(buffers_mutex_);
+
+    for (auto& [tid, buffer] : thread_buffers_) {
+        merged_entries_.insert(merged_entries_.end(), buffer.begin(), buffer.end());
+    }
+
+    // Build lookup map for fast Get() access
+    for (const auto& [i, j, value] : merged_entries_) {
+        size_t index = CondensedIndex(n_, i, j);
+        lookup_[index] = value;
+    }
+
+    // Clear thread buffers to free memory
+    thread_buffers_.clear();
+}
+
+const std::vector<std::tuple<size_t, size_t, double>>& SparseStorage::Entries() const {
+    return merged_entries_;
+}
+
+size_t SparseStorage::CondensedIndex(size_t n, size_t i, size_t j) {
+    // Formula: n * i - i * (i + 1) / 2 + j - i - 1
+    // This matches scipy.spatial.distance.squareform condensed indexing
+    assert(i < j && "CondensedIndex requires i < j");
+    return n * i - i * (i + 1) / 2 + j - i - 1;
+}
+
 }  // namespace OECluster

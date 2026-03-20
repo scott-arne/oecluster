@@ -90,3 +90,31 @@ TEST(MMapStorageTest, PersistsAfterDestruction) {
     }
     std::filesystem::remove(path);
 }
+
+TEST(SparseStorageTest, StoresOnlyBelowCutoff) {
+    SparseStorage storage(4, 0.5);  // cutoff = 0.5
+    storage.Set(0, 1, 0.3);  // below cutoff, stored
+    storage.Set(0, 2, 0.8);  // above cutoff, ignored
+    storage.Set(1, 2, 0.5);  // at cutoff, stored
+    storage.Finalize();
+    auto& entries = storage.Entries();
+    EXPECT_EQ(entries.size(), 2);
+}
+
+TEST(SparseStorageTest, DataReturnsNullptr) {
+    SparseStorage storage(4, 0.5);
+    EXPECT_EQ(storage.Data(), nullptr);
+}
+
+TEST(SparseStorageTest, GetReturnsStoredValues) {
+    SparseStorage storage(4, 0.5);
+    storage.Set(0, 1, 0.3);
+    storage.Finalize();
+    EXPECT_DOUBLE_EQ(storage.Get(0, 1), 0.3);
+}
+
+TEST(SparseStorageTest, GetReturnsZeroForUnstored) {
+    SparseStorage storage(4, 0.5);
+    storage.Finalize();
+    EXPECT_DOUBLE_EQ(storage.Get(0, 1), 0.0);
+}

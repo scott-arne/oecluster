@@ -9,6 +9,10 @@
 #include <cstddef>
 #include <string>
 #include <vector>
+#include <unordered_map>
+#include <tuple>
+#include <thread>
+#include <shared_mutex>
 
 namespace OECluster {
 
@@ -188,6 +192,73 @@ private:
     std::string path_;      ///< File path
     int fd_;                ///< File descriptor
     double* data_;          ///< Pointer to mapped memory
+};
+
+/**
+ * @brief Sparse storage backend that stores only distances below a cutoff.
+ *
+ * SparseStorage filters distances during Set() operations, storing only values
+ * at or below the specified cutoff threshold. It uses per-thread buffers for
+ * thread-safe concurrent writes, which are merged during Finalize() for efficient
+ * lookups.
+ *
+ * Example::
+ *
+ *     SparseStorage storage(4, 0.5);  // 4 items, cutoff = 0.5
+ *     storage.Set(0, 1, 0.3);  // Stored (below cutoff)
+ *     storage.Set(0, 2, 0.8);  // Ignored (above cutoff)
+ *     storage.Finalize();
+ *     double dist = storage.Get(0, 1);  // Returns 0.3
+ *     double dist2 = storage.Get(0, 2);  // Returns 0.0 (not stored)
+ */
+class SparseStorage : public StorageBackend {
+public:
+    /**
+     * @brief Construct a SparseStorage for n items with cutoff threshold.
+     *
+     * :param n: Number of items in the dataset.
+     * :param cutoff: Maximum distance value to store (inclusive).
+     */
+    SparseStorage(size_t n, double cutoff);
+    ~SparseStorage() override = default;
+
+    void Set(size_t i, size_t j, double value) override;
+    double Get(size_t i, size_t j) const override;
+    size_t NumItems() const override;
+    size_t NumPairs() const override;
+    double* Data() override;
+    const double* Data() const override;
+    void Finalize() override;
+
+    /**
+     * @brief Access merged entries after Finalize().
+     *
+     * :returns: Vector of tuples (i, j, value) for all stored distances.
+     */
+    const std::vector<std::tuple<size_t, size_t, double>>& Entries() const;
+
+private:
+    /**
+     * @brief Calculate the condensed index for a pair (i, j) where i < j.
+     *
+     * :param n: Total number of items.
+     * :param i: Index of first item (must be less than j).
+     * :param j: Index of second item (must be greater than i).
+     * :returns: Condensed index in the range [0, n*(n-1)/2).
+     */
+    static size_t CondensedIndex(size_t n, size_t i, size_t j);
+
+    size_t n_;                ///< Number of items
+    double cutoff_;           ///< Maximum distance value to store
+
+    /// Per-thread buffers for concurrent Set() calls
+    std::shared_mutex buffers_mutex_;
+    std::unordered_map<std::thread::id,
+                       std::vector<std::tuple<size_t, size_t, double>>> thread_buffers_;
+
+    /// Merged results after Finalize()
+    std::vector<std::tuple<size_t, size_t, double>> merged_entries_;
+    std::unordered_map<size_t, double> lookup_;  ///< condensed index -> value
 };
 
 }  // namespace OECluster
