@@ -10,6 +10,7 @@ FetchContent_MakeAvailable(googletest)
 add_executable(oecluster_tests
     cpp/test_main.cpp
     cpp/test_storage.cpp
+    cpp/test_thread_pool.cpp
 )
 
 target_link_libraries(oecluster_tests
