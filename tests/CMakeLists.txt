@@ -12,6 +12,7 @@ add_executable(oecluster_tests
     cpp/test_storage.cpp
     cpp/test_thread_pool.cpp
     cpp/test_pdist.cpp
+    cpp/test_fingerprint_metric.cpp
 )
 
 target_link_libraries(oecluster_tests
@@ -19,6 +20,10 @@ target_link_libraries(oecluster_tests
         oecluster
         GTest::gtest
 )
+
+if(OpenEye_GraphSim_FOUND)
+    target_link_libraries(oecluster_tests PRIVATE OpenEye::OEGraphSim)
+endif()
 
 include(GoogleTest)
 gtest_discover_tests(oecluster_tests)

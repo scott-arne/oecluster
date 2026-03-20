@@ -48,6 +48,10 @@ set(OECLUSTER_SOURCES
     src/DistanceMatrix.cpp
 )
 
+if(OpenEye_GraphSim_FOUND)
+    list(APPEND OECLUSTER_SOURCES src/metrics/FingerprintMetric.cpp)
+endif()
+
 add_library(oecluster ${OECLUSTER_SOURCES})
 
 set_target_properties(oecluster PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -62,6 +66,11 @@ target_link_libraries(oecluster
     PUBLIC
         OpenEye::OEChem
 )
+
+if(OpenEye_GraphSim_FOUND)
+    target_compile_definitions(oecluster PUBLIC OECLUSTER_HAS_GRAPHSIM)
+    target_link_libraries(oecluster PUBLIC OpenEye::OEGraphSim)
+endif()
 
 if(OECLUSTER_BUILD_TESTS)
     enable_testing()
