@@ -13,6 +13,8 @@ add_executable(oecluster_tests
     cpp/test_thread_pool.cpp
     cpp/test_pdist.cpp
     cpp/test_fingerprint_metric.cpp
+    cpp/test_rocs_metric.cpp
+    cpp/test_bio_metrics.cpp
 )
 
 target_link_libraries(oecluster_tests
@@ -23,6 +25,14 @@ target_link_libraries(oecluster_tests
 
 if(OpenEye_GraphSim_FOUND)
     target_link_libraries(oecluster_tests PRIVATE OpenEye::OEGraphSim)
+endif()
+
+if(OpenEye_Shape_FOUND)
+    target_link_libraries(oecluster_tests PRIVATE OpenEye::OEShape)
+endif()
+
+if(OpenEye_Bio_FOUND)
+    target_link_libraries(oecluster_tests PRIVATE OpenEye::OEBio)
 endif()
 
 include(GoogleTest)

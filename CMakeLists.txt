@@ -41,6 +41,65 @@ endif()
 
 find_package(OpenEye REQUIRED)
 
+# OEShape and its transitive dependencies are not yet in cmake-openeye
+# FindOpenEye.cmake; discover them manually.
+set(_OE_LIB_SEARCH_PATHS
+    ${OPENEYE_LIB_DIR}
+    ${OPENEYE_ROOT}/lib
+    $ENV{OPENEYE_ROOT}/lib
+    $ENV{OE_DIR}/lib
+    /opt/openeye/lib
+    /usr/local/openeye/lib
+)
+
+macro(_find_oe_dep VAR_NAME LIB_NAME TARGET_NAME DEPS)
+    if(NOT TARGET ${TARGET_NAME})
+        find_library(${VAR_NAME} NAMES ${LIB_NAME} PATHS ${_OE_LIB_SEARCH_PATHS} NO_DEFAULT_PATH)
+        if(${VAR_NAME})
+            add_library(${TARGET_NAME} UNKNOWN IMPORTED)
+            set_target_properties(${TARGET_NAME} PROPERTIES
+                IMPORTED_LOCATION "${${VAR_NAME}}"
+                INTERFACE_INCLUDE_DIRECTORIES "${OPENEYE_INCLUDE_DIR}"
+            )
+            if(NOT "${DEPS}" STREQUAL "")
+                set_property(TARGET ${TARGET_NAME} PROPERTY INTERFACE_LINK_LIBRARIES ${DEPS})
+            endif()
+        endif()
+    endif()
+endmacro()
+
+_find_oe_dep(OEOPT_LIBRARY oeopt OpenEye::OEOpt "OpenEye::OESystem")
+_find_oe_dep(OEMOLPOTENTIAL_LIBRARY oemolpotential OpenEye::OEMolPotential "OpenEye::OEChem")
+_find_oe_dep(OEHERMITE_LIBRARY oehermite OpenEye::OEHermite "OpenEye::OEChem")
+
+if(NOT TARGET OpenEye::OEShape)
+    find_library(OESHAPE_LIBRARY NAMES oeshape PATHS ${_OE_LIB_SEARCH_PATHS} NO_DEFAULT_PATH)
+    if(OESHAPE_LIBRARY)
+        add_library(OpenEye::OEShape UNKNOWN IMPORTED)
+        set_target_properties(OpenEye::OEShape PROPERTIES
+            IMPORTED_LOCATION "${OESHAPE_LIBRARY}"
+            INTERFACE_INCLUDE_DIRECTORIES "${OPENEYE_INCLUDE_DIR}"
+            INTERFACE_LINK_LIBRARIES "OpenEye::OEChem;OpenEye::OEGrid;OpenEye::OEOpt;OpenEye::OEMolPotential;OpenEye::OEHermite"
+        )
+        set(OpenEye_Shape_FOUND TRUE)
+        message(STATUS "OpenEye: Found OEShape: ${OESHAPE_LIBRARY}")
+    endif()
+endif()
+
+if(NOT TARGET OpenEye::OEBio)
+    find_library(OEBIO_LIBRARY NAMES oebio PATHS ${_OE_LIB_SEARCH_PATHS} NO_DEFAULT_PATH)
+    if(OEBIO_LIBRARY)
+        add_library(OpenEye::OEBio UNKNOWN IMPORTED)
+        set_target_properties(OpenEye::OEBio PROPERTIES
+            IMPORTED_LOCATION "${OEBIO_LIBRARY}"
+            INTERFACE_INCLUDE_DIRECTORIES "${OPENEYE_INCLUDE_DIR}"
+            INTERFACE_LINK_LIBRARIES "OpenEye::OEChem"
+        )
+        set(OpenEye_Bio_FOUND TRUE)
+        message(STATUS "OpenEye: Found OEBio: ${OEBIO_LIBRARY}")
+    endif()
+endif()
+
 set(OECLUSTER_SOURCES
     src/StorageBackend.cpp
     src/ThreadPool.cpp
@@ -50,6 +109,17 @@ set(OECLUSTER_SOURCES
 
 if(OpenEye_GraphSim_FOUND)
     list(APPEND OECLUSTER_SOURCES src/metrics/FingerprintMetric.cpp)
+endif()
+
+if(OpenEye_Shape_FOUND)
+    list(APPEND OECLUSTER_SOURCES src/metrics/ROCSMetric.cpp)
+endif()
+
+if(OpenEye_Bio_FOUND)
+    list(APPEND OECLUSTER_SOURCES
+        src/metrics/SuperposeMetric.cpp
+        src/metrics/SiteHopperMetric.cpp
+    )
 endif()
 
 add_library(oecluster ${OECLUSTER_SOURCES})
@@ -70,6 +140,16 @@ target_link_libraries(oecluster
 if(OpenEye_GraphSim_FOUND)
     target_compile_definitions(oecluster PUBLIC OECLUSTER_HAS_GRAPHSIM)
     target_link_libraries(oecluster PUBLIC OpenEye::OEGraphSim)
+endif()
+
+if(OpenEye_Shape_FOUND)
+    target_compile_definitions(oecluster PUBLIC OECLUSTER_HAS_SHAPE)
+    target_link_libraries(oecluster PUBLIC OpenEye::OEShape)
+endif()
+
+if(OpenEye_Bio_FOUND)
+    target_compile_definitions(oecluster PUBLIC OECLUSTER_HAS_BIO)
+    target_link_libraries(oecluster PUBLIC OpenEye::OEBio)
 endif()
 
 if(OECLUSTER_BUILD_TESTS)
