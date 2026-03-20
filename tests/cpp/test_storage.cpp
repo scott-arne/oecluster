@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <filesystem>
 #include "oecluster/StorageBackend.h"
 
 using namespace OECluster;
@@ -59,4 +60,33 @@ TEST(DenseStorageTest, InitializedToZero) {
     for (size_t i = 0; i < storage.NumPairs(); ++i) {
         EXPECT_DOUBLE_EQ(storage.Data()[i], 0.0);
     }
+}
+
+TEST(MMapStorageTest, CreateAndWrite) {
+    auto path = std::filesystem::temp_directory_path() / "test_mmap.bin";
+    {
+        MMapStorage storage(path.string(), 4);
+        storage.Set(0, 1, 0.5);
+        storage.Set(2, 3, 0.8);
+        EXPECT_DOUBLE_EQ(storage.Get(0, 1), 0.5);
+        EXPECT_DOUBLE_EQ(storage.Get(2, 3), 0.8);
+        EXPECT_NE(storage.Data(), nullptr);
+    }
+    EXPECT_TRUE(std::filesystem::exists(path));
+    std::filesystem::remove(path);
+}
+
+TEST(MMapStorageTest, PersistsAfterDestruction) {
+    auto path = std::filesystem::temp_directory_path() / "test_mmap_persist.bin";
+    {
+        MMapStorage storage(path.string(), 4);
+        storage.Set(0, 1, 0.5);
+        storage.Set(1, 2, 0.9);
+    }
+    {
+        MMapStorage storage(path.string(), 4);
+        EXPECT_DOUBLE_EQ(storage.Get(0, 1), 0.5);
+        EXPECT_DOUBLE_EQ(storage.Get(1, 2), 0.9);
+    }
+    std::filesystem::remove(path);
 }

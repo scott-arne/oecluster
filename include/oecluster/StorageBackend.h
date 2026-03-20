@@ -7,6 +7,7 @@
 #define OECLUSTER_STORAGEBACKEND_H
 
 #include <cstddef>
+#include <string>
 #include <vector>
 
 namespace OECluster {
@@ -128,6 +129,65 @@ private:
 
     size_t n_;                    ///< Number of items
     std::vector<double> data_;    ///< Condensed distance array
+};
+
+/**
+ * @brief Memory-mapped storage backend using condensed distance matrix indexing.
+ *
+ * MMapStorage uses the same condensed indexing as DenseStorage but backs the
+ * data with a memory-mapped file for out-of-core operation. The file persists
+ * after the object is destroyed, allowing data to be reused across sessions.
+ *
+ * Example::
+ *
+ *     MMapStorage storage("distances.bin", 4);  // 4 items, 6 pairs
+ *     storage.Set(0, 1, 1.5);
+ *     storage.Set(1, 2, 2.5);
+ *     double dist = storage.Get(0, 1);  // Returns 1.5
+ */
+class MMapStorage : public StorageBackend {
+public:
+    /**
+     * @brief Construct a memory-mapped storage backend.
+     *
+     * Creates or opens a file at path and maps it into memory.
+     * If the file exists and has the correct size, it is reused.
+     * Otherwise, a new file is created and zero-filled.
+     *
+     * :param path: File path for the memory-mapped file.
+     * :param n: Number of items.
+     * :raises StorageError: If file operations fail.
+     */
+    MMapStorage(const std::string& path, size_t n);
+    ~MMapStorage() override;
+
+    MMapStorage(const MMapStorage&) = delete;
+    MMapStorage& operator=(const MMapStorage&) = delete;
+
+    void Set(size_t i, size_t j, double value) override;
+    double Get(size_t i, size_t j) const override;
+    size_t NumItems() const override;
+    size_t NumPairs() const override;
+    double* Data() override;
+    const double* Data() const override;
+
+private:
+    /**
+     * @brief Calculate the condensed index for a pair (i, j) where i < j.
+     *
+     * :param n: Total number of items.
+     * :param i: Index of first item (must be less than j).
+     * :param j: Index of second item (must be greater than i).
+     * :returns: Condensed index in the range [0, n*(n-1)/2).
+     */
+    static size_t CondensedIndex(size_t n, size_t i, size_t j);
+
+    size_t n_;              ///< Number of items
+    size_t num_pairs_;      ///< Number of pairs
+    size_t file_size_;      ///< Size of the mapped file in bytes
+    std::string path_;      ///< File path
+    int fd_;                ///< File descriptor
+    double* data_;          ///< Pointer to mapped memory
 };
 
 }  // namespace OECluster
