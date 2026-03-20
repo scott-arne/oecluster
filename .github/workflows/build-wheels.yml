@@ -1,0 +1,212 @@
+name: Build Wheels
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+env:
+  GCS_BUCKET: openeye-sdks
+  OPENEYE_VERSION: "2025.2.1"
+
+jobs:
+  build-linux:
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+            container: rockylinux:8
+            sdk: OpenEye-toolkits-2025.2.1-redhat-RHEL8-g++8.5-x64.tar.gz
+            python: python3.11
+            dnf_repo: powertools
+            manylinux_plat: manylinux_2_28_x86_64
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+            container: rockylinux:9
+            sdk: OpenEye-toolkits-2025.2.1-Ubuntu-22.04-g++11.11-aarch64.tar.gz
+            python: python3.11
+            dnf_repo: crb
+            manylinux_plat: manylinux_2_34_aarch64
+    runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.container }}
+    steps:
+      - name: Install system dependencies
+        run: |
+          dnf install -y git gcc-c++ cmake make tar gzip unzip which ${{ matrix.python }} ${{ matrix.python }}-pip ${{ matrix.python }}-devel
+          dnf config-manager --set-enabled ${{ matrix.dnf_repo }}
+          dnf install -y patchelf
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Download OpenEye SDK
+        run: |
+          curl -O https://storage.googleapis.com/${{ env.GCS_BUCKET }}/${{ matrix.sdk }}
+          tar -xzf ${{ matrix.sdk }}
+          echo "OPENEYE_ROOT=$(pwd)/$(basename ${{ matrix.sdk }} .tar.gz)" >> $GITHUB_ENV
+
+      - name: Install Python dependencies
+        run: |
+          ${{ matrix.python }} -m pip install --upgrade pip
+          ${{ matrix.python }} -m pip install build wheel auditwheel patchelf
+
+      - name: Install OpenEye Python package
+        run: |
+          ${{ matrix.python }} -m pip install openeye-toolkits==${{ env.OPENEYE_VERSION }}
+
+      - name: Build wheel
+        run: |
+          ${{ matrix.python }} scripts/build_python.py --openeye-root $OPENEYE_ROOT --python ${{ matrix.python }} --verbose
+
+      - name: Repair wheel with auditwheel
+        run: |
+          ${{ matrix.python }} -m auditwheel repair --plat ${{ matrix.manylinux_plat }} dist/oecluster-*.whl -w dist/
+          rm dist/oecluster-*-linux_*.whl
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel-linux-${{ matrix.arch }}
+          path: dist/*.whl
+
+  build-macos:
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: macos-13
+            sdk: OpenEye-toolkits-2025.2.1-macOS-g++14.0-x64.tar.gz
+          - arch: arm64
+            runner: macos-14
+            sdk: OpenEye-toolkits-2025.2.1-macOS-g++14.0-arm64.tar.gz
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Download OpenEye SDK
+        run: |
+          curl -O https://storage.googleapis.com/${{ env.GCS_BUCKET }}/${{ matrix.sdk }}
+          tar -xzf ${{ matrix.sdk }}
+          echo "OPENEYE_ROOT=$(pwd)/$(basename ${{ matrix.sdk }} .tar.gz)" >> $GITHUB_ENV
+
+      - name: Install Python dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install build wheel delocate
+
+      - name: Install OpenEye Python package
+        run: |
+          python3 -m pip install openeye-toolkits==${{ env.OPENEYE_VERSION }}
+
+      - name: Build wheel
+        run: |
+          python3 scripts/build_python.py --openeye-root $OPENEYE_ROOT --python python3 --verbose
+
+      - name: Repair wheel with delocate
+        run: |
+          delocate-wheel -w dist/ -v dist/oecluster-*.whl
+          rm dist/oecluster-*-macosx_*_${{ matrix.arch }}.whl
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel-macos-${{ matrix.arch }}
+          path: dist/*.whl
+
+  build-windows:
+    permissions:
+      contents: read
+      id-token: write
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Download OpenEye SDK
+        shell: bash
+        run: |
+          curl -O https://storage.googleapis.com/${{ env.GCS_BUCKET }}/OpenEye-toolkits-2025.2.1-Windows-visualstudio2022-x64.tar.gz
+          tar -xzf OpenEye-toolkits-2025.2.1-Windows-visualstudio2022-x64.tar.gz
+          echo "OPENEYE_ROOT=$(pwd)/OpenEye-toolkits-2025.2.1-Windows-visualstudio2022-x64" >> $GITHUB_ENV
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build wheel
+
+      - name: Install OpenEye Python package
+        run: |
+          python -m pip install openeye-toolkits==${{ env.OPENEYE_VERSION }}
+
+      - name: Build wheel
+        shell: bash
+        run: |
+          python scripts/build_python.py --openeye-root $OPENEYE_ROOT --python python --verbose
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel-windows-x86_64
+          path: dist/*.whl
+
+  publish:
+    needs: [build-linux, build-macos, build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Download all wheels
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wheel-*
+          path: dist
+          merge-multiple: true
+
+      - name: List wheels
+        run: ls -lh dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+          skip-existing: true

@@ -74,6 +74,7 @@ void ThreadPool::ParallelFor(size_t begin, size_t end, size_t chunk_size,
                 std::call_once(exception_flag, [&]() {
                     captured_exception = std::current_exception();
                 });
+                pimpl_->cancelled_.store(true, std::memory_order_relaxed);
                 break;
             }
         }
