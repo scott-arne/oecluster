@@ -11,6 +11,7 @@ add_executable(oecluster_tests
     cpp/test_main.cpp
     cpp/test_storage.cpp
     cpp/test_thread_pool.cpp
+    cpp/test_pdist.cpp
 )
 
 target_link_libraries(oecluster_tests
