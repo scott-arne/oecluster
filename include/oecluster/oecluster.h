@@ -30,6 +30,7 @@ class DistanceMatrix;
 #include "oecluster/StorageBackend.h"
 #include "oecluster/ThreadPool.h"
 #include "oecluster/PDist.h"
+#include "oecluster/CDist.h"
 #include "oecluster/DistanceMatrix.h"
 
 #ifdef OECLUSTER_HAS_GRAPHSIM

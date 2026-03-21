@@ -104,6 +104,7 @@ set(OECLUSTER_SOURCES
     src/StorageBackend.cpp
     src/ThreadPool.cpp
     src/PDist.cpp
+    src/CDist.cpp
     src/DistanceMatrix.cpp
 )
 
