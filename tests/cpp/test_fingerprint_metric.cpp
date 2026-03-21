@@ -70,4 +70,78 @@ TEST_F(FingerprintMetricTest, IntegrationWithPDist) {
     }
 }
 
+TEST_F(FingerprintMetricTest, PathFingerprintType) {
+    FingerprintOptions opts;
+    opts.fp_type = "path";
+    opts.numbits = 2048;
+    opts.max_distance = 5;
+    FingerprintMetric metric(mols_, opts);
+    EXPECT_EQ(metric.Size(), 3);
+    double d = metric.Distance(0, 1);
+    EXPECT_GE(d, 0.0);
+    EXPECT_LE(d, 1.0);
+}
+
+TEST_F(FingerprintMetricTest, TreeFingerprintType) {
+    FingerprintOptions opts;
+    opts.fp_type = "tree";
+    FingerprintMetric metric(mols_, opts);
+    double d = metric.Distance(0, 1);
+    EXPECT_GE(d, 0.0);
+    EXPECT_LE(d, 1.0);
+}
+
+TEST_F(FingerprintMetricTest, MACCSFingerprintType) {
+    FingerprintOptions opts;
+    opts.fp_type = "maccs";
+    FingerprintMetric metric(mols_, opts);
+    double d = metric.Distance(0, 1);
+    EXPECT_GE(d, 0.0);
+    EXPECT_LE(d, 1.0);
+}
+
+TEST_F(FingerprintMetricTest, LingoFingerprintType) {
+    FingerprintOptions opts;
+    opts.fp_type = "lingo";
+    FingerprintMetric metric(mols_, opts);
+    double d = metric.Distance(0, 1);
+    EXPECT_GE(d, 0.0);
+    EXPECT_LE(d, 1.0);
+}
+
+TEST_F(FingerprintMetricTest, DiceSimilarity) {
+    FingerprintOptions opts;
+    opts.similarity = "dice";
+    FingerprintMetric metric(mols_, opts);
+    double d = metric.Distance(0, 1);
+    EXPECT_GE(d, 0.0);
+    EXPECT_LE(d, 1.0);
+}
+
+TEST_F(FingerprintMetricTest, ParseAtomTypeMask) {
+    unsigned int mask = FingerprintMetric::ParseAtomTypeMask("AtomicNumber|Aromaticity");
+    EXPECT_NE(mask, 0u);
+}
+
+TEST_F(FingerprintMetricTest, ParseBondTypeMask) {
+    unsigned int mask = FingerprintMetric::ParseBondTypeMask("BondOrder|InRing");
+    EXPECT_NE(mask, 0u);
+}
+
+TEST_F(FingerprintMetricTest, CustomAtomBondMasks) {
+    FingerprintOptions opts;
+    opts.atom_type_mask = FingerprintMetric::ParseAtomTypeMask("AtomicNumber|Aromaticity");
+    opts.bond_type_mask = FingerprintMetric::ParseBondTypeMask("BondOrder");
+    FingerprintMetric metric(mols_, opts);
+    double d = metric.Distance(0, 1);
+    EXPECT_GE(d, 0.0);
+    EXPECT_LE(d, 1.0);
+}
+
+TEST_F(FingerprintMetricTest, InvalidFpTypeThrows) {
+    FingerprintOptions opts;
+    opts.fp_type = "invalid";
+    EXPECT_THROW(FingerprintMetric(mols_, opts), MetricError);
+}
+
 #endif  // OECLUSTER_HAS_GRAPHSIM

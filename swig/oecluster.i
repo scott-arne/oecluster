@@ -312,6 +312,10 @@ namespace OEBio {
 
 /* Ignore private constructors for metric clones */
 %ignore OECluster::FingerprintMetric::FingerprintMetric(std::shared_ptr<const Impl>);
+
+/* Ignore static mask parsing methods (not needed from Python) */
+%ignore OECluster::FingerprintMetric::ParseAtomTypeMask;
+%ignore OECluster::FingerprintMetric::ParseBondTypeMask;
 %ignore OECluster::ROCSMetric::ROCSMetric(std::shared_ptr<const SharedData>, const Options&);
 %ignore OECluster::SuperposeMetric::SuperposeMetric(std::shared_ptr<const SharedData>, const Options&);
 %ignore OECluster::SiteHopperMetric::SiteHopperMetric(std::shared_ptr<const SharedData>, const Options&);

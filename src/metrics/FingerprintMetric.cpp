@@ -1,43 +1,153 @@
 /**
  * @file FingerprintMetric.cpp
- * @brief Implementation of fingerprint-based Tanimoto distance metric.
+ * @brief Implementation of fingerprint-based distance metric with configurable
+ *        fingerprint types and similarity functions.
  */
 
 #include "oecluster/metrics/FingerprintMetric.h"
 
 #ifdef OECLUSTER_HAS_GRAPHSIM
 
+#include <algorithm>
+#include <cctype>
+#include <sstream>
+#include <unordered_map>
 #include <oechem.h>
 #include <oegraphsim.h>
 #include "oecluster/Error.h"
 
 namespace OECluster {
 
+// ---------------------------------------------------------------------------
+// Impl
+// ---------------------------------------------------------------------------
+
 struct FingerprintMetric::Impl {
     std::vector<OEGraphSim::OEFingerPrint> fingerprints;
+    FingerprintOptions opts;
 };
+
+// ---------------------------------------------------------------------------
+// Helper: lowercase a string in place
+// ---------------------------------------------------------------------------
+
+static std::string to_lower(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+    return s;
+}
+
+// ---------------------------------------------------------------------------
+// Helper: trim whitespace from both ends
+// ---------------------------------------------------------------------------
+
+static std::string trim(const std::string& s) {
+    auto start = s.find_first_not_of(" \t\r\n");
+    if (start == std::string::npos) return "";
+    auto end = s.find_last_not_of(" \t\r\n");
+    return s.substr(start, end - start + 1);
+}
+
+// ---------------------------------------------------------------------------
+// Constructor
+// ---------------------------------------------------------------------------
 
 FingerprintMetric::FingerprintMetric(const std::vector<OEChem::OEMolBase*>& mols,
                                      const Options& opts) {
     auto impl = std::make_shared<Impl>();
+    impl->opts = opts;
     impl->fingerprints.resize(mols.size());
+
+    std::string fp_lower = to_lower(opts.fp_type);
+
+    // Resolve default atom/bond masks for the three parameterized FP types.
+    unsigned int atom_mask = opts.atom_type_mask;
+    unsigned int bond_mask = opts.bond_type_mask;
+
+    if (fp_lower == "circular") {
+        if (atom_mask == 0) atom_mask = OEGraphSim::OEFPAtomType_DefaultCircularFP;
+        if (bond_mask == 0) bond_mask = OEGraphSim::OEFPBondType_DefaultCircularFP;
+    } else if (fp_lower == "tree") {
+        if (atom_mask == 0) atom_mask = OEGraphSim::OEFPAtomType_DefaultTreeFP;
+        if (bond_mask == 0) bond_mask = OEGraphSim::OEFPBondType_DefaultTreeFP;
+    } else if (fp_lower == "path") {
+        if (atom_mask == 0) atom_mask = OEGraphSim::OEFPAtomType_DefaultPathFP;
+        if (bond_mask == 0) bond_mask = OEGraphSim::OEFPBondType_DefaultPathFP;
+    }
+
     for (size_t i = 0; i < mols.size(); ++i) {
-        if (!OEGraphSim::OEMakeFP(impl->fingerprints[i], *mols[i], opts.fp_type)) {
+        bool ok = false;
+        if (fp_lower == "circular") {
+            ok = OEGraphSim::OEMakeCircularFP(impl->fingerprints[i], *mols[i],
+                                               opts.numbits, opts.min_distance,
+                                               opts.max_distance, atom_mask,
+                                               bond_mask);
+        } else if (fp_lower == "tree") {
+            ok = OEGraphSim::OEMakeTreeFP(impl->fingerprints[i], *mols[i],
+                                           opts.numbits, opts.min_distance,
+                                           opts.max_distance, atom_mask,
+                                           bond_mask);
+        } else if (fp_lower == "path") {
+            ok = OEGraphSim::OEMakePathFP(impl->fingerprints[i], *mols[i],
+                                           opts.numbits, opts.min_distance,
+                                           opts.max_distance, atom_mask,
+                                           bond_mask);
+        } else if (fp_lower == "maccs") {
+            ok = OEGraphSim::OEMakeMACCS166FP(impl->fingerprints[i], *mols[i]);
+        } else if (fp_lower == "lingo") {
+            ok = OEGraphSim::OEMakeLingoFP(impl->fingerprints[i], *mols[i]);
+        } else {
+            throw MetricError("Unknown fingerprint type: " + opts.fp_type);
+        }
+
+        if (!ok) {
             throw MetricError("Failed to compute fingerprint for molecule " +
                               std::to_string(i));
         }
     }
+
     pimpl_ = std::move(impl);
 }
+
+// ---------------------------------------------------------------------------
+// Private clone constructor
+// ---------------------------------------------------------------------------
 
 FingerprintMetric::FingerprintMetric(std::shared_ptr<const Impl> impl)
     : pimpl_(std::move(impl)) {}
 
+// ---------------------------------------------------------------------------
+// Distance
+// ---------------------------------------------------------------------------
+
 double FingerprintMetric::Distance(size_t i, size_t j) {
-    float sim = OEGraphSim::OETanimoto(pimpl_->fingerprints[i],
-                                       pimpl_->fingerprints[j]);
-    return 1.0 - static_cast<double>(sim);
+    const auto& fp_i = pimpl_->fingerprints[i];
+    const auto& fp_j = pimpl_->fingerprints[j];
+    std::string sim_lower = to_lower(pimpl_->opts.similarity);
+
+    if (sim_lower == "tanimoto") {
+        float sim = OEGraphSim::OETanimoto(fp_i, fp_j);
+        return 1.0 - static_cast<double>(sim);
+    } else if (sim_lower == "dice") {
+        float sim = OEGraphSim::OEDice(fp_i, fp_j);
+        return 1.0 - static_cast<double>(sim);
+    } else if (sim_lower == "cosine") {
+        float sim = OEGraphSim::OECosine(fp_i, fp_j);
+        return 1.0 - static_cast<double>(sim);
+    } else if (sim_lower == "manhattan") {
+        float dist = OEGraphSim::OEManhattan(fp_i, fp_j);
+        return static_cast<double>(dist);
+    } else if (sim_lower == "euclidean") {
+        float dist = OEGraphSim::OEEuclid(fp_i, fp_j);
+        return static_cast<double>(dist);
+    }
+
+    throw MetricError("Unknown similarity function: " + pimpl_->opts.similarity);
 }
+
+// ---------------------------------------------------------------------------
+// Clone / Size / Name
+// ---------------------------------------------------------------------------
 
 std::unique_ptr<DistanceMetric> FingerprintMetric::Clone() const {
     return std::unique_ptr<DistanceMetric>(new FingerprintMetric(pimpl_));
@@ -49,6 +159,84 @@ size_t FingerprintMetric::Size() const {
 
 std::string FingerprintMetric::Name() const {
     return "fingerprint";
+}
+
+// ---------------------------------------------------------------------------
+// ParseAtomTypeMask
+// ---------------------------------------------------------------------------
+
+unsigned int FingerprintMetric::ParseAtomTypeMask(const std::string& pipe_delimited) {
+    static const std::unordered_map<std::string, unsigned int> atom_map = {
+        {"atomicnumber",     OEGraphSim::OEFPAtomType_AtomicNumber},
+        {"formalcharge",     OEGraphSim::OEFPAtomType_FormalCharge},
+        {"ringsize",         OEGraphSim::OEFPAtomType_RingSize},
+        {"aromaticity",      OEGraphSim::OEFPAtomType_Aromaticity},
+        {"heavyatom",        OEGraphSim::OEFPAtomType_HeavyAtom},
+        {"halide",           OEGraphSim::OEFPAtomType_Halide},
+        {"hbdonor",          OEGraphSim::OEFPAtomType_HBDonor},
+        {"hbacceptor",       OEGraphSim::OEFPAtomType_HBAcceptor},
+        {"inring",           OEGraphSim::OEFPAtomType_InRing},
+        {"eqhalogen",        OEGraphSim::OEFPAtomType_EqHalogen},
+        {"eqaromatic",       OEGraphSim::OEFPAtomType_EqAromatic},
+        {"defaultatom",      OEGraphSim::OEFPAtomType_DefaultAtom},
+        {"defaultpathfp",    OEGraphSim::OEFPAtomType_DefaultPathFP},
+        {"defaultcircularfp", OEGraphSim::OEFPAtomType_DefaultCircularFP},
+        {"defaulttreefp",    OEGraphSim::OEFPAtomType_DefaultTreeFP},
+    };
+
+    unsigned int mask = 0;
+    std::istringstream stream(pipe_delimited);
+    std::string token;
+    while (std::getline(stream, token, '|')) {
+        std::string key = to_lower(trim(token));
+        // Strip "oefpatomtype_" prefix if present
+        const std::string prefix = "oefpatomtype_";
+        if (key.size() > prefix.size() &&
+            key.compare(0, prefix.size(), prefix) == 0) {
+            key = key.substr(prefix.size());
+        }
+        auto it = atom_map.find(key);
+        if (it == atom_map.end()) {
+            throw MetricError("Unknown atom type token: " + trim(token));
+        }
+        mask |= it->second;
+    }
+    return mask;
+}
+
+// ---------------------------------------------------------------------------
+// ParseBondTypeMask
+// ---------------------------------------------------------------------------
+
+unsigned int FingerprintMetric::ParseBondTypeMask(const std::string& pipe_delimited) {
+    static const std::unordered_map<std::string, unsigned int> bond_map = {
+        {"bondorder",        OEGraphSim::OEFPBondType_BondOrder},
+        {"inring",           OEGraphSim::OEFPBondType_InRing},
+        {"defaultbond",      OEGraphSim::OEFPBondType_DefaultBond},
+        {"defaultpathfp",    OEGraphSim::OEFPBondType_DefaultPathFP},
+        {"defaultcircularfp", OEGraphSim::OEFPBondType_DefaultCircularFP},
+        {"defaulttreefp",    OEGraphSim::OEFPBondType_DefaultTreeFP},
+        {"chiral",           OEGraphSim::OEFPBondType_Chiral},
+    };
+
+    unsigned int mask = 0;
+    std::istringstream stream(pipe_delimited);
+    std::string token;
+    while (std::getline(stream, token, '|')) {
+        std::string key = to_lower(trim(token));
+        // Strip "oefpbondtype_" prefix if present
+        const std::string prefix = "oefpbondtype_";
+        if (key.size() > prefix.size() &&
+            key.compare(0, prefix.size(), prefix) == 0) {
+            key = key.substr(prefix.size());
+        }
+        auto it = bond_map.find(key);
+        if (it == bond_map.end()) {
+            throw MetricError("Unknown bond type token: " + trim(token));
+        }
+        mask |= it->second;
+    }
+    return mask;
 }
 
 }  // namespace OECluster
