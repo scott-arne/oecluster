@@ -57,10 +57,14 @@ double SuperposeMetric::Distance(size_t i, size_t j) {
     OEChem::OEGraphMol mol_j(shared_->mols[j]);
 
     OEBio::OESequenceAlignment alignment =
-        OEBio::OEGetAlignment(mol_i.SCMol(), mol_j.SCMol());
+        OEBio::OEGetAlignment(mol_i.SCMol(), mol_j.SCMol(),
+                               0xF,  // OEAssumption::Default
+                               opts_.alignment_method,
+                               opts_.gap_penalty,
+                               opts_.extend_penalty);
 
     double rmsd = OEBio::OERMSD(mol_i.SCMol(), mol_j.SCMol(), alignment,
-                                 opts_.only_calpha, true);
+                                 opts_.only_calpha, opts_.overlay);
     return rmsd;
 }
 

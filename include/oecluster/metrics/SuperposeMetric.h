@@ -22,8 +22,11 @@ namespace OECluster {
  * @brief Configuration options for protein superposition RMSD.
  */
 struct SuperposeOptions {
-    bool sequence_align = true;  ///< Align by sequence first
-    bool only_calpha = true;     ///< Use only C-alpha atoms for RMSD
+    unsigned int alignment_method = 2;  ///< OESeqAlignmentMethod (2=PAM250)
+    int gap_penalty = -10;              ///< Gap penalty for sequence alignment
+    int extend_penalty = -2;            ///< Gap extension penalty
+    bool only_calpha = true;            ///< Use only C-alpha atoms for RMSD
+    bool overlay = true;                ///< Superpose before computing RMSD
 };
 
 /**

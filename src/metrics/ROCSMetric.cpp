@@ -18,10 +18,29 @@ struct ROCSMetric::SharedData {
 };
 
 struct ROCSMetric::ThreadLocalData {
+    OEShape::OEOverlayOptions overlay_opts;
     OEShape::OEOverlay overlay;
+
+    explicit ThreadLocalData(const OEShape::OEOverlayOptions& opts)
+        : overlay_opts(opts), overlay(opts) {}
 };
 
 ROCSMetric::~ROCSMetric() = default;
+
+void ROCSMetric::InitOverlay() {
+    OEShape::OEOverlayOptions overlay_opts;
+
+    // Configure color force field if needed
+    if (opts_.score_type == ROCSScoreType::Color ||
+        opts_.score_type == ROCSScoreType::Combo ||
+        opts_.score_type == ROCSScoreType::ComboNorm) {
+        OEShape::OEColorOptions color_opts;
+        color_opts.SetColorForceField(opts_.color_ff_type);
+        overlay_opts.SetColorOptions(color_opts);
+    }
+
+    local_ = std::make_unique<ThreadLocalData>(overlay_opts);
+}
 
 ROCSMetric::ROCSMetric(const std::vector<std::shared_ptr<OEChem::OEMol>>& mols,
                        const Options& opts)
@@ -29,14 +48,15 @@ ROCSMetric::ROCSMetric(const std::vector<std::shared_ptr<OEChem::OEMol>>& mols,
     auto shared = std::make_shared<SharedData>();
     shared->mols = mols;
     shared_ = std::move(shared);
-    local_ = std::make_unique<ThreadLocalData>();
+    InitOverlay();
 }
 
 ROCSMetric::ROCSMetric(std::shared_ptr<const SharedData> shared,
                        const Options& opts)
     : shared_(std::move(shared)),
-      local_(std::make_unique<ThreadLocalData>()),
-      opts_(opts) {}
+      opts_(opts) {
+    InitOverlay();
+}
 
 double ROCSMetric::Distance(size_t i, size_t j) {
     local_->overlay.SetupRef(*shared_->mols[i]);
@@ -44,16 +64,27 @@ double ROCSMetric::Distance(size_t i, size_t j) {
     OEShape::OEBestOverlayScore score;
     local_->overlay.BestOverlay(score, *shared_->mols[j]);
 
-    float sim;
-    if (opts_.color_score) {
-        sim = score.GetColorTanimoto();
-    } else if (opts_.combo_score) {
-        sim = score.GetTanimotoCombo();
-    } else {
-        sim = score.GetTanimoto();
+    double dist;
+    switch (opts_.score_type) {
+        case ROCSScoreType::ComboNorm:
+            // TanimotoCombo ∈ [0,2] → distance ∈ [0,1]
+            dist = 1.0 - static_cast<double>(score.GetTanimotoCombo()) / 2.0;
+            break;
+        case ROCSScoreType::Combo:
+            // TanimotoCombo ∈ [0,2] → distance ∈ [0,2]
+            dist = 2.0 - static_cast<double>(score.GetTanimotoCombo());
+            break;
+        case ROCSScoreType::Shape:
+            // Shape Tanimoto ∈ [0,1] → distance ∈ [0,1]
+            dist = 1.0 - static_cast<double>(score.GetTanimoto());
+            break;
+        case ROCSScoreType::Color:
+            // Color Tanimoto ∈ [0,1] → distance ∈ [0,1]
+            dist = 1.0 - static_cast<double>(score.GetColorTanimoto());
+            break;
     }
 
-    return 1.0 - static_cast<double>(sim);
+    return dist;
 }
 
 std::unique_ptr<DistanceMetric> ROCSMetric::Clone() const {

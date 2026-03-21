@@ -26,6 +26,8 @@ openeye_add_swig_module(
     PYTHON_OUTPUT_DIR ${CMAKE_SOURCE_DIR}/python/oecluster
     STABLE_ABI ${OECLUSTER_USE_STABLE_ABI}
     SWIG_FLAGS "-doxygen"
+        "-I${CMAKE_SOURCE_DIR}/include"
+        "-I${OPENEYE_INCLUDE_DIR}"
     EXPECTED_LIB_VARS ${_OECLUSTER_EXPECTED_LIB_VARS}
     INIT_PY ${CMAKE_SOURCE_DIR}/python/oecluster/__init__.py
 )

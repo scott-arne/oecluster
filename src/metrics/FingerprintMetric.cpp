@@ -65,14 +65,14 @@ FingerprintMetric::FingerprintMetric(const std::vector<OEChem::OEMolBase*>& mols
     unsigned int bond_mask = opts.bond_type_mask;
 
     if (fp_lower == "circular") {
-        if (atom_mask == 0) atom_mask = OEGraphSim::OEFPAtomType_DefaultCircularFP;
-        if (bond_mask == 0) bond_mask = OEGraphSim::OEFPBondType_DefaultCircularFP;
+        if (atom_mask == 0) atom_mask = OEGraphSim::OEFPAtomType::DefaultCircularAtom;
+        if (bond_mask == 0) bond_mask = OEGraphSim::OEFPBondType::DefaultCircularBond;
     } else if (fp_lower == "tree") {
-        if (atom_mask == 0) atom_mask = OEGraphSim::OEFPAtomType_DefaultTreeFP;
-        if (bond_mask == 0) bond_mask = OEGraphSim::OEFPBondType_DefaultTreeFP;
+        if (atom_mask == 0) atom_mask = OEGraphSim::OEFPAtomType::DefaultTreeAtom;
+        if (bond_mask == 0) bond_mask = OEGraphSim::OEFPBondType::DefaultTreeBond;
     } else if (fp_lower == "path") {
-        if (atom_mask == 0) atom_mask = OEGraphSim::OEFPAtomType_DefaultPathFP;
-        if (bond_mask == 0) bond_mask = OEGraphSim::OEFPBondType_DefaultPathFP;
+        if (atom_mask == 0) atom_mask = OEGraphSim::OEFPAtomType::DefaultPathAtom;
+        if (bond_mask == 0) bond_mask = OEGraphSim::OEFPBondType::DefaultPathBond;
     }
 
     for (size_t i = 0; i < mols.size(); ++i) {
@@ -167,21 +167,22 @@ std::string FingerprintMetric::Name() const {
 
 unsigned int FingerprintMetric::ParseAtomTypeMask(const std::string& pipe_delimited) {
     static const std::unordered_map<std::string, unsigned int> atom_map = {
-        {"atomicnumber",     OEGraphSim::OEFPAtomType_AtomicNumber},
-        {"formalcharge",     OEGraphSim::OEFPAtomType_FormalCharge},
-        {"ringsize",         OEGraphSim::OEFPAtomType_RingSize},
-        {"aromaticity",      OEGraphSim::OEFPAtomType_Aromaticity},
-        {"heavyatom",        OEGraphSim::OEFPAtomType_HeavyAtom},
-        {"halide",           OEGraphSim::OEFPAtomType_Halide},
-        {"hbdonor",          OEGraphSim::OEFPAtomType_HBDonor},
-        {"hbacceptor",       OEGraphSim::OEFPAtomType_HBAcceptor},
-        {"inring",           OEGraphSim::OEFPAtomType_InRing},
-        {"eqhalogen",        OEGraphSim::OEFPAtomType_EqHalogen},
-        {"eqaromatic",       OEGraphSim::OEFPAtomType_EqAromatic},
-        {"defaultatom",      OEGraphSim::OEFPAtomType_DefaultAtom},
-        {"defaultpathfp",    OEGraphSim::OEFPAtomType_DefaultPathFP},
-        {"defaultcircularfp", OEGraphSim::OEFPAtomType_DefaultCircularFP},
-        {"defaulttreefp",    OEGraphSim::OEFPAtomType_DefaultTreeFP},
+        {"atomicnumber",      OEGraphSim::OEFPAtomType::AtomicNumber},
+        {"aromaticity",       OEGraphSim::OEFPAtomType::Aromaticity},
+        {"chiral",            OEGraphSim::OEFPAtomType::Chiral},
+        {"formalcharge",      OEGraphSim::OEFPAtomType::FormalCharge},
+        {"hvydegree",         OEGraphSim::OEFPAtomType::HvyDegree},
+        {"hybridization",     OEGraphSim::OEFPAtomType::Hybridization},
+        {"inring",            OEGraphSim::OEFPAtomType::InRing},
+        {"hcount",            OEGraphSim::OEFPAtomType::HCount},
+        {"eqhalogen",         OEGraphSim::OEFPAtomType::EqHalogen},
+        {"eqaromatic",        OEGraphSim::OEFPAtomType::EqAromatic},
+        {"eqhbondacceptor",   OEGraphSim::OEFPAtomType::EqHBondAcceptor},
+        {"eqhbonddonor",      OEGraphSim::OEFPAtomType::EqHBondDonor},
+        {"defaultatom",       OEGraphSim::OEFPAtomType::DefaultAtom},
+        {"defaultpathatom",   OEGraphSim::OEFPAtomType::DefaultPathAtom},
+        {"defaultcircularatom", OEGraphSim::OEFPAtomType::DefaultCircularAtom},
+        {"defaulttreeatom",   OEGraphSim::OEFPAtomType::DefaultTreeAtom},
     };
 
     unsigned int mask = 0;
@@ -189,11 +190,13 @@ unsigned int FingerprintMetric::ParseAtomTypeMask(const std::string& pipe_delimi
     std::string token;
     while (std::getline(stream, token, '|')) {
         std::string key = to_lower(trim(token));
-        // Strip "oefpatomtype_" prefix if present
-        const std::string prefix = "oefpatomtype_";
-        if (key.size() > prefix.size() &&
-            key.compare(0, prefix.size(), prefix) == 0) {
-            key = key.substr(prefix.size());
+        // Strip "oefpatomtype::" or "oefpatomtype_" prefix if present
+        for (const auto& prefix : {"oefpatomtype::", "oefpatomtype_"}) {
+            std::string p(prefix);
+            if (key.size() > p.size() && key.compare(0, p.size(), p) == 0) {
+                key = key.substr(p.size());
+                break;
+            }
         }
         auto it = atom_map.find(key);
         if (it == atom_map.end()) {
@@ -210,13 +213,13 @@ unsigned int FingerprintMetric::ParseAtomTypeMask(const std::string& pipe_delimi
 
 unsigned int FingerprintMetric::ParseBondTypeMask(const std::string& pipe_delimited) {
     static const std::unordered_map<std::string, unsigned int> bond_map = {
-        {"bondorder",        OEGraphSim::OEFPBondType_BondOrder},
-        {"inring",           OEGraphSim::OEFPBondType_InRing},
-        {"defaultbond",      OEGraphSim::OEFPBondType_DefaultBond},
-        {"defaultpathfp",    OEGraphSim::OEFPBondType_DefaultPathFP},
-        {"defaultcircularfp", OEGraphSim::OEFPBondType_DefaultCircularFP},
-        {"defaulttreefp",    OEGraphSim::OEFPBondType_DefaultTreeFP},
-        {"chiral",           OEGraphSim::OEFPBondType_Chiral},
+        {"bondorder",          OEGraphSim::OEFPBondType::BondOrder},
+        {"chiral",             OEGraphSim::OEFPBondType::Chiral},
+        {"inring",             OEGraphSim::OEFPBondType::InRing},
+        {"defaultbond",        OEGraphSim::OEFPBondType::DefaultBond},
+        {"defaultpathbond",    OEGraphSim::OEFPBondType::DefaultPathBond},
+        {"defaultcircularbond", OEGraphSim::OEFPBondType::DefaultCircularBond},
+        {"defaulttreebond",    OEGraphSim::OEFPBondType::DefaultTreeBond},
     };
 
     unsigned int mask = 0;
@@ -224,11 +227,13 @@ unsigned int FingerprintMetric::ParseBondTypeMask(const std::string& pipe_delimi
     std::string token;
     while (std::getline(stream, token, '|')) {
         std::string key = to_lower(trim(token));
-        // Strip "oefpbondtype_" prefix if present
-        const std::string prefix = "oefpbondtype_";
-        if (key.size() > prefix.size() &&
-            key.compare(0, prefix.size(), prefix) == 0) {
-            key = key.substr(prefix.size());
+        // Strip "oefpbondtype::" or "oefpbondtype_" prefix if present
+        for (const auto& prefix : {"oefpbondtype::", "oefpbondtype_"}) {
+            std::string p(prefix);
+            if (key.size() > p.size() && key.compare(0, p.size(), p) == 0) {
+                key = key.substr(p.size());
+                break;
+            }
         }
         auto it = bond_map.find(key);
         if (it == bond_map.end()) {

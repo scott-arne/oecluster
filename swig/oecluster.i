@@ -11,6 +11,7 @@
 #include "oecluster/StorageBackend.h"
 #include "oecluster/ThreadPool.h"
 #include "oecluster/PDist.h"
+#include "oecluster/CDist.h"
 #include "oecluster/DistanceMatrix.h"
 
 #ifdef OECLUSTER_HAS_GRAPHSIM
@@ -275,6 +276,23 @@ static void* _oecluster_extract_swig_ptr(PyObject* obj) {
     Py_END_ALLOW_THREADS
 }
 
+%exception OECluster::cdist {
+    Py_BEGIN_ALLOW_THREADS
+    try {
+        $action
+    } catch (const OECluster::OEClusterError& e) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError, e.what());
+    } catch (const std::exception& e) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError, e.what());
+    } catch (...) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError, "Unknown C++ exception in cdist");
+    }
+    Py_END_ALLOW_THREADS
+}
+
 /* --------------------------------------------------------------------------
  * 10. Forward declarations for OE types (SWIG-parsed, not compiled)
  * -------------------------------------------------------------------------- */
@@ -296,6 +314,12 @@ namespace OEBio {
  *
  *     Also ignore private clone constructors for metrics.
  * -------------------------------------------------------------------------- */
+
+/* Suppress default constructors for types that don't have them */
+%nodefaultctor OECluster::OEClusterError;
+%nodefaultctor OECluster::MetricError;
+%nodefaultctor OECluster::StorageError;
+%nodefaultctor OECluster::DistanceMatrix;
 
 /* Ignore Data() -- we expose _data_ptr() via %extend instead */
 %ignore OECluster::StorageBackend::Data;
@@ -441,7 +465,19 @@ struct PDistOptions {
 };
 
 void pdist(DistanceMetric& metric, StorageBackend& storage,
-           const PDistOptions& options = PDistOptions{});
+           const PDistOptions& options = PDistOptions());
+
+struct CDistOptions {
+    size_t num_threads;
+    size_t chunk_size;
+    double cutoff;
+    std::function<void(size_t, size_t)> progress;
+
+    CDistOptions();
+};
+
+void cdist(DistanceMetric& metric, size_t n_a, double* output,
+           const CDistOptions& options = CDistOptions());
 
 }  /* namespace OECluster */
 

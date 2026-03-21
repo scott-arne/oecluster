@@ -51,7 +51,11 @@ double SiteHopperMetric::Distance(size_t i, size_t j) {
     OEChem::OEGraphMol site_j(shared_->sites[j]);
 
     OEBio::OESequenceAlignment alignment =
-        OEBio::OEGetAlignment(site_i.SCMol(), site_j.SCMol());
+        OEBio::OEGetAlignment(site_i.SCMol(), site_j.SCMol(),
+                               0xF,  // OEAssumption::Default
+                               opts_.alignment_method,
+                               opts_.gap_penalty,
+                               opts_.extend_penalty);
 
     double rmsd = OEBio::OERMSD(site_i.SCMol(), site_j.SCMol(), alignment,
                                  opts_.only_calpha, true);

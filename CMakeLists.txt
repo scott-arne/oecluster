@@ -162,6 +162,12 @@ if(OECLUSTER_BUILD_PYTHON AND SWIG_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}
     add_subdirectory(swig)
 endif()
 
+option(OECLUSTER_BUILD_TOOLS "Build CLI tools" ON)
+
+if(OECLUSTER_BUILD_TOOLS)
+    add_subdirectory(tools)
+endif()
+
 install(TARGETS oecluster
     EXPORT oecluster-targets
     LIBRARY DESTINATION lib

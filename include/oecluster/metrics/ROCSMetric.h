@@ -18,20 +18,32 @@ namespace OEChem { class OEMol; }
 namespace OECluster {
 
 /**
+ * @brief Score type for ROCS overlay distance computation.
+ */
+enum class ROCSScoreType {
+    ComboNorm,  ///< TanimotoCombo normalized to [0,1]: distance = 1.0 - combo/2.0
+    Combo,      ///< TanimotoCombo with range [0,2]: distance = 2.0 - combo
+    Shape,      ///< Shape Tanimoto with range [0,1]: distance = 1.0 - shape
+    Color       ///< Color Tanimoto with range [0,1]: distance = 1.0 - color
+};
+
+/**
  * @brief Configuration options for ROCS overlay scoring.
  */
 struct ROCSOptions {
-    bool color_score = false;   ///< Use color Tanimoto only (range [0,1])
-    bool combo_score = true;    ///< Use TanimotoCombo (shape + color, range [0,2])
+    ROCSScoreType score_type = ROCSScoreType::ComboNorm;  ///< Scoring method
+    unsigned int color_ff_type = 1;  ///< OEColorFFType (1=ImplicitMillsDean)
 };
 
 /**
  * @brief ROCS-style shape/color overlay distance metric using OEShape.
  *
  * Stores shared references to molecules and uses ``OEOverlay`` to compute
- * pairwise overlay scores. Distance is ``1.0 - best_score`` where
- * ``best_score`` is the TanimotoCombo, color Tanimoto, or shape Tanimoto
- * depending on options.
+ * pairwise overlay scores. Distance computation depends on score_type:
+ *   - ComboNorm: ``1.0 - TanimotoCombo/2.0`` (range [0,1])
+ *   - Combo: ``2.0 - TanimotoCombo`` (range [0,2])
+ *   - Shape: ``1.0 - ShapeTanimoto`` (range [0,1])
+ *   - Color: ``1.0 - ColorTanimoto`` (range [0,1])
  *
  * Each Clone() creates a new ``OEOverlay`` instance so that Distance()
  * can be called concurrently from different threads without locking.
@@ -69,6 +81,9 @@ private:
     /// Private clone constructor -- shares molecule data, creates new overlay.
     ROCSMetric(std::shared_ptr<const SharedData> shared,
                const Options& opts);
+
+    /// Initialize OEOverlay with configured options.
+    void InitOverlay();
 };
 
 }  // namespace OECluster

@@ -21,7 +21,10 @@ namespace OECluster {
  * @brief Configuration options for binding site comparison.
  */
 struct SiteHopperOptions {
-    bool only_calpha = true;  ///< Use only C-alpha atoms for RMSD
+    unsigned int alignment_method = 2;  ///< OESeqAlignmentMethod (2=PAM250)
+    int gap_penalty = -10;              ///< Gap penalty for sequence alignment
+    int extend_penalty = -2;            ///< Gap extension penalty
+    bool only_calpha = true;            ///< Use only C-alpha atoms for RMSD
 };
 
 /**

@@ -110,6 +110,26 @@ TEST_F(SuperposeMetricTest, IntegrationWithPDist) {
     EXPECT_EQ(storage.NumPairs(), 3u);
 }
 
+TEST_F(SuperposeMetricTest, CustomAlignmentOptions) {
+    SuperposeOptions opts;
+    opts.alignment_method = 3;  // BLOSUM62
+    opts.gap_penalty = -12;
+    opts.extend_penalty = -4;
+    opts.only_calpha = false;
+    SuperposeMetric metric(mols_, opts);
+    EXPECT_EQ(metric.Size(), 3u);
+    double d = metric.Distance(0, 1);
+    EXPECT_TRUE(std::isfinite(d));
+}
+
+TEST_F(SuperposeMetricTest, NoOverlay) {
+    SuperposeOptions opts;
+    opts.overlay = false;
+    SuperposeMetric metric(mols_, opts);
+    double d = metric.Distance(0, 1);
+    EXPECT_TRUE(std::isfinite(d));
+}
+
 // ---------------------------------------------------------------------------
 // SiteHopperMetric tests would require actual design units with binding
 // sites, which are difficult to create programmatically.  We verify
