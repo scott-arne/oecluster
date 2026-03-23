@@ -30,6 +30,14 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(cmake_openeye)
 list(APPEND CMAKE_MODULE_PATH "${cmake_openeye_SOURCE_DIR}")
 
+FetchContent_Declare(
+    oeselect
+    GIT_REPOSITORY https://github.com/scott-arne/oeselect.git
+    GIT_TAG main
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(oeselect)
+
 if(OECLUSTER_BUILD_PYTHON)
     find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
     find_package(SWIG 4.0)
@@ -81,7 +89,6 @@ if(NOT TARGET OpenEye::OEShape)
             INTERFACE_INCLUDE_DIRECTORIES "${OPENEYE_INCLUDE_DIR}"
             INTERFACE_LINK_LIBRARIES "OpenEye::OEChem;OpenEye::OEGrid;OpenEye::OEOpt;OpenEye::OEMolPotential;OpenEye::OEHermite"
         )
-        set(OpenEye_Shape_FOUND TRUE)
         message(STATUS "OpenEye: Found OEShape: ${OESHAPE_LIBRARY}")
     endif()
 endif()
@@ -95,10 +102,11 @@ if(NOT TARGET OpenEye::OEBio)
             INTERFACE_INCLUDE_DIRECTORIES "${OPENEYE_INCLUDE_DIR}"
             INTERFACE_LINK_LIBRARIES "OpenEye::OEChem"
         )
-        set(OpenEye_Bio_FOUND TRUE)
         message(STATUS "OpenEye: Found OEBio: ${OEBIO_LIBRARY}")
     endif()
 endif()
+
+_find_oe_dep(OESPRUCE_LIBRARY oespruce OpenEye::OESpruce "OpenEye::OEChem;OpenEye::OEBio")
 
 set(OECLUSTER_SOURCES
     src/StorageBackend.cpp
@@ -106,22 +114,11 @@ set(OECLUSTER_SOURCES
     src/PDist.cpp
     src/CDist.cpp
     src/DistanceMatrix.cpp
+    src/metrics/FingerprintMetric.cpp
+    src/metrics/ROCSMetric.cpp
+    src/metrics/SuperposeMetric.cpp
+    src/metrics/SiteHopperMetric.cpp
 )
-
-if(OpenEye_GraphSim_FOUND)
-    list(APPEND OECLUSTER_SOURCES src/metrics/FingerprintMetric.cpp)
-endif()
-
-if(OpenEye_Shape_FOUND)
-    list(APPEND OECLUSTER_SOURCES src/metrics/ROCSMetric.cpp)
-endif()
-
-if(OpenEye_Bio_FOUND)
-    list(APPEND OECLUSTER_SOURCES
-        src/metrics/SuperposeMetric.cpp
-        src/metrics/SiteHopperMetric.cpp
-    )
-endif()
 
 add_library(oecluster ${OECLUSTER_SOURCES})
 
@@ -136,22 +133,13 @@ target_include_directories(oecluster
 target_link_libraries(oecluster
     PUBLIC
         OpenEye::OEChem
+        OpenEye::OEGraphSim
+        OpenEye::OEShape
+        OpenEye::OEBio
+        OpenEye::OESpruce
+    PRIVATE
+        oeselect
 )
-
-if(OpenEye_GraphSim_FOUND)
-    target_compile_definitions(oecluster PUBLIC OECLUSTER_HAS_GRAPHSIM)
-    target_link_libraries(oecluster PUBLIC OpenEye::OEGraphSim)
-endif()
-
-if(OpenEye_Shape_FOUND)
-    target_compile_definitions(oecluster PUBLIC OECLUSTER_HAS_SHAPE)
-    target_link_libraries(oecluster PUBLIC OpenEye::OEShape)
-endif()
-
-if(OpenEye_Bio_FOUND)
-    target_compile_definitions(oecluster PUBLIC OECLUSTER_HAS_BIO)
-    target_link_libraries(oecluster PUBLIC OpenEye::OEBio)
-endif()
 
 if(OECLUSTER_BUILD_TESTS)
     enable_testing()
