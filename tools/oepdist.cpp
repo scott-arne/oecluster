@@ -24,12 +24,22 @@ static unsigned int ParseColorFF(const std::string& s) {
     throw std::runtime_error("Unknown color force field: " + s);
 }
 
-static unsigned int ParseAlignmentMethod(const std::string& s) {
-    if (s == "identity") return 1;
-    if (s == "pam250")   return 2;
-    if (s == "blosum62") return 3;
-    if (s == "gonnet")   return 4;
-    throw std::runtime_error("Unknown alignment method: " + s);
+static OECluster::SuperposeMethod ParseSuperposeMethod(const std::string& s) {
+    if (s == "global_carbon_alpha") return OECluster::SuperposeMethod::GlobalCarbonAlpha;
+    if (s == "global")              return OECluster::SuperposeMethod::Global;
+    if (s == "ddm")                 return OECluster::SuperposeMethod::DDM;
+    if (s == "weighted")            return OECluster::SuperposeMethod::Weighted;
+    if (s == "sse")                 return OECluster::SuperposeMethod::SSE;
+    if (s == "sitehopper")          return OECluster::SuperposeMethod::SiteHopper;
+    throw std::runtime_error("Unknown superpose method: " + s);
+}
+
+static OECluster::SuperposeScoreType ParseSuperposeScoreType(const std::string& s) {
+    if (s == "auto")        return OECluster::SuperposeScoreType::Auto;
+    if (s == "rmsd")        return OECluster::SuperposeScoreType::RMSD;
+    if (s == "tanimoto")    return OECluster::SuperposeScoreType::Tanimoto;
+    if (s == "patch_score") return OECluster::SuperposeScoreType::PatchScore;
+    throw std::runtime_error("Unknown superpose score type: " + s);
 }
 
 static std::string JsonStr(const std::string& key, const std::string& val) {
@@ -149,6 +159,8 @@ int main(int argc, char** argv) {
         "Pipe-delimited OEFPBondType flags");
     fp_cmd->add_option("--similarity", fp_similarity,
         "Similarity: tanimoto, dice, cosine, manhattan, euclidean");
+    bool fp_sim = false;
+    fp_cmd->add_flag("--sim", fp_sim, "Return similarity instead of distance");
 
     fp_cmd->callback([&]() {
         OECluster::FingerprintOptions opts;
@@ -163,6 +175,7 @@ int main(int argc, char** argv) {
         if (!fp_bond_type.empty())
             opts.bond_type_mask =
                 OECluster::FingerprintMetric::ParseBondTypeMask(fp_bond_type);
+        opts.similarity = fp_sim;
 
         std::string params = "{" + JsonStr("fp_type", fp_type) + ","
             + JsonNum("numbits", fp_numbits) + ","
@@ -217,11 +230,14 @@ int main(int argc, char** argv) {
         "Score: combo_norm, combo, shape, color");
     rocs_cmd->add_option("--color-ff", rocs_color_ff,
         "Color force field");
+    bool rocs_sim = false;
+    rocs_cmd->add_flag("--sim", rocs_sim, "Return similarity instead of distance");
 
     rocs_cmd->callback([&]() {
         OECluster::ROCSOptions opts;
         opts.score_type = ParseScoreType(rocs_score);
         opts.color_ff_type = ParseColorFF(rocs_color_ff);
+        opts.similarity = rocs_sim;
 
         std::string params = "{" + JsonStr("score", rocs_score) + ","
             + JsonStr("color_ff", rocs_color_ff) + "}";
@@ -262,44 +278,46 @@ int main(int argc, char** argv) {
     });
 
     CommonOpts sup_co;
-    std::string sup_alignment = "pam250";
-    int sup_gap = -10, sup_extend = -2;
-    bool sup_all_atoms = false, sup_no_overlay = false;
+    std::string sup_method = "global_carbon_alpha";
+    std::string sup_score_type = "auto";
+    bool sup_sim = false;
+    std::string sup_predicate, sup_ref_predicate, sup_fit_predicate;
 
     auto* sup_cmd = app.add_subcommand("superpose",
-        "Protein superposition RMSD");
+        "Protein superposition distance");
     AddCommonOpts(sup_cmd, sup_co);
-    sup_cmd->add_option("--alignment", sup_alignment,
-        "Alignment: pam250, blosum62, gonnet, identity");
-    sup_cmd->add_option("--gap-penalty", sup_gap, "Gap open penalty");
-    sup_cmd->add_option("--extend-penalty", sup_extend, "Gap extend penalty");
-    sup_cmd->add_flag("--all-atoms", sup_all_atoms,
-        "All backbone atoms (not just C-alpha)");
-    sup_cmd->add_flag("--no-overlay", sup_no_overlay,
-        "RMSD without spatial overlay");
+    sup_cmd->add_option("--method", sup_method,
+        "Method: global_carbon_alpha, global, ddm, weighted, sse, sitehopper");
+    sup_cmd->add_option("--score-type", sup_score_type,
+        "Score: auto, rmsd, tanimoto, patch_score");
+    sup_cmd->add_flag("--sim", sup_sim, "Return similarity instead of distance");
+    sup_cmd->add_option("--predicate", sup_predicate,
+        "oeselect expression for both ref and fit");
+    sup_cmd->add_option("--ref-predicate", sup_ref_predicate,
+        "Override predicate for ref structures");
+    sup_cmd->add_option("--fit-predicate", sup_fit_predicate,
+        "Override predicate for fit structures");
 
     sup_cmd->callback([&]() {
         OECluster::SuperposeOptions opts;
-        opts.alignment_method = ParseAlignmentMethod(sup_alignment);
-        opts.gap_penalty = sup_gap;
-        opts.extend_penalty = sup_extend;
-        opts.only_calpha = !sup_all_atoms;
-        opts.overlay = !sup_no_overlay;
+        opts.method = ParseSuperposeMethod(sup_method);
+        opts.score_type = ParseSuperposeScoreType(sup_score_type);
+        opts.similarity = sup_sim;
+        opts.predicate = sup_predicate;
+        opts.ref_predicate = sup_ref_predicate;
+        opts.fit_predicate = sup_fit_predicate;
 
-        std::string params = "{" + JsonStr("alignment", sup_alignment) + ","
-            + JsonNum("gap_penalty", sup_gap) + ","
-            + JsonNum("extend_penalty", sup_extend) + ","
-            + JsonBool("only_calpha", opts.only_calpha) + ","
-            + JsonBool("overlay", opts.overlay) + "}";
+        std::string params = "{" + JsonStr("method", sup_method) + ","
+            + JsonStr("score_type", sup_score_type) + ","
+            + JsonBool("similarity", sup_sim) + "}";
 
         if (sup_co.input2.empty()) {
             try {
-                auto ds = OEPDist::ReadDesignUnits(
-                    sup_co.input1, sup_co.verbose);
+                auto ds = OEPDist::ReadDesignUnits(sup_co.input1, sup_co.verbose);
                 if (!ds.dus.empty()) {
                     OECluster::SuperposeMetric metric(ds.dus, opts);
                     OEPDist::OutputMetadata meta{
-                        "pdist", "superpose", params, ds.labels, ds.labels};
+                        "pdist", metric.Name(), params, ds.labels, ds.labels};
                     exit_code = run_pdist(metric, sup_co.output, meta,
                         sup_co.num_threads, sup_co.chunk_size,
                         sup_co.cutoff, sup_co.progress);
@@ -314,11 +332,28 @@ int main(int argc, char** argv) {
             }
             OECluster::SuperposeMetric metric(ms.ptrs, opts);
             OEPDist::OutputMetadata meta{
-                "pdist", "superpose", params, ms.labels, ms.labels};
+                "pdist", metric.Name(), params, ms.labels, ms.labels};
             exit_code = run_pdist(metric, sup_co.output, meta,
                 sup_co.num_threads, sup_co.chunk_size,
                 sup_co.cutoff, sup_co.progress);
         } else {
+            // Cross-distance: try design units first
+            try {
+                auto sa = OEPDist::ReadDesignUnits(sup_co.input1, sup_co.verbose);
+                auto sb = OEPDist::ReadDesignUnits(sup_co.input2, sup_co.verbose);
+                if (!sa.dus.empty() && !sb.dus.empty()) {
+                    std::vector<std::shared_ptr<OEBio::OEDesignUnit>> all;
+                    all.insert(all.end(), sa.dus.begin(), sa.dus.end());
+                    all.insert(all.end(), sb.dus.begin(), sb.dus.end());
+                    OECluster::SuperposeMetric metric(all, opts);
+                    OEPDist::OutputMetadata meta{
+                        "cdist", metric.Name(), params, sa.labels, sb.labels};
+                    exit_code = run_cdist(metric, sa.dus.size(), sup_co.output,
+                        meta, sup_co.num_threads, sup_co.chunk_size,
+                        sup_co.cutoff, sup_co.progress);
+                    return;
+                }
+            } catch (...) {}
             auto sa = OEPDist::ReadMolecules(sup_co.input1, sup_co.verbose);
             auto sb = OEPDist::ReadMolecules(sup_co.input2, sup_co.verbose);
             if (sa.ptrs.empty() || sb.ptrs.empty()) {
@@ -330,72 +365,10 @@ int main(int argc, char** argv) {
             all.insert(all.end(), sb.ptrs.begin(), sb.ptrs.end());
             OECluster::SuperposeMetric metric(all, opts);
             OEPDist::OutputMetadata meta{
-                "cdist", "superpose", params, sa.labels, sb.labels};
+                "cdist", metric.Name(), params, sa.labels, sb.labels};
             exit_code = run_cdist(metric, sa.ptrs.size(), sup_co.output,
                 meta, sup_co.num_threads, sup_co.chunk_size,
                 sup_co.cutoff, sup_co.progress);
-        }
-    });
-
-    CommonOpts sh_co;
-    std::string sh_alignment = "pam250";
-    int sh_gap = -10, sh_extend = -2;
-    bool sh_all_atoms = false;
-
-    auto* sh_cmd = app.add_subcommand("sitehopper",
-        "Binding site RMSD");
-    AddCommonOpts(sh_cmd, sh_co);
-    sh_cmd->add_option("--alignment", sh_alignment,
-        "Alignment: pam250, blosum62, gonnet, identity");
-    sh_cmd->add_option("--gap-penalty", sh_gap, "Gap open penalty");
-    sh_cmd->add_option("--extend-penalty", sh_extend, "Gap extend penalty");
-    sh_cmd->add_flag("--all-atoms", sh_all_atoms,
-        "All backbone atoms (not just C-alpha)");
-
-    sh_cmd->callback([&]() {
-        OECluster::SiteHopperOptions opts;
-        opts.alignment_method = ParseAlignmentMethod(sh_alignment);
-        opts.gap_penalty = sh_gap;
-        opts.extend_penalty = sh_extend;
-        opts.only_calpha = !sh_all_atoms;
-
-        std::string params = "{" + JsonStr("alignment", sh_alignment) + ","
-            + JsonNum("gap_penalty", sh_gap) + ","
-            + JsonNum("extend_penalty", sh_extend) + ","
-            + JsonBool("only_calpha", opts.only_calpha) + "}";
-
-        if (sh_co.input2.empty()) {
-            auto ds = OEPDist::ReadDesignUnits(
-                sh_co.input1, sh_co.verbose);
-            if (ds.dus.empty()) {
-                std::cerr << "Error: No design units read from "
-                          << sh_co.input1 << std::endl;
-                exit_code = 1; return;
-            }
-            OECluster::SiteHopperMetric metric(ds.dus, opts);
-            OEPDist::OutputMetadata meta{
-                "pdist", "sitehopper", params, ds.labels, ds.labels};
-            exit_code = run_pdist(metric, sh_co.output, meta,
-                sh_co.num_threads, sh_co.chunk_size,
-                sh_co.cutoff, sh_co.progress);
-        } else {
-            auto sa = OEPDist::ReadDesignUnits(
-                sh_co.input1, sh_co.verbose);
-            auto sb = OEPDist::ReadDesignUnits(
-                sh_co.input2, sh_co.verbose);
-            if (sa.dus.empty() || sb.dus.empty()) {
-                std::cerr << "Error: No design units read" << std::endl;
-                exit_code = 1; return;
-            }
-            std::vector<std::shared_ptr<OEBio::OEDesignUnit>> all;
-            all.insert(all.end(), sa.dus.begin(), sa.dus.end());
-            all.insert(all.end(), sb.dus.begin(), sb.dus.end());
-            OECluster::SiteHopperMetric metric(all, opts);
-            OEPDist::OutputMetadata meta{
-                "cdist", "sitehopper", params, sa.labels, sb.labels};
-            exit_code = run_cdist(metric, sa.dus.size(), sh_co.output,
-                meta, sh_co.num_threads, sh_co.chunk_size,
-                sh_co.cutoff, sh_co.progress);
         }
     });
 
