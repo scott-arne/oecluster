@@ -13,22 +13,13 @@
 #include "oecluster/PDist.h"
 #include "oecluster/CDist.h"
 #include "oecluster/DistanceMatrix.h"
-
-#ifdef OECLUSTER_HAS_GRAPHSIM
 #include "oecluster/metrics/FingerprintMetric.h"
-#endif
-#ifdef OECLUSTER_HAS_SHAPE
 #include "oecluster/metrics/ROCSMetric.h"
-#endif
-#ifdef OECLUSTER_HAS_BIO
-#include "oecluster/metrics/SiteHopperMetric.h"
 #include "oecluster/metrics/SuperposeMetric.h"
-#endif
 
 #include <oechem.h>
-#ifdef OECLUSTER_HAS_BIO
 #include <oebio.h>
-#endif
+#include <oespruce.h>
 
 using namespace OECluster;
 %}
@@ -106,13 +97,10 @@ static void* _oecluster_extract_swig_ptr(PyObject* obj) {
     temp.reserve(size);
     for (Py_ssize_t i = 0; i < size; ++i) {
         PyObject* item = PyList_GetItem($input, i);
-        void* ptr = NULL;
-        int res = SWIG_ConvertPtr(item, &ptr, SWIGTYPE_p_OEChem__OEMolBase, 0);
-        if (!SWIG_IsOK(res)) {
-            if (_oecluster_is_oemolbase(item)) {
-                ptr = _oecluster_extract_swig_ptr(item);
-            }
+        if (!_oecluster_is_oemolbase(item)) {
+            SWIG_exception_fail(SWIG_TypeError, "List item is not an OEMolBase object");
         }
+        void* ptr = _oecluster_extract_swig_ptr(item);
         if (!ptr) {
             SWIG_exception_fail(SWIG_TypeError, "List item is not an OEMolBase object");
         }
@@ -137,13 +125,10 @@ static void* _oecluster_extract_swig_ptr(PyObject* obj) {
     temp.reserve(size);
     for (Py_ssize_t i = 0; i < size; ++i) {
         PyObject* item = PyList_GetItem($input, i);
-        void* ptr = NULL;
-        int res = SWIG_ConvertPtr(item, &ptr, SWIGTYPE_p_OEChem__OEMol, 0);
-        if (!SWIG_IsOK(res)) {
-            if (_oecluster_is_oemol(item)) {
-                ptr = _oecluster_extract_swig_ptr(item);
-            }
+        if (!_oecluster_is_oemol(item)) {
+            SWIG_exception_fail(SWIG_TypeError, "List item is not an OEMol object");
         }
+        void* ptr = _oecluster_extract_swig_ptr(item);
         if (!ptr) {
             SWIG_exception_fail(SWIG_TypeError, "List item is not an OEMol object");
         }
@@ -162,7 +147,6 @@ static void* _oecluster_extract_swig_ptr(PyObject* obj) {
  * 5. Typemap: const std::vector<std::shared_ptr<OEBio::OEDesignUnit>>&
  *    Used by SiteHopperMetric and SuperposeMetric (DU overload)
  * -------------------------------------------------------------------------- */
-#ifdef OECLUSTER_HAS_BIO
 %typemap(in) const std::vector<std::shared_ptr<OEBio::OEDesignUnit>>& (std::vector<std::shared_ptr<OEBio::OEDesignUnit>> temp) {
     if (!PyList_Check($input)) {
         SWIG_exception_fail(SWIG_TypeError, "Expected a list of OEDesignUnit objects");
@@ -171,13 +155,10 @@ static void* _oecluster_extract_swig_ptr(PyObject* obj) {
     temp.reserve(size);
     for (Py_ssize_t i = 0; i < size; ++i) {
         PyObject* item = PyList_GetItem($input, i);
-        void* ptr = NULL;
-        int res = SWIG_ConvertPtr(item, &ptr, SWIGTYPE_p_OEBio__OEDesignUnit, 0);
-        if (!SWIG_IsOK(res)) {
-            if (_oecluster_is_oedesignunit(item)) {
-                ptr = _oecluster_extract_swig_ptr(item);
-            }
+        if (!_oecluster_is_oedesignunit(item)) {
+            SWIG_exception_fail(SWIG_TypeError, "List item is not an OEDesignUnit object");
         }
+        void* ptr = _oecluster_extract_swig_ptr(item);
         if (!ptr) {
             SWIG_exception_fail(SWIG_TypeError, "List item is not an OEDesignUnit object");
         }
@@ -191,7 +172,6 @@ static void* _oecluster_extract_swig_ptr(PyObject* obj) {
 %typemap(typecheck, precedence=SWIG_TYPECHECK_POINTER) const std::vector<std::shared_ptr<OEBio::OEDesignUnit>>& {
     $1 = PyList_Check($input) ? 1 : 0;
 }
-#endif
 
 /* --------------------------------------------------------------------------
  * 6. Typemap: std::function<void(size_t, size_t)> progress callback
@@ -300,11 +280,9 @@ namespace OEChem {
     class OEMolBase;
     class OEMol;
 }
-#ifdef OECLUSTER_HAS_BIO
 namespace OEBio {
     class OEDesignUnit;
 }
-#endif
 
 /* --------------------------------------------------------------------------
  * 11. Ignore problematic members before %include
@@ -342,8 +320,6 @@ namespace OEBio {
 %ignore OECluster::FingerprintMetric::ParseBondTypeMask;
 %ignore OECluster::ROCSMetric::ROCSMetric(std::shared_ptr<const SharedData>, const Options&);
 %ignore OECluster::SuperposeMetric::SuperposeMetric(std::shared_ptr<const SharedData>, const Options&);
-%ignore OECluster::SiteHopperMetric::SiteHopperMetric(std::shared_ptr<const SharedData>, const Options&);
-
 /* Ignore SparseStorage internals that use unordered_map/shared_mutex/thread */
 %ignore OECluster::SparseStorage::Entries;
 
@@ -499,17 +475,8 @@ public:
 }  /* namespace OECluster */
 
 /* --------------------------------------------------------------------------
- * 19. Conditional metric classes
+ * 19. Metric classes
  * -------------------------------------------------------------------------- */
-#ifdef OECLUSTER_HAS_GRAPHSIM
 %include "oecluster/metrics/FingerprintMetric.h"
-#endif
-
-#ifdef OECLUSTER_HAS_SHAPE
 %include "oecluster/metrics/ROCSMetric.h"
-#endif
-
-#ifdef OECLUSTER_HAS_BIO
-%include "oecluster/metrics/SiteHopperMetric.h"
 %include "oecluster/metrics/SuperposeMetric.h"
-#endif

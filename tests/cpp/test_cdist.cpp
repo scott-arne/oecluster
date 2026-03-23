@@ -5,8 +5,6 @@
 
 #include <gtest/gtest.h>
 #include "oecluster/oecluster.h"
-
-#ifdef OECLUSTER_HAS_GRAPHSIM
 #include "oecluster/metrics/FingerprintMetric.h"
 #include <oechem.h>
 #include <vector>
@@ -92,5 +90,3 @@ TEST_F(CDistTest, ProgressCallback) {
     cdist(metric, n_a, output.data(), opts);
     EXPECT_EQ(last_total, n_a * n_b);
 }
-
-#endif  // OECLUSTER_HAS_GRAPHSIM

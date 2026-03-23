@@ -1,7 +1,5 @@
 #include <gtest/gtest.h>
 #include "oecluster/oecluster.h"
-
-#ifdef OECLUSTER_HAS_SHAPE
 #include "oecluster/metrics/ROCSMetric.h"
 #include <oechem.h>
 #include <oeshape.h>
@@ -128,5 +126,3 @@ TEST_F(ROCSMetricTest, ColorForceFieldConfiguration) {
     EXPECT_GE(d, 0.0);
     EXPECT_LE(d, 1.0);
 }
-
-#endif  // OECLUSTER_HAS_SHAPE

@@ -6,8 +6,6 @@
 #include <cmath>
 #include <gtest/gtest.h>
 #include "oecluster/oecluster.h"
-
-#ifdef OECLUSTER_HAS_BIO
 #include "oecluster/metrics/SuperposeMetric.h"
 #include "oecluster/metrics/SiteHopperMetric.h"
 #include <oechem.h>
@@ -135,5 +133,3 @@ TEST_F(SuperposeMetricTest, NoOverlay) {
 // sites, which are difficult to create programmatically.  We verify
 // only compilation and basic API shape here.
 // ---------------------------------------------------------------------------
-
-#endif  // OECLUSTER_HAS_BIO
