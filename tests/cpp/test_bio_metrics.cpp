@@ -1,135 +1,198 @@
 /**
  * @file test_bio_metrics.cpp
- * @brief Tests for SuperposeMetric and SiteHopperMetric.
+ * @brief Tests for SuperposeMetric using oespruce OESuperpose.
  */
 
 #include <cmath>
 #include <gtest/gtest.h>
 #include "oecluster/oecluster.h"
 #include "oecluster/metrics/SuperposeMetric.h"
-#include "oecluster/metrics/SiteHopperMetric.h"
 #include <oechem.h>
 #include <oebio.h>
 
 using namespace OECluster;
 
-/// Helper: create a simple protein-like molecule with 3D coords.
-static OEChem::OEGraphMol make_simple_protein(double x_offset = 0.0) {
-    OEChem::OEGraphMol mol;
-    // Create a minimal peptide-like chain with 3D coordinates
-    // Three residues worth of backbone atoms: N, CA, C, O
-    const char* names[] = {
-        "N", "CA", "C", "O",
-        "N", "CA", "C", "O",
-        "N", "CA", "C", "O"
-    };
-    double coords[][3] = {
-        {0.0 + x_offset, 0.0, 0.0},
-        {1.5 + x_offset, 0.0, 0.0},
-        {2.0 + x_offset, 1.5, 0.0},
-        {3.0 + x_offset, 2.0, 0.0},
-        {1.5 + x_offset, 2.5, 0.0},
-        {2.5 + x_offset, 3.5, 0.0},
-        {3.5 + x_offset, 3.0, 0.0},
-        {4.5 + x_offset, 3.5, 0.0},
-        {3.0 + x_offset, 1.5, 1.0},
-        {4.0 + x_offset, 2.0, 1.0},
-        {5.0 + x_offset, 1.5, 1.0},
-        {6.0 + x_offset, 2.0, 1.0}
-    };
-    // Atom numbers: N=7, C=6, O=8
-    unsigned int atomic_nums[] = {
-        7, 6, 6, 8,
-        7, 6, 6, 8,
-        7, 6, 6, 8
-    };
-    for (int i = 0; i < 12; ++i) {
-        auto* atom = mol.NewAtom(atomic_nums[i]);
-        atom->SetName(names[i]);
-        mol.SetCoords(atom, coords[i]);
-    }
-    mol.SetDimension(3);
-    return mol;
+static std::string asset_path(const std::string& name) {
+    return std::string(TEST_ASSETS_DIR) + "/" + name;
 }
 
-// ---------------------------------------------------------------------------
-// SuperposeMetric tests (molecule constructor)
-// ---------------------------------------------------------------------------
-
-class SuperposeMetricTest : public ::testing::Test {
+class SuperposeMetricDUTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        auto m0 = make_simple_protein(0.0);
-        auto m1 = make_simple_protein(0.5);
-        auto m2 = make_simple_protein(5.0);
-        owned_.push_back(std::make_unique<OEChem::OEGraphMol>(m0));
-        owned_.push_back(std::make_unique<OEChem::OEGraphMol>(m1));
-        owned_.push_back(std::make_unique<OEChem::OEGraphMol>(m2));
-        for (auto& p : owned_) {
-            mols_.push_back(&p->SCMol());
+        std::vector<std::string> files = {
+            asset_path("spruce_5FQD_1_5FQD_1-ALIGNED_BC__DU__LVY_B-1438.oedu"),
+            asset_path("spruce_8G66_1_8G66_1-ALIGNED_BC__DU__YOT_B-502.oedu"),
+        };
+        for (const auto& f : files) {
+            auto du = std::make_shared<OEBio::OEDesignUnit>();
+            if (!OEBio::OEReadDesignUnit(f, *du)) {
+                GTEST_SKIP() << "Cannot read test asset: " << f;
+            }
+            dus_.push_back(du);
         }
     }
 
-    std::vector<std::unique_ptr<OEChem::OEGraphMol>> owned_;
-    std::vector<OEChem::OEMolBase*> mols_;
+    std::vector<std::shared_ptr<OEBio::OEDesignUnit>> dus_;
 };
 
-TEST_F(SuperposeMetricTest, ConstructAndSize) {
-    SuperposeMetric metric(mols_);
-    EXPECT_EQ(metric.Size(), 3u);
-    EXPECT_EQ(metric.Name(), "superpose");
+// -- Method tests --
+
+TEST_F(SuperposeMetricDUTest, GlobalCarbonAlpha_RMSD) {
+    SuperposeOptions opts;
+    opts.method = SuperposeMethod::GlobalCarbonAlpha;
+    SuperposeMetric metric(dus_, opts);
+    EXPECT_EQ(metric.Size(), 2u);
+    EXPECT_EQ(metric.Name(), "superpose:global_carbon_alpha");
+    double d = metric.Distance(0, 1);
+    EXPECT_GT(d, 0.0);
+    EXPECT_TRUE(std::isfinite(d));
 }
 
-TEST_F(SuperposeMetricTest, DistanceIsFinite) {
-    SuperposeMetric metric(mols_);
-    for (size_t i = 0; i < 3; ++i) {
-        for (size_t j = i + 1; j < 3; ++j) {
-            double d = metric.Distance(i, j);
-            // With synthetic (non-protein) molecules, OEGetAlignment may
-            // fail and OERMSD returns -1.  We only verify the call
-            // completes and returns a finite value.
-            EXPECT_TRUE(std::isfinite(d));
-        }
-    }
+TEST_F(SuperposeMetricDUTest, Global_RMSD) {
+    SuperposeOptions opts;
+    opts.method = SuperposeMethod::Global;
+    SuperposeMetric metric(dus_, opts);
+    EXPECT_EQ(metric.Name(), "superpose:global");
+    double d = metric.Distance(0, 1);
+    EXPECT_GT(d, 0.0);
 }
 
-TEST_F(SuperposeMetricTest, CloneProducesValidResults) {
-    SuperposeMetric metric(mols_);
+TEST_F(SuperposeMetricDUTest, DDM_RMSD) {
+    SuperposeOptions opts;
+    opts.method = SuperposeMethod::DDM;
+    SuperposeMetric metric(dus_, opts);
+    EXPECT_EQ(metric.Name(), "superpose:ddm");
+    double d = metric.Distance(0, 1);
+    EXPECT_GT(d, 0.0);
+}
+
+TEST_F(SuperposeMetricDUTest, Weighted_RMSD) {
+    SuperposeOptions opts;
+    opts.method = SuperposeMethod::Weighted;
+    SuperposeMetric metric(dus_, opts);
+    EXPECT_EQ(metric.Name(), "superpose:weighted");
+    double d = metric.Distance(0, 1);
+    EXPECT_GT(d, 0.0);
+}
+
+TEST_F(SuperposeMetricDUTest, SSE_Tanimoto) {
+    SuperposeOptions opts;
+    opts.method = SuperposeMethod::SSE;
+    SuperposeMetric metric(dus_, opts);
+    EXPECT_EQ(metric.Name(), "superpose:sse");
+    double d = metric.Distance(0, 1);
+    // Distance = 1.0 - tanimoto, should be in [0, 1]
+    EXPECT_GE(d, 0.0);
+    EXPECT_LE(d, 1.0);
+}
+
+TEST_F(SuperposeMetricDUTest, SiteHopper_PatchScore) {
+    SuperposeOptions opts;
+    opts.method = SuperposeMethod::SiteHopper;
+    SuperposeMetric metric(dus_, opts);
+    EXPECT_EQ(metric.Name(), "superpose:sitehopper");
+    double d = metric.Distance(0, 1);
+    // Distance = 4.0 - patch_score, should be in [0, 4]
+    EXPECT_GE(d, 0.0);
+    EXPECT_LE(d, 4.0);
+}
+
+// -- Distance / Similarity mode tests --
+
+TEST_F(SuperposeMetricDUTest, SSE_Similarity) {
+    SuperposeOptions opts;
+    opts.method = SuperposeMethod::SSE;
+    opts.similarity = true;
+    SuperposeMetric metric(dus_, opts);
+    double sim = metric.Distance(0, 1);
+    EXPECT_GE(sim, 0.0);
+    EXPECT_LE(sim, 1.0);
+}
+
+TEST_F(SuperposeMetricDUTest, SiteHopper_Similarity) {
+    SuperposeOptions opts;
+    opts.method = SuperposeMethod::SiteHopper;
+    opts.similarity = true;
+    SuperposeMetric metric(dus_, opts);
+    double sim = metric.Distance(0, 1);
+    EXPECT_GE(sim, 0.0);
+    EXPECT_LE(sim, 4.0);
+}
+
+TEST_F(SuperposeMetricDUTest, RMSD_SimilarityIsNoOp) {
+    SuperposeOptions opts;
+    opts.method = SuperposeMethod::GlobalCarbonAlpha;
+
+    opts.similarity = false;
+    SuperposeMetric dist_metric(dus_, opts);
+    double d = dist_metric.Distance(0, 1);
+
+    opts.similarity = true;
+    SuperposeMetric sim_metric(dus_, opts);
+    double s = sim_metric.Distance(0, 1);
+
+    EXPECT_DOUBLE_EQ(d, s);
+}
+
+// -- Score type validation --
+
+TEST_F(SuperposeMetricDUTest, IncompatibleScoreTypeThrows) {
+    SuperposeOptions opts;
+    opts.method = SuperposeMethod::SSE;
+    opts.score_type = SuperposeScoreType::RMSD;
+    EXPECT_THROW(SuperposeMetric(dus_, opts), MetricError);
+}
+
+TEST_F(SuperposeMetricDUTest, AutoScoreTypeResolvesCorrectly) {
+    SuperposeOptions opts;
+    opts.method = SuperposeMethod::GlobalCarbonAlpha;
+    opts.score_type = SuperposeScoreType::Auto;
+    SuperposeMetric metric(dus_, opts);
+    double d = metric.Distance(0, 1);
+    // Auto resolves to RMSD for GlobalCarbonAlpha
+    EXPECT_GT(d, 0.0);
+}
+
+// -- Predicate tests --
+
+TEST_F(SuperposeMetricDUTest, ValidPredicateConstructionSucceeds) {
+    // Verify that a valid predicate is parsed and construction succeeds.
+    // The actual superposition may fail depending on atom coverage, so
+    // we only test construction here.
+    SuperposeOptions opts;
+    opts.method = SuperposeMethod::GlobalCarbonAlpha;
+    opts.predicate = "backbone";
+    EXPECT_NO_THROW({ SuperposeMetric m(dus_, opts); });
+}
+
+TEST_F(SuperposeMetricDUTest, InvalidPredicateThrows) {
+    SuperposeOptions opts;
+    opts.predicate = "!!!INVALID_PREDICATE!!!";
+    EXPECT_THROW(SuperposeMetric(dus_, opts), MetricError);
+}
+
+// -- Clone and pdist integration --
+
+TEST_F(SuperposeMetricDUTest, CloneProducesValidResults) {
+    SuperposeMetric metric(dus_);
     auto clone = metric.Clone();
-    EXPECT_EQ(clone->Size(), 3u);
+    EXPECT_EQ(clone->Size(), 2u);
     double d = clone->Distance(0, 1);
     EXPECT_TRUE(std::isfinite(d));
 }
 
-TEST_F(SuperposeMetricTest, IntegrationWithPDist) {
-    SuperposeMetric metric(mols_);
-    DenseStorage storage(3);
+TEST_F(SuperposeMetricDUTest, IntegrationWithPDist) {
+    SuperposeMetric metric(dus_);
+    DenseStorage storage(2);
     pdist(metric, storage);
-    EXPECT_EQ(storage.NumPairs(), 3u);
-}
-
-TEST_F(SuperposeMetricTest, CustomAlignmentOptions) {
-    SuperposeOptions opts;
-    opts.alignment_method = 3;  // BLOSUM62
-    opts.gap_penalty = -12;
-    opts.extend_penalty = -4;
-    opts.only_calpha = false;
-    SuperposeMetric metric(mols_, opts);
-    EXPECT_EQ(metric.Size(), 3u);
-    double d = metric.Distance(0, 1);
+    EXPECT_EQ(storage.NumPairs(), 1u);
+    double d = storage.Get(0, 1);
     EXPECT_TRUE(std::isfinite(d));
 }
 
-TEST_F(SuperposeMetricTest, NoOverlay) {
-    SuperposeOptions opts;
-    opts.overlay = false;
-    SuperposeMetric metric(mols_, opts);
-    double d = metric.Distance(0, 1);
-    EXPECT_TRUE(std::isfinite(d));
-}
+// -- Error cases --
 
-// ---------------------------------------------------------------------------
-// SiteHopperMetric tests would require actual design units with binding
-// sites, which are difficult to create programmatically.  We verify
-// only compilation and basic API shape here.
-// ---------------------------------------------------------------------------
+TEST_F(SuperposeMetricDUTest, EmptyStructureListThrows) {
+    std::vector<std::shared_ptr<OEBio::OEDesignUnit>> empty_dus;
+    EXPECT_THROW({ SuperposeMetric m(empty_dus); }, MetricError);
+}

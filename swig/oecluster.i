@@ -145,7 +145,7 @@ static void* _oecluster_extract_swig_ptr(PyObject* obj) {
 
 /* --------------------------------------------------------------------------
  * 5. Typemap: const std::vector<std::shared_ptr<OEBio::OEDesignUnit>>&
- *    Used by SiteHopperMetric and SuperposeMetric (DU overload)
+ *    Used by SuperposeMetric (DU overload)
  * -------------------------------------------------------------------------- */
 %typemap(in) const std::vector<std::shared_ptr<OEBio::OEDesignUnit>>& (std::vector<std::shared_ptr<OEBio::OEDesignUnit>> temp) {
     if (!PyList_Check($input)) {
