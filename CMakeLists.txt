@@ -117,7 +117,6 @@ set(OECLUSTER_SOURCES
     src/metrics/FingerprintMetric.cpp
     src/metrics/ROCSMetric.cpp
     src/metrics/SuperposeMetric.cpp
-    src/metrics/SiteHopperMetric.cpp
 )
 
 add_library(oecluster ${OECLUSTER_SOURCES})

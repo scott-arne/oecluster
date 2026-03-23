@@ -5,10 +5,7 @@
 #include <string>
 #include <vector>
 #include <oechem.h>
-
-#ifdef OECLUSTER_HAS_BIO
 #include <oebio.h>
-#endif
 
 namespace OEPDist {
 
@@ -27,14 +24,12 @@ struct MultiConfMolSet {
 
 MultiConfMolSet ReadMultiConfMolecules(const std::string& path, bool verbose = false);
 
-#ifdef OECLUSTER_HAS_BIO
 struct DesignUnitSet {
     std::vector<std::shared_ptr<OEBio::OEDesignUnit>> dus;
     std::vector<std::string> labels;
 };
 
 DesignUnitSet ReadDesignUnits(const std::string& path, bool verbose = false);
-#endif
 
 }  // namespace OEPDist
 

@@ -33,17 +33,8 @@ class DistanceMatrix;
 #include "oecluster/CDist.h"
 #include "oecluster/DistanceMatrix.h"
 
-#ifdef OECLUSTER_HAS_GRAPHSIM
 #include "oecluster/metrics/FingerprintMetric.h"
-#endif
-
-#ifdef OECLUSTER_HAS_SHAPE
 #include "oecluster/metrics/ROCSMetric.h"
-#endif
-
-#ifdef OECLUSTER_HAS_BIO
-#include "oecluster/metrics/SiteHopperMetric.h"
 #include "oecluster/metrics/SuperposeMetric.h"
-#endif
 
 #endif  // OECLUSTER_OECLUSTER_H

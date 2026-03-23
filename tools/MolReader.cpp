@@ -50,7 +50,6 @@ MultiConfMolSet ReadMultiConfMolecules(const std::string& path, bool verbose) {
     return result;
 }
 
-#ifdef OECLUSTER_HAS_BIO
 DesignUnitSet ReadDesignUnits(const std::string& path, bool verbose) {
     DesignUnitSet result;
     OEChem::oemolistream ifs;
@@ -72,6 +71,5 @@ DesignUnitSet ReadDesignUnits(const std::string& path, bool verbose) {
     }
     return result;
 }
-#endif
 
 }  // namespace OEPDist

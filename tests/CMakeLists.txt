@@ -24,17 +24,5 @@ target_link_libraries(oecluster_tests
         GTest::gtest
 )
 
-if(OpenEye_GraphSim_FOUND)
-    target_link_libraries(oecluster_tests PRIVATE OpenEye::OEGraphSim)
-endif()
-
-if(OpenEye_Shape_FOUND)
-    target_link_libraries(oecluster_tests PRIVATE OpenEye::OEShape)
-endif()
-
-if(OpenEye_Bio_FOUND)
-    target_link_libraries(oecluster_tests PRIVATE OpenEye::OEBio)
-endif()
-
 include(GoogleTest)
 gtest_discover_tests(oecluster_tests)
