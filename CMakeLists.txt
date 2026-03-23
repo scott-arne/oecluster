@@ -33,7 +33,7 @@ list(APPEND CMAKE_MODULE_PATH "${cmake_openeye_SOURCE_DIR}")
 FetchContent_Declare(
     oeselect
     GIT_REPOSITORY https://github.com/scott-arne/oeselect.git
-    GIT_TAG main
+    GIT_TAG master
     GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(oeselect)
@@ -106,7 +106,10 @@ if(NOT TARGET OpenEye::OEBio)
     endif()
 endif()
 
-_find_oe_dep(OESPRUCE_LIBRARY oespruce OpenEye::OESpruce "OpenEye::OEChem;OpenEye::OEBio")
+_find_oe_dep(OEZAP_LIBRARY oezap OpenEye::OEZap "OpenEye::OEChem;OpenEye::OEGrid")
+_find_oe_dep(OESPICOLI_LIBRARY oespicoli OpenEye::OESpicoli "OpenEye::OEChem;OpenEye::OEZap")
+_find_oe_dep(OESITEHOPPER_LIBRARY oesitehopper OpenEye::OESiteHopper "OpenEye::OEChem;OpenEye::OEShape;OpenEye::OESpicoli")
+_find_oe_dep(OESPRUCE_LIBRARY oespruce OpenEye::OESpruce "OpenEye::OEChem;OpenEye::OEBio;OpenEye::OESiteHopper")
 
 set(OECLUSTER_SOURCES
     src/StorageBackend.cpp

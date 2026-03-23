@@ -88,7 +88,7 @@ static std::string method_name(SuperposeMethod m) {
 }
 
 // ---------------------------------------------------------------------------
-// SharedData: structures + compiled predicates
+// SharedData: structures + parsed selections
 // ---------------------------------------------------------------------------
 
 struct SuperposeMetric::SharedData {
@@ -96,9 +96,11 @@ struct SuperposeMetric::SharedData {
     std::vector<OEChem::OEGraphMol> mols;
     bool use_dus = false;
 
-    // Compiled predicates (nullptr = OEIsTrueAtom, match all)
-    std::shared_ptr<OESystem::OEUnaryPredicate<OEChem::OEAtomBase>> ref_pred;
-    std::shared_ptr<OESystem::OEUnaryPredicate<OEChem::OEAtomBase>> fit_pred;
+    // Parsed oeselect selections (empty OESelection = match all atoms)
+    OESel::OESelection ref_sele;
+    OESel::OESelection fit_sele;
+    bool has_ref_pred = false;
+    bool has_fit_pred = false;
 };
 
 // ---------------------------------------------------------------------------
@@ -127,17 +129,16 @@ void SuperposeMetric::InitSuperpose() {
 }
 
 // ---------------------------------------------------------------------------
-// Helper: compile a predicate, returning nullptr for empty string
+// Helper: parse a predicate string, returning a validated OESelection
 // ---------------------------------------------------------------------------
 
-static std::shared_ptr<OESystem::OEUnaryPredicate<OEChem::OEAtomBase>>
-compile_predicate(const std::string& expr) {
-    if (expr.empty()) return nullptr;
-    auto pred = oeselect::compile_atom_predicate(expr);
-    if (!pred) {
-        throw MetricError("SuperposeMetric: invalid predicate: " + expr);
+static OESel::OESelection parse_predicate(const std::string& expr) {
+    try {
+        return OESel::OESelection::Parse(expr);
+    } catch (const std::exception& e) {
+        throw MetricError("SuperposeMetric: invalid predicate: " + expr
+                          + " (" + e.what() + ")");
     }
-    return pred;
 }
 
 // ---------------------------------------------------------------------------
@@ -153,6 +154,21 @@ static std::string resolve_pred_str(const std::string& specific,
 // Constructors
 // ---------------------------------------------------------------------------
 
+static void init_predicates(OESel::OESelection& ref_sele, bool& has_ref,
+                             OESel::OESelection& fit_sele, bool& has_fit,
+                             const SuperposeOptions& opts) {
+    std::string ref_str = resolve_pred_str(opts.ref_predicate, opts.predicate);
+    std::string fit_str = resolve_pred_str(opts.fit_predicate, opts.predicate);
+    if (!ref_str.empty()) {
+        ref_sele = parse_predicate(ref_str);
+        has_ref = true;
+    }
+    if (!fit_str.empty()) {
+        fit_sele = parse_predicate(fit_str);
+        has_fit = true;
+    }
+}
+
 SuperposeMetric::SuperposeMetric(
     const std::vector<std::shared_ptr<OEBio::OEDesignUnit>>& dus,
     const Options& opts)
@@ -164,12 +180,8 @@ SuperposeMetric::SuperposeMetric(
     auto shared = std::make_shared<SharedData>();
     shared->use_dus = true;
     shared->dus = dus;
-
-    // Compile predicates
-    std::string ref_str = resolve_pred_str(opts.ref_predicate, opts.predicate);
-    std::string fit_str = resolve_pred_str(opts.fit_predicate, opts.predicate);
-    shared->ref_pred = compile_predicate(ref_str);
-    shared->fit_pred = compile_predicate(fit_str);
+    init_predicates(shared->ref_sele, shared->has_ref_pred,
+                    shared->fit_sele, shared->has_fit_pred, opts);
 
     shared_ = std::move(shared);
     InitSuperpose();
@@ -189,11 +201,8 @@ SuperposeMetric::SuperposeMetric(
     for (auto* mol : mols) {
         shared->mols.emplace_back(*mol);
     }
-
-    std::string ref_str = resolve_pred_str(opts.ref_predicate, opts.predicate);
-    std::string fit_str = resolve_pred_str(opts.fit_predicate, opts.predicate);
-    shared->ref_pred = compile_predicate(ref_str);
-    shared->fit_pred = compile_predicate(fit_str);
+    init_predicates(shared->ref_sele, shared->has_ref_pred,
+                    shared->fit_sele, shared->has_fit_pred, opts);
 
     shared_ = std::move(shared);
     InitSuperpose();
@@ -217,15 +226,20 @@ double SuperposeMetric::Distance(size_t i, size_t j) {
     // SetupRef with predicate
     bool ref_ok = false;
     if (shared_->use_dus) {
-        if (shared_->ref_pred) {
-            ref_ok = local_->superpose.SetupRef(*shared_->dus[i], *shared_->ref_pred);
+        if (shared_->has_ref_pred) {
+            // Extract protein from DU to bind predicate
+            OEChem::OEGraphMol ref_prot;
+            shared_->dus[i]->GetProtein(ref_prot);
+            OESel::OESelect ref_pred(ref_prot, shared_->ref_sele);
+            ref_ok = local_->superpose.SetupRef(*shared_->dus[i], ref_pred);
         } else {
             ref_ok = local_->superpose.SetupRef(*shared_->dus[i]);
         }
     } else {
         OEChem::OEGraphMol ref_copy(shared_->mols[i]);
-        if (shared_->ref_pred) {
-            ref_ok = local_->superpose.SetupRef(ref_copy, *shared_->ref_pred);
+        if (shared_->has_ref_pred) {
+            OESel::OESelect ref_pred(ref_copy, shared_->ref_sele);
+            ref_ok = local_->superpose.SetupRef(ref_copy, ref_pred);
         } else {
             ref_ok = local_->superpose.SetupRef(ref_copy);
         }
@@ -239,17 +253,21 @@ double SuperposeMetric::Distance(size_t i, size_t j) {
     OESpruce::OESuperposeResults results;
     bool sp_ok = false;
     if (shared_->use_dus) {
-        if (shared_->fit_pred) {
+        if (shared_->has_fit_pred) {
+            OEChem::OEGraphMol fit_prot;
+            shared_->dus[j]->GetProtein(fit_prot);
+            OESel::OESelect fit_pred(fit_prot, shared_->fit_sele);
             sp_ok = local_->superpose.Superpose(results, *shared_->dus[j],
-                                                 *shared_->fit_pred);
+                                                 fit_pred);
         } else {
             sp_ok = local_->superpose.Superpose(results, *shared_->dus[j]);
         }
     } else {
         OEChem::OEGraphMol fit_copy(shared_->mols[j]);
-        if (shared_->fit_pred) {
+        if (shared_->has_fit_pred) {
+            OESel::OESelect fit_pred(fit_copy, shared_->fit_sele);
             sp_ok = local_->superpose.Superpose(results, fit_copy,
-                                                 *shared_->fit_pred);
+                                                 fit_pred);
         } else {
             sp_ok = local_->superpose.Superpose(results, fit_copy);
         }

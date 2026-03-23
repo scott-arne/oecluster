@@ -136,7 +136,7 @@ _check_openeye_version()
 
 # Import C++ bindings from SWIG module
 try:
-    from ._oecluster import (
+    from .oecluster import (
         DenseStorage,
         MMapStorage,
         SparseStorage,
@@ -149,14 +149,14 @@ except ImportError as e:
         "The package may not be built correctly."
     ) from e
 
-from . import _oecluster
+from . import oecluster as _oecluster
 
-from ._oecluster import FingerprintMetric as _FingerprintMetric
-from ._oecluster import FingerprintOptions
-from ._oecluster import ROCSMetric as _ROCSMetric
-from ._oecluster import ROCSOptions
-from ._oecluster import SuperposeMetric as _SuperposeMetric
-from ._oecluster import SuperposeOptions
+from .oecluster import FingerprintMetric as _FingerprintMetric
+from .oecluster import FingerprintOptions
+from .oecluster import ROCSMetric as _ROCSMetric
+from .oecluster import ROCSOptions
+from .oecluster import SuperposeMetric as _SuperposeMetric
+from .oecluster import SuperposeOptions
 
 
 class DistanceMatrix:

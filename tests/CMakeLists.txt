@@ -24,5 +24,8 @@ target_link_libraries(oecluster_tests
         GTest::gtest
 )
 
+target_compile_definitions(oecluster_tests PRIVATE
+    TEST_ASSETS_DIR="${CMAKE_SOURCE_DIR}/tests/assets")
+
 include(GoogleTest)
 gtest_discover_tests(oecluster_tests)
