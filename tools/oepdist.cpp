@@ -8,7 +8,6 @@
 #include <string>
 #include <vector>
 
-#ifdef OECLUSTER_HAS_SHAPE
 static OECluster::ROCSScoreType ParseScoreType(const std::string& s) {
     if (s == "combo_norm") return OECluster::ROCSScoreType::ComboNorm;
     if (s == "combo")      return OECluster::ROCSScoreType::Combo;
@@ -24,9 +23,7 @@ static unsigned int ParseColorFF(const std::string& s) {
     if (s == "explicit-no-rings")   return 4;
     throw std::runtime_error("Unknown color force field: " + s);
 }
-#endif
 
-#ifdef OECLUSTER_HAS_BIO
 static unsigned int ParseAlignmentMethod(const std::string& s) {
     if (s == "identity") return 1;
     if (s == "pam250")   return 2;
@@ -34,7 +31,6 @@ static unsigned int ParseAlignmentMethod(const std::string& s) {
     if (s == "gonnet")   return 4;
     throw std::runtime_error("Unknown alignment method: " + s);
 }
-#endif
 
 static std::string JsonStr(const std::string& key, const std::string& val) {
     return "\"" + key + "\":\"" + val + "\"";
@@ -135,7 +131,6 @@ int main(int argc, char** argv) {
 
     int exit_code = 0;
 
-#ifdef OECLUSTER_HAS_GRAPHSIM
     CommonOpts fp_co;
     std::string fp_type = "circular", fp_atom_type, fp_bond_type;
     std::string fp_similarity = "tanimoto";
@@ -161,7 +156,7 @@ int main(int argc, char** argv) {
         opts.numbits = fp_numbits;
         opts.min_distance = fp_min;
         opts.max_distance = fp_max;
-        opts.similarity = fp_similarity;
+        opts.similarity_func = fp_similarity;
         if (!fp_atom_type.empty())
             opts.atom_type_mask =
                 OECluster::FingerprintMetric::ParseAtomTypeMask(fp_atom_type);
@@ -173,7 +168,7 @@ int main(int argc, char** argv) {
             + JsonNum("numbits", fp_numbits) + ","
             + JsonNum("min_distance", fp_min) + ","
             + JsonNum("max_distance", fp_max) + ","
-            + JsonStr("similarity", fp_similarity) + "}";
+            + JsonStr("similarity_func", fp_similarity) + "}";
 
         if (fp_co.input2.empty()) {
             auto ms = OEPDist::ReadMolecules(fp_co.input1, fp_co.verbose);
@@ -212,9 +207,7 @@ int main(int argc, char** argv) {
                 fp_co.cutoff, fp_co.progress);
         }
     });
-#endif
 
-#ifdef OECLUSTER_HAS_SHAPE
     CommonOpts rocs_co;
     std::string rocs_score = "combo_norm", rocs_color_ff = "implicit-mills-dean";
 
@@ -267,9 +260,7 @@ int main(int argc, char** argv) {
                 rocs_co.cutoff, rocs_co.progress);
         }
     });
-#endif
 
-#ifdef OECLUSTER_HAS_BIO
     CommonOpts sup_co;
     std::string sup_alignment = "pam250";
     int sup_gap = -10, sup_extend = -2;
@@ -407,7 +398,6 @@ int main(int argc, char** argv) {
                 sh_co.cutoff, sh_co.progress);
         }
     });
-#endif
 
     try {
         CLI11_PARSE(app, argc, argv);

@@ -6,8 +6,6 @@
 
 #include "oecluster/metrics/FingerprintMetric.h"
 
-#ifdef OECLUSTER_HAS_GRAPHSIM
-
 #include <algorithm>
 #include <cctype>
 #include <sstream>
@@ -106,6 +104,13 @@ FingerprintMetric::FingerprintMetric(const std::vector<OEChem::OEMolBase*>& mols
         }
     }
 
+    // Validate: similarity mode is incompatible with absolute distance functions
+    std::string sim_check = to_lower(opts.similarity_func);
+    if (opts.similarity && (sim_check == "manhattan" || sim_check == "euclidean")) {
+        throw MetricError("similarity=true is incompatible with distance function: "
+                          + opts.similarity_func);
+    }
+
     pimpl_ = std::move(impl);
 }
 
@@ -123,26 +128,25 @@ FingerprintMetric::FingerprintMetric(std::shared_ptr<const Impl> impl)
 double FingerprintMetric::Distance(size_t i, size_t j) {
     const auto& fp_i = pimpl_->fingerprints[i];
     const auto& fp_j = pimpl_->fingerprints[j];
-    std::string sim_lower = to_lower(pimpl_->opts.similarity);
+    std::string sim_lower = to_lower(pimpl_->opts.similarity_func);
+    bool sim_mode = pimpl_->opts.similarity;
 
     if (sim_lower == "tanimoto") {
-        float sim = OEGraphSim::OETanimoto(fp_i, fp_j);
-        return 1.0 - static_cast<double>(sim);
+        double sim = static_cast<double>(OEGraphSim::OETanimoto(fp_i, fp_j));
+        return sim_mode ? sim : (1.0 - sim);
     } else if (sim_lower == "dice") {
-        float sim = OEGraphSim::OEDice(fp_i, fp_j);
-        return 1.0 - static_cast<double>(sim);
+        double sim = static_cast<double>(OEGraphSim::OEDice(fp_i, fp_j));
+        return sim_mode ? sim : (1.0 - sim);
     } else if (sim_lower == "cosine") {
-        float sim = OEGraphSim::OECosine(fp_i, fp_j);
-        return 1.0 - static_cast<double>(sim);
+        double sim = static_cast<double>(OEGraphSim::OECosine(fp_i, fp_j));
+        return sim_mode ? sim : (1.0 - sim);
     } else if (sim_lower == "manhattan") {
-        float dist = OEGraphSim::OEManhattan(fp_i, fp_j);
-        return static_cast<double>(dist);
+        return static_cast<double>(OEGraphSim::OEManhattan(fp_i, fp_j));
     } else if (sim_lower == "euclidean") {
-        float dist = OEGraphSim::OEEuclid(fp_i, fp_j);
-        return static_cast<double>(dist);
+        return static_cast<double>(OEGraphSim::OEEuclid(fp_i, fp_j));
     }
 
-    throw MetricError("Unknown similarity function: " + pimpl_->opts.similarity);
+    throw MetricError("Unknown similarity function: " + pimpl_->opts.similarity_func);
 }
 
 // ---------------------------------------------------------------------------
@@ -245,5 +249,3 @@ unsigned int FingerprintMetric::ParseBondTypeMask(const std::string& pipe_delimi
 }
 
 }  // namespace OECluster
-
-#endif  // OECLUSTER_HAS_GRAPHSIM

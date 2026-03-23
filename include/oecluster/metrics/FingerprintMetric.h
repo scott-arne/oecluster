@@ -6,8 +6,6 @@
 #ifndef OECLUSTER_METRICS_FINGERPRINTMETRIC_H
 #define OECLUSTER_METRICS_FINGERPRINTMETRIC_H
 
-#ifdef OECLUSTER_HAS_GRAPHSIM
-
 #include <memory>
 #include <string>
 #include <vector>
@@ -27,7 +25,8 @@ struct FingerprintOptions {
     unsigned int max_distance = 2;
     unsigned int atom_type_mask = 0;  ///< 0 = use method default
     unsigned int bond_type_mask = 0;  ///< 0 = use method default
-    std::string similarity = "tanimoto";
+    std::string similarity_func = "tanimoto";  ///< Similarity function name
+    bool similarity = false;  ///< Return raw similarity instead of distance
 };
 
 /**
@@ -53,7 +52,7 @@ public:
      * :raises MetricError: If fingerprint generation fails for any molecule.
      */
     explicit FingerprintMetric(const std::vector<OEChem::OEMolBase*>& mols,
-                               const Options& opts = Options{});
+                               const Options& opts = Options());
 
     double Distance(size_t i, size_t j) override;
     std::unique_ptr<DistanceMetric> Clone() const override;
@@ -88,5 +87,4 @@ private:
 
 }  // namespace OECluster
 
-#endif  // OECLUSTER_HAS_GRAPHSIM
 #endif  // OECLUSTER_METRICS_FINGERPRINTMETRIC_H

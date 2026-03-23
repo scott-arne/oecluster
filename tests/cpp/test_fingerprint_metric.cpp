@@ -1,7 +1,5 @@
 #include <gtest/gtest.h>
 #include "oecluster/oecluster.h"
-
-#ifdef OECLUSTER_HAS_GRAPHSIM
 #include "oecluster/metrics/FingerprintMetric.h"
 #include <oechem.h>
 #include <oegraphsim.h>
@@ -111,7 +109,7 @@ TEST_F(FingerprintMetricTest, LingoFingerprintType) {
 
 TEST_F(FingerprintMetricTest, DiceSimilarity) {
     FingerprintOptions opts;
-    opts.similarity = "dice";
+    opts.similarity_func = "dice";
     FingerprintMetric metric(mols_, opts);
     double d = metric.Distance(0, 1);
     EXPECT_GE(d, 0.0);
@@ -143,5 +141,3 @@ TEST_F(FingerprintMetricTest, InvalidFpTypeThrows) {
     opts.fp_type = "invalid";
     EXPECT_THROW(FingerprintMetric(mols_, opts), MetricError);
 }
-
-#endif  // OECLUSTER_HAS_GRAPHSIM
