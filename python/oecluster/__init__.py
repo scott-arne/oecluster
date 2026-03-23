@@ -28,7 +28,6 @@ __all__ = [
     "FingerprintMetric",
     "ROCSMetric",
     "SuperposeMetric",
-    "SiteHopperMetric",
 ]
 
 
@@ -150,40 +149,14 @@ except ImportError as e:
         "The package may not be built correctly."
     ) from e
 
+from . import _oecluster
 
-# Conditionally import metric classes
-_HAVE_FINGERPRINT = False
-_HAVE_ROCS = False
-_HAVE_SUPERPOSE = False
-_HAVE_SITEHOPPER = False
-
-try:
-    from ._oecluster import FingerprintMetric as _FingerprintMetric
-    from ._oecluster import FingerprintOptions
-    _HAVE_FINGERPRINT = True
-except ImportError:
-    pass
-
-try:
-    from ._oecluster import ROCSMetric as _ROCSMetric
-    from ._oecluster import ROCSOptions
-    _HAVE_ROCS = True
-except ImportError:
-    pass
-
-try:
-    from ._oecluster import SuperposeMetric as _SuperposeMetric
-    from ._oecluster import SuperposeOptions
-    _HAVE_SUPERPOSE = True
-except ImportError:
-    pass
-
-try:
-    from ._oecluster import SiteHopperMetric as _SiteHopperMetric
-    from ._oecluster import SiteHopperOptions
-    _HAVE_SITEHOPPER = True
-except ImportError:
-    pass
+from ._oecluster import FingerprintMetric as _FingerprintMetric
+from ._oecluster import FingerprintOptions
+from ._oecluster import ROCSMetric as _ROCSMetric
+from ._oecluster import ROCSOptions
+from ._oecluster import SuperposeMetric as _SuperposeMetric
+from ._oecluster import SuperposeOptions
 
 
 class DistanceMatrix:
@@ -439,116 +412,140 @@ def _extract_labels(items):
 def pdist(items,
           metric,
           *,
+          similarity=False,
           num_threads=0,
           chunk_size=256,
           cutoff=0.0,
           output=None,
-          progress=None) -> DistanceMatrix:
+          progress=None,
+          **kwargs) -> DistanceMatrix:
     """
     Compute pairwise distances for a collection of items using a specified metric.
 
-    :param items: List of molecules, design units, or other items (type depends on metric).
-    :param metric: Distance metric specification. Can be:
-                   - A string: "fingerprint", "rocs", "superpose", "sitehopper"
-                   - A C++ metric object (FingerprintMetric, ROCSMetric, etc.)
-    :param num_threads: Number of threads to use (0 = auto).
-    :param chunk_size: Size of work chunks for parallel processing.
-    :param cutoff: Distance cutoff for sparse storage (only store distances <= cutoff, 0 = store all).
+    :param items: List of molecules, design units, or other items.
+    :param metric: Distance metric: "fingerprint", "rocs", "superpose",
+                   "sitehopper", or a C++ metric object.
+    :param similarity: Return similarities instead of distances.
+    :param num_threads: Number of threads (0 = auto).
+    :param chunk_size: Pairs per work unit.
+    :param cutoff: Distance cutoff for sparse storage (0 = store all).
     :param output: Optional file path for memory-mapped storage.
-    :param progress: Optional progress callback function(completed, total).
-    :returns: DistanceMatrix with computed distances.
-    :raises ValueError: If metric string is not recognized or not available.
-    :raises TypeError: If items type doesn't match the metric.
-
-    Example::
-
-        from openeye import oechem
-        import oecluster
-
-        # Load molecules
-        mols = []
-        ifs = oechem.oemolistream("molecules.sdf")
-        for mol in ifs.GetOEMols():
-            mols.append(oechem.OEMol(mol))
-
-        # Compute fingerprint distances
-        dm = oecluster.pdist(mols, "fingerprint", num_threads=4)
-
-        # Access condensed array
-        distances = dm.condensed
-
-        # Convert to square form
-        square = dm.squareform()
+    :param progress: Optional callback(completed, total).
+    :param kwargs: Metric-specific options.
+    :returns: DistanceMatrix with computed distances/similarities.
+    :raises TypeError: If unknown kwargs are passed.
     """
-    # Handle string metric specifications
     if isinstance(metric, str):
         metric_lower = metric.lower()
         labels = _extract_labels(items)
-        params = {'metric_type': metric_lower}
+        params = {'metric_type': metric_lower, 'similarity': similarity}
 
         if metric_lower == "fingerprint":
-            if not _HAVE_FINGERPRINT:
-                raise ValueError(
-                    "FingerprintMetric is not available. "
-                    "oecluster was not compiled with OEGraphSim support."
-                )
-            metric_obj = _FingerprintMetric(items)
+            opts = FingerprintOptions()
+            opts.similarity = similarity
+            if 'fp_type' in kwargs:
+                opts.fp_type = kwargs.pop('fp_type')
+            if 'numbits' in kwargs:
+                opts.numbits = kwargs.pop('numbits')
+            if 'min_distance' in kwargs:
+                opts.min_distance = kwargs.pop('min_distance')
+            if 'max_distance' in kwargs:
+                opts.max_distance = kwargs.pop('max_distance')
+            if 'atom_type_mask' in kwargs:
+                opts.atom_type_mask = kwargs.pop('atom_type_mask')
+            if 'bond_type_mask' in kwargs:
+                opts.bond_type_mask = kwargs.pop('bond_type_mask')
+            if 'similarity_func' in kwargs:
+                opts.similarity_func = kwargs.pop('similarity_func')
+            if kwargs:
+                raise TypeError(
+                    f"Unknown kwargs for fingerprint metric: {list(kwargs)}")
+            metric_obj = _FingerprintMetric(items, opts)
             metric_name = "fingerprint"
 
         elif metric_lower == "rocs":
-            if not _HAVE_ROCS:
-                raise ValueError(
-                    "ROCSMetric is not available. "
-                    "oecluster was not compiled with OEShape support."
-                )
-            metric_obj = _ROCSMetric(items)
+            opts = ROCSOptions()
+            opts.similarity = similarity
+            if 'score_type' in kwargs:
+                st = kwargs.pop('score_type')
+                score_map = {
+                    'combo_norm': _oecluster.ROCSScoreType_ComboNorm,
+                    'combo': _oecluster.ROCSScoreType_Combo,
+                    'shape': _oecluster.ROCSScoreType_Shape,
+                    'color': _oecluster.ROCSScoreType_Color,
+                }
+                if st not in score_map:
+                    raise ValueError(f"Unknown ROCS score type: {st}")
+                opts.score_type = score_map[st]
+            if 'color_ff_type' in kwargs:
+                opts.color_ff_type = kwargs.pop('color_ff_type')
+            if kwargs:
+                raise TypeError(
+                    f"Unknown kwargs for rocs metric: {list(kwargs)}")
+            metric_obj = _ROCSMetric(items, opts)
             metric_name = "rocs"
 
-        elif metric_lower == "superpose":
-            if not _HAVE_SUPERPOSE:
-                raise ValueError(
-                    "SuperposeMetric is not available. "
-                    "oecluster was not compiled with OEBio support."
-                )
-            metric_obj = _SuperposeMetric(items)
-            metric_name = "superpose"
-
-        elif metric_lower == "sitehopper":
-            if not _HAVE_SITEHOPPER:
-                raise ValueError(
-                    "SiteHopperMetric is not available. "
-                    "oecluster was not compiled with OEBio support."
-                )
-            metric_obj = _SiteHopperMetric(items)
-            metric_name = "sitehopper"
+        elif metric_lower in ("superpose", "sitehopper"):
+            opts = SuperposeOptions()
+            opts.similarity = similarity
+            method = kwargs.pop('method', None)
+            if metric_lower == "sitehopper":
+                method = method or "sitehopper"
+            if method is not None:
+                method_map = {
+                    'global_carbon_alpha': _oecluster.SuperposeMethod_GlobalCarbonAlpha,
+                    'global': _oecluster.SuperposeMethod_Global,
+                    'ddm': _oecluster.SuperposeMethod_DDM,
+                    'weighted': _oecluster.SuperposeMethod_Weighted,
+                    'sse': _oecluster.SuperposeMethod_SSE,
+                    'sitehopper': _oecluster.SuperposeMethod_SiteHopper,
+                }
+                if method not in method_map:
+                    raise ValueError(f"Unknown superpose method: {method}")
+                opts.method = method_map[method]
+            if 'score_type' in kwargs:
+                st = kwargs.pop('score_type')
+                st_map = {
+                    'auto': _oecluster.SuperposeScoreType_Auto,
+                    'rmsd': _oecluster.SuperposeScoreType_RMSD,
+                    'tanimoto': _oecluster.SuperposeScoreType_Tanimoto,
+                    'patch_score': _oecluster.SuperposeScoreType_PatchScore,
+                }
+                if st not in st_map:
+                    raise ValueError(f"Unknown superpose score type: {st}")
+                opts.score_type = st_map[st]
+            if 'predicate' in kwargs:
+                opts.predicate = kwargs.pop('predicate')
+            if 'ref_predicate' in kwargs:
+                opts.ref_predicate = kwargs.pop('ref_predicate')
+            if 'fit_predicate' in kwargs:
+                opts.fit_predicate = kwargs.pop('fit_predicate')
+            if kwargs:
+                raise TypeError(
+                    f"Unknown kwargs for superpose metric: {list(kwargs)}")
+            metric_obj = _SuperposeMetric(items, opts)
+            metric_name = metric_obj.Name()
 
         else:
             raise ValueError(
                 f"Unknown metric: {metric!r}. "
-                f"Valid options are: 'fingerprint', 'rocs', 'superpose', 'sitehopper'"
-            )
+                f"Valid options: 'fingerprint', 'rocs', 'superpose', 'sitehopper'")
 
     else:
-        # Assume metric is already a C++ metric object
         metric_obj = metric
         metric_name = metric_obj.Name()
         labels = []
         params = {}
 
-    # Determine storage backend
     n = metric_obj.Size()
 
     if output is not None:
-        # Memory-mapped storage
         storage = MMapStorage(output, n)
     elif cutoff > 0.0:
-        # Sparse storage
         storage = SparseStorage(n, cutoff)
     else:
-        # Dense storage
         storage = DenseStorage(n)
 
-    # Build options
     options = PDistOptions()
     options.num_threads = num_threads
     options.chunk_size = chunk_size
@@ -556,132 +553,79 @@ def pdist(items,
     if progress is not None:
         options.progress = progress
 
-    # Call C++ pdist (which calls storage.Finalize() internally)
     _cpp_pdist(metric_obj, storage, options)
-
-    # Wrap in DistanceMatrix
     return DistanceMatrix(storage, metric_name, labels, params)
 
 
 # Python wrapper classes for metric construction
 class FingerprintMetric:
-    """
-    Fingerprint-based distance metric using Tanimoto similarity.
+    """Fingerprint-based distance metric using Tanimoto similarity."""
 
-    Computes distances as ``1 - Tanimoto(fp_i, fp_j)`` where fingerprints
-    are generated using OpenEye's OEGraphSim toolkit.
-    """
-
-    def __new__(cls, mols, *, fp_type=None):
+    def __new__(cls, mols, *, fp_type=None, similarity=False):
         """
         Construct a FingerprintMetric.
 
         :param mols: List of OEMolBase molecules.
-        :param fp_type: Fingerprint type (unsigned int, default 105 = OEFPType::Tree).
+        :param fp_type: Fingerprint type (unsigned int).
+        :param similarity: Return similarity instead of distance.
         :returns: C++ FingerprintMetric object.
-        :raises ValueError: If FingerprintMetric is not available.
         """
-        if not _HAVE_FINGERPRINT:
-            raise ValueError(
-                "FingerprintMetric is not available. "
-                "oecluster was not compiled with OEGraphSim support."
-            )
-
-        if fp_type is None:
-            opts = FingerprintOptions()
-        else:
-            opts = FingerprintOptions()
+        opts = FingerprintOptions()
+        opts.similarity = similarity
+        if fp_type is not None:
             opts.fp_type = fp_type
-
         return _FingerprintMetric(mols, opts)
 
 
 class ROCSMetric:
-    """
-    ROCS-style shape overlay distance metric.
+    """ROCS-style shape overlay distance metric."""
 
-    Computes distances as ``1 - score`` where score is the TanimotoCombo,
-    color Tanimoto, or shape Tanimoto from OEShape overlay.
-    """
-
-    def __new__(cls, mols, *, color=False, combo=True):
+    def __new__(cls, mols, *, similarity=False):
         """
         Construct a ROCSMetric.
 
         :param mols: List of OEMol molecules with 3D coordinates.
-        :param color: Use color Tanimoto only (default False).
-        :param combo: Use TanimotoCombo (shape + color, default True).
+        :param similarity: Return similarity instead of distance.
         :returns: C++ ROCSMetric object.
-        :raises ValueError: If ROCSMetric is not available.
         """
-        if not _HAVE_ROCS:
-            raise ValueError(
-                "ROCSMetric is not available. "
-                "oecluster was not compiled with OEShape support."
-            )
-
         opts = ROCSOptions()
-        opts.color_score = color
-        opts.combo_score = combo
-
+        opts.similarity = similarity
         return _ROCSMetric(mols, opts)
 
 
 class SuperposeMetric:
-    """
-    Protein superposition distance metric using RMSD.
+    """Protein superposition distance metric using oespruce OESuperpose."""
 
-    Computes pairwise RMSD between protein structures after sequence
-    alignment and optimal overlay using OEBio.
-    """
-
-    def __new__(cls, items, *, sequence_align=True, only_calpha=True):
+    def __new__(cls, items, *, method="global_carbon_alpha", similarity=False,
+                predicate=None, ref_predicate=None, fit_predicate=None):
         """
         Construct a SuperposeMetric.
 
-        :param items: List of OEDesignUnit objects or OEMolBase molecules.
-        :param sequence_align: Align by sequence first (default True).
-        :param only_calpha: Use only C-alpha atoms for RMSD (default True).
+        :param items: List of OEDesignUnit or OEMolBase objects.
+        :param method: Superposition method name.
+        :param similarity: Return similarity instead of distance.
+        :param predicate: oeselect expression for both ref and fit.
+        :param ref_predicate: Override predicate for ref.
+        :param fit_predicate: Override predicate for fit.
         :returns: C++ SuperposeMetric object.
-        :raises ValueError: If SuperposeMetric is not available.
         """
-        if not _HAVE_SUPERPOSE:
-            raise ValueError(
-                "SuperposeMetric is not available. "
-                "oecluster was not compiled with OEBio support."
-            )
-
         opts = SuperposeOptions()
-        opts.sequence_align = sequence_align
-        opts.only_calpha = only_calpha
-
+        method_map = {
+            'global_carbon_alpha': _oecluster.SuperposeMethod_GlobalCarbonAlpha,
+            'global': _oecluster.SuperposeMethod_Global,
+            'ddm': _oecluster.SuperposeMethod_DDM,
+            'weighted': _oecluster.SuperposeMethod_Weighted,
+            'sse': _oecluster.SuperposeMethod_SSE,
+            'sitehopper': _oecluster.SuperposeMethod_SiteHopper,
+        }
+        if method not in method_map:
+            raise ValueError(f"Unknown superpose method: {method}")
+        opts.method = method_map[method]
+        opts.similarity = similarity
+        if predicate is not None:
+            opts.predicate = predicate
+        if ref_predicate is not None:
+            opts.ref_predicate = ref_predicate
+        if fit_predicate is not None:
+            opts.fit_predicate = fit_predicate
         return _SuperposeMetric(items, opts)
-
-
-class SiteHopperMetric:
-    """
-    Binding site comparison distance metric using RMSD.
-
-    Extracts binding site protein components from design units and computes
-    pairwise RMSD using OEBio.
-    """
-
-    def __new__(cls, dus, *, only_calpha=True):
-        """
-        Construct a SiteHopperMetric.
-
-        :param dus: List of OEDesignUnit objects.
-        :param only_calpha: Use only C-alpha atoms for RMSD (default True).
-        :returns: C++ SiteHopperMetric object.
-        :raises ValueError: If SiteHopperMetric is not available.
-        """
-        if not _HAVE_SITEHOPPER:
-            raise ValueError(
-                "SiteHopperMetric is not available. "
-                "oecluster was not compiled with OEBio support."
-            )
-
-        opts = SiteHopperOptions()
-        opts.only_calpha = only_calpha
-
-        return _SiteHopperMetric(dus, opts)
