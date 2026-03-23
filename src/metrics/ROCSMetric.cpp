@@ -5,8 +5,6 @@
 
 #include "oecluster/metrics/ROCSMetric.h"
 
-#ifdef OECLUSTER_HAS_SHAPE
-
 #include <oechem.h>
 #include <oeshape.h>
 #include "oecluster/Error.h"
@@ -64,27 +62,31 @@ double ROCSMetric::Distance(size_t i, size_t j) {
     OEShape::OEBestOverlayScore score;
     local_->overlay.BestOverlay(score, *shared_->mols[j]);
 
-    double dist;
-    switch (opts_.score_type) {
-        case ROCSScoreType::ComboNorm:
-            // TanimotoCombo ∈ [0,2] → distance ∈ [0,1]
-            dist = 1.0 - static_cast<double>(score.GetTanimotoCombo()) / 2.0;
-            break;
-        case ROCSScoreType::Combo:
-            // TanimotoCombo ∈ [0,2] → distance ∈ [0,2]
-            dist = 2.0 - static_cast<double>(score.GetTanimotoCombo());
-            break;
-        case ROCSScoreType::Shape:
-            // Shape Tanimoto ∈ [0,1] → distance ∈ [0,1]
-            dist = 1.0 - static_cast<double>(score.GetTanimoto());
-            break;
-        case ROCSScoreType::Color:
-            // Color Tanimoto ∈ [0,1] → distance ∈ [0,1]
-            dist = 1.0 - static_cast<double>(score.GetColorTanimoto());
-            break;
+    if (opts_.similarity) {
+        switch (opts_.score_type) {
+            case ROCSScoreType::ComboNorm:
+                return static_cast<double>(score.GetTanimotoCombo()) / 2.0;
+            case ROCSScoreType::Combo:
+                return static_cast<double>(score.GetTanimotoCombo());
+            case ROCSScoreType::Shape:
+                return static_cast<double>(score.GetTanimoto());
+            case ROCSScoreType::Color:
+                return static_cast<double>(score.GetColorTanimoto());
+        }
     }
 
-    return dist;
+    switch (opts_.score_type) {
+        case ROCSScoreType::ComboNorm:
+            return 1.0 - static_cast<double>(score.GetTanimotoCombo()) / 2.0;
+        case ROCSScoreType::Combo:
+            return 2.0 - static_cast<double>(score.GetTanimotoCombo());
+        case ROCSScoreType::Shape:
+            return 1.0 - static_cast<double>(score.GetTanimoto());
+        case ROCSScoreType::Color:
+            return 1.0 - static_cast<double>(score.GetColorTanimoto());
+    }
+
+    return 0.0;
 }
 
 std::unique_ptr<DistanceMetric> ROCSMetric::Clone() const {
@@ -100,5 +102,3 @@ std::string ROCSMetric::Name() const {
 }
 
 }  // namespace OECluster
-
-#endif  // OECLUSTER_HAS_SHAPE

@@ -6,8 +6,6 @@
 #ifndef OECLUSTER_METRICS_ROCSMETRIC_H
 #define OECLUSTER_METRICS_ROCSMETRIC_H
 
-#ifdef OECLUSTER_HAS_SHAPE
-
 #include <memory>
 #include <string>
 #include <vector>
@@ -33,6 +31,7 @@ enum class ROCSScoreType {
 struct ROCSOptions {
     ROCSScoreType score_type = ROCSScoreType::ComboNorm;  ///< Scoring method
     unsigned int color_ff_type = 1;  ///< OEColorFFType (1=ImplicitMillsDean)
+    bool similarity = false;         ///< Return raw similarity instead of distance
 };
 
 /**
@@ -62,7 +61,7 @@ public:
      * :param opts: Scoring options.
      */
     explicit ROCSMetric(const std::vector<std::shared_ptr<OEChem::OEMol>>& mols,
-                        const Options& opts = Options{});
+                        const Options& opts = Options());
 
     ~ROCSMetric() override;
 
@@ -88,5 +87,4 @@ private:
 
 }  // namespace OECluster
 
-#endif  // OECLUSTER_HAS_SHAPE
 #endif  // OECLUSTER_METRICS_ROCSMETRIC_H
