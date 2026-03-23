@@ -1,12 +1,10 @@
 /**
  * @file SuperposeMetric.h
- * @brief Distance metric based on protein superposition RMSD using OEBio.
+ * @brief Distance metric based on protein superposition using oespruce OESuperpose.
  */
 
 #ifndef OECLUSTER_METRICS_SUPERPOSEMETRIC_H
 #define OECLUSTER_METRICS_SUPERPOSEMETRIC_H
-
-#ifdef OECLUSTER_HAS_BIO
 
 #include <memory>
 #include <string>
@@ -19,52 +17,78 @@ namespace OEChem { class OEMolBase; }
 namespace OECluster {
 
 /**
- * @brief Configuration options for protein superposition RMSD.
+ * @brief Superposition method for protein overlay.
  */
-struct SuperposeOptions {
-    unsigned int alignment_method = 2;  ///< OESeqAlignmentMethod (2=PAM250)
-    int gap_penalty = -10;              ///< Gap penalty for sequence alignment
-    int extend_penalty = -2;            ///< Gap extension penalty
-    bool only_calpha = true;            ///< Use only C-alpha atoms for RMSD
-    bool overlay = true;                ///< Superpose before computing RMSD
+enum class SuperposeMethod {
+    GlobalCarbonAlpha,  ///< All matched alpha carbon atoms (default)
+    Global,             ///< Global superposition
+    DDM,                ///< Distance Difference Matrix
+    Weighted,           ///< Weighted DDM
+    SSE,                ///< Secondary Structure Elements (Tanimoto score)
+    SiteHopper          ///< SiteHopper patch score
 };
 
 /**
- * @brief Protein superposition distance metric using OEBio OERMSD.
+ * @brief Score type selection for superposition results.
+ */
+enum class SuperposeScoreType {
+    Auto,       ///< Natural score for the method
+    RMSD,       ///< Root mean square deviation
+    Tanimoto,   ///< Tanimoto coefficient [0,1]
+    PatchScore  ///< SiteHopper patch score [0,4]
+};
+
+/**
+ * @brief Configuration options for protein superposition.
+ */
+struct SuperposeOptions {
+    SuperposeMethod method = SuperposeMethod::GlobalCarbonAlpha;
+    SuperposeScoreType score_type = SuperposeScoreType::Auto;
+    bool similarity = false;
+    std::string predicate;      ///< oeselect expression for both ref and fit
+    std::string ref_predicate;  ///< Override predicate for ref
+    std::string fit_predicate;  ///< Override predicate for fit
+};
+
+/**
+ * @brief Protein superposition distance metric using oespruce OESuperpose.
  *
- * Computes pairwise RMSD between protein structures after sequence
- * alignment and optimal overlay. Accepts either design units (from
- * which the protein component is extracted) or molecules directly.
+ * Supports multiple superposition methods (GlobalCarbonAlpha, Global, DDM,
+ * Weighted, SSE, SiteHopper) with configurable score types and atom predicates
+ * via oeselect expressions.
  *
- * Distance values are unbounded (not normalized to [0,1]).
+ * Score semantics per method:
+ * - RMSD group (Global, GlobalCarbonAlpha, DDM, Weighted): raw RMSD
+ * - Tanimoto group (SSE): 1.0 - tanimoto (distance), raw tanimoto (similarity)
+ * - PatchScore group (SiteHopper): 4.0 - patch_score (distance), raw (similarity)
  *
- * Each Clone() shares the immutable protein structures. Distance()
- * creates temporary copies since OEGetAlignment requires non-const refs.
+ * Each Clone() creates a new thread-local OESuperpose instance.
  */
 class SuperposeMetric : public DistanceMetric {
 public:
     using Options = SuperposeOptions;
 
     /**
-     * @brief Construct from design units (extracts protein components).
+     * @brief Construct from design units.
      *
      * :param dus: Shared pointers to design units.
      * :param opts: Superposition options.
      */
-    explicit SuperposeMetric(const std::vector<std::shared_ptr<OEBio::OEDesignUnit>>& dus,
-                             const Options& opts = Options{});
+    explicit SuperposeMetric(
+        const std::vector<std::shared_ptr<OEBio::OEDesignUnit>>& dus,
+        const Options& opts = Options());
 
     /**
      * @brief Construct from molecules directly.
      *
-     * Molecules are copied internally. The pointers are only used
-     * during construction.
+     * Molecules are copied internally.
      *
      * :param mols: Pointers to molecules with 3D coordinates.
      * :param opts: Superposition options.
      */
-    explicit SuperposeMetric(const std::vector<OEChem::OEMolBase*>& mols,
-                             const Options& opts = Options{});
+    explicit SuperposeMetric(
+        const std::vector<OEChem::OEMolBase*>& mols,
+        const Options& opts = Options());
 
     ~SuperposeMetric() override;
 
@@ -75,14 +99,18 @@ public:
 
 private:
     struct SharedData;
+    struct ThreadLocalData;
     std::shared_ptr<const SharedData> shared_;
+    std::unique_ptr<ThreadLocalData> local_;
     Options opts_;
 
-    /// Private clone constructor -- shares molecule data.
+    /// Private clone constructor -- shares structure data, creates new OESuperpose.
     SuperposeMetric(std::shared_ptr<const SharedData> shared, const Options& opts);
+
+    /// Initialize thread-local OESuperpose with configured options.
+    void InitSuperpose();
 };
 
 }  // namespace OECluster
 
-#endif  // OECLUSTER_HAS_BIO
 #endif  // OECLUSTER_METRICS_SUPERPOSEMETRIC_H
