@@ -188,6 +188,7 @@ def build_oecluster(python_exe, openeye_root, project_dir, verbose=False):
 
     cmd = [
         python_exe, '-m', 'pip', 'wheel',
+        '--no-build-isolation',
         '--no-deps',
         '--wheel-dir', 'dist',
         '-C', 'cmake.define.OECLUSTER_BUILD_TESTS=OFF',
