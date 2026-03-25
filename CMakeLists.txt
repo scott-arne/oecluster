@@ -38,6 +38,16 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(oeselect)
 
+FetchContent_Declare(
+    oemaestro
+    GIT_REPOSITORY https://github.com/scott-arne/oemaestro.git
+    GIT_TAG master
+    GIT_SHALLOW TRUE
+)
+set(OEMAESTRO_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(OEMAESTRO_BUILD_PYTHON OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(oemaestro)
+
 if(OECLUSTER_BUILD_PYTHON)
     find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
     find_package(SWIG 4.0)
