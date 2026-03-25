@@ -45,7 +45,7 @@ jobs:
           dnf install -y --allowerasing \
             git curl unzip gcc gcc-c++ cmake ninja-build \
             ${{ matrix.python }} ${{ matrix.python }}-devel \
-            zlib-devel boost-devel boost-iostreams boost-filesystem swig patchelf cairo
+            zlib-devel boost-devel boost-static boost-iostreams boost-filesystem swig patchelf cairo
 
       - uses: actions/checkout@v6
 
