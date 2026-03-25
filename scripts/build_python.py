@@ -187,7 +187,7 @@ def build_oecluster(python_exe, openeye_root, project_dir, verbose=False):
     print_step("Building oecluster wheel")
 
     cmd = [
-        python_exe, '-m', 'pip', 'wheel',
+        str(python_exe), '-m', 'pip', 'wheel',
         '--no-build-isolation',
         '--no-deps',
         '--wheel-dir', 'dist',
