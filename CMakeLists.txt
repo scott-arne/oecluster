@@ -132,7 +132,7 @@ endif()
 
 _find_oe_dep(OEZAP_LIBRARY oezap OpenEye::OEZap "OpenEye::OEChem;OpenEye::OEGrid")
 _find_oe_dep(OESPICOLI_LIBRARY oespicoli OpenEye::OESpicoli "OpenEye::OEChem;OpenEye::OEZap")
-_find_oe_dep(OESITEHOPPER_LIBRARY oesitehopper OpenEye::OESiteHopper "OpenEye::OEChem;OpenEye::OEShape;OpenEye::OESpicoli")
+_find_oe_dep(OESITEHOPPER_LIBRARY oesitehopper OpenEye::OESiteHopper "OpenEye::OEChem;OpenEye::OEShape;OpenEye::OESpicoli;${CMAKE_DL_LIBS}")
 _find_oe_dep(OESPRUCE_LIBRARY oespruce OpenEye::OESpruce "OpenEye::OEChem;OpenEye::OEBio;OpenEye::OESiteHopper")
 
 set(OECLUSTER_SOURCES
