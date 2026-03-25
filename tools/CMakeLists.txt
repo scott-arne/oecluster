@@ -10,6 +10,6 @@ FetchContent_MakeAvailable(cli11)
 
 add_executable(oepdist oepdist.cpp OutputWriter.cpp MolReader.cpp)
 
-target_link_libraries(oepdist PRIVATE oecluster CLI11::CLI11)
+target_link_libraries(oepdist PRIVATE oecluster oemaestro CLI11::CLI11)
 
 install(TARGETS oepdist RUNTIME DESTINATION bin)
