@@ -496,7 +496,8 @@ class FingerprintOptions(object):
     max_distance = property(_oecluster.FingerprintOptions_max_distance_get, _oecluster.FingerprintOptions_max_distance_set)
     atom_type_mask = property(_oecluster.FingerprintOptions_atom_type_mask_get, _oecluster.FingerprintOptions_atom_type_mask_set, doc=r"""0 = use method default""")
     bond_type_mask = property(_oecluster.FingerprintOptions_bond_type_mask_get, _oecluster.FingerprintOptions_bond_type_mask_set, doc=r"""0 = use method default""")
-    similarity = property(_oecluster.FingerprintOptions_similarity_get, _oecluster.FingerprintOptions_similarity_set)
+    similarity_func = property(_oecluster.FingerprintOptions_similarity_func_get, _oecluster.FingerprintOptions_similarity_func_set, doc=r"""Similarity function name""")
+    similarity = property(_oecluster.FingerprintOptions_similarity_get, _oecluster.FingerprintOptions_similarity_set, doc=r"""Return raw similarity instead of distance""")
 
     def __init__(self):
         _oecluster.FingerprintOptions_swiginit(self, _oecluster.new_FingerprintOptions())
@@ -557,6 +558,7 @@ class ROCSOptions(object):
     __repr__ = _swig_repr
     score_type = property(_oecluster.ROCSOptions_score_type_get, _oecluster.ROCSOptions_score_type_set, doc=r"""Scoring method""")
     color_ff_type = property(_oecluster.ROCSOptions_color_ff_type_get, _oecluster.ROCSOptions_color_ff_type_set, doc=r"""OEColorFFType (1=ImplicitMillsDean)""")
+    similarity = property(_oecluster.ROCSOptions_similarity_get, _oecluster.ROCSOptions_similarity_set, doc=r"""Return raw similarity instead of distance""")
 
     def __init__(self):
         _oecluster.ROCSOptions_swiginit(self, _oecluster.new_ROCSOptions())
@@ -606,69 +608,37 @@ class ROCSMetric(DistanceMetric):
 
 # Register ROCSMetric in _oecluster:
 _oecluster.ROCSMetric_swigregister(ROCSMetric)
-class SiteHopperOptions(object):
-    r"""Configuration options for binding site comparison."""
-
-    thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
-    __repr__ = _swig_repr
-    alignment_method = property(_oecluster.SiteHopperOptions_alignment_method_get, _oecluster.SiteHopperOptions_alignment_method_set, doc=r"""OESeqAlignmentMethod (2=PAM250)""")
-    gap_penalty = property(_oecluster.SiteHopperOptions_gap_penalty_get, _oecluster.SiteHopperOptions_gap_penalty_set, doc=r"""Gap penalty for sequence alignment""")
-    extend_penalty = property(_oecluster.SiteHopperOptions_extend_penalty_get, _oecluster.SiteHopperOptions_extend_penalty_set, doc=r"""Gap extension penalty""")
-    only_calpha = property(_oecluster.SiteHopperOptions_only_calpha_get, _oecluster.SiteHopperOptions_only_calpha_set, doc=r"""Use only C-alpha atoms for RMSD""")
-
-    def __init__(self):
-        _oecluster.SiteHopperOptions_swiginit(self, _oecluster.new_SiteHopperOptions())
-    __swig_destroy__ = _oecluster.delete_SiteHopperOptions
-
-# Register SiteHopperOptions in _oecluster:
-_oecluster.SiteHopperOptions_swigregister(SiteHopperOptions)
-class SiteHopperMetric(DistanceMetric):
-    r"""
-    Binding site distance metric using protein RMSD from OEBio.
-
-    Extracts binding site protein components from design units and computes
-    pairwise RMSD between them using sequence alignment and superposition.
-
-    Distance values are unbounded (not normalized to [0,1]).
-
-    Each Clone() shares the immutable binding site structures. Distance()
-    creates temporary copies since OEGetAlignment requires non-const refs.
-    """
-
-    thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
-    __repr__ = _swig_repr
-
-    def __init__(self, *args):
-        r"""
-        Construct from design units (extracts binding site components).
-
-        :param dus: Shared pointers to design units.
-        :param opts: Site comparison options.
-        """
-        _oecluster.SiteHopperMetric_swiginit(self, _oecluster.new_SiteHopperMetric(*args))
-    __swig_destroy__ = _oecluster.delete_SiteHopperMetric
-
-    def Distance(self, i, j):
-        return _oecluster.SiteHopperMetric_Distance(self, i, j)
-
-    def Size(self):
-        return _oecluster.SiteHopperMetric_Size(self)
-
-    def Name(self):
-        return _oecluster.SiteHopperMetric_Name(self)
-
-# Register SiteHopperMetric in _oecluster:
-_oecluster.SiteHopperMetric_swigregister(SiteHopperMetric)
+SuperposeMethod_GlobalCarbonAlpha = _oecluster.SuperposeMethod_GlobalCarbonAlpha
+r"""All matched alpha carbon atoms (default)"""
+SuperposeMethod_Global = _oecluster.SuperposeMethod_Global
+r"""Global superposition"""
+SuperposeMethod_DDM = _oecluster.SuperposeMethod_DDM
+r"""Distance Difference Matrix"""
+SuperposeMethod_Weighted = _oecluster.SuperposeMethod_Weighted
+r"""Weighted DDM"""
+SuperposeMethod_SSE = _oecluster.SuperposeMethod_SSE
+r"""Secondary Structure Elements (Tanimoto score)"""
+SuperposeMethod_SiteHopper = _oecluster.SuperposeMethod_SiteHopper
+r"""SiteHopper patch score"""
+SuperposeScoreType_Auto = _oecluster.SuperposeScoreType_Auto
+r"""Natural score for the method"""
+SuperposeScoreType_RMSD = _oecluster.SuperposeScoreType_RMSD
+r"""Root mean square deviation"""
+SuperposeScoreType_Tanimoto = _oecluster.SuperposeScoreType_Tanimoto
+r"""Tanimoto coefficient [0,1]"""
+SuperposeScoreType_PatchScore = _oecluster.SuperposeScoreType_PatchScore
+r"""SiteHopper patch score [0,4]"""
 class SuperposeOptions(object):
-    r"""Configuration options for protein superposition RMSD."""
+    r"""Configuration options for protein superposition."""
 
     thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
     __repr__ = _swig_repr
-    alignment_method = property(_oecluster.SuperposeOptions_alignment_method_get, _oecluster.SuperposeOptions_alignment_method_set, doc=r"""OESeqAlignmentMethod (2=PAM250)""")
-    gap_penalty = property(_oecluster.SuperposeOptions_gap_penalty_get, _oecluster.SuperposeOptions_gap_penalty_set, doc=r"""Gap penalty for sequence alignment""")
-    extend_penalty = property(_oecluster.SuperposeOptions_extend_penalty_get, _oecluster.SuperposeOptions_extend_penalty_set, doc=r"""Gap extension penalty""")
-    only_calpha = property(_oecluster.SuperposeOptions_only_calpha_get, _oecluster.SuperposeOptions_only_calpha_set, doc=r"""Use only C-alpha atoms for RMSD""")
-    overlay = property(_oecluster.SuperposeOptions_overlay_get, _oecluster.SuperposeOptions_overlay_set, doc=r"""Superpose before computing RMSD""")
+    method = property(_oecluster.SuperposeOptions_method_get, _oecluster.SuperposeOptions_method_set)
+    score_type = property(_oecluster.SuperposeOptions_score_type_get, _oecluster.SuperposeOptions_score_type_set)
+    similarity = property(_oecluster.SuperposeOptions_similarity_get, _oecluster.SuperposeOptions_similarity_set)
+    predicate = property(_oecluster.SuperposeOptions_predicate_get, _oecluster.SuperposeOptions_predicate_set, doc=r"""oeselect expression for both ref and fit""")
+    ref_predicate = property(_oecluster.SuperposeOptions_ref_predicate_get, _oecluster.SuperposeOptions_ref_predicate_set, doc=r"""Override predicate for ref""")
+    fit_predicate = property(_oecluster.SuperposeOptions_fit_predicate_get, _oecluster.SuperposeOptions_fit_predicate_set, doc=r"""Override predicate for fit""")
 
     def __init__(self):
         _oecluster.SuperposeOptions_swiginit(self, _oecluster.new_SuperposeOptions())
@@ -678,16 +648,18 @@ class SuperposeOptions(object):
 _oecluster.SuperposeOptions_swigregister(SuperposeOptions)
 class SuperposeMetric(DistanceMetric):
     r"""
-    Protein superposition distance metric using OEBio OERMSD.
+    Protein superposition distance metric using oespruce OESuperpose.
 
-    Computes pairwise RMSD between protein structures after sequence
-    alignment and optimal overlay. Accepts either design units (from
-    which the protein component is extracted) or molecules directly.
+    Supports multiple superposition methods (GlobalCarbonAlpha, Global, DDM,
+    Weighted, SSE, SiteHopper) with configurable score types and atom predicates
+    via oeselect expressions.
 
-    Distance values are unbounded (not normalized to [0,1]).
+    Score semantics per method:
+    - RMSD group (Global, GlobalCarbonAlpha, DDM, Weighted): raw RMSD
+    - Tanimoto group (SSE): 1.0 - tanimoto (distance), raw tanimoto (similarity)
+    - PatchScore group (SiteHopper): 4.0 - patch_score (distance), raw (similarity)
 
-    Each Clone() shares the immutable protein structures. Distance()
-    creates temporary copies since OEGetAlignment requires non-const refs.
+    Each Clone() creates a new thread-local OESuperpose instance.
     """
 
     thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
@@ -697,7 +669,7 @@ class SuperposeMetric(DistanceMetric):
         r"""
         *Overload 1:*
 
-        Construct from design units (extracts protein components).
+        Construct from design units.
 
         :param dus: Shared pointers to design units.
         :param opts: Superposition options.
@@ -708,8 +680,7 @@ class SuperposeMetric(DistanceMetric):
 
         Construct from molecules directly.
 
-        Molecules are copied internally. The pointers are only used
-        during construction.
+        Molecules are copied internally.
 
         :param mols: Pointers to molecules with 3D coordinates.
         :param opts: Superposition options.
@@ -720,8 +691,7 @@ class SuperposeMetric(DistanceMetric):
 
         Construct from molecules directly.
 
-        Molecules are copied internally. The pointers are only used
-        during construction.
+        Molecules are copied internally.
 
         :param mols: Pointers to molecules with 3D coordinates.
         :param opts: Superposition options.
