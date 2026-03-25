@@ -101,8 +101,8 @@ macro(_find_oe_dep VAR_NAME LIB_NAME TARGET_NAME DEPS)
 endmacro()
 
 _find_oe_dep(OEOPT_LIBRARY oeopt OpenEye::OEOpt "OpenEye::OESystem")
-_find_oe_dep(OEMOLPOTENTIAL_LIBRARY oemolpotential OpenEye::OEMolPotential "OpenEye::OEChem")
-_find_oe_dep(OEHERMITE_LIBRARY oehermite OpenEye::OEHermite "OpenEye::OEChem")
+_find_oe_dep(OEMOLPOTENTIAL_LIBRARY oemolpotential OpenEye::OEMolPotential "OpenEye::OEChem;OpenEye::OEOpt")
+_find_oe_dep(OEHERMITE_LIBRARY oehermite OpenEye::OEHermite "OpenEye::OEChem;OpenEye::OEOpt")
 
 if(NOT TARGET OpenEye::OEShape)
     find_library(OESHAPE_LIBRARY NAMES oeshape PATHS ${_OE_LIB_SEARCH_PATHS} NO_DEFAULT_PATH)
