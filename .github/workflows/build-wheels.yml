@@ -62,7 +62,7 @@ jobs:
           ${{ matrix.python }} -m venv /opt/venv
           echo "/opt/venv/bin" >> $GITHUB_PATH
           /opt/venv/bin/pip install --upgrade pip setuptools wheel
-          /opt/venv/bin/pip install scikit-build-core ninja cmake build swig auditwheel patchelf
+          /opt/venv/bin/pip install scikit-build-core ninja "cmake<4" build swig auditwheel patchelf
 
       - name: Download OpenEye SDK from GCS
         run: |
