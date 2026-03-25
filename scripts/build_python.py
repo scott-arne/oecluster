@@ -172,12 +172,12 @@ def find_missing_libraries(lib_dir, verbose=False):
         print_error(f"Library directory does not exist: {lib_dir}")
         return []
 
-    all_libs = {f.stem for f in lib_path.iterdir() if f.suffix == ext}
+    lib_files = [f.name for f in lib_path.iterdir() if ext in f.suffixes or f.name.endswith(ext)]
     if verbose:
-        print_step(f"Found {len(all_libs)} libraries in {lib_dir}")
+        print_step(f"Found {len(lib_files)} libraries in {lib_dir}")
 
     for lib_name in expected_missing:
-        if lib_name not in all_libs:
+        if not any(f.startswith(lib_name + '-') or f.startswith(lib_name + '.') for f in lib_files):
             missing.append(lib_name)
 
     return missing
