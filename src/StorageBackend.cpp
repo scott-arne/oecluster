@@ -6,6 +6,7 @@
 #include "oecluster/StorageBackend.h"
 #include <cassert>
 #include <algorithm>
+#include <mutex>
 #include <stdexcept>
 #include <cstring>
 #include <sys/mman.h>
