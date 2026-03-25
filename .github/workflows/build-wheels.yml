@@ -39,7 +39,7 @@ jobs:
         run: |
           dnf install -y git gcc-c++ cmake make tar gzip unzip which ${{ matrix.python }} ${{ matrix.python }}-pip ${{ matrix.python }}-devel
           dnf config-manager --set-enabled ${{ matrix.dnf_repo }}
-          dnf install -y patchelf
+          dnf install -y patchelf boost-devel swig
 
       - name: Checkout code
         uses: actions/checkout@v4
@@ -115,6 +115,10 @@ jobs:
           curl -O https://storage.googleapis.com/${{ env.GCS_BUCKET }}/${{ matrix.sdk }}
           tar -xzf ${{ matrix.sdk }}
           echo "OPENEYE_ROOT=$(pwd)/$(basename ${{ matrix.sdk }} .tar.gz)" >> $GITHUB_ENV
+
+      - name: Install system dependencies
+        run: |
+          brew install boost swig icu4c
 
       - name: Install Python dependencies
         run: |
