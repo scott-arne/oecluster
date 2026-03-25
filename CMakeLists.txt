@@ -19,6 +19,28 @@ if(APPLE AND OECLUSTER_UNIVERSAL2)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version" FORCE)
 endif()
 
+if(APPLE)
+    execute_process(
+        COMMAND brew --prefix
+        OUTPUT_VARIABLE HOMEBREW_PREFIX
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    if(HOMEBREW_PREFIX)
+        link_directories(${HOMEBREW_PREFIX}/lib)
+        # ICU is keg-only on macOS and not linked into the main homebrew lib dir
+        execute_process(
+            COMMAND brew --prefix icu4c
+            OUTPUT_VARIABLE ICU_PREFIX
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET
+        )
+        if(ICU_PREFIX)
+            link_directories(${ICU_PREFIX}/lib)
+        endif()
+    endif()
+endif()
+
 include(FetchContent)
 
 FetchContent_Declare(
@@ -36,17 +58,9 @@ FetchContent_Declare(
     GIT_TAG master
     GIT_SHALLOW TRUE
 )
+set(OESELECT_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(OESELECT_BUILD_PYTHON OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(oeselect)
-
-FetchContent_Declare(
-    oemaestro
-    GIT_REPOSITORY https://github.com/scott-arne/oemaestro.git
-    GIT_TAG master
-    GIT_SHALLOW TRUE
-)
-set(OEMAESTRO_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(OEMAESTRO_BUILD_PYTHON OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(oemaestro)
 
 if(OECLUSTER_BUILD_PYTHON)
     find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
