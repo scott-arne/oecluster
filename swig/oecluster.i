@@ -110,7 +110,11 @@ static void* _oecluster_extract_swig_ptr(PyObject* obj) {
 }
 
 %typemap(typecheck, precedence=SWIG_TYPECHECK_POINTER) const std::vector<OEChem::OEMolBase*>& {
-    $1 = PyList_Check($input) ? 1 : 0;
+    if (PyList_Check($input) && PyList_Size($input) > 0) {
+        $1 = _oecluster_is_oemolbase(PyList_GetItem($input, 0)) ? 1 : 0;
+    } else {
+        $1 = PyList_Check($input) ? 1 : 0;
+    }
 }
 
 /* --------------------------------------------------------------------------
@@ -140,7 +144,11 @@ static void* _oecluster_extract_swig_ptr(PyObject* obj) {
 }
 
 %typemap(typecheck, precedence=SWIG_TYPECHECK_POINTER) const std::vector<std::shared_ptr<OEChem::OEMol>>& {
-    $1 = PyList_Check($input) ? 1 : 0;
+    if (PyList_Check($input) && PyList_Size($input) > 0) {
+        $1 = _oecluster_is_oemol(PyList_GetItem($input, 0)) ? 1 : 0;
+    } else {
+        $1 = PyList_Check($input) ? 1 : 0;
+    }
 }
 
 /* --------------------------------------------------------------------------
@@ -170,7 +178,11 @@ static void* _oecluster_extract_swig_ptr(PyObject* obj) {
 }
 
 %typemap(typecheck, precedence=SWIG_TYPECHECK_POINTER) const std::vector<std::shared_ptr<OEBio::OEDesignUnit>>& {
-    $1 = PyList_Check($input) ? 1 : 0;
+    if (PyList_Check($input) && PyList_Size($input) > 0) {
+        $1 = _oecluster_is_oedesignunit(PyList_GetItem($input, 0)) ? 1 : 0;
+    } else {
+        $1 = PyList_Check($input) ? 1 : 0;
+    }
 }
 
 /* --------------------------------------------------------------------------

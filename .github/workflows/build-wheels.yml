@@ -136,7 +136,7 @@ jobs:
 
       - name: Test wheel
         run: |
-          /opt/venv/bin/pip install pytest
+          /opt/venv/bin/pip install pytest scipy
           /opt/venv/bin/pip install dist/oecluster-*.whl
           /opt/venv/bin/pytest tests/python/ -v -s
 
@@ -212,7 +212,7 @@ jobs:
 
       - name: Test wheel
         run: |
-          pip install pytest
+          pip install pytest scipy
           pip install dist/oecluster-*.whl
           pytest tests/python/ -v -s
 
