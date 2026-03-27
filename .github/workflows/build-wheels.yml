@@ -128,7 +128,13 @@ jobs:
           if [ -n "$SO_FILE" ]; then
             patchelf --add-rpath '$ORIGIN' "$SO_FILE"
             patchelf --add-rpath "\$ORIGIN/../openeye/libs/$OE_PLATFORM" "$SO_FILE"
-            echo "RPATH set to: $(patchelf --print-rpath "$SO_FILE")"
+            echo "SWIG module RPATH set to: $(patchelf --print-rpath "$SO_FILE")"
+          fi
+          BIN_FILE=$(find "$TMPDIR" -path '*/oecluster/_bin/oepdist' | head -1)
+          if [ -n "$BIN_FILE" ]; then
+            patchelf --add-rpath '$ORIGIN/..' "$BIN_FILE"
+            patchelf --add-rpath "\$ORIGIN/../../openeye/libs/$OE_PLATFORM" "$BIN_FILE"
+            echo "oepdist binary RPATH set to: $(patchelf --print-rpath "$BIN_FILE")"
           fi
           rm "$WHEEL"
           /opt/venv/bin/python -m wheel pack "$TMPDIR" -d dist/
