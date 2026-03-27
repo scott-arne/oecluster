@@ -7,7 +7,7 @@ def test_import():
     assert hasattr(oecluster, 'pdist')
 
 def test_dense_storage_roundtrip():
-    from oecluster._oecluster import DenseStorage
+    from oecluster import DenseStorage
     s = DenseStorage(4)
     s.Set(0, 1, 0.5)
     assert s.Get(0, 1) == pytest.approx(0.5)
