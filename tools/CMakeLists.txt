@@ -35,5 +35,5 @@ install(TARGETS oepdist RUNTIME DESTINATION bin)
 
 if(OECLUSTER_BUILD_PYTHON)
     install(TARGETS oepdist RUNTIME DESTINATION oecluster/_bin)
-    install(FILES ${CMAKE_SOURCE_DIR}/python/oecluster/_cli.py DESTINATION oecluster)
+    install(FILES ${CMAKE_SOURCE_DIR}/python/_oepdist_main.py DESTINATION .)
 endif()
