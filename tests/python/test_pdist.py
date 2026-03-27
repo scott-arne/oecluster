@@ -176,7 +176,7 @@ def test_pdist_superpose_predicate():
             pytest.skip(f"Cannot read {f}")
         dus.append(du)
 
-    dm = oecluster.pdist(dus, "superpose", method="global", predicate="backbone")
+    dm = oecluster.pdist(dus, "superpose", predicate="backbone")
     arr = np.asarray(dm)
     assert arr.shape == (1,)
     assert np.isfinite(arr[0])

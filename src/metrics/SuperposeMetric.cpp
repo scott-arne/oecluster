@@ -224,14 +224,16 @@ SuperposeMetric::~SuperposeMetric() = default;
 
 double SuperposeMetric::Distance(size_t i, size_t j) {
     // SetupRef with predicate
+    // When predicates are used with design units, extract the protein and use
+    // the molecule-based API so OESelect is bound to the same molecule instance
+    // that SetupRef/Superpose operates on.
     bool ref_ok = false;
     if (shared_->use_dus) {
         if (shared_->has_ref_pred) {
-            // Extract protein from DU to bind predicate
             OEChem::OEGraphMol ref_prot;
             shared_->dus[i]->GetProtein(ref_prot);
             OESel::OESelect ref_pred(ref_prot, shared_->ref_sele);
-            ref_ok = local_->superpose.SetupRef(*shared_->dus[i], ref_pred);
+            ref_ok = local_->superpose.SetupRef(ref_prot, ref_pred);
         } else {
             ref_ok = local_->superpose.SetupRef(*shared_->dus[i]);
         }
@@ -257,7 +259,7 @@ double SuperposeMetric::Distance(size_t i, size_t j) {
             OEChem::OEGraphMol fit_prot;
             shared_->dus[j]->GetProtein(fit_prot);
             OESel::OESelect fit_pred(fit_prot, shared_->fit_sele);
-            sp_ok = local_->superpose.Superpose(results, *shared_->dus[j],
+            sp_ok = local_->superpose.Superpose(results, fit_prot,
                                                  fit_pred);
         } else {
             sp_ok = local_->superpose.Superpose(results, *shared_->dus[j]);
