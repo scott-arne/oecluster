@@ -130,6 +130,14 @@ def _locations() -> list[VersionLocation]:
             replacement=r'\g<1>{major}.{minor}.{patch}\g<2>',
             extract=r'^version\s*=\s*"([\d.]+)"',
         ),
+        # python/pyproject.toml (editable dev install)
+        VersionLocation(
+            file=PROJECT_ROOT / "python" / "pyproject.toml",
+            label="python/pyproject.toml",
+            pattern=r'(^version\s*=\s*")[\d.]+(")',
+            replacement=r'\g<1>{major}.{minor}.{patch}\g<2>',
+            extract=r'^version\s*=\s*"([\d.]+)"',
+        ),
         # __init__.py __version__
         VersionLocation(
             file=PROJECT_ROOT / "python" / "oecluster" / "__init__.py",

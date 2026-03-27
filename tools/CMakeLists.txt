@@ -9,6 +9,14 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(cli11)
 
 FetchContent_Declare(
+    indicators
+    GIT_REPOSITORY https://github.com/p-ranav/indicators.git
+    GIT_TAG master
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(indicators)
+
+FetchContent_Declare(
     oemaestro
     GIT_REPOSITORY https://github.com/scott-arne/oemaestro.git
     GIT_TAG master
@@ -21,10 +29,11 @@ FetchContent_MakeAvailable(oemaestro)
 
 add_executable(oepdist oepdist.cpp OutputWriter.cpp MolReader.cpp)
 
-target_link_libraries(oepdist PRIVATE oecluster oemaestro CLI11::CLI11)
+target_link_libraries(oepdist PRIVATE oecluster oemaestro CLI11::CLI11 indicators::indicators)
 
 install(TARGETS oepdist RUNTIME DESTINATION bin)
 
 if(OECLUSTER_BUILD_PYTHON)
     install(TARGETS oepdist RUNTIME DESTINATION oecluster/_bin)
+    install(FILES ${CMAKE_SOURCE_DIR}/python/oecluster/_cli.py DESTINATION oecluster)
 endif()
