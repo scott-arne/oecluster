@@ -63,10 +63,17 @@ static bool _oecluster_is_oemol(PyObject* obj) {
 
 static bool _oecluster_is_oedesignunit(PyObject* obj) {
     if (!_oecluster_oe_du_type) {
-        PyObject* mod = PyImport_ImportModule("openeye.oebio");
-        if (mod) {
-            _oecluster_oe_du_type = PyObject_GetAttrString(mod, "OEDesignUnit");
-            Py_DECREF(mod);
+        /* OEDesignUnit may live in oechem or oebio depending on the OE version */
+        const char* modules[] = {"openeye.oechem", "openeye.oebio", NULL};
+        for (const char** m = modules; *m && !_oecluster_oe_du_type; ++m) {
+            PyObject* mod = PyImport_ImportModule(*m);
+            if (mod) {
+                _oecluster_oe_du_type = PyObject_GetAttrString(mod, "OEDesignUnit");
+                Py_DECREF(mod);
+                if (!_oecluster_oe_du_type) PyErr_Clear();
+            } else {
+                PyErr_Clear();
+            }
         }
         if (!_oecluster_oe_du_type) return false;
     }
