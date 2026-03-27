@@ -132,9 +132,14 @@ jobs:
           fi
           BIN_FILE=$(find "$TMPDIR" -path '*/oecluster/_bin/oepdist' | head -1)
           if [ -n "$BIN_FILE" ]; then
-            patchelf --add-rpath '$ORIGIN/..' "$BIN_FILE"
-            patchelf --add-rpath "\$ORIGIN/../../openeye/libs/$OE_PLATFORM" "$BIN_FILE"
-            echo "oepdist binary RPATH set to: $(patchelf --print-rpath "$BIN_FILE")"
+            # Best-effort: patchelf may fail on some architectures (e.g. aarch64).
+            # The _cli.py wrapper sets LD_LIBRARY_PATH as a fallback.
+            if patchelf --add-rpath '$ORIGIN/..' "$BIN_FILE" 2>/dev/null && \
+               patchelf --add-rpath "\$ORIGIN/../../openeye/libs/$OE_PLATFORM" "$BIN_FILE" 2>/dev/null; then
+              echo "oepdist binary RPATH set to: $(patchelf --print-rpath "$BIN_FILE")"
+            else
+              echo "Warning: could not patch oepdist RPATH (LD_LIBRARY_PATH fallback will be used)"
+            fi
           fi
           rm "$WHEEL"
           /opt/venv/bin/python -m wheel pack "$TMPDIR" -d dist/
