@@ -4,7 +4,7 @@ if(POLICY CMP0144)
     cmake_policy(SET CMP0144 NEW)
 endif()
 
-project(oecluster VERSION 0.1.1 LANGUAGES CXX)
+project(oecluster VERSION 3.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -13,6 +13,10 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(OECLUSTER_BUILD_TESTS "Build tests" ON)
 option(OECLUSTER_BUILD_PYTHON "Build Python bindings" ON)
 option(OECLUSTER_UNIVERSAL2 "Build universal2 binary for macOS" OFF)
+
+if(APPLE)
+    add_link_options("LINKER:-no_warn_duplicate_libraries")
+endif()
 
 if(APPLE AND OECLUSTER_UNIVERSAL2)
     set(CMAKE_OSX_ARCHITECTURES "x86_64;arm64" CACHE STRING "Build architectures" FORCE)

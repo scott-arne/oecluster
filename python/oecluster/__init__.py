@@ -15,7 +15,7 @@ import ctypes
 
 import numpy as np
 
-__version__ = "0.1.1"
+__version__ = "3.1.0"
 
 __all__ = [
     "__version__",
@@ -94,56 +94,6 @@ def _ensure_library_compat():
     return created_any
 
 
-def _preload_shared_libs():
-    """Preload OpenEye shared libraries on Linux so the C extension can find them.
-
-    On Linux, auditwheel excludes OpenEye libraries from the wheel but the
-    resulting RUNPATH does not include the OpenEye library directory. This
-    function preloads all OpenEye shared libraries with RTLD_GLOBAL so the
-    dynamic linker can resolve them when the extension is imported.
-    """
-    import sys
-    if sys.platform != 'linux':
-        return
-
-    try:
-        from . import _build_info
-    except ImportError:
-        return
-
-    if getattr(_build_info, 'OPENEYE_LIBRARY_TYPE', 'STATIC') != 'SHARED':
-        return
-
-    try:
-        from openeye import libs
-        oe_lib_dir = libs.FindOpenEyeDLLSDirectory()
-    except (ImportError, Exception):
-        return
-
-    if not os.path.isdir(oe_lib_dir):
-        return
-
-    # Preload from the OpenEye library directory (handles version-match case)
-    for f in sorted(os.listdir(oe_lib_dir)):
-        if f.endswith('.so') or '.so.' in f:
-            try:
-                ctypes.CDLL(os.path.join(oe_lib_dir, f), mode=ctypes.RTLD_GLOBAL)
-            except OSError:
-                pass
-
-    # Preload symlinks from package directory (handles version-mismatch case
-    # when _ensure_library_compat() has created compatibility symlinks)
-    pkg_dir = os.path.dirname(__file__)
-    expected_libs = getattr(_build_info, 'OPENEYE_EXPECTED_LIBS', [])
-    for lib_name in expected_libs:
-        symlink = os.path.join(pkg_dir, lib_name)
-        if os.path.islink(symlink):
-            try:
-                ctypes.CDLL(symlink, mode=ctypes.RTLD_GLOBAL)
-            except OSError:
-                pass
-
-
 def _check_openeye_version():
     """Check that the OpenEye version matches what was used at build time."""
     try:
@@ -181,7 +131,6 @@ def _check_openeye_version():
 
 # Initialize compatibility checks
 _ensure_library_compat()
-_preload_shared_libs()
 _check_openeye_version()
 
 

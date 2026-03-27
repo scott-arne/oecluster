@@ -133,6 +133,12 @@ jobs:
           /opt/venv/bin/python -m wheel pack "$TMPDIR" -d dist/
           rm -rf "$TMPDIR"
 
+      - name: Test wheel
+        run: |
+          /opt/venv/bin/pip install pytest
+          /opt/venv/bin/pip install dist/oecluster-*.whl
+          /opt/venv/bin/pytest tests/python/ -v
+
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v7
         with:
@@ -201,6 +207,12 @@ jobs:
             --openeye-root ${{ runner.temp }}/openeye \
             --python $(which python) \
             --verbose
+
+      - name: Test wheel
+        run: |
+          pip install pytest
+          pip install dist/oecluster-*.whl
+          pytest tests/python/ -v
 
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v7

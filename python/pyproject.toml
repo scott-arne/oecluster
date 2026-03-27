@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "oecluster"
+version = "3.1.0"
+description = "High-performance pairwise distance and clustering for OpenEye Toolkits"
+requires-python = ">=3.10"
+dependencies = ["openeye-toolkits>=2025.2", "numpy>=1.20"]
+
+[project.scripts]
+oepdist = "oecluster._cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "scipy>=1.7"]
+
+[tool.setuptools]
+packages = ["oecluster"]
