@@ -15,7 +15,7 @@ import ctypes
 
 import numpy as np
 
-__version__ = "3.1.6"
+__version__ = "3.1.7"
 
 __all__ = [
     "__version__",
@@ -165,8 +165,8 @@ def _check_openeye_version():
         from openeye import oechem
         runtime_version = oechem.OEToolkitsGetRelease()
         if runtime_version and build_version:
-            build_parts = build_version.split('.')[:3]
-            runtime_parts = runtime_version.split('.')[:3]
+            build_parts = build_version.split('.')[:2]
+            runtime_parts = runtime_version.split('.')[:2]
             if build_parts != runtime_parts:
                 warnings.warn(
                     f"OpenEye version mismatch: oecluster was built with OpenEye Toolkits {build_version} "
