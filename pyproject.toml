@@ -27,7 +27,7 @@ dependencies = ["openeye-toolkits>=2025.2", "numpy>=1.20"]
 oepdist = "_oepdist_main:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0", "scipy>=1.7"]
+dev = ["pytest>=7.0", "scipy>=1.7", "vrzn>=0.1.0"]
 
 [tool.scikit-build]
 cmake.version = ">=3.21"
@@ -47,6 +47,31 @@ OECLUSTER_BUILD_PYTHON = "ON"
 OPENEYE_USE_SHARED = "ON"
 OECLUSTER_USE_STABLE_ABI = "ON"
 OECLUSTER_UNIVERSAL2 = "ON"
+
+# =============================================================================
+# TOML-driven build configuration for scripts/build_python.py
+# =============================================================================
+# This section is read by build_python.py to parameterize the build.
+# The script itself is identical across all projects — only this config changes.
+[tool.oe-build]
+package-name = "oecluster"
+cmake-test-flag = "OECLUSTER_BUILD_TESTS"
+rpath-strategy = "platform"  # "platform" = @loader_path/../openeye/libs/{platform}, "simple" = @loader_path
+
+# OpenEye libraries that are expected to be missing from delocate
+# (they are provided at runtime by openeye-toolkits, not bundled in the wheel)
+expected-missing-libs = [
+    "liboechem", "liboesystem", "liboeplatform",
+    "liboemath", "libzstd",
+    "liboegraphsim",
+    "liboeshape", "liboehermite", "liboeopt", "liboemolpotential",
+    "liboebio",
+    "liboegrid", "liboezap", "liboespicoli", "liboesitehopper",
+    "liboespruce",
+]
+
+# Additional CMake defines passed during wheel build (beyond the standard ones)
+[tool.oe-build.extra-cmake-defines]
 
 [tool.pytest.ini_options]
 testpaths = ["tests/python"]

@@ -1,0 +1,41 @@
+[[locations]]
+file = "pyproject.toml"
+type = "pyproject-version"
+
+[[locations]]
+file = "python/pyproject.toml"
+type = "pyproject-version"
+
+[[locations]]
+file = "python/oecluster/__init__.py"
+type = "python-dunder"
+
+[[locations]]
+file = "python/oecluster/__init__.py"
+type = "python-version-info"
+
+[[locations]]
+file = "CMakeLists.txt"
+type = "cmake-project"
+
+[[locations]]
+file = "include/oecluster/oecluster.h"
+type = "c-define"
+prefix = "OECLUSTER"
+
+[[locations]]
+file = "swig/oecluster.i"
+type = "c-define"
+prefix = "OECLUSTER"
+
+[[locations]]
+file = "tests/python/test_oecluster.py"
+type = "custom"
+template = 'oecluster\.__version__ == "{version}"'
+label = "test-version-string"
+
+[[locations]]
+file = "tests/python/test_oecluster.py"
+type = "custom"
+template = 'oecluster\.__version_info__ == \({info_tuple}\)'
+label = "test-version-info"

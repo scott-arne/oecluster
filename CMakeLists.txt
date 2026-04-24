@@ -13,6 +13,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(OECLUSTER_BUILD_TESTS "Build tests" ON)
 option(OECLUSTER_BUILD_PYTHON "Build Python bindings" ON)
 option(OECLUSTER_UNIVERSAL2 "Build universal2 binary for macOS" OFF)
+option(OECLUSTER_USE_STABLE_ABI "Use Python stable ABI" ON)
 
 if(APPLE)
     add_link_options("LINKER:-no_warn_duplicate_libraries")
@@ -20,7 +21,12 @@ endif()
 
 if(APPLE AND OECLUSTER_UNIVERSAL2)
     set(CMAKE_OSX_ARCHITECTURES "x86_64;arm64" CACHE STRING "Build architectures" FORCE)
-    set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version" FORCE)
+elseif(APPLE)
+    unset(CMAKE_OSX_ARCHITECTURES CACHE)
+endif()
+
+if(APPLE AND NOT CMAKE_OSX_DEPLOYMENT_TARGET)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version")
 endif()
 
 if(APPLE)
@@ -50,7 +56,7 @@ include(FetchContent)
 FetchContent_Declare(
     cmake_openeye
     GIT_REPOSITORY https://github.com/scott-arne/cmake-openeye.git
-    GIT_TAG v1.0.0
+    GIT_TAG v1.0.2
     GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(cmake_openeye)
