@@ -16,9 +16,11 @@ import ctypes
 import numpy as np
 
 __version__ = "3.1.7"
+__version_info__ = (3, 1, 7)
 
 __all__ = [
     "__version__",
+    "__version_info__",
     "DenseStorage",
     "MMapStorage",
     "SparseStorage",
@@ -147,6 +149,48 @@ def _preload_shared_libs():
                 pass
 
 
+def _preload_bundled_libs():
+    """Preload libraries bundled by auditwheel from the .libs directory.
+
+    auditwheel repair bundles non-manylinux dependencies (e.g. libraries
+    from FetchContent or system packages) into a ``<package>.libs/``
+    directory next to the package. The bundled copies have hashed filenames
+    and must be loaded before the C extension to satisfy its DT_NEEDED
+    entries.
+
+    Libraries may have inter-dependencies, so we do multiple passes
+    until no new libraries can be loaded. Libraries are loaded without
+    ``RTLD_GLOBAL`` to avoid polluting the global symbol namespace.
+    """
+    import sys
+    if sys.platform != 'linux':
+        return
+
+    import ctypes
+    pkg_name = __name__
+    pkg_dir = os.path.dirname(os.path.abspath(__file__))
+    site_dir = os.path.dirname(pkg_dir)
+    for libs_name in (f'{pkg_name}.libs', f'.{pkg_name}.libs'):
+        libs_dir = os.path.join(site_dir, libs_name)
+        if not os.path.isdir(libs_dir):
+            continue
+        remaining = [
+            os.path.join(libs_dir, f)
+            for f in sorted(os.listdir(libs_dir))
+            if '.so' in f
+        ]
+        while remaining:
+            failed = []
+            for lib_path in remaining:
+                try:
+                    ctypes.CDLL(lib_path)
+                except OSError:
+                    failed.append(lib_path)
+            if len(failed) == len(remaining):
+                break
+            remaining = failed
+
+
 def _check_openeye_version():
     """Check that the OpenEye version matches what was used at build time."""
     try:
@@ -185,6 +229,7 @@ def _check_openeye_version():
 # Initialize compatibility checks
 _ensure_library_compat()
 _preload_shared_libs()
+_preload_bundled_libs()
 _check_openeye_version()
 
 
