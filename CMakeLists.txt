@@ -143,7 +143,18 @@ endif()
 _find_oe_dep(OEZAP_LIBRARY oezap OpenEye::OEZap "OpenEye::OEChem;OpenEye::OEGrid")
 _find_oe_dep(OESPICOLI_LIBRARY oespicoli OpenEye::OESpicoli "OpenEye::OEChem;OpenEye::OEZap")
 _find_oe_dep(OESITEHOPPER_LIBRARY oesitehopper OpenEye::OESiteHopper "OpenEye::OEChem;OpenEye::OEShape;OpenEye::OESpicoli;${CMAKE_DL_LIBS}")
-_find_oe_dep(OESPRUCE_LIBRARY oespruce OpenEye::OESpruce "OpenEye::OEChem;OpenEye::OEBio;OpenEye::OESiteHopper")
+
+# OESpruce (2025.2+) pulls in OEQuacpac (OEProton), OEMMFF, OEOmega2 (OEConfGen),
+# and OESheffield via its builder/designunit code paths. These must be linked
+# explicitly as transitive deps of OESpruce.
+_find_oe_dep(OEMMFF_LIBRARY oemmff OpenEye::OEMMFF "OpenEye::OEChem")
+_find_oe_dep(OEFF_LIBRARY oeff OpenEye::OEFF "OpenEye::OEChem")
+_find_oe_dep(OESZYBKI_LIBRARY oeszybki OpenEye::OESzybki "OpenEye::OEChem;OpenEye::OEMMFF;OpenEye::OEFF")
+_find_oe_dep(OEQUACPAC_LIBRARY oequacpac OpenEye::OEQuacpac "OpenEye::OEChem;OpenEye::OESzybki")
+_find_oe_dep(OEOMEGA2_LIBRARY oeomega2 OpenEye::OEOmega2 "OpenEye::OEChem;OpenEye::OEMMFF")
+_find_oe_dep(OESHEFFIELD_LIBRARY oesheffield OpenEye::OESheffield "OpenEye::OEChem")
+
+_find_oe_dep(OESPRUCE_LIBRARY oespruce OpenEye::OESpruce "OpenEye::OEChem;OpenEye::OEBio;OpenEye::OESiteHopper;OpenEye::OEQuacpac;OpenEye::OEMMFF;OpenEye::OEOmega2;OpenEye::OESheffield")
 
 set(OECLUSTER_SOURCES
     src/StorageBackend.cpp
