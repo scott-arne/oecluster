@@ -56,7 +56,7 @@ include(FetchContent)
 FetchContent_Declare(
     cmake_openeye
     GIT_REPOSITORY https://github.com/scott-arne/cmake-openeye.git
-    GIT_TAG v1.1.5
+    GIT_TAG v1.1.6
     GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(cmake_openeye)
