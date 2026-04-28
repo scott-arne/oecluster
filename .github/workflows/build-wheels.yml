@@ -255,8 +255,8 @@ jobs:
 
       - name: Install build dependencies
         run: |
-          pip install --upgrade pip setuptools wheel
-          pip install scikit-build-core ninja cmake build swig pytest
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install scikit-build-core ninja cmake build swig pytest
 
       - name: Validate configuration
         run: |
@@ -371,10 +371,10 @@ jobs:
           # Install the wheel into a different Python minor than the build
           # Python (3.11) to verify the stable-ABI contract actually holds.
           python -m pip install --upgrade pip
-          pip install dist/oecluster-*.whl
           pip install "openeye-toolkits==${{ vars.OPENEYE_VERSION }}" \
             --extra-index-url https://pypi.anaconda.org/openeye/simple \
             --no-cache-dir
+          pip install dist/oecluster-*.whl
           python -c "import oecluster; print('oecluster', oecluster.__version__, 'loaded under Python', __import__('sys').version)"
 
       - name: Upload wheel artifact
