@@ -253,6 +253,26 @@ jobs:
         with:
           arch: x64
 
+      - name: Download Boost headers
+        shell: bash
+        run: |
+          # windows-latest (windows-2025) no longer ships Boost under
+          # C:\local\boost_<version>. oemaestro (pulled in as a FetchContent
+          # dep for Maestro .mae I/O) needs header-only Boost, so fetch the
+          # source archive and point BOOST_ROOT at the extracted tree.
+          BOOST_VERSION=1.86.0
+          BOOST_UNDER=${BOOST_VERSION//./_}
+          ARCHIVE="${RUNNER_TEMP}/boost.7z"
+          EXTRACT="${RUNNER_TEMP}/boost-src"
+          curl -fsSL \
+            "https://archives.boost.io/release/${BOOST_VERSION}/source/boost_${BOOST_UNDER}.7z" \
+            -o "${ARCHIVE}"
+          mkdir -p "${EXTRACT}"
+          7z x -y "-o${EXTRACT}" "${ARCHIVE}" > /dev/null
+          BOOST_ROOT="${EXTRACT}/boost_${BOOST_UNDER}"
+          echo "BOOST_ROOT=${BOOST_ROOT}" >> $GITHUB_ENV
+          echo "Using BOOST_ROOT=${BOOST_ROOT}"
+
       - name: Install build dependencies
         run: |
           python -m pip install --upgrade pip setuptools wheel
