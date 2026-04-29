@@ -9,10 +9,22 @@
 #include <mutex>
 #include <stdexcept>
 #include <cstring>
+#ifdef _WIN32
+// Win32 has no POSIX mmap; use CreateFileMapping + MapViewOfFile instead.
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <cerrno>
+#endif
 
 namespace OECluster {
 
@@ -73,6 +85,124 @@ size_t DenseStorage::CondensedIndex(size_t n, size_t i, size_t j) {
 
 // MMapStorage implementation
 
+#ifdef _WIN32
+
+namespace {
+
+// Format a human-readable message from GetLastError() for diagnostics.
+std::string win32_error_message(DWORD code) {
+    LPSTR buf = nullptr;
+    DWORD len = FormatMessageA(
+        FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+            FORMAT_MESSAGE_IGNORE_INSERTS,
+        nullptr, code, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+        reinterpret_cast<LPSTR>(&buf), 0, nullptr);
+    std::string msg = (len && buf) ? std::string(buf, len) : "Unknown error";
+    if (buf) {
+        LocalFree(buf);
+    }
+    while (!msg.empty() && (msg.back() == '\n' || msg.back() == '\r')) {
+        msg.pop_back();
+    }
+    return msg + " (code " + std::to_string(code) + ")";
+}
+
+}  // namespace
+
+MMapStorage::MMapStorage(const std::string& path, size_t n)
+    : n_(n),
+      num_pairs_(n * (n - 1) / 2),
+      file_size_(num_pairs_ * sizeof(double)),
+      path_(path),
+      file_handle_(INVALID_HANDLE_VALUE),
+      mapping_handle_(nullptr),
+      data_(nullptr) {
+
+    // CREATE_ALWAYS would truncate; OPEN_ALWAYS keeps existing contents,
+    // matching the POSIX O_RDWR|O_CREAT behavior used on other platforms.
+    HANDLE fh = CreateFileA(path.c_str(), GENERIC_READ | GENERIC_WRITE,
+                            FILE_SHARE_READ, nullptr, OPEN_ALWAYS,
+                            FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (fh == INVALID_HANDLE_VALUE) {
+        throw std::runtime_error("MMapStorage: Failed to open file " + path +
+                                 ": " + win32_error_message(GetLastError()));
+    }
+    file_handle_ = fh;
+
+    LARGE_INTEGER existing_size;
+    if (!GetFileSizeEx(fh, &existing_size)) {
+        DWORD err = GetLastError();
+        CloseHandle(fh);
+        file_handle_ = INVALID_HANDLE_VALUE;
+        throw std::runtime_error("MMapStorage: Failed to stat file " + path +
+                                 ": " + win32_error_message(err));
+    }
+
+    const bool needs_extend =
+        static_cast<size_t>(existing_size.QuadPart) < file_size_;
+
+    if (static_cast<size_t>(existing_size.QuadPart) != file_size_) {
+        LARGE_INTEGER new_size;
+        new_size.QuadPart = static_cast<LONGLONG>(file_size_);
+        if (!SetFilePointerEx(fh, new_size, nullptr, FILE_BEGIN) ||
+            !SetEndOfFile(fh)) {
+            DWORD err = GetLastError();
+            CloseHandle(fh);
+            file_handle_ = INVALID_HANDLE_VALUE;
+            throw std::runtime_error("MMapStorage: Failed to resize file " +
+                                     path + ": " + win32_error_message(err));
+        }
+    }
+
+    const DWORD size_high =
+        static_cast<DWORD>((static_cast<uint64_t>(file_size_) >> 32) & 0xFFFFFFFFu);
+    const DWORD size_low =
+        static_cast<DWORD>(static_cast<uint64_t>(file_size_) & 0xFFFFFFFFu);
+    HANDLE mh = CreateFileMappingA(fh, nullptr, PAGE_READWRITE,
+                                   size_high, size_low, nullptr);
+    if (mh == nullptr) {
+        DWORD err = GetLastError();
+        CloseHandle(fh);
+        file_handle_ = INVALID_HANDLE_VALUE;
+        throw std::runtime_error("MMapStorage: Failed to create file mapping " +
+                                 path + ": " + win32_error_message(err));
+    }
+    mapping_handle_ = mh;
+
+    void* view = MapViewOfFile(mh, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0,
+                               file_size_);
+    if (view == nullptr) {
+        DWORD err = GetLastError();
+        CloseHandle(mh);
+        CloseHandle(fh);
+        mapping_handle_ = nullptr;
+        file_handle_ = INVALID_HANDLE_VALUE;
+        throw std::runtime_error("MMapStorage: Failed to map view of file " +
+                                 path + ": " + win32_error_message(err));
+    }
+    data_ = static_cast<double*>(view);
+
+    // SetEndOfFile leaves new bytes undefined on some filesystems; match the
+    // POSIX branch by zeroing any extended region.
+    if (needs_extend) {
+        std::memset(data_, 0, file_size_);
+    }
+}
+
+MMapStorage::~MMapStorage() {
+    if (data_ != nullptr) {
+        UnmapViewOfFile(data_);
+    }
+    if (mapping_handle_ != nullptr) {
+        CloseHandle(mapping_handle_);
+    }
+    if (file_handle_ != INVALID_HANDLE_VALUE && file_handle_ != nullptr) {
+        CloseHandle(file_handle_);
+    }
+}
+
+#else  // !_WIN32
+
 MMapStorage::MMapStorage(const std::string& path, size_t n)
     : n_(n),
       num_pairs_(n * (n - 1) / 2),
@@ -128,6 +258,8 @@ MMapStorage::~MMapStorage() {
         close(fd_);
     }
 }
+
+#endif  // _WIN32
 
 void MMapStorage::Set(size_t i, size_t j, double value) {
     // Ensure i < j for upper triangle storage
