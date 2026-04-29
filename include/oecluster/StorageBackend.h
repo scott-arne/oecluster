@@ -190,7 +190,14 @@ private:
     size_t num_pairs_;      ///< Number of pairs
     size_t file_size_;      ///< Size of the mapped file in bytes
     std::string path_;      ///< File path
+#ifdef _WIN32
+    // HANDLE is void* in <windows.h>; use void* here so public consumers of
+    // this header don't need to pull in <windows.h>.
+    void* file_handle_;     ///< Win32 file HANDLE
+    void* mapping_handle_;  ///< Win32 file-mapping HANDLE
+#else
     int fd_;                ///< File descriptor
+#endif
     double* data_;          ///< Pointer to mapped memory
 };
 

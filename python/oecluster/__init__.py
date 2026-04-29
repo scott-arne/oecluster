@@ -232,6 +232,11 @@ _preload_shared_libs()
 _preload_bundled_libs()
 _check_openeye_version()
 
+# Import openeye.libs before loading the SWIG extension so that on Windows its
+# os.add_dll_directory() side effect populates the DLL search path; harmless on
+# POSIX where openeye-toolkits is already a runtime dependency.
+import openeye.libs  # noqa: F401,E402
+
 
 # Import C++ bindings from SWIG module
 try:

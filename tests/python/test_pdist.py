@@ -125,18 +125,15 @@ def test_pdist_superpose_sitehopper_alias():
     from openeye import oechem
     import oecluster
 
-    files = [
-        "tests/assets/spruce_5FQD_1_5FQD_1-ALIGNED_BC__DU__LVY_B-1438.oedu",
-        "tests/assets/spruce_8G66_1_8G66_1-ALIGNED_BC__DU__YOT_B-502.oedu",
-    ]
-    dus = []
-    for f in files:
-        du = oechem.OEDesignUnit()
-        if not oechem.OEReadDesignUnit(f, du):
-            pytest.skip(f"Cannot read {f}")
-        dus.append(du)
+    # Use a single DU so pdist exercises the alias-dispatch path without
+    # invoking Distance() — this test covers routing, not scoring. Scoring
+    # of SiteHopper is covered by the superpose:sitehopper integration tests.
+    du = oechem.OEDesignUnit()
+    path = "tests/assets/spruce_5FQD_1_5FQD_1-ALIGNED_BC__DU__LVY_B-1438.oedu"
+    if not oechem.OEReadDesignUnit(path, du):
+        pytest.skip(f"Cannot read {path}")
 
-    dm = oecluster.pdist(dus, "sitehopper")
+    dm = oecluster.pdist([du], "sitehopper")
     assert "sitehopper" in dm.metric_name
 
 
