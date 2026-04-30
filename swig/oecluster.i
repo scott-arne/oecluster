@@ -761,7 +761,7 @@ public:
 // ============================================================================
 #define OECLUSTER_VERSION_MAJOR 3
 #define OECLUSTER_VERSION_MINOR 2
-#define OECLUSTER_VERSION_PATCH 0
+#define OECLUSTER_VERSION_PATCH 1
 
 // ============================================================================
 // Module-level Python convenience code
