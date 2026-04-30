@@ -56,7 +56,7 @@ include(FetchContent)
 FetchContent_Declare(
     cmake_openeye
     GIT_REPOSITORY https://github.com/scott-arne/cmake-openeye.git
-    GIT_TAG v1.1.6
+    GIT_TAG v1.2.0
     GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(cmake_openeye)
@@ -82,79 +82,6 @@ if(OPENEYE_USE_SHARED)
 endif()
 
 find_package(OpenEye REQUIRED)
-
-# OEShape and its transitive dependencies are not yet in cmake-openeye
-# FindOpenEye.cmake; discover them manually.
-set(_OE_LIB_SEARCH_PATHS
-    ${OPENEYE_LIB_DIR}
-    ${OPENEYE_ROOT}/lib
-    $ENV{OPENEYE_ROOT}/lib
-    $ENV{OE_DIR}/lib
-    /opt/openeye/lib
-    /usr/local/openeye/lib
-)
-
-macro(_find_oe_dep VAR_NAME LIB_NAME TARGET_NAME DEPS)
-    if(NOT TARGET ${TARGET_NAME})
-        find_library(${VAR_NAME} NAMES ${LIB_NAME} PATHS ${_OE_LIB_SEARCH_PATHS} NO_DEFAULT_PATH)
-        if(${VAR_NAME})
-            add_library(${TARGET_NAME} UNKNOWN IMPORTED)
-            set_target_properties(${TARGET_NAME} PROPERTIES
-                IMPORTED_LOCATION "${${VAR_NAME}}"
-                INTERFACE_INCLUDE_DIRECTORIES "${OPENEYE_INCLUDE_DIR}"
-            )
-            if(NOT "${DEPS}" STREQUAL "")
-                set_property(TARGET ${TARGET_NAME} PROPERTY INTERFACE_LINK_LIBRARIES ${DEPS})
-            endif()
-        endif()
-    endif()
-endmacro()
-
-_find_oe_dep(OEOPT_LIBRARY oeopt OpenEye::OEOpt "OpenEye::OESystem")
-_find_oe_dep(OEMOLPOTENTIAL_LIBRARY oemolpotential OpenEye::OEMolPotential "OpenEye::OEChem;OpenEye::OEOpt")
-_find_oe_dep(OEHERMITE_LIBRARY oehermite OpenEye::OEHermite "OpenEye::OEChem;OpenEye::OEOpt")
-
-if(NOT TARGET OpenEye::OEShape)
-    find_library(OESHAPE_LIBRARY NAMES oeshape PATHS ${_OE_LIB_SEARCH_PATHS} NO_DEFAULT_PATH)
-    if(OESHAPE_LIBRARY)
-        add_library(OpenEye::OEShape UNKNOWN IMPORTED)
-        set_target_properties(OpenEye::OEShape PROPERTIES
-            IMPORTED_LOCATION "${OESHAPE_LIBRARY}"
-            INTERFACE_INCLUDE_DIRECTORIES "${OPENEYE_INCLUDE_DIR}"
-            INTERFACE_LINK_LIBRARIES "OpenEye::OEChem;OpenEye::OEGrid;OpenEye::OEOpt;OpenEye::OEMolPotential;OpenEye::OEHermite"
-        )
-        message(STATUS "OpenEye: Found OEShape: ${OESHAPE_LIBRARY}")
-    endif()
-endif()
-
-if(NOT TARGET OpenEye::OEBio)
-    find_library(OEBIO_LIBRARY NAMES oebio PATHS ${_OE_LIB_SEARCH_PATHS} NO_DEFAULT_PATH)
-    if(OEBIO_LIBRARY)
-        add_library(OpenEye::OEBio UNKNOWN IMPORTED)
-        set_target_properties(OpenEye::OEBio PROPERTIES
-            IMPORTED_LOCATION "${OEBIO_LIBRARY}"
-            INTERFACE_INCLUDE_DIRECTORIES "${OPENEYE_INCLUDE_DIR}"
-            INTERFACE_LINK_LIBRARIES "OpenEye::OEChem"
-        )
-        message(STATUS "OpenEye: Found OEBio: ${OEBIO_LIBRARY}")
-    endif()
-endif()
-
-_find_oe_dep(OEZAP_LIBRARY oezap OpenEye::OEZap "OpenEye::OEChem;OpenEye::OEGrid")
-_find_oe_dep(OESPICOLI_LIBRARY oespicoli OpenEye::OESpicoli "OpenEye::OEChem;OpenEye::OEZap")
-_find_oe_dep(OESITEHOPPER_LIBRARY oesitehopper OpenEye::OESiteHopper "OpenEye::OEChem;OpenEye::OEShape;OpenEye::OESpicoli;${CMAKE_DL_LIBS}")
-
-# OESpruce (2025.2+) pulls in OEQuacpac (OEProton), OEMMFF, OEOmega2 (OEConfGen),
-# and OESheffield via its builder/designunit code paths. These must be linked
-# explicitly as transitive deps of OESpruce.
-_find_oe_dep(OEMMFF_LIBRARY oemmff OpenEye::OEMMFF "OpenEye::OEChem")
-_find_oe_dep(OEFF_LIBRARY oeff OpenEye::OEFF "OpenEye::OEChem")
-_find_oe_dep(OESZYBKI_LIBRARY oeszybki OpenEye::OESzybki "OpenEye::OEChem;OpenEye::OEMMFF;OpenEye::OEFF")
-_find_oe_dep(OEQUACPAC_LIBRARY oequacpac OpenEye::OEQuacpac "OpenEye::OEChem;OpenEye::OESzybki")
-_find_oe_dep(OEOMEGA2_LIBRARY oeomega2 OpenEye::OEOmega2 "OpenEye::OEChem;OpenEye::OEMMFF")
-_find_oe_dep(OESHEFFIELD_LIBRARY oesheffield OpenEye::OESheffield "OpenEye::OEChem")
-
-_find_oe_dep(OESPRUCE_LIBRARY oespruce OpenEye::OESpruce "OpenEye::OEChem;OpenEye::OEBio;OpenEye::OESiteHopper;OpenEye::OEQuacpac;OpenEye::OEMMFF;OpenEye::OEOmega2;OpenEye::OESheffield")
 
 set(OECLUSTER_SOURCES
     src/StorageBackend.cpp
