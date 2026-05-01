@@ -11,8 +11,8 @@ class TestVersion:
         import oecluster
         assert hasattr(oecluster, '__version__')
         assert hasattr(oecluster, '__version_info__')
-        assert oecluster.__version__ == "3.2.1"
-        assert oecluster.__version_info__ == (3, 2, 1)
+        assert oecluster.__version__ == "3.2.2"
+        assert oecluster.__version_info__ == (3, 2, 2)
 
 
 class TestPackageImports:
