@@ -1,7 +1,5 @@
 """Template-aligned tests for oecluster Python bindings."""
 
-import pytest
-
 
 class TestVersion:
     """Test version information is exposed correctly."""
@@ -11,8 +9,8 @@ class TestVersion:
         import oecluster
         assert hasattr(oecluster, '__version__')
         assert hasattr(oecluster, '__version_info__')
-        assert oecluster.__version__ == "3.2.3"
-        assert oecluster.__version_info__ == (3, 2, 3)
+        assert oecluster.__version__ == "3.2.4"
+        assert oecluster.__version_info__ == (3, 2, 4)
 
 
 class TestPackageImports:
