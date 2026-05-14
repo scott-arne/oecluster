@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "oecluster"
-version = "3.2.2"
+version = "3.2.3"
 description = "High-performance pairwise distance and clustering for OpenEye Toolkits"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -77,3 +77,6 @@ expected-missing-libs = [
 testpaths = ["tests/python"]
 python_files = ["test_*.py"]
 addopts = "-v"
+
+[tool.ruff.lint.per-file-ignores]
+"python/oecluster/__init__.py" = ["E402"]
