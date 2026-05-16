@@ -395,23 +395,19 @@ int main(int argc, char** argv) {
     int exit_code = 0;
 
     CommonOpts fp_co;
-    std::string fp_type = "circular", fp_atom_type, fp_bond_type;
+    std::string fp_type = "morgan";
     std::string fp_similarity = "tanimoto";
     unsigned int fp_numbits = 2048, fp_min = 0, fp_max = 2;
 
     auto* fp_cmd = app.add_subcommand("fp", "Fingerprint distance");
     AddCommonOpts(fp_cmd, fp_co);
     fp_cmd->add_option("--fp-type", fp_type,
-        "Fingerprint type: circular, tree, path, maccs, lingo");
+        "OEFP fingerprint type: morgan, atom_pair");
     fp_cmd->add_option("--numbits", fp_numbits, "Number of bits");
-    fp_cmd->add_option("--min-distance", fp_min, "Min radius/bond path");
-    fp_cmd->add_option("--max-distance", fp_max, "Max radius/bond path");
-    fp_cmd->add_option("--atom-type", fp_atom_type,
-        "Pipe-delimited OEFPAtomType flags");
-    fp_cmd->add_option("--bond-type", fp_bond_type,
-        "Pipe-delimited OEFPBondType flags");
+    fp_cmd->add_option("--min-distance", fp_min, "Minimum Atom Pair graph distance");
+    fp_cmd->add_option("--max-distance", fp_max, "Morgan radius or maximum Atom Pair graph distance");
     fp_cmd->add_option("--similarity", fp_similarity,
-        "Similarity: tanimoto, dice, cosine, manhattan, euclidean");
+        "Metric: tanimoto, dice, cosine, manhattan");
     bool fp_sim = false;
     fp_cmd->add_flag("--sim", fp_sim, "Return similarity instead of distance");
 
@@ -422,12 +418,6 @@ int main(int argc, char** argv) {
         opts.min_distance = fp_min;
         opts.max_distance = fp_max;
         opts.similarity_func = fp_similarity;
-        if (!fp_atom_type.empty())
-            opts.atom_type_mask =
-                OECluster::FingerprintMetric::ParseAtomTypeMask(fp_atom_type);
-        if (!fp_bond_type.empty())
-            opts.bond_type_mask =
-                OECluster::FingerprintMetric::ParseBondTypeMask(fp_bond_type);
         opts.similarity = fp_sim;
 
         std::string params = "{" + JsonStr("fp_type", fp_type) + ","

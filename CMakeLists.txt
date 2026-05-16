@@ -4,7 +4,7 @@ if(POLICY CMP0144)
     cmake_policy(SET CMP0144 NEW)
 endif()
 
-project(oecluster VERSION 3.2.4 LANGUAGES CXX)
+project(oecluster VERSION 3.3.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -62,6 +62,33 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(cmake_openeye)
 list(APPEND CMAKE_MODULE_PATH "${cmake_openeye_SOURCE_DIR}")
 
+set(OECLUSTER_OEFP_SOURCE_DIR "../oefp" CACHE PATH "Path to local oefp source tree")
+set(OEFP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(OEFP_BUILD_PYTHON OFF CACHE BOOL "" FORCE)
+set(OEFP_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
+
+if(IS_ABSOLUTE "${OECLUSTER_OEFP_SOURCE_DIR}")
+    set(OECLUSTER_OEFP_RESOLVED_SOURCE_DIR "${OECLUSTER_OEFP_SOURCE_DIR}")
+else()
+    set(OECLUSTER_OEFP_RESOLVED_SOURCE_DIR
+        "${CMAKE_CURRENT_SOURCE_DIR}/${OECLUSTER_OEFP_SOURCE_DIR}")
+endif()
+
+if(EXISTS "${OECLUSTER_OEFP_RESOLVED_SOURCE_DIR}/CMakeLists.txt")
+    add_subdirectory(
+        "${OECLUSTER_OEFP_RESOLVED_SOURCE_DIR}"
+        "${CMAKE_BINARY_DIR}/_deps/oefp"
+    )
+else()
+    FetchContent_Declare(
+        oefp
+        GIT_REPOSITORY https://github.com/scott-arne/oefp.git
+        GIT_TAG v0.2.4
+        GIT_SHALLOW TRUE
+    )
+    FetchContent_MakeAvailable(oefp)
+endif()
+
 FetchContent_Declare(
     oeselect
     GIT_REPOSITORY https://github.com/scott-arne/oeselect.git
@@ -107,11 +134,11 @@ target_include_directories(oecluster
 target_link_libraries(oecluster
     PUBLIC
         OpenEye::OEChem
-        OpenEye::OEGraphSim
         OpenEye::OEShape
         OpenEye::OEBio
         OpenEye::OESpruce
     PRIVATE
+        oefp
         oeselect
 )
 

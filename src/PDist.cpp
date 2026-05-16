@@ -82,12 +82,13 @@ void pdist(DistanceMetric& metric, StorageBackend& storage,
                 storage.Set(i, j, distance);
             }
 
-            // Update progress
             if (options.progress) {
+                // Keep the counter update and callback together so callers
+                // observe monotonically increasing progress from worker chunks.
+                std::lock_guard<std::mutex> lock(progress_mutex);
                 size_t done = completed_pairs.fetch_add(
                     chunk_end - chunk_begin, std::memory_order_relaxed)
                     + (chunk_end - chunk_begin);
-                std::lock_guard<std::mutex> lock(progress_mutex);
                 options.progress(done, total_pairs);
             }
         });

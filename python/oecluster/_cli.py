@@ -115,7 +115,7 @@ def _setup_library_env():
 def main():
     binary = _binary_path()
     if not os.path.isfile(binary):
-        print(f"Error: oepdist binary not found. Build with CMake first, or install the wheel.", file=sys.stderr)
+        print("Error: oepdist binary not found. Build with CMake first, or install the wheel.", file=sys.stderr)
         sys.exit(1)
 
     _ensure_compat_symlinks()

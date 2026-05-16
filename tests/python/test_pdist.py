@@ -15,7 +15,7 @@ def test_dense_storage_roundtrip():
     assert s.NumPairs() == 6
 
 def test_pdist_fingerprint():
-    """Test pdist with fingerprint metric on simple molecules."""
+    """Test pdist with default Morgan fingerprint metric on simple molecules."""
     from openeye import oechem
     import oecluster
 
@@ -41,6 +41,51 @@ def test_pdist_fingerprint():
     assert sq.shape == (4, 4)
     assert sq[0, 0] == 0.0
     assert sq[0, 1] == sq[1, 0]  # symmetric
+
+
+def test_pdist_fingerprint_atom_pair():
+    """Test pdist with OEFP Atom Pair fingerprints."""
+    from openeye import oechem
+    import oecluster
+
+    smiles = ["c1ccccc1", "c1ccc(O)cc1", "CCCCCCCC"]
+    mols = []
+    for smi in smiles:
+        mol = oechem.OEGraphMol()
+        oechem.OESmilesToMol(mol, smi)
+        mols.append(mol)
+
+    dist = oecluster.pdist(mols, "fingerprint", fp_type="atom_pair")
+    arr = np.asarray(dist)
+    assert dist.num_items == 3
+    assert arr.shape == (3,)
+    assert np.all(arr >= 0.0)
+
+
+def test_pdist_fingerprint_removed_openeye_type_raises():
+    """OpenEye fingerprint families are not accepted by oecluster fingerprints."""
+    from openeye import oechem
+    import oecluster
+
+    mols = [oechem.OEGraphMol(), oechem.OEGraphMol()]
+    oechem.OESmilesToMol(mols[0], "C")
+    oechem.OESmilesToMol(mols[1], "CC")
+
+    with pytest.raises(Exception, match="OpenEye fingerprint type"):
+        oecluster.pdist(mols, "fingerprint", fp_type="circular")
+
+
+def test_pdist_fingerprint_rejects_openeye_mask_kwargs():
+    """OpenEye atom and bond mask kwargs are no longer part of the API."""
+    from openeye import oechem
+    import oecluster
+
+    mols = [oechem.OEGraphMol(), oechem.OEGraphMol()]
+    oechem.OESmilesToMol(mols[0], "C")
+    oechem.OESmilesToMol(mols[1], "CC")
+
+    with pytest.raises(TypeError, match="Unknown kwargs"):
+        oecluster.pdist(mols, "fingerprint", atom_type_mask=1)
 
 def test_pdist_with_cutoff():
     """Test pdist with cutoff produces sparse result."""
@@ -70,8 +115,8 @@ def test_pdist_progress():
         mols.append(mol)
 
     calls = []
-    dist = oecluster.pdist(mols, "fingerprint",
-                           progress=lambda d, t: calls.append((d, t)))
+    oecluster.pdist(mols, "fingerprint",
+                    progress=lambda d, t: calls.append((d, t)))
     assert len(calls) > 0
 
 def test_distance_matrix_serialization(tmp_path):

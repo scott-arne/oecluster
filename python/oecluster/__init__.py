@@ -19,11 +19,12 @@ import warnings
 import ctypes
 from importlib import metadata
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
-__version__ = "3.2.4"
-__version_info__ = (3, 2, 4)
+__version__ = "3.3.0"
+__version_info__ = (3, 3, 0)
 
 
 _OPENEYE_COMPAT_PRELOAD_PATHS: list[str] = []
@@ -873,33 +874,30 @@ def pdist(items,
         metric_lower = metric.lower()
         labels = _extract_labels(items)
         params = {'metric_type': metric_lower, 'similarity': similarity}
+        metric_obj: Any
 
         if metric_lower == "fingerprint":
-            opts = FingerprintOptions()
-            opts.similarity = similarity
+            fp_opts = FingerprintOptions()
+            fp_opts.similarity = similarity
             if 'fp_type' in kwargs:
-                opts.fp_type = kwargs.pop('fp_type')
+                fp_opts.fp_type = kwargs.pop('fp_type')
             if 'numbits' in kwargs:
-                opts.numbits = kwargs.pop('numbits')
+                fp_opts.numbits = kwargs.pop('numbits')
             if 'min_distance' in kwargs:
-                opts.min_distance = kwargs.pop('min_distance')
+                fp_opts.min_distance = kwargs.pop('min_distance')
             if 'max_distance' in kwargs:
-                opts.max_distance = kwargs.pop('max_distance')
-            if 'atom_type_mask' in kwargs:
-                opts.atom_type_mask = kwargs.pop('atom_type_mask')
-            if 'bond_type_mask' in kwargs:
-                opts.bond_type_mask = kwargs.pop('bond_type_mask')
+                fp_opts.max_distance = kwargs.pop('max_distance')
             if 'similarity_func' in kwargs:
-                opts.similarity_func = kwargs.pop('similarity_func')
+                fp_opts.similarity_func = kwargs.pop('similarity_func')
             if kwargs:
                 raise TypeError(
                     f"Unknown kwargs for fingerprint metric: {list(kwargs)}")
-            metric_obj = _FingerprintMetric(items, opts)
+            metric_obj = _FingerprintMetric(items, fp_opts)
             metric_name = "fingerprint"
 
         elif metric_lower == "rocs":
-            opts = ROCSOptions()
-            opts.similarity = similarity
+            rocs_opts = ROCSOptions()
+            rocs_opts.similarity = similarity
             if 'score_type' in kwargs:
                 st = kwargs.pop('score_type')
                 score_map = {
@@ -910,18 +908,18 @@ def pdist(items,
                 }
                 if st not in score_map:
                     raise ValueError(f"Unknown ROCS score type: {st}")
-                opts.score_type = score_map[st]
+                rocs_opts.score_type = score_map[st]
             if 'color_ff_type' in kwargs:
-                opts.color_ff_type = kwargs.pop('color_ff_type')
+                rocs_opts.color_ff_type = kwargs.pop('color_ff_type')
             if kwargs:
                 raise TypeError(
                     f"Unknown kwargs for rocs metric: {list(kwargs)}")
-            metric_obj = _ROCSMetric(items, opts)
+            metric_obj = _ROCSMetric(items, rocs_opts)
             metric_name = "rocs"
 
         elif metric_lower in ("superpose", "sitehopper"):
-            opts = SuperposeOptions()
-            opts.similarity = similarity
+            superpose_opts = SuperposeOptions()
+            superpose_opts.similarity = similarity
             method = kwargs.pop('method', None)
             if metric_lower == "sitehopper":
                 method = method or "sitehopper"
@@ -936,7 +934,7 @@ def pdist(items,
                 }
                 if method not in method_map:
                     raise ValueError(f"Unknown superpose method: {method}")
-                opts.method = method_map[method]
+                superpose_opts.method = method_map[method]
             if 'score_type' in kwargs:
                 st = kwargs.pop('score_type')
                 st_map = {
@@ -947,17 +945,17 @@ def pdist(items,
                 }
                 if st not in st_map:
                     raise ValueError(f"Unknown superpose score type: {st}")
-                opts.score_type = st_map[st]
+                superpose_opts.score_type = st_map[st]
             if 'predicate' in kwargs:
-                opts.predicate = kwargs.pop('predicate')
+                superpose_opts.predicate = kwargs.pop('predicate')
             if 'ref_predicate' in kwargs:
-                opts.ref_predicate = kwargs.pop('ref_predicate')
+                superpose_opts.ref_predicate = kwargs.pop('ref_predicate')
             if 'fit_predicate' in kwargs:
-                opts.fit_predicate = kwargs.pop('fit_predicate')
+                superpose_opts.fit_predicate = kwargs.pop('fit_predicate')
             if kwargs:
                 raise TypeError(
                     f"Unknown kwargs for superpose metric: {list(kwargs)}")
-            metric_obj = _SuperposeMetric(items, opts)
+            metric_obj = _SuperposeMetric(items, superpose_opts)
             metric_name = metric_obj.Name()
 
         else:
@@ -973,6 +971,7 @@ def pdist(items,
 
     n = metric_obj.Size()
 
+    storage: Any
     if output is not None:
         storage = MMapStorage(output, n)
     elif cutoff > 0.0:

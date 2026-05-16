@@ -590,9 +590,6 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, _oecluster_is_oereceptor, "
 // Ignore private constructors for metric clones
 %ignore OECluster::FingerprintMetric::FingerprintMetric(std::shared_ptr<const Impl>);
 
-// Ignore static mask parsing methods (not needed from Python)
-%ignore OECluster::FingerprintMetric::ParseAtomTypeMask;
-%ignore OECluster::FingerprintMetric::ParseBondTypeMask;
 %ignore OECluster::ROCSMetric::ROCSMetric(std::shared_ptr<const SharedData>, const Options&);
 %ignore OECluster::SuperposeMetric::SuperposeMetric(std::shared_ptr<const SharedData>, const Options&);
 // Ignore SparseStorage internals that use unordered_map/shared_mutex/thread
@@ -760,8 +757,8 @@ public:
 // Version macros
 // ============================================================================
 #define OECLUSTER_VERSION_MAJOR 3
-#define OECLUSTER_VERSION_MINOR 2
-#define OECLUSTER_VERSION_PATCH 4
+#define OECLUSTER_VERSION_MINOR 3
+#define OECLUSTER_VERSION_PATCH 0
 
 // ============================================================================
 // Module-level Python convenience code

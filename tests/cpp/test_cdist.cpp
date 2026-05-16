@@ -83,8 +83,13 @@ TEST_F(CDistTest, ProgressCallback) {
     size_t n_b = 3;
     std::vector<double> output(n_a * n_b, 0.0);
     CDistOptions opts;
+    opts.num_threads = 2;
+    opts.chunk_size = 1;
+    size_t last_completed = 0;
     size_t last_total = 0;
     opts.progress = [&](size_t completed, size_t total) {
+        EXPECT_GE(completed, last_completed);
+        last_completed = completed;
         last_total = total;
     };
     cdist(metric, n_a, output.data(), opts);

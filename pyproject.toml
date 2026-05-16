@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "oecluster"
-version = "3.2.4"
+version = "3.3.0"
 description = "High-performance pairwise distance and clustering for OpenEye Toolkits"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -21,7 +21,7 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 requires-python = ">=3.10"
-dependencies = ["openeye-toolkits>=2025.2", "numpy>=1.20"]
+dependencies = ["openeye-toolkits>=2025.2", "numpy>=1.20", "oefp>=0.2.4"]
 
 [project.scripts]
 oepdist = "_oepdist_main:main"
@@ -78,5 +78,20 @@ testpaths = ["tests/python"]
 python_files = ["test_*.py"]
 addopts = "-v"
 
+[tool.ruff]
+extend-exclude = [
+    "python/oecluster/oecluster.py",
+    "python/oeselect",
+]
+
 [tool.ruff.lint.per-file-ignores]
 "python/oecluster/__init__.py" = ["E402"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+exclude = [
+    "^python/oecluster/oecluster\\.py$",
+    "^python/oecluster/_build_info\\.py$",
+    "^python/oeselect/",
+]

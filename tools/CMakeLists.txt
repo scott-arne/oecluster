@@ -27,6 +27,15 @@ set(OEMAESTRO_BUILD_PYTHON OFF CACHE BOOL "" FORCE)
 set(MAEPARSER_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(oemaestro)
 
+if(TARGET maeparser)
+    # Boost.Spirit in maeparser triggers libc++'s char_traits<unsigned int>
+    # deprecation on recent Clang toolchains; keep that third-party warning
+    # out of oecluster builds without changing project-wide warning behavior.
+    target_compile_options(maeparser PRIVATE
+        $<$<COMPILE_LANG_AND_ID:CXX,AppleClang,Clang>:-Wno-deprecated-declarations>
+    )
+endif()
+
 add_executable(oepdist oepdist.cpp OutputWriter.cpp MolReader.cpp)
 
 target_link_libraries(oepdist PRIVATE oecluster oemaestro CLI11::CLI11 indicators::indicators)

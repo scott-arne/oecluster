@@ -494,8 +494,6 @@ class FingerprintOptions(object):
     numbits = property(_oecluster.FingerprintOptions_numbits_get, _oecluster.FingerprintOptions_numbits_set)
     min_distance = property(_oecluster.FingerprintOptions_min_distance_get, _oecluster.FingerprintOptions_min_distance_set)
     max_distance = property(_oecluster.FingerprintOptions_max_distance_get, _oecluster.FingerprintOptions_max_distance_set)
-    atom_type_mask = property(_oecluster.FingerprintOptions_atom_type_mask_get, _oecluster.FingerprintOptions_atom_type_mask_set, doc=r"""0 = use method default""")
-    bond_type_mask = property(_oecluster.FingerprintOptions_bond_type_mask_get, _oecluster.FingerprintOptions_bond_type_mask_set, doc=r"""0 = use method default""")
     similarity_func = property(_oecluster.FingerprintOptions_similarity_func_get, _oecluster.FingerprintOptions_similarity_func_set, doc=r"""Similarity function name""")
     similarity = property(_oecluster.FingerprintOptions_similarity_get, _oecluster.FingerprintOptions_similarity_set, doc=r"""Return raw similarity instead of distance""")
 
@@ -507,7 +505,7 @@ class FingerprintOptions(object):
 _oecluster.FingerprintOptions_swigregister(FingerprintOptions)
 class FingerprintMetric(DistanceMetric):
     r"""
-    Fingerprint-based distance metric using OEGraphSim similarity functions.
+    Fingerprint-based distance metric using OEFP fingerprints.
 
     Computes all molecular fingerprints upfront during construction, then
     returns a distance value based on the configured similarity metric.

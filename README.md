@@ -31,8 +31,8 @@ library, Python bindings, and a command-line interface.
 ## Features
 
 - **Four distance metrics** for molecular comparison:
-  - **Fingerprint** -- Tanimoto, Dice, Cosine, Manhattan, or Euclidean distance
-    between molecular fingerprints (circular, tree, path, MACCS, lingo).
+  - **Fingerprint** -- OEFP-backed Morgan and Atom Pair fingerprints with
+    Tanimoto/Jaccard, Dice, Cosine, or Manhattan comparison.
   - **ROCS** -- 3D shape and color overlay using OEShape with configurable
     scoring (ComboNorm, Combo, Shape, Color).
   - **Superpose** -- Protein superposition RMSD via sequence alignment and
@@ -61,7 +61,8 @@ library, Python bindings, and a command-line interface.
 
 - **C++17** compiler (GCC 9+, Clang 10+, MSVC 2019+)
 - **CMake** 3.16 or later
-- **OpenEye C++ Toolkits** 2025.2 or later (OEChem, OEGraphSim, OEShape, OEBio)
+- **OpenEye C++ Toolkits** 2025.2 or later (OEChem, OEShape, OEBio, OESpruce)
+- **OEFP** 0.2.4 or later for fingerprint generation and comparison
 - **SWIG** 4.0+ (for Python bindings)
 - **Python** 3.10+ with NumPy (for Python bindings)
 
@@ -174,8 +175,8 @@ dm.to_file("distances.npz")
 dm = oecluster.pdist(
     mols,
     "fingerprint",
-    fp_type="circular",
-    similarity="tanimoto",
+    fp_type="morgan",
+    similarity_func="tanimoto",
     num_threads=8,
     cutoff=0.7,
     progress=lambda done, total: print(f"{done}/{total}")
@@ -192,7 +193,7 @@ from oecluster.oecluster import (
 import numpy as np
 
 opts = FingerprintOptions()
-opts.fp_type = "circular"
+opts.fp_type = "morgan"
 
 # Concatenate both sets: [set_a... , set_b...]
 all_mols = list_a + list_b
@@ -221,7 +222,7 @@ Subcommands:
 
 ```bash
 oepdist fp molecules.sdf -o distances.npy \
-  --fp-type circular --similarity tanimoto --threads 8
+  --fp-type morgan --similarity tanimoto --threads 8
 ```
 
 **ROCS shape overlay (NxN):**
@@ -262,8 +263,8 @@ std::vector<OEChem::OEMolBase*> mols = /* ... */;
 
 // Create metric
 OECluster::FingerprintOptions opts;
-opts.fp_type = "circular";
-opts.similarity = "tanimoto";
+opts.fp_type = "morgan";
+opts.similarity_func = "tanimoto";
 OECluster::FingerprintMetric metric(mols, opts);
 
 // Allocate storage and compute
@@ -286,15 +287,14 @@ for (size_t i = 0; i < mols.size(); ++i)
 
 | Parameter      | Values                                              | Default    |
 |----------------|-----------------------------------------------------|------------|
-| `fp_type`      | circular, tree, path, maccs, lingo                  | circular   |
-| `similarity`   | tanimoto, dice, cosine, manhattan, euclidean         | tanimoto   |
+| `fp_type`      | morgan, atom_pair                                   | morgan     |
+| `similarity_func` | tanimoto, dice, cosine, manhattan                | tanimoto   |
 | `numbits`      | Fingerprint size                                    | 2048       |
-| `min_distance`  | Minimum radius/path length                         | 0          |
-| `max_distance`  | Maximum radius/path length                         | 0 (auto)   |
-| `atom_type_mask` | Pipe-delimited atom features                      | (per type) |
-| `bond_type_mask` | Pipe-delimited bond features                      | (per type) |
+| `min_distance`  | Minimum Atom Pair graph distance                   | 0          |
+| `max_distance`  | Morgan radius or maximum Atom Pair graph distance  | 2          |
 
-Distance: `1.0 - similarity` for Tanimoto/Dice/Cosine; raw value for Manhattan/Euclidean.
+Distance mode maps Tanimoto to Jaccard distance, uses `1.0 - similarity` for
+Dice/Cosine, and returns raw Manhattan distance.
 
 ### ROCS
 
