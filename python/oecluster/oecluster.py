@@ -710,4 +710,10 @@ class SuperposeMetric(DistanceMetric):
 
 # Register SuperposeMetric in _oecluster:
 _oecluster.SuperposeMetric_swigregister(SuperposeMetric)
+OECLUSTER_VERSION_MAJOR = _oecluster.OECLUSTER_VERSION_MAJOR
+OECLUSTER_VERSION_MINOR = _oecluster.OECLUSTER_VERSION_MINOR
+OECLUSTER_VERSION_PATCH = _oecluster.OECLUSTER_VERSION_PATCH
+
+__version__ = "3.1.7"
+
 

@@ -1,0 +1,61 @@
+{
+  "include": [
+    "python",
+    "tests/python",
+    "scripts"
+  ],
+  "exclude": [
+    "**/.*",
+    "**/node_modules",
+    "**/__pycache__",
+    ".git",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    "build",
+    "build-*",
+    "build-*/**",
+    "**/build-*",
+    "**/build-*/**",
+    "build-cmake-openeye-check",
+    "build-cmake-openeye-check/**",
+    "cmake-build-*",
+    "cmake-build-*/**",
+    "**/cmake-build-*",
+    "**/cmake-build-*/**",
+    "dist",
+    "docs/superpowers",
+    "python/oeselect",
+    "venv",
+    ".venv"
+  ],
+  "ignore": [
+    "python/oecluster/_build_info.py",
+    "python/oecluster/oecluster.py",
+    "python/oeselect",
+    "build",
+    "build-*",
+    "build-*/**",
+    "**/build-*",
+    "**/build-*/**",
+    "build-cmake-openeye-check",
+    "build-cmake-openeye-check/**",
+    "cmake-build-*",
+    "cmake-build-*/**",
+    "**/cmake-build-*",
+    "**/cmake-build-*/**",
+    "dist",
+    "venv",
+    "**/site-packages"
+  ],
+  "extraPaths": [
+    "python"
+  ],
+  "venvPath": "/Users/johnss51/Applications/miniforge3/envs",
+  "venv": "main",
+  "pythonVersion": "3.10",
+  "pythonPlatform": "Darwin",
+  "typeCheckingMode": "basic",
+  "reportMissingImports": "none",
+  "reportMissingModuleSource": "none"
+}

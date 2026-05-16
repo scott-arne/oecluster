@@ -521,7 +521,6 @@ def _check_openeye_version():
         return
 
     try:
-        from importlib import metadata
         runtime_version = metadata.version("openeye-toolkits")
     except metadata.PackageNotFoundError:
         warnings.warn(
@@ -703,7 +702,17 @@ class DistanceMatrix:
                 return coo_matrix((n, n), dtype=np.float64)
 
             rows, cols, data = zip(*entries)
-            return coo_matrix((data, (rows, cols)), shape=(n, n), dtype=np.float64)
+            return coo_matrix(
+                (
+                    np.asarray(data, dtype=np.float64),
+                    (
+                        np.asarray(rows, dtype=np.intp),
+                        np.asarray(cols, dtype=np.intp),
+                    ),
+                ),
+                shape=(n, n),
+                dtype=np.float64,
+            )
 
         # Dense/MMap: convert condensed to COO
         condensed = self.condensed
@@ -721,7 +730,17 @@ class DistanceMatrix:
                     data.append(val)
                 idx += 1
 
-        return coo_matrix((data, (rows, cols)), shape=(n, n), dtype=np.float64)
+        return coo_matrix(
+            (
+                np.asarray(data, dtype=np.float64),
+                (
+                    np.asarray(rows, dtype=np.intp),
+                    np.asarray(cols, dtype=np.intp),
+                ),
+            ),
+            shape=(n, n),
+            dtype=np.float64,
+        )
 
     def squareform(self):
         """
