@@ -12,10 +12,10 @@
 namespace OECluster {
 
 DistanceMatrix::DistanceMatrix(std::unique_ptr<StorageBackend> storage,
-                               std::string metric_name,
+                               std::string comparison_name,
                                std::vector<std::string> labels)
     : storage_(std::move(storage)),
-      metric_name_(std::move(metric_name)),
+      comparison_name_(std::move(comparison_name)),
       labels_(std::move(labels)) {}
 
 StorageBackend& DistanceMatrix::Storage() {
@@ -26,8 +26,8 @@ const StorageBackend& DistanceMatrix::Storage() const {
     return *storage_;
 }
 
-const std::string& DistanceMatrix::MetricName() const {
-    return metric_name_;
+const std::string& DistanceMatrix::ComparisonName() const {
+    return comparison_name_;
 }
 
 const std::vector<std::string>& DistanceMatrix::Labels() const {

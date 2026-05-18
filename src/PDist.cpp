@@ -10,7 +10,7 @@
 #include <mutex>
 #include <vector>
 
-#include "oecluster/DistanceMetric.h"
+#include "oecluster/PairwiseComparison.h"
 #include "oecluster/StorageBackend.h"
 #include "oecluster/ThreadPool.h"
 
@@ -41,12 +41,17 @@ void condensed_to_pair(size_t k, size_t n, size_t& out_i, size_t& out_j) {
 
 }  // namespace
 
-void pdist(DistanceMetric& metric, StorageBackend& storage,
+void pdist(PairwiseComparison& comparison, StorageBackend& storage,
            const PDistOptions& options) {
-    const size_t n = metric.Size();
+    const size_t n = comparison.Size();
     const size_t total_pairs = n * (n - 1) / 2;
 
     if (total_pairs == 0) {
+        storage.Finalize();
+        return;
+    }
+
+    if (comparison.TryPDist(storage, options)) {
         storage.Finalize();
         return;
     }
@@ -56,10 +61,10 @@ void pdist(DistanceMetric& metric, StorageBackend& storage,
     const size_t chunk_size = options.chunk_size > 0 ? options.chunk_size : 256;
 
     // Create one clone per thread
-    std::vector<std::unique_ptr<DistanceMetric>> clones;
+    std::vector<std::unique_ptr<PairwiseComparison>> clones;
     clones.reserve(num_threads);
     for (size_t t = 0; t < num_threads; ++t) {
-        clones.push_back(metric.Clone());
+        clones.push_back(comparison.Clone());
     }
 
     // Atomic counter for thread-local index assignment
@@ -73,12 +78,12 @@ void pdist(DistanceMetric& metric, StorageBackend& storage,
         [&](size_t chunk_begin, size_t chunk_end) {
             // Assign each thread a unique ordinal on first entry
             thread_local size_t my_ordinal = thread_ordinal.fetch_add(1, std::memory_order_relaxed);
-            auto& local_metric = clones[my_ordinal];
+            auto& local_comparison = clones[my_ordinal];
 
             size_t i, j;
             for (size_t k = chunk_begin; k < chunk_end; ++k) {
                 condensed_to_pair(k, n, i, j);
-                double distance = local_metric->Distance(i, j);
+                double distance = local_comparison->Compare(i, j);
                 storage.Set(i, j, distance);
             }
 

@@ -254,12 +254,12 @@ static std::string JsonBool(const std::string& key, bool val) {
 // Distance computation
 // ---------------------------------------------------------------------------
 
-template<typename MetricT>
-static int run_pdist(MetricT& metric, const std::string& output_path,
+template<typename ComparisonT>
+static int run_pdist(ComparisonT& comparison, const std::string& output_path,
                      const OEPDist::OutputMetadata& meta,
                      size_t num_threads, size_t chunk_size,
                      double cutoff, bool progress) {
-    size_t n = metric.Size();
+    size_t n = comparison.Size();
     if (n == 0) {
         std::cerr << "Error: No items loaded" << std::endl;
         return 1;
@@ -277,7 +277,7 @@ static int run_pdist(MetricT& metric, const std::string& output_path,
             bar.set_progress(done);
         };
     }
-    OECluster::pdist(metric, storage, opts);
+    OECluster::pdist(comparison, storage, opts);
     if (progress) {
         if (!bar.is_completed())
             bar.mark_as_completed();
@@ -294,13 +294,13 @@ static int run_pdist(MetricT& metric, const std::string& output_path,
     return 0;
 }
 
-template<typename MetricT>
-static int run_cdist(MetricT& metric, size_t n_a,
+template<typename ComparisonT>
+static int run_cdist(ComparisonT& comparison, size_t n_a,
                      const std::string& output_path,
                      const OEPDist::OutputMetadata& meta,
                      size_t num_threads, size_t chunk_size,
                      double cutoff, bool progress) {
-    size_t n_b = metric.Size() - n_a;
+    size_t n_b = comparison.Size() - n_a;
     if (n_a == 0 || n_b == 0) {
         std::cerr << "Error: Empty input set" << std::endl;
         return 1;
@@ -318,7 +318,7 @@ static int run_cdist(MetricT& metric, size_t n_a,
             bar.set_progress(done);
         };
     }
-    OECluster::cdist(metric, n_a, data.data(), opts);
+    OECluster::cdist(comparison, n_a, data.data(), opts);
     if (progress) {
         if (!bar.is_completed())
             bar.mark_as_completed();
@@ -396,7 +396,7 @@ int main(int argc, char** argv) {
 
     CommonOpts fp_co;
     std::string fp_type = "morgan";
-    std::string fp_similarity = "tanimoto";
+    std::string fp_metric = "tanimoto";
     unsigned int fp_numbits = 2048, fp_min = 0, fp_max = 2;
 
     auto* fp_cmd = app.add_subcommand("fp", "Fingerprint distance");
@@ -406,8 +406,8 @@ int main(int argc, char** argv) {
     fp_cmd->add_option("--numbits", fp_numbits, "Number of bits");
     fp_cmd->add_option("--min-distance", fp_min, "Minimum Atom Pair graph distance");
     fp_cmd->add_option("--max-distance", fp_max, "Morgan radius or maximum Atom Pair graph distance");
-    fp_cmd->add_option("--similarity", fp_similarity,
-        "Metric: tanimoto, dice, cosine, manhattan");
+    fp_cmd->add_option("--metric", fp_metric,
+        "Scalar metric: tanimoto, dice, manhattan");
     bool fp_sim = false;
     fp_cmd->add_flag("--sim", fp_sim, "Return similarity instead of distance");
 
@@ -417,14 +417,14 @@ int main(int argc, char** argv) {
         opts.numbits = fp_numbits;
         opts.min_distance = fp_min;
         opts.max_distance = fp_max;
-        opts.similarity_func = fp_similarity;
+        opts.metric = fp_metric;
         opts.similarity = fp_sim;
 
         std::string params = "{" + JsonStr("fp_type", fp_type) + ","
             + JsonNum("numbits", fp_numbits) + ","
             + JsonNum("min_distance", fp_min) + ","
             + JsonNum("max_distance", fp_max) + ","
-            + JsonStr("similarity_func", fp_similarity) + "}";
+            + JsonStr("metric", fp_metric) + "}";
 
         if (fp_co.input2.empty()) {
             auto ms = ReadMolsProgress(fp_co.input1, fp_co);
@@ -433,10 +433,10 @@ int main(int argc, char** argv) {
                           << fp_co.input1 << std::endl;
                 exit_code = 1; return;
             }
-            OECluster::FingerprintMetric metric(ms.ptrs, opts);
+            OECluster::FingerprintComparison comparison(ms.ptrs, opts);
             OEPDist::OutputMetadata meta{
                 "pdist", "fingerprint", params, ms.labels, ms.labels};
-            exit_code = run_pdist(metric, fp_co.output, meta,
+            exit_code = run_pdist(comparison, fp_co.output, meta,
                 fp_co.num_threads, fp_co.chunk_size,
                 fp_co.cutoff, fp_co.progress());
         } else {
@@ -455,10 +455,10 @@ int main(int argc, char** argv) {
             std::vector<OEChem::OEMolBase*> all;
             all.insert(all.end(), sa.ptrs.begin(), sa.ptrs.end());
             all.insert(all.end(), sb.ptrs.begin(), sb.ptrs.end());
-            OECluster::FingerprintMetric metric(all, opts);
+            OECluster::FingerprintComparison comparison(all, opts);
             OEPDist::OutputMetadata meta{
                 "cdist", "fingerprint", params, sa.labels, sb.labels};
-            exit_code = run_cdist(metric, sa.ptrs.size(), fp_co.output, meta,
+            exit_code = run_cdist(comparison, sa.ptrs.size(), fp_co.output, meta,
                 fp_co.num_threads, fp_co.chunk_size,
                 fp_co.cutoff, fp_co.progress());
         }
@@ -492,10 +492,10 @@ int main(int argc, char** argv) {
                           << rocs_co.input1 << std::endl;
                 exit_code = 1; return;
             }
-            OECluster::ROCSMetric metric(ms.mols, opts);
+            OECluster::ROCSComparison comparison(ms.mols, opts);
             OEPDist::OutputMetadata meta{
                 "pdist", "rocs", params, ms.labels, ms.labels};
-            exit_code = run_pdist(metric, rocs_co.output, meta,
+            exit_code = run_pdist(comparison, rocs_co.output, meta,
                 rocs_co.num_threads, rocs_co.chunk_size,
                 rocs_co.cutoff, rocs_co.progress());
         } else {
@@ -508,10 +508,10 @@ int main(int argc, char** argv) {
             std::vector<std::shared_ptr<OEChem::OEMol>> all;
             all.insert(all.end(), sa.mols.begin(), sa.mols.end());
             all.insert(all.end(), sb.mols.begin(), sb.mols.end());
-            OECluster::ROCSMetric metric(all, opts);
+            OECluster::ROCSComparison comparison(all, opts);
             OEPDist::OutputMetadata meta{
                 "cdist", "rocs", params, sa.labels, sb.labels};
-            exit_code = run_cdist(metric, sa.mols.size(), rocs_co.output,
+            exit_code = run_cdist(comparison, sa.mols.size(), rocs_co.output,
                 meta, rocs_co.num_threads, rocs_co.chunk_size,
                 rocs_co.cutoff, rocs_co.progress());
         }
@@ -560,10 +560,10 @@ int main(int argc, char** argv) {
                 if (opts.method == OECluster::SuperposeMethod::SiteHopper)
                     AddPatchSurfaces(ds, sup_co.progress(), sup_co.verbose,
                                      sup_co.num_threads);
-                OECluster::SuperposeMetric metric(ds.dus, opts);
+                OECluster::SuperposeComparison comparison(ds.dus, opts);
                 OEPDist::OutputMetadata meta{
-                    "pdist", metric.Name(), params, ds.labels, ds.labels};
-                exit_code = run_pdist(metric, sup_co.output, meta,
+                    "pdist", comparison.ComparisonName(), params, ds.labels, ds.labels};
+                exit_code = run_pdist(comparison, sup_co.output, meta,
                     sup_co.num_threads, sup_co.chunk_size,
                     sup_co.cutoff, sup_co.progress());
                 return;
@@ -574,10 +574,10 @@ int main(int argc, char** argv) {
                           << sup_co.input1 << std::endl;
                 exit_code = 1; return;
             }
-            OECluster::SuperposeMetric metric(ms.ptrs, opts);
+            OECluster::SuperposeComparison comparison(ms.ptrs, opts);
             OEPDist::OutputMetadata meta{
-                "pdist", metric.Name(), params, ms.labels, ms.labels};
-            exit_code = run_pdist(metric, sup_co.output, meta,
+                "pdist", comparison.ComparisonName(), params, ms.labels, ms.labels};
+            exit_code = run_pdist(comparison, sup_co.output, meta,
                 sup_co.num_threads, sup_co.chunk_size,
                 sup_co.cutoff, sup_co.progress());
         } else {
@@ -597,10 +597,10 @@ int main(int argc, char** argv) {
                 std::vector<std::shared_ptr<OEBio::OEDesignUnit>> all;
                 all.insert(all.end(), sa_du.dus.begin(), sa_du.dus.end());
                 all.insert(all.end(), sb_du.dus.begin(), sb_du.dus.end());
-                OECluster::SuperposeMetric metric(all, opts);
+                OECluster::SuperposeComparison comparison(all, opts);
                 OEPDist::OutputMetadata meta{
-                    "cdist", metric.Name(), params, sa_du.labels, sb_du.labels};
-                exit_code = run_cdist(metric, sa_du.dus.size(), sup_co.output,
+                    "cdist", comparison.ComparisonName(), params, sa_du.labels, sb_du.labels};
+                exit_code = run_cdist(comparison, sa_du.dus.size(), sup_co.output,
                     meta, sup_co.num_threads, sup_co.chunk_size,
                     sup_co.cutoff, sup_co.progress());
                 return;
@@ -614,10 +614,10 @@ int main(int argc, char** argv) {
             std::vector<OEChem::OEMolBase*> all;
             all.insert(all.end(), sa.ptrs.begin(), sa.ptrs.end());
             all.insert(all.end(), sb.ptrs.begin(), sb.ptrs.end());
-            OECluster::SuperposeMetric metric(all, opts);
+            OECluster::SuperposeComparison comparison(all, opts);
             OEPDist::OutputMetadata meta{
-                "cdist", metric.Name(), params, sa.labels, sb.labels};
-            exit_code = run_cdist(metric, sa.ptrs.size(), sup_co.output,
+                "cdist", comparison.ComparisonName(), params, sa.labels, sb.labels};
+            exit_code = run_cdist(comparison, sa.ptrs.size(), sup_co.output,
                 meta, sup_co.num_threads, sup_co.chunk_size,
                 sup_co.cutoff, sup_co.progress());
         }

@@ -233,6 +233,14 @@ public:
     double Get(size_t i, size_t j) const override;
     size_t NumItems() const override;
     size_t NumPairs() const override;
+
+    /**
+     * @brief Return the maximum distance retained by this sparse storage.
+     *
+     * :returns: Sparse distance cutoff.
+     */
+    double Cutoff() const;
+
     double* Data() override;
     const double* Data() const override;
     void Finalize() override;

@@ -22,16 +22,16 @@ class TestPackageImports:
         assert hasattr(oecluster, 'pdist')
         assert hasattr(oecluster, 'DenseStorage')
         assert hasattr(oecluster, 'DistanceMatrix')
-        assert hasattr(oecluster, 'FingerprintMetric')
-        assert hasattr(oecluster, 'ROCSMetric')
-        assert hasattr(oecluster, 'SuperposeMetric')
+        assert hasattr(oecluster, 'FingerprintComparison')
+        assert hasattr(oecluster, 'ROCSComparison')
+        assert hasattr(oecluster, 'SuperposeComparison')
 
 
 class TestNativeMoleculePassing:
     """Verify cross-SWIG-runtime typemaps work for molecule arguments."""
 
-    def test_fingerprint_metric_accepts_oemolbase(self, aspirin_mol, ethanol_mol):
-        """Verify FingerprintMetric accepts OEGraphMol from openeye.oechem.
+    def test_fingerprint_comparison_accepts_oemolbase(self, aspirin_mol, ethanol_mol):
+        """Verify FingerprintComparison accepts OEGraphMol from openeye.oechem.
 
         This test confirms the cross-SWIG-runtime typemap works: molecules
         created by openeye.oechem (SWIG v4) are accepted by our module

@@ -5,11 +5,41 @@
 
 #include <gtest/gtest.h>
 #include "oecluster/oecluster.h"
-#include "oecluster/metrics/FingerprintMetric.h"
+#include "oecluster/comparisons/FingerprintComparison.h"
 #include <oechem.h>
 #include <vector>
 
 using namespace OECluster;
+
+class BulkCDistComparison : public PairwiseComparison {
+public:
+    double Compare(size_t, size_t) override {
+        used_compare = true;
+        return 1.0;
+    }
+
+    bool TryCDist(size_t n_a, double* output, const CDistOptions& options) override {
+        if (n_a != 1) {
+            return false;
+        }
+        output[0] = 0.25;
+        if (options.progress) {
+            options.progress(1, 1);
+        }
+        used_bulk = true;
+        return true;
+    }
+
+    std::unique_ptr<PairwiseComparison> Clone() const override {
+        return std::make_unique<BulkCDistComparison>();
+    }
+
+    size_t Size() const override { return 2; }
+    std::string ComparisonName() const override { return "bulk"; }
+
+    bool used_bulk = false;
+    bool used_compare = false;
+};
 
 class CDistTest : public ::testing::Test {
 protected:
@@ -36,11 +66,11 @@ protected:
 };
 
 TEST_F(CDistTest, OutputShape) {
-    FingerprintMetric metric(mols_);
+    FingerprintComparison comparison(mols_);
     size_t n_a = 2;
     size_t n_b = 3;
     std::vector<double> output(n_a * n_b, -1.0);
-    cdist(metric, n_a, output.data());
+    cdist(comparison, n_a, output.data());
     // All values should be filled (not -1.0)
     for (size_t k = 0; k < n_a * n_b; ++k) {
         EXPECT_GE(output[k], 0.0);
@@ -49,36 +79,36 @@ TEST_F(CDistTest, OutputShape) {
 }
 
 TEST_F(CDistTest, MatchesDirectDistance) {
-    FingerprintMetric metric(mols_);
+    FingerprintComparison comparison(mols_);
     size_t n_a = 2;
     size_t n_b = 3;
     std::vector<double> output(n_a * n_b, 0.0);
-    cdist(metric, n_a, output.data());
+    cdist(comparison, n_a, output.data());
 
-    // Verify output[i * n_b + j] == metric.Distance(i, n_a + j)
+    // Verify output[i * n_b + j] == comparison.Compare(i, n_a + j)
     for (size_t i = 0; i < n_a; ++i) {
         for (size_t j = 0; j < n_b; ++j) {
-            double expected = metric.Distance(i, n_a + j);
+            double expected = comparison.Compare(i, n_a + j);
             EXPECT_DOUBLE_EQ(output[i * n_b + j], expected);
         }
     }
 }
 
 TEST_F(CDistTest, WithCutoff) {
-    FingerprintMetric metric(mols_);
+    FingerprintComparison comparison(mols_);
     size_t n_a = 2;
     size_t n_b = 3;
     std::vector<double> output(n_a * n_b, -1.0);
     CDistOptions opts;
     opts.cutoff = 0.3;
-    cdist(metric, n_a, output.data(), opts);
+    cdist(comparison, n_a, output.data(), opts);
     for (size_t k = 0; k < n_a * n_b; ++k) {
         EXPECT_TRUE(output[k] == 0.0 || output[k] <= 0.3);
     }
 }
 
 TEST_F(CDistTest, ProgressCallback) {
-    FingerprintMetric metric(mols_);
+    FingerprintComparison comparison(mols_);
     size_t n_a = 2;
     size_t n_b = 3;
     std::vector<double> output(n_a * n_b, 0.0);
@@ -92,6 +122,25 @@ TEST_F(CDistTest, ProgressCallback) {
         last_completed = completed;
         last_total = total;
     };
-    cdist(metric, n_a, output.data(), opts);
+    cdist(comparison, n_a, output.data(), opts);
     EXPECT_EQ(last_total, n_a * n_b);
+}
+
+TEST(CDistBulkTest, UsesBulkComparisonWhenAvailable) {
+    BulkCDistComparison comparison;
+    std::vector<double> output(1, 0.0);
+    size_t callback_count = 0;
+    CDistOptions opts;
+    opts.progress = [&](size_t completed, size_t total) {
+        EXPECT_EQ(completed, 1);
+        EXPECT_EQ(total, 1);
+        callback_count++;
+    };
+
+    cdist(comparison, 1, output.data(), opts);
+
+    EXPECT_TRUE(comparison.used_bulk);
+    EXPECT_FALSE(comparison.used_compare);
+    EXPECT_EQ(callback_count, 1);
+    EXPECT_DOUBLE_EQ(output[0], 0.25);
 }

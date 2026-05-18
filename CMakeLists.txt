@@ -116,9 +116,11 @@ set(OECLUSTER_SOURCES
     src/PDist.cpp
     src/CDist.cpp
     src/DistanceMatrix.cpp
-    src/metrics/FingerprintMetric.cpp
-    src/metrics/ROCSMetric.cpp
-    src/metrics/SuperposeMetric.cpp
+    src/comparisons/FingerprintComparison.cpp
+    src/comparisons/ROCSComparison.cpp
+    src/comparisons/SuperposeComparison.cpp
+    src/clustering/ThresholdGraph.cpp
+    src/clustering/Butina.cpp
 )
 
 add_library(oecluster ${OECLUSTER_SOURCES})

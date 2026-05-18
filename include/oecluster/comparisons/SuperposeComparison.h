@@ -1,15 +1,15 @@
 /**
- * @file SuperposeMetric.h
- * @brief Distance metric based on protein superposition using oespruce OESuperpose.
+ * @file SuperposeComparison.h
+ * @brief Pairwise comparison based on protein superposition using OESpruce.
  */
 
-#ifndef OECLUSTER_METRICS_SUPERPOSEMETRIC_H
-#define OECLUSTER_METRICS_SUPERPOSEMETRIC_H
+#ifndef OECLUSTER_COMPARISONS_SUPERPOSECOMPARISON_H
+#define OECLUSTER_COMPARISONS_SUPERPOSECOMPARISON_H
 
 #include <memory>
 #include <string>
 #include <vector>
-#include "oecluster/DistanceMetric.h"
+#include "oecluster/PairwiseComparison.h"
 
 namespace OEBio { class OEDesignUnit; }
 namespace OEChem { class OEMolBase; }
@@ -51,7 +51,7 @@ struct SuperposeOptions {
 };
 
 /**
- * @brief Protein superposition distance metric using oespruce OESuperpose.
+ * @brief Protein superposition pairwise comparison using OESpruce OESuperpose.
  *
  * Supports multiple superposition methods (GlobalCarbonAlpha, Global, DDM,
  * Weighted, SSE, SiteHopper) with configurable score types and atom predicates
@@ -64,7 +64,7 @@ struct SuperposeOptions {
  *
  * Each Clone() creates a new thread-local OESuperpose instance.
  */
-class SuperposeMetric : public DistanceMetric {
+class SuperposeComparison : public PairwiseComparison {
 public:
     using Options = SuperposeOptions;
 
@@ -74,7 +74,7 @@ public:
      * :param dus: Shared pointers to design units.
      * :param opts: Superposition options.
      */
-    explicit SuperposeMetric(
+    explicit SuperposeComparison(
         const std::vector<std::shared_ptr<OEBio::OEDesignUnit>>& dus,
         const Options& opts = Options());
 
@@ -86,16 +86,16 @@ public:
      * :param mols: Pointers to molecules with 3D coordinates.
      * :param opts: Superposition options.
      */
-    explicit SuperposeMetric(
+    explicit SuperposeComparison(
         const std::vector<OEChem::OEMolBase*>& mols,
         const Options& opts = Options());
 
-    ~SuperposeMetric() override;
+    ~SuperposeComparison() override;
 
-    double Distance(size_t i, size_t j) override;
-    std::unique_ptr<DistanceMetric> Clone() const override;
+    double Compare(size_t i, size_t j) override;
+    std::unique_ptr<PairwiseComparison> Clone() const override;
     size_t Size() const override;
-    std::string Name() const override;
+    std::string ComparisonName() const override;
 
 private:
     struct SharedData;
@@ -105,7 +105,7 @@ private:
     Options opts_;
 
     /// Private clone constructor -- shares structure data, creates new OESuperpose.
-    SuperposeMetric(std::shared_ptr<const SharedData> shared, const Options& opts);
+    SuperposeComparison(std::shared_ptr<const SharedData> shared, const Options& opts);
 
     /// Initialize thread-local OESuperpose with configured options.
     void InitSuperpose();
@@ -113,4 +113,4 @@ private:
 
 }  // namespace OECluster
 
-#endif  // OECLUSTER_METRICS_SUPERPOSEMETRIC_H
+#endif  // OECLUSTER_COMPARISONS_SUPERPOSECOMPARISON_H

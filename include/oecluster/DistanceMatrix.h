@@ -17,7 +17,7 @@ class StorageBackend;
 /**
  * @brief Container for a distance matrix with metadata.
  *
- * Wraps a StorageBackend and associates it with a metric name and
+ * Wraps a StorageBackend and associates it with a comparison name and
  * optional item labels.
  */
 class DistanceMatrix {
@@ -26,11 +26,11 @@ public:
      * @brief Construct a DistanceMatrix.
      *
      * :param storage: Owned storage backend containing the distances.
-     * :param metric_name: Name of the metric used to compute distances.
+     * :param comparison_name: Name of the comparison used to compute distances.
      * :param labels: Optional labels for each item.
      */
     DistanceMatrix(std::unique_ptr<StorageBackend> storage,
-                   std::string metric_name,
+                   std::string comparison_name,
                    std::vector<std::string> labels = {});
 
     /**
@@ -48,11 +48,11 @@ public:
     const StorageBackend& Storage() const;
 
     /**
-     * @brief Get the metric name.
+     * @brief Get the comparison name.
      *
-     * :returns: Name of the distance metric.
+     * :returns: Name of the comparison.
      */
-    const std::string& MetricName() const;
+    const std::string& ComparisonName() const;
 
     /**
      * @brief Get the item labels.
@@ -77,7 +77,7 @@ public:
 
 private:
     std::unique_ptr<StorageBackend> storage_;
-    std::string metric_name_;
+    std::string comparison_name_;
     std::vector<std::string> labels_;
 };
 

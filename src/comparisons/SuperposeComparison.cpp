@@ -1,9 +1,9 @@
 /**
- * @file SuperposeMetric.cpp
- * @brief Implementation of protein superposition metric using oespruce OESuperpose.
+ * @file SuperposeComparison.cpp
+ * @brief Implementation of protein superposition comparison using oespruce OESuperpose.
  */
 
-#include "oecluster/metrics/SuperposeMetric.h"
+#include "oecluster/comparisons/SuperposeComparison.h"
 
 #include <oechem.h>
 #include <oebio.h>
@@ -32,7 +32,7 @@ static unsigned int to_oe_method(SuperposeMethod m) {
         case SuperposeMethod::SiteHopper:
             return OESpruce::OESuperposeMethod::SiteHopper;
     }
-    throw MetricError("Unknown SuperposeMethod");
+    throw ComparisonError("Unknown SuperposeMethod");
 }
 
 // ---------------------------------------------------------------------------
@@ -55,7 +55,7 @@ static SuperposeScoreType resolve_score_type(SuperposeMethod method,
         case SuperposeMethod::SiteHopper:
             return SuperposeScoreType::PatchScore;
     }
-    throw MetricError("Unknown SuperposeMethod for score resolution");
+    throw ComparisonError("Unknown SuperposeMethod for score resolution");
 }
 
 // ---------------------------------------------------------------------------
@@ -66,13 +66,13 @@ static void validate_score_type(SuperposeMethod method,
                                  SuperposeScoreType score_type) {
     SuperposeScoreType natural = resolve_score_type(method, SuperposeScoreType::Auto);
     if (score_type != natural) {
-        throw MetricError(
+        throw ComparisonError(
             "Incompatible score type for the selected superposition method");
     }
 }
 
 // ---------------------------------------------------------------------------
-// Helper: method name for Name()
+// Helper: method name for ComparisonName()
 // ---------------------------------------------------------------------------
 
 static std::string method_name(SuperposeMethod m) {
@@ -91,7 +91,7 @@ static std::string method_name(SuperposeMethod m) {
 // SharedData: structures + parsed selections
 // ---------------------------------------------------------------------------
 
-struct SuperposeMetric::SharedData {
+struct SuperposeComparison::SharedData {
     std::vector<std::shared_ptr<OEBio::OEDesignUnit>> dus;
     std::vector<OEChem::OEGraphMol> mols;
     bool use_dus = false;
@@ -107,7 +107,7 @@ struct SuperposeMetric::SharedData {
 // ThreadLocalData: per-clone OESuperpose instance
 // ---------------------------------------------------------------------------
 
-struct SuperposeMetric::ThreadLocalData {
+struct SuperposeComparison::ThreadLocalData {
     OESpruce::OESuperpose superpose;
 
     explicit ThreadLocalData(const OESpruce::OESuperposeOptions& opts)
@@ -118,7 +118,7 @@ struct SuperposeMetric::ThreadLocalData {
 // InitSuperpose
 // ---------------------------------------------------------------------------
 
-void SuperposeMetric::InitSuperpose() {
+void SuperposeComparison::InitSuperpose() {
     SuperposeScoreType resolved = resolve_score_type(opts_.method, opts_.score_type);
     if (opts_.score_type != SuperposeScoreType::Auto) {
         validate_score_type(opts_.method, resolved);
@@ -136,7 +136,7 @@ static OESel::OESelection parse_predicate(const std::string& expr) {
     try {
         return OESel::OESelection::Parse(expr);
     } catch (const std::exception& e) {
-        throw MetricError("SuperposeMetric: invalid predicate: " + expr
+        throw ComparisonError("SuperposeComparison: invalid predicate: " + expr
                           + " (" + e.what() + ")");
     }
 }
@@ -169,12 +169,12 @@ static void init_predicates(OESel::OESelection& ref_sele, bool& has_ref,
     }
 }
 
-SuperposeMetric::SuperposeMetric(
+SuperposeComparison::SuperposeComparison(
     const std::vector<std::shared_ptr<OEBio::OEDesignUnit>>& dus,
     const Options& opts)
     : opts_(opts) {
     if (dus.empty()) {
-        throw MetricError("SuperposeMetric: empty structure list");
+        throw ComparisonError("SuperposeComparison: empty structure list");
     }
 
     auto shared = std::make_shared<SharedData>();
@@ -187,12 +187,12 @@ SuperposeMetric::SuperposeMetric(
     InitSuperpose();
 }
 
-SuperposeMetric::SuperposeMetric(
+SuperposeComparison::SuperposeComparison(
     const std::vector<OEChem::OEMolBase*>& mols,
     const Options& opts)
     : opts_(opts) {
     if (mols.empty()) {
-        throw MetricError("SuperposeMetric: empty structure list");
+        throw ComparisonError("SuperposeComparison: empty structure list");
     }
 
     auto shared = std::make_shared<SharedData>();
@@ -208,7 +208,7 @@ SuperposeMetric::SuperposeMetric(
     InitSuperpose();
 }
 
-SuperposeMetric::SuperposeMetric(
+SuperposeComparison::SuperposeComparison(
     std::shared_ptr<const SharedData> shared,
     const Options& opts)
     : shared_(std::move(shared)),
@@ -216,13 +216,13 @@ SuperposeMetric::SuperposeMetric(
     InitSuperpose();
 }
 
-SuperposeMetric::~SuperposeMetric() = default;
+SuperposeComparison::~SuperposeComparison() = default;
 
 // ---------------------------------------------------------------------------
 // Distance
 // ---------------------------------------------------------------------------
 
-double SuperposeMetric::Distance(size_t i, size_t j) {
+double SuperposeComparison::Compare(size_t i, size_t j) {
     // SetupRef with predicate
     // When predicates are used with design units, extract the protein and use
     // the molecule-based API so OESelect is bound to the same molecule instance
@@ -247,7 +247,7 @@ double SuperposeMetric::Distance(size_t i, size_t j) {
         }
     }
     if (!ref_ok) {
-        throw MetricError("SuperposeMetric: SetupRef failed for structure " +
+        throw ComparisonError("SuperposeComparison: SetupRef failed for structure " +
                           std::to_string(i));
     }
 
@@ -275,7 +275,7 @@ double SuperposeMetric::Distance(size_t i, size_t j) {
         }
     }
     if (!sp_ok) {
-        throw MetricError("SuperposeMetric: Superpose failed for structures " +
+        throw ComparisonError("SuperposeComparison: Superpose failed for structures " +
                           std::to_string(i) + " and " + std::to_string(j));
     }
 
@@ -287,7 +287,7 @@ double SuperposeMetric::Distance(size_t i, size_t j) {
         case SuperposeScoreType::RMSD:
             raw_score = results.GetRMSD();
             if (raw_score < 0.0) {
-                throw MetricError("SuperposeMetric: sentinel RMSD for structures " +
+                throw ComparisonError("SuperposeComparison: sentinel RMSD for structures " +
                                   std::to_string(i) + " and " + std::to_string(j));
             }
             // RMSD: distance = raw, similarity = raw (no-op)
@@ -296,7 +296,7 @@ double SuperposeMetric::Distance(size_t i, size_t j) {
         case SuperposeScoreType::Tanimoto:
             raw_score = results.GetTanimoto();
             if (raw_score < 0.0) {
-                throw MetricError("SuperposeMetric: sentinel Tanimoto for structures " +
+                throw ComparisonError("SuperposeComparison: sentinel Tanimoto for structures " +
                                   std::to_string(i) + " and " + std::to_string(j));
             }
             return opts_.similarity ? raw_score : (1.0 - raw_score);
@@ -305,13 +305,13 @@ double SuperposeMetric::Distance(size_t i, size_t j) {
             raw_score = results.GetTanimoto();
             // SiteHopper returns patch score via GetTanimoto (range [0,4])
             if (raw_score < 0.0) {
-                throw MetricError("SuperposeMetric: sentinel PatchScore for structures " +
+                throw ComparisonError("SuperposeComparison: sentinel PatchScore for structures " +
                                   std::to_string(i) + " and " + std::to_string(j));
             }
             return opts_.similarity ? raw_score : (4.0 - raw_score);
 
         default:
-            throw MetricError("SuperposeMetric: unresolved score type");
+            throw ComparisonError("SuperposeComparison: unresolved score type");
     }
 }
 
@@ -319,16 +319,16 @@ double SuperposeMetric::Distance(size_t i, size_t j) {
 // Clone / Size / Name
 // ---------------------------------------------------------------------------
 
-std::unique_ptr<DistanceMetric> SuperposeMetric::Clone() const {
-    return std::unique_ptr<DistanceMetric>(
-        new SuperposeMetric(shared_, opts_));
+std::unique_ptr<PairwiseComparison> SuperposeComparison::Clone() const {
+    return std::unique_ptr<PairwiseComparison>(
+        new SuperposeComparison(shared_, opts_));
 }
 
-size_t SuperposeMetric::Size() const {
+size_t SuperposeComparison::Size() const {
     return shared_->use_dus ? shared_->dus.size() : shared_->mols.size();
 }
 
-std::string SuperposeMetric::Name() const {
+std::string SuperposeComparison::ComparisonName() const {
     return "superpose:" + method_name(opts_.method);
 }
 

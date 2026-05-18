@@ -13,9 +13,10 @@ add_executable(oecluster_tests
     cpp/test_thread_pool.cpp
     cpp/test_pdist.cpp
     cpp/test_cdist.cpp
-    cpp/test_fingerprint_metric.cpp
-    cpp/test_rocs_metric.cpp
-    cpp/test_bio_metrics.cpp
+    cpp/test_butina_clustering.cpp
+    cpp/test_fingerprint_comparison.cpp
+    cpp/test_rocs_comparison.cpp
+    cpp/test_superpose_comparison.cpp
 )
 
 target_link_libraries(oecluster_tests

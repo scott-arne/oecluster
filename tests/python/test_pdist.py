@@ -15,7 +15,7 @@ def test_dense_storage_roundtrip():
     assert s.NumPairs() == 6
 
 def test_pdist_fingerprint():
-    """Test pdist with default Morgan fingerprint metric on simple molecules."""
+    """Test pdist with default Morgan fingerprint comparison on simple molecules."""
     from openeye import oechem
     import oecluster
 
@@ -29,7 +29,9 @@ def test_pdist_fingerprint():
     dist = oecluster.pdist(mols, "fingerprint")
     assert dist.num_items == 4
     assert len(dist) == 6  # 4*3/2
-    assert dist.metric_name == "fingerprint"
+    assert dist.comparison_name == "fingerprint"
+    removed_metadata_name = "metr" + "ic_name"
+    assert not hasattr(dist, removed_metadata_name)
 
     # Check numpy array protocol
     arr = np.asarray(dist)
@@ -62,6 +64,25 @@ def test_pdist_fingerprint_atom_pair():
     assert np.all(arr >= 0.0)
 
 
+def test_pdist_fingerprint_metric_kwarg():
+    """Test pdist selects the OEFP scalar metric with the metric kwarg."""
+    from openeye import oechem
+    import oecluster
+
+    smiles = ["c1ccccc1", "c1ccc(O)cc1", "CCCCCCCC"]
+    mols = []
+    for smi in smiles:
+        mol = oechem.OEGraphMol()
+        oechem.OESmilesToMol(mol, smi)
+        mols.append(mol)
+
+    dist = oecluster.pdist(mols, "fingerprint", metric="dice")
+    arr = np.asarray(dist)
+    assert dist.num_items == 3
+    assert arr.shape == (3,)
+    assert np.all(arr >= 0.0)
+
+
 def test_pdist_fingerprint_removed_openeye_type_raises():
     """OpenEye fingerprint families are not accepted by oecluster fingerprints."""
     from openeye import oechem
@@ -86,6 +107,20 @@ def test_pdist_fingerprint_rejects_openeye_mask_kwargs():
 
     with pytest.raises(TypeError, match="Unknown kwargs"):
         oecluster.pdist(mols, "fingerprint", atom_type_mask=1)
+
+
+def test_pdist_fingerprint_rejects_similarity_func_kwarg():
+    """The old similarity_func name is not part of the hard-break API."""
+    from openeye import oechem
+    import oecluster
+
+    mols = [oechem.OEGraphMol(), oechem.OEGraphMol()]
+    oechem.OESmilesToMol(mols[0], "C")
+    oechem.OESmilesToMol(mols[1], "CC")
+
+    with pytest.raises(TypeError, match="Unknown kwargs"):
+        oecluster.pdist(mols, "fingerprint", similarity_func="dice")
+
 
 def test_pdist_with_cutoff():
     """Test pdist with cutoff produces sparse result."""
@@ -139,10 +174,11 @@ def test_distance_matrix_serialization(tmp_path):
     np.testing.assert_array_almost_equal(
         np.asarray(dist), np.asarray(loaded)
     )
+    assert loaded.comparison_name == "fingerprint"
 
 
 def test_pdist_fingerprint_similarity():
-    """Test pdist with fingerprint metric in similarity mode."""
+    """Test pdist with fingerprint comparison in similarity mode."""
     from openeye import oechem
     import oecluster
 
@@ -179,7 +215,7 @@ def test_pdist_superpose_sitehopper_alias():
         pytest.skip(f"Cannot read {path}")
 
     dm = oecluster.pdist([du], "sitehopper")
-    assert "sitehopper" in dm.metric_name
+    assert "sitehopper" in dm.comparison_name
 
 
 def test_pdist_superpose_kwargs():
@@ -199,7 +235,7 @@ def test_pdist_superpose_kwargs():
         dus.append(du)
 
     dm = oecluster.pdist(dus, "superpose", method="ddm")
-    assert dm.metric_name == "superpose:ddm"
+    assert dm.comparison_name == "superpose:ddm"
 
 
 def test_pdist_superpose_predicate():

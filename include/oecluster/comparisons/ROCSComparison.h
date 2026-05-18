@@ -1,15 +1,15 @@
 /**
- * @file ROCSMetric.h
- * @brief Distance metric based on OEShape overlay (ROCS-style).
+ * @file ROCSComparison.h
+ * @brief Pairwise comparison based on OEShape overlay (ROCS-style).
  */
 
-#ifndef OECLUSTER_METRICS_ROCSMETRIC_H
-#define OECLUSTER_METRICS_ROCSMETRIC_H
+#ifndef OECLUSTER_COMPARISONS_ROCSCOMPARISON_H
+#define OECLUSTER_COMPARISONS_ROCSCOMPARISON_H
 
 #include <memory>
 #include <string>
 #include <vector>
-#include "oecluster/DistanceMetric.h"
+#include "oecluster/PairwiseComparison.h"
 
 namespace OEChem { class OEMol; }
 
@@ -35,24 +35,24 @@ struct ROCSOptions {
 };
 
 /**
- * @brief ROCS-style shape/color overlay distance metric using OEShape.
+ * @brief ROCS-style shape/color pairwise comparison using OEShape.
  *
  * Stores shared references to molecules and uses ``OEOverlay`` to compute
- * pairwise overlay scores. Distance computation depends on score_type:
+ * pairwise overlay scores. Comparison output depends on score_type and mode:
  *   - ComboNorm: ``1.0 - TanimotoCombo/2.0`` (range [0,1])
  *   - Combo: ``2.0 - TanimotoCombo`` (range [0,2])
  *   - Shape: ``1.0 - ShapeTanimoto`` (range [0,1])
  *   - Color: ``1.0 - ColorTanimoto`` (range [0,1])
  *
- * Each Clone() creates a new ``OEOverlay`` instance so that Distance()
+ * Each Clone() creates a new ``OEOverlay`` instance so that Compare()
  * can be called concurrently from different threads without locking.
  */
-class ROCSMetric : public DistanceMetric {
+class ROCSComparison : public PairwiseComparison {
 public:
     using Options = ROCSOptions;
 
     /**
-     * @brief Construct a ROCSMetric from a set of molecules.
+     * @brief Construct a ROCSComparison from a set of molecules.
      *
      * Molecules are stored by shared_ptr and shared across clones.
      * Each molecule should have 3D coordinates for meaningful results.
@@ -60,15 +60,15 @@ public:
      * :param mols: Shared pointers to molecules.
      * :param opts: Scoring options.
      */
-    explicit ROCSMetric(const std::vector<std::shared_ptr<OEChem::OEMol>>& mols,
+    explicit ROCSComparison(const std::vector<std::shared_ptr<OEChem::OEMol>>& mols,
                         const Options& opts = Options());
 
-    ~ROCSMetric() override;
+    ~ROCSComparison() override;
 
-    double Distance(size_t i, size_t j) override;
-    std::unique_ptr<DistanceMetric> Clone() const override;
+    double Compare(size_t i, size_t j) override;
+    std::unique_ptr<PairwiseComparison> Clone() const override;
     size_t Size() const override;
-    std::string Name() const override;
+    std::string ComparisonName() const override;
 
 private:
     struct SharedData;
@@ -78,7 +78,7 @@ private:
     Options opts_;
 
     /// Private clone constructor -- shares molecule data, creates new overlay.
-    ROCSMetric(std::shared_ptr<const SharedData> shared,
+    ROCSComparison(std::shared_ptr<const SharedData> shared,
                const Options& opts);
 
     /// Initialize OEOverlay with configured options.
@@ -87,4 +87,4 @@ private:
 
 }  // namespace OECluster
 
-#endif  // OECLUSTER_METRICS_ROCSMETRIC_H
+#endif  // OECLUSTER_COMPARISONS_ROCSCOMPARISON_H

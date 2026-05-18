@@ -1,9 +1,9 @@
 /**
- * @file ROCSMetric.cpp
- * @brief Implementation of ROCS-style shape overlay distance metric.
+ * @file ROCSComparison.cpp
+ * @brief Implementation of ROCS-style shape overlay comparison.
  */
 
-#include "oecluster/metrics/ROCSMetric.h"
+#include "oecluster/comparisons/ROCSComparison.h"
 
 #include <oechem.h>
 #include <oeshape.h>
@@ -11,11 +11,11 @@
 
 namespace OECluster {
 
-struct ROCSMetric::SharedData {
+struct ROCSComparison::SharedData {
     std::vector<std::shared_ptr<OEChem::OEMol>> mols;
 };
 
-struct ROCSMetric::ThreadLocalData {
+struct ROCSComparison::ThreadLocalData {
     OEShape::OEOverlayOptions overlay_opts;
     OEShape::OEOverlay overlay;
 
@@ -23,9 +23,9 @@ struct ROCSMetric::ThreadLocalData {
         : overlay_opts(opts), overlay(opts) {}
 };
 
-ROCSMetric::~ROCSMetric() = default;
+ROCSComparison::~ROCSComparison() = default;
 
-void ROCSMetric::InitOverlay() {
+void ROCSComparison::InitOverlay() {
     OEShape::OEOverlayOptions overlay_opts;
 
     // Configure color force field if needed
@@ -40,7 +40,7 @@ void ROCSMetric::InitOverlay() {
     local_ = std::make_unique<ThreadLocalData>(overlay_opts);
 }
 
-ROCSMetric::ROCSMetric(const std::vector<std::shared_ptr<OEChem::OEMol>>& mols,
+ROCSComparison::ROCSComparison(const std::vector<std::shared_ptr<OEChem::OEMol>>& mols,
                        const Options& opts)
     : opts_(opts) {
     auto shared = std::make_shared<SharedData>();
@@ -49,14 +49,14 @@ ROCSMetric::ROCSMetric(const std::vector<std::shared_ptr<OEChem::OEMol>>& mols,
     InitOverlay();
 }
 
-ROCSMetric::ROCSMetric(std::shared_ptr<const SharedData> shared,
+ROCSComparison::ROCSComparison(std::shared_ptr<const SharedData> shared,
                        const Options& opts)
     : shared_(std::move(shared)),
       opts_(opts) {
     InitOverlay();
 }
 
-double ROCSMetric::Distance(size_t i, size_t j) {
+double ROCSComparison::Compare(size_t i, size_t j) {
     local_->overlay.SetupRef(*shared_->mols[i]);
 
     OEShape::OEBestOverlayScore score;
@@ -89,15 +89,15 @@ double ROCSMetric::Distance(size_t i, size_t j) {
     return 0.0;
 }
 
-std::unique_ptr<DistanceMetric> ROCSMetric::Clone() const {
-    return std::unique_ptr<DistanceMetric>(new ROCSMetric(shared_, opts_));
+std::unique_ptr<PairwiseComparison> ROCSComparison::Clone() const {
+    return std::unique_ptr<PairwiseComparison>(new ROCSComparison(shared_, opts_));
 }
 
-size_t ROCSMetric::Size() const {
+size_t ROCSComparison::Size() const {
     return shared_->mols.size();
 }
 
-std::string ROCSMetric::Name() const {
+std::string ROCSComparison::ComparisonName() const {
     return "rocs";
 }
 

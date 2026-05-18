@@ -20,9 +20,9 @@ public:
 };
 
 /**
- * @brief Exception for metric-related failures (Distance, Clone).
+ * @brief Exception for comparison-related failures (Compare, Clone).
  */
-class MetricError : public OEClusterError {
+class ComparisonError : public OEClusterError {
 public:
     using OEClusterError::OEClusterError;
 };

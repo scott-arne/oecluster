@@ -223,6 +223,216 @@ class StringVector(object):
 
 # Register StringVector in _oecluster:
 _oecluster.StringVector_swigregister(StringVector)
+class SizeTVector(object):
+    thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
+    __repr__ = _swig_repr
+
+    def iterator(self):
+        return _oecluster.SizeTVector_iterator(self)
+    def __iter__(self):
+        return self.iterator()
+
+    def __nonzero__(self):
+        return _oecluster.SizeTVector___nonzero__(self)
+
+    def __bool__(self):
+        return _oecluster.SizeTVector___bool__(self)
+
+    def __len__(self):
+        return _oecluster.SizeTVector___len__(self)
+
+    def __getslice__(self, i, j):
+        return _oecluster.SizeTVector___getslice__(self, i, j)
+
+    def __setslice__(self, *args):
+        return _oecluster.SizeTVector___setslice__(self, *args)
+
+    def __delslice__(self, i, j):
+        return _oecluster.SizeTVector___delslice__(self, i, j)
+
+    def __delitem__(self, *args):
+        return _oecluster.SizeTVector___delitem__(self, *args)
+
+    def __getitem__(self, *args):
+        return _oecluster.SizeTVector___getitem__(self, *args)
+
+    def __setitem__(self, *args):
+        return _oecluster.SizeTVector___setitem__(self, *args)
+
+    def pop(self):
+        return _oecluster.SizeTVector_pop(self)
+
+    def append(self, x):
+        return _oecluster.SizeTVector_append(self, x)
+
+    def empty(self):
+        return _oecluster.SizeTVector_empty(self)
+
+    def size(self):
+        return _oecluster.SizeTVector_size(self)
+
+    def swap(self, v):
+        return _oecluster.SizeTVector_swap(self, v)
+
+    def begin(self):
+        return _oecluster.SizeTVector_begin(self)
+
+    def end(self):
+        return _oecluster.SizeTVector_end(self)
+
+    def rbegin(self):
+        return _oecluster.SizeTVector_rbegin(self)
+
+    def rend(self):
+        return _oecluster.SizeTVector_rend(self)
+
+    def clear(self):
+        return _oecluster.SizeTVector_clear(self)
+
+    def get_allocator(self):
+        return _oecluster.SizeTVector_get_allocator(self)
+
+    def pop_back(self):
+        return _oecluster.SizeTVector_pop_back(self)
+
+    def erase(self, *args):
+        return _oecluster.SizeTVector_erase(self, *args)
+
+    def __init__(self, *args):
+        _oecluster.SizeTVector_swiginit(self, _oecluster.new_SizeTVector(*args))
+
+    def push_back(self, x):
+        return _oecluster.SizeTVector_push_back(self, x)
+
+    def front(self):
+        return _oecluster.SizeTVector_front(self)
+
+    def back(self):
+        return _oecluster.SizeTVector_back(self)
+
+    def assign(self, n, x):
+        return _oecluster.SizeTVector_assign(self, n, x)
+
+    def resize(self, *args):
+        return _oecluster.SizeTVector_resize(self, *args)
+
+    def insert(self, *args):
+        return _oecluster.SizeTVector_insert(self, *args)
+
+    def reserve(self, n):
+        return _oecluster.SizeTVector_reserve(self, n)
+
+    def capacity(self):
+        return _oecluster.SizeTVector_capacity(self)
+    __swig_destroy__ = _oecluster.delete_SizeTVector
+
+# Register SizeTVector in _oecluster:
+_oecluster.SizeTVector_swigregister(SizeTVector)
+class ClusterVector(object):
+    thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
+    __repr__ = _swig_repr
+
+    def iterator(self):
+        return _oecluster.ClusterVector_iterator(self)
+    def __iter__(self):
+        return self.iterator()
+
+    def __nonzero__(self):
+        return _oecluster.ClusterVector___nonzero__(self)
+
+    def __bool__(self):
+        return _oecluster.ClusterVector___bool__(self)
+
+    def __len__(self):
+        return _oecluster.ClusterVector___len__(self)
+
+    def __getslice__(self, i, j):
+        return _oecluster.ClusterVector___getslice__(self, i, j)
+
+    def __setslice__(self, *args):
+        return _oecluster.ClusterVector___setslice__(self, *args)
+
+    def __delslice__(self, i, j):
+        return _oecluster.ClusterVector___delslice__(self, i, j)
+
+    def __delitem__(self, *args):
+        return _oecluster.ClusterVector___delitem__(self, *args)
+
+    def __getitem__(self, *args):
+        return _oecluster.ClusterVector___getitem__(self, *args)
+
+    def __setitem__(self, *args):
+        return _oecluster.ClusterVector___setitem__(self, *args)
+
+    def pop(self):
+        return _oecluster.ClusterVector_pop(self)
+
+    def append(self, x):
+        return _oecluster.ClusterVector_append(self, x)
+
+    def empty(self):
+        return _oecluster.ClusterVector_empty(self)
+
+    def size(self):
+        return _oecluster.ClusterVector_size(self)
+
+    def swap(self, v):
+        return _oecluster.ClusterVector_swap(self, v)
+
+    def begin(self):
+        return _oecluster.ClusterVector_begin(self)
+
+    def end(self):
+        return _oecluster.ClusterVector_end(self)
+
+    def rbegin(self):
+        return _oecluster.ClusterVector_rbegin(self)
+
+    def rend(self):
+        return _oecluster.ClusterVector_rend(self)
+
+    def clear(self):
+        return _oecluster.ClusterVector_clear(self)
+
+    def get_allocator(self):
+        return _oecluster.ClusterVector_get_allocator(self)
+
+    def pop_back(self):
+        return _oecluster.ClusterVector_pop_back(self)
+
+    def erase(self, *args):
+        return _oecluster.ClusterVector_erase(self, *args)
+
+    def __init__(self, *args):
+        _oecluster.ClusterVector_swiginit(self, _oecluster.new_ClusterVector(*args))
+
+    def push_back(self, x):
+        return _oecluster.ClusterVector_push_back(self, x)
+
+    def front(self):
+        return _oecluster.ClusterVector_front(self)
+
+    def back(self):
+        return _oecluster.ClusterVector_back(self)
+
+    def assign(self, n, x):
+        return _oecluster.ClusterVector_assign(self, n, x)
+
+    def resize(self, *args):
+        return _oecluster.ClusterVector_resize(self, *args)
+
+    def insert(self, *args):
+        return _oecluster.ClusterVector_insert(self, *args)
+
+    def reserve(self, n):
+        return _oecluster.ClusterVector_reserve(self, n)
+
+    def capacity(self):
+        return _oecluster.ClusterVector_capacity(self)
+    __swig_destroy__ = _oecluster.delete_ClusterVector
+
+# Register ClusterVector in _oecluster:
+_oecluster.ClusterVector_swigregister(ClusterVector)
 class StorageBackend(object):
     thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
 
@@ -337,18 +547,18 @@ class OEClusterError(object):
 
 # Register OEClusterError in _oecluster:
 _oecluster.OEClusterError_swigregister(OEClusterError)
-class MetricError(OEClusterError):
-    r"""Exception for metric-related failures (Distance, Clone)."""
+class ComparisonError(OEClusterError):
+    r"""Exception for comparison-related failures (Compare, Clone)."""
 
     thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
 
     def __init__(self, *args, **kwargs):
         raise AttributeError("No constructor defined")
     __repr__ = _swig_repr
-    __swig_destroy__ = _oecluster.delete_MetricError
+    __swig_destroy__ = _oecluster.delete_ComparisonError
 
-# Register MetricError in _oecluster:
-_oecluster.MetricError_swigregister(MetricError)
+# Register ComparisonError in _oecluster:
+_oecluster.ComparisonError_swigregister(ComparisonError)
 class StorageError(OEClusterError):
     r"""Exception for storage-related failures (MMap, file I/O)."""
 
@@ -361,13 +571,13 @@ class StorageError(OEClusterError):
 
 # Register StorageError in _oecluster:
 _oecluster.StorageError_swigregister(StorageError)
-class DistanceMetric(object):
+class PairwiseComparison(object):
     r"""
-    Abstract base class for distance metrics.
+    Abstract base class for pairwise comparison methods.
 
-    Defines the interface for computing pairwise distances between items.
-    Implementations must be cloneable so that each thread in a parallel
-    computation can own its own scorer objects, avoiding synchronization.
+    Implementations own the data and scorer state needed to compare indexed
+    items. They must be cloneable so each worker thread can evaluate pairs
+    without synchronizing scorer internals.
     """
 
     thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
@@ -375,38 +585,39 @@ class DistanceMetric(object):
     def __init__(self, *args, **kwargs):
         raise AttributeError("No constructor defined - class is abstract")
     __repr__ = _swig_repr
-    __swig_destroy__ = _oecluster.delete_DistanceMetric
+    __swig_destroy__ = _oecluster.delete_PairwiseComparison
 
-    def Distance(self, i, j):
+    def Compare(self, i, j):
         r"""
-        Compute distance between items i and j.
+        Compare items i and j.
 
-        Must be thread-safe when called on a Clone()'d instance.
+        The returned scalar follows the comparison's configured output mode,
+        usually distance or similarity.
 
         :param i: Index of first item.
         :param j: Index of second item.
-        :returns: Distance value between items i and j.
+        :returns: Comparison value between items i and j.
         """
-        return _oecluster.DistanceMetric_Distance(self, i, j)
+        return _oecluster.PairwiseComparison_Compare(self, i, j)
 
     def Size(self):
         r"""
-        Number of items loaded into this metric.
+        Number of items loaded into this comparison.
 
         :returns: Number of items.
         """
-        return _oecluster.DistanceMetric_Size(self)
+        return _oecluster.PairwiseComparison_Size(self)
 
-    def Name(self):
+    def ComparisonName(self):
         r"""
-        Human-readable metric name.
+        Human-readable comparison name.
 
-        :returns: Name of the metric.
+        :returns: Name of the comparison.
         """
-        return _oecluster.DistanceMetric_Name(self)
+        return _oecluster.PairwiseComparison_ComparisonName(self)
 
-# Register DistanceMetric in _oecluster:
-_oecluster.DistanceMetric_swigregister(DistanceMetric)
+# Register PairwiseComparison in _oecluster:
+_oecluster.PairwiseComparison_swigregister(PairwiseComparison)
 class ThreadPool(object):
     thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
     __repr__ = _swig_repr
@@ -470,8 +681,8 @@ class DistanceMatrix(object):
     def Storage(self):
         return _oecluster.DistanceMatrix_Storage(self)
 
-    def MetricName(self):
-        return _oecluster.DistanceMatrix_MetricName(self)
+    def ComparisonName(self):
+        return _oecluster.DistanceMatrix_ComparisonName(self)
 
     def Labels(self):
         return _oecluster.DistanceMatrix_Labels(self)
@@ -494,7 +705,7 @@ class FingerprintOptions(object):
     numbits = property(_oecluster.FingerprintOptions_numbits_get, _oecluster.FingerprintOptions_numbits_set)
     min_distance = property(_oecluster.FingerprintOptions_min_distance_get, _oecluster.FingerprintOptions_min_distance_set)
     max_distance = property(_oecluster.FingerprintOptions_max_distance_get, _oecluster.FingerprintOptions_max_distance_set)
-    similarity_func = property(_oecluster.FingerprintOptions_similarity_func_get, _oecluster.FingerprintOptions_similarity_func_set, doc=r"""Similarity function name""")
+    metric = property(_oecluster.FingerprintOptions_metric_get, _oecluster.FingerprintOptions_metric_set, doc=r"""OEFP scalar metric name.""")
     similarity = property(_oecluster.FingerprintOptions_similarity_get, _oecluster.FingerprintOptions_similarity_set, doc=r"""Return raw similarity instead of distance""")
 
     def __init__(self):
@@ -503,14 +714,13 @@ class FingerprintOptions(object):
 
 # Register FingerprintOptions in _oecluster:
 _oecluster.FingerprintOptions_swigregister(FingerprintOptions)
-class FingerprintMetric(DistanceMetric):
+class FingerprintComparison(PairwiseComparison):
     r"""
-    Fingerprint-based distance metric using OEFP fingerprints.
+    Fingerprint-based pairwise comparison using OEFP fingerprints.
 
     Computes all molecular fingerprints upfront during construction, then
-    returns a distance value based on the configured similarity metric.
-    The fingerprint data is immutable and shared across clones via
-    ``std::shared_ptr``.
+    delegates scalar and batch comparisons to OEFP. The fingerprint data is
+    immutable and shared across clones via ``std::shared_ptr``.
     """
 
     thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
@@ -518,29 +728,29 @@ class FingerprintMetric(DistanceMetric):
 
     def __init__(self, *args):
         r"""
-        Construct a FingerprintMetric from a set of molecules.
+        Construct a FingerprintComparison from a set of molecules.
 
         Generates fingerprints for every molecule in *mols* using the
         fingerprint type and parameters specified by *opts*.
 
         :param mols: Pointers to molecules (not owned).
         :param opts: Fingerprint options.
-        :raises MetricError: If fingerprint generation fails for any molecule.
+        :raises ComparisonError: If fingerprint generation fails for any molecule.
         """
-        _oecluster.FingerprintMetric_swiginit(self, _oecluster.new_FingerprintMetric(*args))
+        _oecluster.FingerprintComparison_swiginit(self, _oecluster.new_FingerprintComparison(*args))
 
-    def Distance(self, i, j):
-        return _oecluster.FingerprintMetric_Distance(self, i, j)
+    def Compare(self, i, j):
+        return _oecluster.FingerprintComparison_Compare(self, i, j)
 
     def Size(self):
-        return _oecluster.FingerprintMetric_Size(self)
+        return _oecluster.FingerprintComparison_Size(self)
 
-    def Name(self):
-        return _oecluster.FingerprintMetric_Name(self)
-    __swig_destroy__ = _oecluster.delete_FingerprintMetric
+    def ComparisonName(self):
+        return _oecluster.FingerprintComparison_ComparisonName(self)
+    __swig_destroy__ = _oecluster.delete_FingerprintComparison
 
-# Register FingerprintMetric in _oecluster:
-_oecluster.FingerprintMetric_swigregister(FingerprintMetric)
+# Register FingerprintComparison in _oecluster:
+_oecluster.FingerprintComparison_swigregister(FingerprintComparison)
 ROCSScoreType_ComboNorm = _oecluster.ROCSScoreType_ComboNorm
 r"""TanimotoCombo normalized to [0,1]: distance = 1.0 - combo/2.0"""
 ROCSScoreType_Combo = _oecluster.ROCSScoreType_Combo
@@ -564,18 +774,18 @@ class ROCSOptions(object):
 
 # Register ROCSOptions in _oecluster:
 _oecluster.ROCSOptions_swigregister(ROCSOptions)
-class ROCSMetric(DistanceMetric):
+class ROCSComparison(PairwiseComparison):
     r"""
-    ROCS-style shape/color overlay distance metric using OEShape.
+    ROCS-style shape/color pairwise comparison using OEShape.
 
     Stores shared references to molecules and uses ``OEOverlay`` to compute
-    pairwise overlay scores. Distance computation depends on score_type:
+    pairwise overlay scores. Comparison output depends on score_type and mode:
       - ComboNorm: ``1.0 - TanimotoCombo/2.0`` (range [0,1])
       - Combo: ``2.0 - TanimotoCombo`` (range [0,2])
       - Shape: ``1.0 - ShapeTanimoto`` (range [0,1])
       - Color: ``1.0 - ColorTanimoto`` (range [0,1])
 
-    Each Clone() creates a new ``OEOverlay`` instance so that Distance()
+    Each Clone() creates a new ``OEOverlay`` instance so that Compare()
     can be called concurrently from different threads without locking.
     """
 
@@ -584,7 +794,7 @@ class ROCSMetric(DistanceMetric):
 
     def __init__(self, *args):
         r"""
-        Construct a ROCSMetric from a set of molecules.
+        Construct a ROCSComparison from a set of molecules.
 
         Molecules are stored by shared_ptr and shared across clones.
         Each molecule should have 3D coordinates for meaningful results.
@@ -592,20 +802,20 @@ class ROCSMetric(DistanceMetric):
         :param mols: Shared pointers to molecules.
         :param opts: Scoring options.
         """
-        _oecluster.ROCSMetric_swiginit(self, _oecluster.new_ROCSMetric(*args))
-    __swig_destroy__ = _oecluster.delete_ROCSMetric
+        _oecluster.ROCSComparison_swiginit(self, _oecluster.new_ROCSComparison(*args))
+    __swig_destroy__ = _oecluster.delete_ROCSComparison
 
-    def Distance(self, i, j):
-        return _oecluster.ROCSMetric_Distance(self, i, j)
+    def Compare(self, i, j):
+        return _oecluster.ROCSComparison_Compare(self, i, j)
 
     def Size(self):
-        return _oecluster.ROCSMetric_Size(self)
+        return _oecluster.ROCSComparison_Size(self)
 
-    def Name(self):
-        return _oecluster.ROCSMetric_Name(self)
+    def ComparisonName(self):
+        return _oecluster.ROCSComparison_ComparisonName(self)
 
-# Register ROCSMetric in _oecluster:
-_oecluster.ROCSMetric_swigregister(ROCSMetric)
+# Register ROCSComparison in _oecluster:
+_oecluster.ROCSComparison_swigregister(ROCSComparison)
 SuperposeMethod_GlobalCarbonAlpha = _oecluster.SuperposeMethod_GlobalCarbonAlpha
 r"""All matched alpha carbon atoms (default)"""
 SuperposeMethod_Global = _oecluster.SuperposeMethod_Global
@@ -644,9 +854,9 @@ class SuperposeOptions(object):
 
 # Register SuperposeOptions in _oecluster:
 _oecluster.SuperposeOptions_swigregister(SuperposeOptions)
-class SuperposeMetric(DistanceMetric):
+class SuperposeComparison(PairwiseComparison):
     r"""
-    Protein superposition distance metric using oespruce OESuperpose.
+    Protein superposition pairwise comparison using OESpruce OESuperpose.
 
     Supports multiple superposition methods (GlobalCarbonAlpha, Global, DDM,
     Weighted, SSE, SiteHopper) with configurable score types and atom predicates
@@ -694,24 +904,50 @@ class SuperposeMetric(DistanceMetric):
         :param mols: Pointers to molecules with 3D coordinates.
         :param opts: Superposition options.
         """
-        _oecluster.SuperposeMetric_swiginit(self, _oecluster.new_SuperposeMetric(*args))
-    __swig_destroy__ = _oecluster.delete_SuperposeMetric
+        _oecluster.SuperposeComparison_swiginit(self, _oecluster.new_SuperposeComparison(*args))
+    __swig_destroy__ = _oecluster.delete_SuperposeComparison
 
-    def Distance(self, i, j):
-        return _oecluster.SuperposeMetric_Distance(self, i, j)
+    def Compare(self, i, j):
+        return _oecluster.SuperposeComparison_Compare(self, i, j)
 
     def Size(self):
-        return _oecluster.SuperposeMetric_Size(self)
+        return _oecluster.SuperposeComparison_Size(self)
 
-    def Name(self):
-        return _oecluster.SuperposeMetric_Name(self)
+    def ComparisonName(self):
+        return _oecluster.SuperposeComparison_ComparisonName(self)
 
-# Register SuperposeMetric in _oecluster:
-_oecluster.SuperposeMetric_swigregister(SuperposeMetric)
+# Register SuperposeComparison in _oecluster:
+_oecluster.SuperposeComparison_swigregister(SuperposeComparison)
+class ButinaOptions(object):
+    r"""Options for Butina clustering."""
+
+    thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
+    __repr__ = _swig_repr
+    distance_threshold = property(_oecluster.ButinaOptions_distance_threshold_get, _oecluster.ButinaOptions_distance_threshold_set)
+    reordering = property(_oecluster.ButinaOptions_reordering_get, _oecluster.ButinaOptions_reordering_set)
+    num_threads = property(_oecluster.ButinaOptions_num_threads_get, _oecluster.ButinaOptions_num_threads_set)
+    chunk_size = property(_oecluster.ButinaOptions_chunk_size_get, _oecluster.ButinaOptions_chunk_size_set)
+
+    def __init__(self):
+        _oecluster.ButinaOptions_swiginit(self, _oecluster.new_ButinaOptions())
+    __swig_destroy__ = _oecluster.delete_ButinaOptions
+
+# Register ButinaOptions in _oecluster:
+_oecluster.ButinaOptions_swigregister(ButinaOptions)
+
+def butina_cluster(storage, options):
+    r"""
+    Cluster a precomputed distance matrix with the Butina algorithm.
+
+    :param storage: Pairwise distance storage.
+    :param options: Butina clustering options.
+    :returns: Clusters where the first member is the centroid.
+    """
+    return _oecluster.butina_cluster(storage, options)
 OECLUSTER_VERSION_MAJOR = _oecluster.OECLUSTER_VERSION_MAJOR
 OECLUSTER_VERSION_MINOR = _oecluster.OECLUSTER_VERSION_MINOR
 OECLUSTER_VERSION_PATCH = _oecluster.OECLUSTER_VERSION_PATCH
 
-__version__ = "3.1.7"
+__version__ = "3.3.0"
 
 

@@ -42,7 +42,7 @@ void WriteSidecar(const std::string& path,
     if (!f) throw std::runtime_error("Failed to write: " + path);
     f << "{\n";
     f << "  \"mode\": \"" << meta.mode << "\",\n";
-    f << "  \"metric\": \"" << meta.metric << "\",\n";
+    f << "  \"comparison\": \"" << meta.comparison << "\",\n";
     f << "  \"params\": " << meta.params_json << ",\n";
     f << "  \"n_rows\": " << n_rows << ",\n";
     f << "  \"n_cols\": " << n_cols << ",\n";

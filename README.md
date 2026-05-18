@@ -21,7 +21,7 @@ library, Python bindings, and a command-line interface.
   - [Python API](#python-api)
   - [Command-Line Tool (oepdist)](#command-line-tool-oepdist)
   - [C++ API](#c-api)
-- [Distance Metrics](#distance-metrics)
+- [Comparison Methods](#comparison-methods)
 - [Storage Backends](#storage-backends)
 - [Project Structure](#project-structure)
 - [License](#license)
@@ -30,9 +30,9 @@ library, Python bindings, and a command-line interface.
 
 ## Features
 
-- **Four distance metrics** for molecular comparison:
+- **Four comparison methods** for molecular data:
   - **Fingerprint** -- OEFP-backed Morgan and Atom Pair fingerprints with
-    Tanimoto/Jaccard, Dice, Cosine, or Manhattan comparison.
+    OEFP-owned scalar and batch comparison kernels.
   - **ROCS** -- 3D shape and color overlay using OEShape with configurable
     scoring (ComboNorm, Combo, Shape, Color).
   - **Superpose** -- Protein superposition RMSD via sequence alignment and
@@ -40,7 +40,7 @@ library, Python bindings, and a command-line interface.
   - **SiteHopper** -- Binding site RMSD comparison from design units.
 
 - **Parallel computation** with automatic hardware concurrency detection,
-  dynamic chunk-based scheduling, and per-thread metric cloning for
+  dynamic chunk-based scheduling, and per-thread comparison cloning for
   lock-free execution.
 
 - **Flexible storage**: dense in-memory, memory-mapped files for out-of-core
@@ -176,18 +176,33 @@ dm = oecluster.pdist(
     mols,
     "fingerprint",
     fp_type="morgan",
-    similarity_func="tanimoto",
+    metric="tanimoto",
     num_threads=8,
     cutoff=0.7,
     progress=lambda done, total: print(f"{done}/{total}")
 )
 ```
 
+### Clustering
+
+OECluster includes clustering algorithms that operate on precomputed
+`DistanceMatrix` objects. Butina is the first algorithm in this module.
+
+```python
+dm = oecluster.pdist(mols, "fingerprint", metric="tanimoto", num_threads=8)
+clusters = oecluster.butina(dm, threshold=0.35, reordering=False)
+
+for cluster in clusters:
+    centroid = cluster[0]
+    members = cluster[1:]
+    print(centroid, members)
+```
+
 **Cross-distance (NxM) via C++ bindings:**
 
 ```python
 from oecluster.oecluster import (
-    FingerprintMetric, FingerprintOptions,
+    FingerprintComparison, FingerprintOptions,
     CDistOptions, cdist
 )
 import numpy as np
@@ -197,10 +212,10 @@ opts.fp_type = "morgan"
 
 # Concatenate both sets: [set_a... , set_b...]
 all_mols = list_a + list_b
-metric = FingerprintMetric([m for m in all_mols], opts)
+comparison = FingerprintComparison([m for m in all_mols], opts)
 
 output = np.zeros(len(list_a) * len(list_b))
-cdist(metric, len(list_a), output)
+cdist(comparison, len(list_a), output)
 result = output.reshape(len(list_a), len(list_b))
 ```
 
@@ -215,28 +230,27 @@ Subcommands:
   fp            Fingerprint distance
   rocs          ROCS shape overlay distance
   superpose     Protein superposition RMSD
-  sitehopper    Binding site RMSD
 ```
 
 **Fingerprint distance (NxN):**
 
 ```bash
 oepdist fp molecules.sdf -o distances.npy \
-  --fp-type morgan --similarity tanimoto --threads 8
+  --fp-type morgan --metric tanimoto --threads 8
 ```
 
 **ROCS shape overlay (NxN):**
 
 ```bash
 oepdist rocs conformers.oeb -o shape_dist.npy \
-  --score-type combonorm
+  --score combo_norm
 ```
 
 **Protein superposition (NxN):**
 
 ```bash
 oepdist superpose structures.oeb -o rmsd.npy \
-  --alignment-method pam250 --only-calpha
+  --method global_carbon_alpha
 ```
 
 **Cross-distance (NxM) -- supply two input files:**
@@ -261,17 +275,17 @@ oepdist fp queries.sdf targets.sdf -o cross_dist.npy
 // Load molecules into a vector<OEChem::OEMolBase*>
 std::vector<OEChem::OEMolBase*> mols = /* ... */;
 
-// Create metric
+// Create comparison
 OECluster::FingerprintOptions opts;
 opts.fp_type = "morgan";
-opts.similarity_func = "tanimoto";
-OECluster::FingerprintMetric metric(mols, opts);
+opts.metric = "tanimoto";
+OECluster::FingerprintComparison comparison(mols, opts);
 
 // Allocate storage and compute
 OECluster::DenseStorage storage(mols.size());
 OECluster::PDistOptions pdist_opts;
 pdist_opts.num_threads = 8;
-OECluster::pdist(metric, storage, pdist_opts);
+OECluster::pdist(comparison, storage, pdist_opts);
 
 // Access results
 for (size_t i = 0; i < mols.size(); ++i)
@@ -281,20 +295,21 @@ for (size_t i = 0; i < mols.size(); ++i)
 
 ---
 
-## Distance Metrics
+## Comparison Methods
 
 ### Fingerprint
 
 | Parameter      | Values                                              | Default    |
 |----------------|-----------------------------------------------------|------------|
 | `fp_type`      | morgan, atom_pair                                   | morgan     |
-| `similarity_func` | tanimoto, dice, cosine, manhattan                | tanimoto   |
+| `metric`       | tanimoto, dice, manhattan                        | tanimoto   |
 | `numbits`      | Fingerprint size                                    | 2048       |
 | `min_distance`  | Minimum Atom Pair graph distance                   | 0          |
 | `max_distance`  | Morgan radius or maximum Atom Pair graph distance  | 2          |
 
-Distance mode maps Tanimoto to Jaccard distance, uses `1.0 - similarity` for
-Dice/Cosine, and returns raw Manhattan distance.
+Distance mode maps Tanimoto to Jaccard distance, uses OEFP's Dice distance for
+Dice, and returns raw Manhattan distance. Similarity mode is supported for
+Tanimoto.
 
 ### ROCS
 
@@ -309,18 +324,18 @@ Distance ranges: ComboNorm [0,1], Combo [0,2], Shape [0,1], Color [0,1].
 
 | Parameter          | Values                                   | Default  |
 |--------------------|------------------------------------------|----------|
-| `alignment_method` | PAM250 (2), BLOSUM62 (3), Gonnet, Identity| PAM250  |
-| `gap_penalty`      | Sequence alignment gap penalty           | -10      |
-| `extend_penalty`   | Gap extension penalty                    | -2       |
-| `only_calpha`      | Use only C-alpha atoms                   | true     |
-| `overlay`          | Superpose structures before RMSD         | true     |
+| `method`           | global_carbon_alpha, global, ddm, weighted, sse, sitehopper | global_carbon_alpha |
+| `score_type`       | auto, rmsd, tanimoto, patch_score        | auto     |
+| `predicate`        | oeselect atom selection expression       | empty    |
+| `ref_predicate`    | Reference atom selection override        | empty    |
+| `fit_predicate`    | Fit atom selection override              | empty    |
 
 Accepts molecules directly or design units (protein component extracted automatically).
 
 ### SiteHopper
 
-Same alignment parameters as Superpose. Accepts design units only; always
-performs overlay. Extracts and compares binding site protein components.
+Use `method="sitehopper"` in the superpose comparison. It accepts design units,
+generates patch surfaces when needed, and compares binding-site patch scores.
 
 ---
 
@@ -342,9 +357,9 @@ All backends use scipy-compatible condensed distance matrix indexing
 ```
 oecluster/
   include/oecluster/         C++ public headers
-    metrics/                  Metric-specific headers
+    comparisons/             Comparison-specific headers
   src/                        C++ implementation
-    metrics/                  Metric implementations
+    comparisons/             Comparison implementations
   tools/                      CLI tool (oepdist)
   swig/                       SWIG interface for Python bindings
   python/oecluster/           Python package

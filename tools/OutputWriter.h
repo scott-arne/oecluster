@@ -9,7 +9,7 @@ namespace OEPDist {
 
 struct OutputMetadata {
     std::string mode;
-    std::string metric;
+    std::string comparison;
     std::string params_json;
     std::vector<std::string> row_labels;
     std::vector<std::string> col_labels;

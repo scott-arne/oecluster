@@ -3,8 +3,8 @@ oecluster: High-performance pairwise distance computation for molecular datasets
 
 This package provides efficient computation of pairwise distance matrices for
 molecular and protein structure datasets using OpenEye toolkits. It supports
-multiple distance metrics including fingerprint similarity, ROCS shape overlay,
-protein superposition, and binding site comparison.
+multiple comparison methods including fingerprint similarity, ROCS shape
+overlay, protein superposition, and binding site comparison.
 """
 
 import json
@@ -38,9 +38,11 @@ __all__ = [
     "PDistOptions",
     "DistanceMatrix",
     "pdist",
-    "FingerprintMetric",
-    "ROCSMetric",
-    "SuperposeMetric",
+    "butina",
+    "ButinaOptions",
+    "FingerprintComparison",
+    "ROCSComparison",
+    "SuperposeComparison",
 ]
 
 
@@ -556,7 +558,9 @@ try:
         MMapStorage,
         SparseStorage,
         PDistOptions,
+        ButinaOptions,
         pdist as _cpp_pdist,
+        butina_cluster as _butina_cluster,
     )
 except ImportError as e:
     raise ImportError(
@@ -566,33 +570,33 @@ except ImportError as e:
 
 from . import oecluster as _oecluster
 
-from .oecluster import FingerprintMetric as _FingerprintMetric
+from .oecluster import FingerprintComparison as _FingerprintComparison
 from .oecluster import FingerprintOptions
-from .oecluster import ROCSMetric as _ROCSMetric
+from .oecluster import ROCSComparison as _ROCSComparison
 from .oecluster import ROCSOptions
-from .oecluster import SuperposeMetric as _SuperposeMetric
+from .oecluster import SuperposeComparison as _SuperposeComparison
 from .oecluster import SuperposeOptions
 
 
 class DistanceMatrix:
     """
-    A distance matrix computed from a set of items using a specific metric.
+    A distance matrix computed from a set of items using a comparison method.
 
     Provides zero-copy access to condensed distance matrix data via numpy arrays,
     conversion to scipy sparse matrices, and serialization support.
     """
 
-    def __init__(self, storage, metric_name, labels=None, params=None):
+    def __init__(self, storage, comparison_name, labels=None, params=None):
         """
         Construct a DistanceMatrix wrapper.
 
         :param storage: C++ StorageBackend instance.
-        :param metric_name: Name of the distance metric used.
+        :param comparison_name: Name of the comparison method used.
         :param labels: Optional list of labels for items.
-        :param params: Optional dictionary of metric parameters.
+        :param params: Optional dictionary of comparison parameters.
         """
         self._storage = storage
-        self._metric_name = metric_name
+        self._comparison_name = comparison_name
         self._labels = labels if labels is not None else []
         self._params = params if params is not None else {}
         self._condensed_cache = None
@@ -603,13 +607,13 @@ class DistanceMatrix:
         return self._storage
 
     @property
-    def metric_name(self):
-        """Get the name of the distance metric."""
-        return self._metric_name
+    def comparison_name(self):
+        """Get the name of the comparison method."""
+        return self._comparison_name
 
     @property
     def params(self):
-        """Get the metric parameters dictionary."""
+        """Get the comparison parameters dictionary."""
         return self._params
 
     @property
@@ -769,7 +773,7 @@ class DistanceMatrix:
         np.savez_compressed(
             path,
             condensed=self.condensed,
-            metric_name=np.array(self._metric_name),
+            comparison_name=np.array(self._comparison_name),
             params_json=np.array(json.dumps(self._params)),
             labels=np.array(self._labels),
             num_items=np.array(self.num_items),
@@ -786,7 +790,7 @@ class DistanceMatrix:
         data = np.load(path, allow_pickle=False)
         condensed = data['condensed']
 
-        metric_name = str(data['metric_name'])
+        comparison_name = str(data['comparison_name'])
         labels = list(data.get('labels', np.array([])))
 
         try:
@@ -803,7 +807,7 @@ class DistanceMatrix:
                 storage.Set(i, j, float(condensed[idx]))
                 idx += 1
 
-        return cls(storage, metric_name, labels, params)
+        return cls(storage, comparison_name, labels, params)
 
     def __array__(self):
         """Support numpy array interface."""
@@ -814,7 +818,7 @@ class DistanceMatrix:
         return self.num_pairs
 
     def __repr__(self):
-        return (f"DistanceMatrix(metric={self._metric_name!r}, "
+        return (f"DistanceMatrix(comparison={self._comparison_name!r}, "
                 f"num_items={self.num_items}, num_pairs={self.num_pairs})")
 
 
@@ -845,7 +849,7 @@ def _extract_labels(items):
 
 
 def pdist(items,
-          metric,
+          comparison,
           *,
           similarity=False,
           num_threads=0,
@@ -855,28 +859,28 @@ def pdist(items,
           progress=None,
           **kwargs) -> DistanceMatrix:
     """
-    Compute pairwise distances for a collection of items using a specified metric.
+    Compute pairwise distances for a collection of items using a comparison.
 
     :param items: List of molecules, design units, or other items.
-    :param metric: Distance metric: "fingerprint", "rocs", "superpose",
-                   "sitehopper", or a C++ metric object.
+    :param comparison: Comparison method: "fingerprint", "rocs", "superpose",
+                       "sitehopper", or a C++ comparison object.
     :param similarity: Return similarities instead of distances.
     :param num_threads: Number of threads (0 = auto).
     :param chunk_size: Pairs per work unit.
     :param cutoff: Distance cutoff for sparse storage (0 = store all).
     :param output: Optional file path for memory-mapped storage.
     :param progress: Optional callback(completed, total).
-    :param kwargs: Metric-specific options.
+    :param kwargs: Comparison-specific options.
     :returns: DistanceMatrix with computed distances/similarities.
     :raises TypeError: If unknown kwargs are passed.
     """
-    if isinstance(metric, str):
-        metric_lower = metric.lower()
+    if isinstance(comparison, str):
+        comparison_lower = comparison.lower()
         labels = _extract_labels(items)
-        params = {'metric_type': metric_lower, 'similarity': similarity}
-        metric_obj: Any
+        params = {'comparison_type': comparison_lower, 'similarity': similarity}
+        comparison_obj: Any
 
-        if metric_lower == "fingerprint":
+        if comparison_lower == "fingerprint":
             fp_opts = FingerprintOptions()
             fp_opts.similarity = similarity
             if 'fp_type' in kwargs:
@@ -887,15 +891,15 @@ def pdist(items,
                 fp_opts.min_distance = kwargs.pop('min_distance')
             if 'max_distance' in kwargs:
                 fp_opts.max_distance = kwargs.pop('max_distance')
-            if 'similarity_func' in kwargs:
-                fp_opts.similarity_func = kwargs.pop('similarity_func')
+            if 'metric' in kwargs:
+                fp_opts.metric = kwargs.pop('metric')
             if kwargs:
                 raise TypeError(
-                    f"Unknown kwargs for fingerprint metric: {list(kwargs)}")
-            metric_obj = _FingerprintMetric(items, fp_opts)
-            metric_name = "fingerprint"
+                    f"Unknown kwargs for fingerprint comparison: {list(kwargs)}")
+            comparison_obj = _FingerprintComparison(items, fp_opts)
+            comparison_name = "fingerprint"
 
-        elif metric_lower == "rocs":
+        elif comparison_lower == "rocs":
             rocs_opts = ROCSOptions()
             rocs_opts.similarity = similarity
             if 'score_type' in kwargs:
@@ -913,15 +917,15 @@ def pdist(items,
                 rocs_opts.color_ff_type = kwargs.pop('color_ff_type')
             if kwargs:
                 raise TypeError(
-                    f"Unknown kwargs for rocs metric: {list(kwargs)}")
-            metric_obj = _ROCSMetric(items, rocs_opts)
-            metric_name = "rocs"
+                    f"Unknown kwargs for rocs comparison: {list(kwargs)}")
+            comparison_obj = _ROCSComparison(items, rocs_opts)
+            comparison_name = "rocs"
 
-        elif metric_lower in ("superpose", "sitehopper"):
+        elif comparison_lower in ("superpose", "sitehopper"):
             superpose_opts = SuperposeOptions()
             superpose_opts.similarity = similarity
             method = kwargs.pop('method', None)
-            if metric_lower == "sitehopper":
+            if comparison_lower == "sitehopper":
                 method = method or "sitehopper"
             if method is not None:
                 method_map = {
@@ -954,22 +958,22 @@ def pdist(items,
                 superpose_opts.fit_predicate = kwargs.pop('fit_predicate')
             if kwargs:
                 raise TypeError(
-                    f"Unknown kwargs for superpose metric: {list(kwargs)}")
-            metric_obj = _SuperposeMetric(items, superpose_opts)
-            metric_name = metric_obj.Name()
+                    f"Unknown kwargs for superpose comparison: {list(kwargs)}")
+            comparison_obj = _SuperposeComparison(items, superpose_opts)
+            comparison_name = comparison_obj.ComparisonName()
 
         else:
             raise ValueError(
-                f"Unknown metric: {metric!r}. "
+                f"Unknown comparison: {comparison!r}. "
                 f"Valid options: 'fingerprint', 'rocs', 'superpose', 'sitehopper'")
 
     else:
-        metric_obj = metric
-        metric_name = metric_obj.Name()
+        comparison_obj = comparison
+        comparison_name = comparison_obj.ComparisonName()
         labels = []
         params = {}
 
-    n = metric_obj.Size()
+    n = comparison_obj.Size()
 
     storage: Any
     if output is not None:
@@ -986,53 +990,95 @@ def pdist(items,
     if progress is not None:
         options.progress = progress
 
-    _cpp_pdist(metric_obj, storage, options)
-    return DistanceMatrix(storage, metric_name, labels, params)
+    _cpp_pdist(comparison_obj, storage, options)
+    return DistanceMatrix(storage, comparison_name, labels, params)
 
 
-# Python wrapper classes for metric construction
-class FingerprintMetric:
-    """Fingerprint-based distance metric using Tanimoto similarity."""
+def butina(distance_matrix, threshold, *, reordering=False,
+           num_threads=0, chunk_size=4096):
+    """
+    Cluster a precomputed distance matrix using the Butina algorithm.
 
-    def __new__(cls, mols, *, fp_type=None, similarity=False):
+    :param distance_matrix: DistanceMatrix returned by :func:`pdist`.
+    :param threshold: Maximum distance for two items to be neighbors.
+    :param reordering: Recompute candidate neighbor counts after each cluster.
+    :param num_threads: Thread count for threshold graph construction.
+    :param chunk_size: Condensed-distance pairs per work unit.
+    :returns: Tuple of clusters. The first item in each cluster is the centroid.
+    :raises TypeError: If distance_matrix is not a DistanceMatrix.
+    :raises ValueError: If threshold is negative.
+    """
+    if threshold < 0.0:
+        raise ValueError("Butina threshold must be non-negative")
+    if not isinstance(distance_matrix, DistanceMatrix):
+        raise TypeError("butina() expects a DistanceMatrix")
+
+    options = ButinaOptions()
+    options.distance_threshold = float(threshold)
+    options.reordering = bool(reordering)
+    options.num_threads = int(num_threads)
+    options.chunk_size = int(chunk_size)
+
+    clusters = _butina_cluster(distance_matrix.storage, options)
+    return tuple(tuple(int(member) for member in cluster) for cluster in clusters)
+
+
+# Python wrapper classes for comparison construction
+class FingerprintComparison:
+    """Fingerprint-based comparison using OEFP scalar metrics."""
+
+    def __new__(cls, mols, *, fp_type=None, metric=None, numbits=None,
+                min_distance=None, max_distance=None, similarity=False):
         """
-        Construct a FingerprintMetric.
+        Construct a FingerprintComparison.
 
         :param mols: List of OEMolBase molecules.
-        :param fp_type: Fingerprint type (unsigned int).
+        :param fp_type: Fingerprint type.
+        :param metric: OEFP scalar metric name.
+        :param numbits: Fingerprint size in bits.
+        :param min_distance: Minimum Atom Pair graph distance.
+        :param max_distance: Morgan radius or maximum Atom Pair graph distance.
         :param similarity: Return similarity instead of distance.
-        :returns: C++ FingerprintMetric object.
+        :returns: C++ FingerprintComparison object.
         """
         opts = FingerprintOptions()
         opts.similarity = similarity
         if fp_type is not None:
             opts.fp_type = fp_type
-        return _FingerprintMetric(mols, opts)
+        if metric is not None:
+            opts.metric = metric
+        if numbits is not None:
+            opts.numbits = numbits
+        if min_distance is not None:
+            opts.min_distance = min_distance
+        if max_distance is not None:
+            opts.max_distance = max_distance
+        return _FingerprintComparison(mols, opts)
 
 
-class ROCSMetric:
-    """ROCS-style shape overlay distance metric."""
+class ROCSComparison:
+    """ROCS-style shape overlay comparison."""
 
     def __new__(cls, mols, *, similarity=False):
         """
-        Construct a ROCSMetric.
+        Construct a ROCSComparison.
 
         :param mols: List of OEMol molecules with 3D coordinates.
         :param similarity: Return similarity instead of distance.
-        :returns: C++ ROCSMetric object.
+        :returns: C++ ROCSComparison object.
         """
         opts = ROCSOptions()
         opts.similarity = similarity
-        return _ROCSMetric(mols, opts)
+        return _ROCSComparison(mols, opts)
 
 
-class SuperposeMetric:
-    """Protein superposition distance metric using oespruce OESuperpose."""
+class SuperposeComparison:
+    """Protein superposition comparison using oespruce OESuperpose."""
 
     def __new__(cls, items, *, method="global_carbon_alpha", similarity=False,
                 predicate=None, ref_predicate=None, fit_predicate=None):
         """
-        Construct a SuperposeMetric.
+        Construct a SuperposeComparison.
 
         :param items: List of OEDesignUnit or OEMolBase objects.
         :param method: Superposition method name.
@@ -1040,7 +1086,7 @@ class SuperposeMetric:
         :param predicate: oeselect expression for both ref and fit.
         :param ref_predicate: Override predicate for ref.
         :param fit_predicate: Override predicate for fit.
-        :returns: C++ SuperposeMetric object.
+        :returns: C++ SuperposeComparison object.
         """
         opts = SuperposeOptions()
         method_map = {
@@ -1061,4 +1107,4 @@ class SuperposeMetric:
             opts.ref_predicate = ref_predicate
         if fit_predicate is not None:
             opts.fit_predicate = fit_predicate
-        return _SuperposeMetric(items, opts)
+        return _SuperposeComparison(items, opts)

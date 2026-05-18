@@ -15,7 +15,7 @@
 namespace OECluster {
 
 // Forward declarations
-class DistanceMetric;
+class PairwiseComparison;
 class StorageBackend;
 class DenseStorage;
 class MMapStorage;
@@ -26,15 +26,18 @@ class DistanceMatrix;
 }  // namespace OECluster
 
 #include "oecluster/Error.h"
-#include "oecluster/DistanceMetric.h"
+#include "oecluster/PairwiseComparison.h"
 #include "oecluster/StorageBackend.h"
 #include "oecluster/ThreadPool.h"
 #include "oecluster/PDist.h"
 #include "oecluster/CDist.h"
 #include "oecluster/DistanceMatrix.h"
 
-#include "oecluster/metrics/FingerprintMetric.h"
-#include "oecluster/metrics/ROCSMetric.h"
-#include "oecluster/metrics/SuperposeMetric.h"
+#include "oecluster/comparisons/FingerprintComparison.h"
+#include "oecluster/comparisons/ROCSComparison.h"
+#include "oecluster/comparisons/SuperposeComparison.h"
+
+#include "oecluster/clustering/ClusterTypes.h"
+#include "oecluster/clustering/Butina.h"
 
 #endif  // OECLUSTER_OECLUSTER_H

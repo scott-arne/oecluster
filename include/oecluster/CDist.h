@@ -11,7 +11,7 @@
 
 namespace OECluster {
 
-class DistanceMetric;
+class PairwiseComparison;
 
 /**
  * @brief Options for controlling cross-distance computation.
@@ -26,18 +26,18 @@ struct CDistOptions {
 };
 
 /**
- * @brief Compute cross-distances between two item sets packed in a single metric.
+ * @brief Compute cross-distances between two item sets packed in one comparison.
  *
- * The metric must have been constructed with items [set_a..., set_b...].
- * n_a items from set A, metric.Size() - n_a items from set B.
+ * The comparison must have been constructed with items [set_a..., set_b...].
+ * n_a items from set A, comparison.Size() - n_a items from set B.
  * Output is a flat array of size n_a * n_b in row-major order.
  *
- * :param metric: Distance metric constructed with concatenated items.
- * :param n_a: Number of items in set A (first n_a items in metric).
- * :param output: Pre-allocated array of size n_a * (metric.Size() - n_a).
+ * :param comparison: Pairwise comparison constructed with concatenated items.
+ * :param n_a: Number of items in set A (first n_a items in comparison).
+ * :param output: Pre-allocated array of size n_a * (comparison.Size() - n_a).
  * :param options: Threading and progress options.
  */
-void cdist(DistanceMetric& metric, size_t n_a, double* output,
+void cdist(PairwiseComparison& comparison, size_t n_a, double* output,
            const CDistOptions& options = {});
 
 }  // namespace OECluster

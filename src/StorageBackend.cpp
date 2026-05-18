@@ -328,17 +328,8 @@ void SparseStorage::Set(size_t i, size_t j, double value) {
     }
     assert(i < j && "Set requires i < j after swap");
 
-    // Get the calling thread's buffer
     std::thread::id tid = std::this_thread::get_id();
 
-    // Try with shared lock first (read access) to check if buffer exists
-    bool buffer_exists = false;
-    {
-        std::shared_lock<std::shared_mutex> lock(buffers_mutex_);
-        buffer_exists = thread_buffers_.find(tid) != thread_buffers_.end();
-    }
-
-    // Get unique lock for write access
     std::unique_lock<std::shared_mutex> lock(buffers_mutex_);
     thread_buffers_[tid].emplace_back(i, j, value);
 }
@@ -368,6 +359,10 @@ size_t SparseStorage::NumItems() const {
 
 size_t SparseStorage::NumPairs() const {
     return n_ * (n_ - 1) / 2;
+}
+
+double SparseStorage::Cutoff() const {
+    return cutoff_;
 }
 
 double* SparseStorage::Data() {

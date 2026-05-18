@@ -6,15 +6,15 @@
 %{
 #include "oecluster/oecluster.h"
 #include "oecluster/Error.h"
-#include "oecluster/DistanceMetric.h"
+#include "oecluster/PairwiseComparison.h"
 #include "oecluster/StorageBackend.h"
 #include "oecluster/ThreadPool.h"
 #include "oecluster/PDist.h"
 #include "oecluster/CDist.h"
 #include "oecluster/DistanceMatrix.h"
-#include "oecluster/metrics/FingerprintMetric.h"
-#include "oecluster/metrics/ROCSMetric.h"
-#include "oecluster/metrics/SuperposeMetric.h"
+#include "oecluster/comparisons/FingerprintComparison.h"
+#include "oecluster/comparisons/ROCSComparison.h"
+#include "oecluster/comparisons/SuperposeComparison.h"
 
 #include <oechem.h>
 #include <oebio.h>
@@ -366,8 +366,8 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, _oecluster_is_oereceptor, "
 // ============================================================================
 // Domain-specific typemaps for oecluster's container-based APIs
 // ============================================================================
-// FingerprintMetric and SuperposeMetric (mol overload) accept lists of
-// OEMolBase pointers. ROCSMetric and SuperposeMetric (DU overload) accept
+// FingerprintComparison and SuperposeComparison (mol overload) accept lists of
+// OEMolBase pointers. ROCSComparison and SuperposeComparison (DU overload) accept
 // lists of shared_ptr to OEMol / OEDesignUnit — these require a copy because
 // we do not own the Python-owned objects.
 
@@ -506,6 +506,8 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, _oecluster_is_oereceptor, "
 
 // Instantiate vector templates used by the Python layer
 %template(StringVector) std::vector<std::string>;
+%template(SizeTVector) std::vector<size_t>;
+%template(ClusterVector) std::vector<std::vector<size_t>>;
 
 // ============================================================================
 // Exception handling -- general
@@ -559,18 +561,35 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, _oecluster_is_oereceptor, "
     Py_END_ALLOW_THREADS
 }
 
+%exception OECluster::butina_cluster {
+    Py_BEGIN_ALLOW_THREADS
+    try {
+        $action
+    } catch (const OECluster::OEClusterError& e) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError, e.what());
+    } catch (const std::exception& e) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError, e.what());
+    } catch (...) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError, "Unknown C++ exception in butina_cluster");
+    }
+    Py_END_ALLOW_THREADS
+}
+
 // ============================================================================
 // Ignore problematic members before %include
 //
 // StorageBackend.h pulls in <shared_mutex>, <unordered_map>, <thread>
 // which SWIG cannot parse. We redeclare the classes manually instead.
 //
-// Also ignore private clone constructors for metrics.
+// Also ignore private clone constructors for comparisons.
 // ============================================================================
 
 // Suppress default constructors for types that don't have them
 %nodefaultctor OECluster::OEClusterError;
-%nodefaultctor OECluster::MetricError;
+%nodefaultctor OECluster::ComparisonError;
 %nodefaultctor OECluster::StorageError;
 %nodefaultctor OECluster::DistanceMatrix;
 
@@ -584,14 +603,18 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, _oecluster_is_oereceptor, "
 %ignore OECluster::MMapStorage::MMapStorage(const MMapStorage&);
 %ignore OECluster::MMapStorage::operator=;
 
-// Ignore DistanceMetric::Clone -- returns unique_ptr, expose via %extend
-%ignore OECluster::DistanceMetric::Clone;
+// Ignore PairwiseComparison::Clone -- returns unique_ptr, expose via %extend
+%ignore OECluster::PairwiseComparison::Clone;
+%ignore OECluster::PairwiseComparison::TryPDist;
+%ignore OECluster::PairwiseComparison::TryCDist;
 
-// Ignore private constructors for metric clones
-%ignore OECluster::FingerprintMetric::FingerprintMetric(std::shared_ptr<const Impl>);
+// Ignore private constructors for comparison clones
+%ignore OECluster::FingerprintComparison::FingerprintComparison(std::shared_ptr<const Impl>);
+%ignore OECluster::FingerprintComparison::TryPDist;
+%ignore OECluster::FingerprintComparison::TryCDist;
 
-%ignore OECluster::ROCSMetric::ROCSMetric(std::shared_ptr<const SharedData>, const Options&);
-%ignore OECluster::SuperposeMetric::SuperposeMetric(std::shared_ptr<const SharedData>, const Options&);
+%ignore OECluster::ROCSComparison::ROCSComparison(std::shared_ptr<const SharedData>, const Options&);
+%ignore OECluster::SuperposeComparison::SuperposeComparison(std::shared_ptr<const SharedData>, const Options&);
 // Ignore SparseStorage internals that use unordered_map/shared_mutex/thread
 %ignore OECluster::SparseStorage::Entries;
 
@@ -673,9 +696,9 @@ public:
 %include "oecluster/Error.h"
 
 // ============================================================================
-// DistanceMetric base class
+// PairwiseComparison base class
 // ============================================================================
-%include "oecluster/DistanceMetric.h"
+%include "oecluster/PairwiseComparison.h"
 
 // ============================================================================
 // ThreadPool (PIMPL -- only expose public interface)
@@ -700,7 +723,7 @@ public:
 // ============================================================================
 namespace OECluster {
 
-class DistanceMetric;
+class PairwiseComparison;
 class StorageBackend;
 
 struct PDistOptions {
@@ -712,7 +735,7 @@ struct PDistOptions {
     PDistOptions();
 };
 
-void pdist(DistanceMetric& metric, StorageBackend& storage,
+void pdist(PairwiseComparison& comparison, StorageBackend& storage,
            const PDistOptions& options = PDistOptions());
 
 struct CDistOptions {
@@ -724,7 +747,7 @@ struct CDistOptions {
     CDistOptions();
 };
 
-void cdist(DistanceMetric& metric, size_t n_a, double* output,
+void cdist(PairwiseComparison& comparison, size_t n_a, double* output,
            const CDistOptions& options = CDistOptions());
 
 }  // namespace OECluster
@@ -738,7 +761,7 @@ namespace OECluster {
 class DistanceMatrix {
 public:
     StorageBackend& Storage();
-    const std::string& MetricName() const;
+    const std::string& ComparisonName() const;
     const std::vector<std::string>& Labels() const;
     size_t NumItems() const;
     size_t NumPairs() const;
@@ -747,11 +770,17 @@ public:
 }  // namespace OECluster
 
 // ============================================================================
-// Metric classes
+// Comparison classes
 // ============================================================================
-%include "oecluster/metrics/FingerprintMetric.h"
-%include "oecluster/metrics/ROCSMetric.h"
-%include "oecluster/metrics/SuperposeMetric.h"
+%include "oecluster/comparisons/FingerprintComparison.h"
+%include "oecluster/comparisons/ROCSComparison.h"
+%include "oecluster/comparisons/SuperposeComparison.h"
+
+// ============================================================================
+// Clustering algorithms
+// ============================================================================
+%include "oecluster/clustering/ClusterTypes.h"
+%include "oecluster/clustering/Butina.h"
 
 // ============================================================================
 // Version macros
@@ -764,5 +793,5 @@ public:
 // Module-level Python convenience code
 // ============================================================================
 %pythoncode %{
-__version__ = "3.1.7"
+__version__ = "3.3.0"
 %}

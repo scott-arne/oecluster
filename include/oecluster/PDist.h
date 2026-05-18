@@ -11,7 +11,7 @@
 
 namespace OECluster {
 
-class DistanceMetric;
+class PairwiseComparison;
 class StorageBackend;
 
 /**
@@ -30,14 +30,14 @@ struct PDistOptions {
  * @brief Compute all pairwise distances.
  *
  * Distributes work across threads using a ThreadPool. Each thread
- * gets its own Clone() of the metric for thread safety. Results
+ * gets its own Clone() of the comparison for thread safety. Results
  * are written into the storage backend.
  *
- * :param metric: Distance metric (will be Clone()'d per thread).
+ * :param comparison: Pairwise comparison (will be Clone()'d per thread).
  * :param storage: Storage backend to write results into.
  * :param options: Threading, chunking, cutoff, and progress options.
  */
-void pdist(DistanceMetric& metric, StorageBackend& storage,
+void pdist(PairwiseComparison& comparison, StorageBackend& storage,
            const PDistOptions& options = {});
 
 }  // namespace OECluster
