@@ -121,6 +121,7 @@ set(OECLUSTER_SOURCES
     src/comparisons/SuperposeComparison.cpp
     src/clustering/ThresholdGraph.cpp
     src/clustering/Butina.cpp
+    src/clustering/Centroid.cpp
 )
 
 add_library(oecluster ${OECLUSTER_SOURCES})

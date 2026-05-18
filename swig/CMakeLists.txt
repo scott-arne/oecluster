@@ -24,6 +24,7 @@ set(_OECLUSTER_SWIG_DEPENDS
     ${CMAKE_SOURCE_DIR}/include/oecluster/comparisons/SuperposeComparison.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/clustering/ClusterTypes.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/clustering/Butina.h
+    ${CMAKE_SOURCE_DIR}/include/oecluster/clustering/Centroid.h
 )
 
 set_source_files_properties(oecluster.i PROPERTIES

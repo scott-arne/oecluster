@@ -944,6 +944,27 @@ def butina_cluster(storage, options):
     :returns: Clusters where the first member is the centroid.
     """
     return _oecluster.butina_cluster(storage, options)
+CentroidMethod_First = _oecluster.CentroidMethod_First
+r"""Return the first member stored in the cluster."""
+CentroidMethod_Medoid = _oecluster.CentroidMethod_Medoid
+r"""Return the member with the lowest total in-cluster distance."""
+CentroidMethod_Minimax = _oecluster.CentroidMethod_Minimax
+r"""Return the member with the lowest maximum in-cluster distance."""
+CentroidMethod_Mean = _oecluster.CentroidMethod_Mean
+r"""Alias for medoid over a precomputed distance matrix."""
+
+def cluster_centroid(*args):
+    r"""
+    Select a representative member index from a cluster.
+
+    :param cluster: Cluster member indices.
+    :param storage: Pairwise distance storage used for distance-based methods.
+    :param method: Centroid selection algorithm.
+    :returns: Member index selected as the cluster representative.
+    :raises std::invalid_argument: If the cluster is empty or sparse distances are incomplete.
+    :raises std::out_of_range: If a cluster member is outside the storage range.
+    """
+    return _oecluster.cluster_centroid(*args)
 OECLUSTER_VERSION_MAJOR = _oecluster.OECLUSTER_VERSION_MAJOR
 OECLUSTER_VERSION_MINOR = _oecluster.OECLUSTER_VERSION_MINOR
 OECLUSTER_VERSION_PATCH = _oecluster.OECLUSTER_VERSION_PATCH

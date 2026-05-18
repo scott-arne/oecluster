@@ -39,6 +39,7 @@ __all__ = [
     "DistanceMatrix",
     "pdist",
     "butina",
+    "centroid",
     "ButinaOptions",
     "FingerprintComparison",
     "ROCSComparison",
@@ -561,6 +562,7 @@ try:
         ButinaOptions,
         pdist as _cpp_pdist,
         butina_cluster as _butina_cluster,
+        cluster_centroid as _cluster_centroid,
     )
 except ImportError as e:
     raise ImportError(
@@ -1021,6 +1023,49 @@ def butina(distance_matrix, threshold, *, reordering=False,
 
     clusters = _butina_cluster(distance_matrix.storage, options)
     return tuple(tuple(int(member) for member in cluster) for cluster in clusters)
+
+
+def centroid(cluster, distance_matrix, *, method="medoid"):
+    """
+    Select a representative member from a cluster.
+
+    :param cluster: Iterable of item indices, such as one cluster returned by
+        :func:`butina`.
+    :param distance_matrix: DistanceMatrix used to compute the cluster.
+    :param method: Representative selection method: "first", "medoid",
+        "mean", or "minimax". "mean" selects the member with the minimum mean
+        distance to other cluster members, which is equivalent to the medoid for
+        a precomputed distance matrix.
+    :returns: Selected member index.
+    :raises TypeError: If distance_matrix is not a DistanceMatrix.
+    :raises ValueError: If cluster is empty or method is unknown.
+    """
+    if not isinstance(distance_matrix, DistanceMatrix):
+        raise TypeError("centroid() expects a DistanceMatrix")
+
+    method_map = {
+        "first": _oecluster.CentroidMethod_First,
+        "medoid": _oecluster.CentroidMethod_Medoid,
+        "mean": _oecluster.CentroidMethod_Mean,
+        "minimax": _oecluster.CentroidMethod_Minimax,
+    }
+    method_key = str(method).lower()
+    if method_key not in method_map:
+        raise ValueError(f"Unknown centroid method: {method!r}")
+
+    cpp_cluster = _oecluster.SizeTVector()
+    for member in cluster:
+        cpp_cluster.push_back(int(member))
+    if len(cpp_cluster) == 0:
+        raise ValueError("centroid() requires a non-empty cluster")
+
+    return int(
+        _cluster_centroid(
+            cpp_cluster,
+            distance_matrix.storage,
+            method_map[method_key],
+        )
+    )
 
 
 # Python wrapper classes for comparison construction

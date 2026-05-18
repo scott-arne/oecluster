@@ -6,6 +6,7 @@
 
 #include "oecluster/StorageBackend.h"
 #include "oecluster/clustering/Butina.h"
+#include "oecluster/clustering/Centroid.h"
 #include "../../src/clustering/ThresholdGraph.h"
 
 using namespace OECluster;
@@ -172,4 +173,67 @@ TEST(ButinaClusteringTest, NegativeThresholdThrows) {
     options.distance_threshold = -0.1;
 
     EXPECT_THROW(butina_cluster(storage, options), std::invalid_argument);
+}
+
+TEST(ClusterCentroidTest, FirstReturnsFirstClusterMember) {
+    DenseStorage storage(5);
+    const Cluster cluster{4, 1, 3};
+
+    EXPECT_EQ(cluster_centroid(cluster, storage, CentroidMethod::First), 4);
+}
+
+TEST(ClusterCentroidTest, MedoidMinimizesTotalDistanceWithClusterOrderTieBreak) {
+    DenseStorage storage(3);
+    storage.Set(0, 1, 1.0);
+    storage.Set(0, 2, 1.0);
+    storage.Set(1, 2, 0.1);
+    const Cluster cluster{0, 1, 2};
+
+    EXPECT_EQ(cluster_centroid(cluster, storage, CentroidMethod::Medoid), 1);
+    EXPECT_EQ(cluster_centroid(cluster, storage, CentroidMethod::Mean), 1);
+}
+
+TEST(ClusterCentroidTest, MinimaxMinimizesWorstNeighborDistance) {
+    DenseStorage storage(4);
+    storage.Set(0, 1, 0.1);
+    storage.Set(0, 2, 0.1);
+    storage.Set(0, 3, 1.0);
+    storage.Set(1, 2, 0.6);
+    storage.Set(1, 3, 0.6);
+    storage.Set(2, 3, 0.6);
+    const Cluster cluster{0, 1, 2, 3};
+
+    EXPECT_EQ(cluster_centroid(cluster, storage, CentroidMethod::Medoid), 0);
+    EXPECT_EQ(cluster_centroid(cluster, storage, CentroidMethod::Minimax), 1);
+}
+
+TEST(ClusterCentroidTest, EmptyClusterThrows) {
+    DenseStorage storage(1);
+
+    EXPECT_THROW(
+        cluster_centroid(Cluster{}, storage, CentroidMethod::Medoid),
+        std::invalid_argument);
+}
+
+TEST(ClusterCentroidTest, InvalidMemberThrows) {
+    DenseStorage storage(2);
+
+    EXPECT_THROW(
+        cluster_centroid(Cluster({0, 2}), storage, CentroidMethod::First),
+        std::out_of_range);
+}
+
+TEST(ClusterCentroidTest, SparseStorageOnlySupportsFirstMethod) {
+    SparseStorage storage(3, 0.2);
+    storage.Set(0, 1, 0.1);
+    storage.Set(0, 2, 0.3);
+    storage.Set(1, 2, 0.3);
+    storage.Finalize();
+    const Cluster cluster{1, 0, 2};
+
+    EXPECT_EQ(cluster_centroid(cluster, storage, CentroidMethod::First), 1);
+    EXPECT_EQ(cluster_centroid(Cluster({2}), storage, CentroidMethod::Medoid), 2);
+    EXPECT_THROW(
+        cluster_centroid(cluster, storage, CentroidMethod::Medoid),
+        std::invalid_argument);
 }

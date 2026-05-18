@@ -39,5 +39,6 @@ class DistanceMatrix;
 
 #include "oecluster/clustering/ClusterTypes.h"
 #include "oecluster/clustering/Butina.h"
+#include "oecluster/clustering/Centroid.h"
 
 #endif  // OECLUSTER_OECLUSTER_H

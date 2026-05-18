@@ -578,6 +578,23 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, _oecluster_is_oereceptor, "
     Py_END_ALLOW_THREADS
 }
 
+%exception OECluster::cluster_centroid {
+    Py_BEGIN_ALLOW_THREADS
+    try {
+        $action
+    } catch (const OECluster::OEClusterError& e) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError, e.what());
+    } catch (const std::exception& e) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError, e.what());
+    } catch (...) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError, "Unknown C++ exception in cluster_centroid");
+    }
+    Py_END_ALLOW_THREADS
+}
+
 // ============================================================================
 // Ignore problematic members before %include
 //
@@ -781,6 +798,7 @@ public:
 // ============================================================================
 %include "oecluster/clustering/ClusterTypes.h"
 %include "oecluster/clustering/Butina.h"
+%include "oecluster/clustering/Centroid.h"
 
 // ============================================================================
 // Version macros
