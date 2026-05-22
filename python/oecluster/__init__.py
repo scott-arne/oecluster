@@ -37,10 +37,23 @@ __all__ = [
     "SparseStorage",
     "PDistOptions",
     "DistanceMatrix",
+    "ClusteringResult",
     "pdist",
     "butina",
     "centroid",
+    "dbscan",
+    "hdbscan",
+    "agglomerative",
+    "bitbirch",
+    "bitbirch_recluster",
+    "bitbirch_refine",
     "ButinaOptions",
+    "DBSCANOptions",
+    "HDBSCANOptions",
+    "AgglomerativeOptions",
+    "BitBirchOptions",
+    "BitBirchReclusteringOptions",
+    "BitBirchRefinementOptions",
     "FingerprintComparison",
     "ROCSComparison",
     "SuperposeComparison",
@@ -560,9 +573,21 @@ try:
         SparseStorage,
         PDistOptions,
         ButinaOptions,
+        DBSCANOptions,
+        HDBSCANOptions,
+        AgglomerativeOptions,
+        BitBirchOptions,
+        BitBirchReclusteringOptions,
+        BitBirchRefinementOptions,
         pdist as _cpp_pdist,
         butina_cluster as _butina_cluster,
         cluster_centroid as _cluster_centroid,
+        dbscan_cluster as _dbscan_cluster,
+        hdbscan_cluster as _hdbscan_cluster,
+        agglomerative_cluster as _agglomerative_cluster,
+        bitbirch_cluster as _bitbirch_cluster,
+        bitbirch_recluster as _bitbirch_recluster,
+        bitbirch_refine as _bitbirch_refine,
     )
 except ImportError as e:
     raise ImportError(
@@ -824,6 +849,61 @@ class DistanceMatrix:
                 f"num_items={self.num_items}, num_pairs={self.num_pairs})")
 
 
+class ClusteringResult:
+    """Python clustering result with labels and grouped cluster members."""
+
+    def __init__(
+        self,
+        labels,
+        clusters,
+        *,
+        core_sample_indices=(),
+        probabilities=None,
+        children=(),
+        distances=None,
+        cluster_sizes=(),
+        centroids=None,
+        native_owner=None,
+    ):
+        """
+        Construct a clustering result.
+
+        :param labels: Per-item integer labels. Noise is labeled -1.
+        :param clusters: Iterable of cluster member iterables.
+        :param core_sample_indices: Optional DBSCAN core sample indices.
+        :param probabilities: Optional per-item HDBSCAN probabilities.
+        :param children: Optional hierarchical merge children.
+        :param distances: Optional hierarchical merge distances.
+        :param cluster_sizes: Optional hierarchical merge cluster sizes.
+        :param centroids: Optional centroid fingerprint batch.
+        :param native_owner: Optional native result object that owns borrowed
+            centroid storage.
+        """
+        self.labels = np.asarray(list(labels), dtype=np.intp)
+        self.clusters = tuple(
+            tuple(int(member) for member in cluster)
+            for cluster in clusters
+        )
+        self.core_sample_indices = tuple(int(index) for index in core_sample_indices)
+        self.probabilities = (
+            None
+            if probabilities is None
+            else np.asarray(list(probabilities), dtype=np.float64)
+        )
+        self.children = tuple(
+            (int(left), int(right))
+            for left, right in children
+        )
+        self.distances = (
+            None
+            if distances is None
+            else np.asarray(list(distances), dtype=np.float64)
+        )
+        self.cluster_sizes = tuple(int(size) for size in cluster_sizes)
+        self.centroids = centroids
+        self._native_owner = native_owner
+
+
 def _extract_labels(items):
     """
     Extract labels from molecular items.
@@ -1065,6 +1145,349 @@ def centroid(cluster, distance_matrix, *, method="medoid"):
             distance_matrix.storage,
             method_map[method_key],
         )
+    )
+
+
+def dbscan(distance_matrix, eps, *, min_samples=5, num_threads=0, chunk_size=4096):
+    """
+    Cluster a precomputed distance matrix using DBSCAN.
+
+    :param distance_matrix: DistanceMatrix returned by :func:`pdist`.
+    :param eps: Maximum distance for two items to be neighbors.
+    :param min_samples: Minimum self-inclusive neighbor count for a core sample.
+    :param num_threads: Thread count for threshold graph construction.
+    :param chunk_size: Condensed-distance pairs per work unit.
+    :returns: ClusteringResult with labels, clusters, and core sample indices.
+    :raises TypeError: If distance_matrix is not a DistanceMatrix.
+    :raises ValueError: If eps or min_samples are invalid.
+    """
+    if eps < 0.0:
+        raise ValueError("DBSCAN eps must be non-negative")
+    if min_samples < 1:
+        raise ValueError("DBSCAN min_samples must be at least one")
+    if not isinstance(distance_matrix, DistanceMatrix):
+        raise TypeError("dbscan() expects a DistanceMatrix")
+
+    options = DBSCANOptions()
+    options.eps = float(eps)
+    options.min_samples = int(min_samples)
+    options.num_threads = int(num_threads)
+    options.chunk_size = int(chunk_size)
+
+    result = _dbscan_cluster(distance_matrix.storage, options)
+    return ClusteringResult(
+        result.labels,
+        result.clusters,
+        core_sample_indices=result.core_sample_indices,
+    )
+
+
+def hdbscan(distance_matrix, *, min_cluster_size=5, min_samples=None,
+            cluster_selection_epsilon=0.0, max_cluster_size=None, alpha=1.0,
+            cluster_selection_method="eom", allow_single_cluster=False,
+            num_threads=0, chunk_size=4096):
+    """
+    Cluster a precomputed distance matrix using HDBSCAN.
+
+    :param distance_matrix: DistanceMatrix returned by :func:`pdist`.
+    :param min_cluster_size: Minimum size for selected clusters.
+    :param min_samples: Self-inclusive core-distance neighbor count. Defaults
+        to min_cluster_size when omitted.
+    :param cluster_selection_epsilon: Epsilon threshold for merging selected
+        clusters.
+    :param max_cluster_size: Optional maximum selected cluster size.
+    :param alpha: Mutual-reachability distance scaling.
+    :param cluster_selection_method: Cluster selection method, "eom" or "leaf".
+    :param allow_single_cluster: Whether the root cluster may be selected.
+    :param num_threads: Thread count for core-distance computation.
+    :param chunk_size: Reserved for parity with other clustering wrappers.
+    :returns: ClusteringResult with labels, clusters, and probabilities.
+    :raises TypeError: If distance_matrix is not a DistanceMatrix.
+    :raises ValueError: If options are invalid.
+    """
+    if min_cluster_size < 2:
+        raise ValueError("HDBSCAN min_cluster_size must be at least two")
+    if min_samples is not None and min_samples < 1:
+        raise ValueError("HDBSCAN min_samples must be at least one")
+    if cluster_selection_epsilon < 0.0:
+        raise ValueError("HDBSCAN cluster_selection_epsilon must be non-negative")
+    if max_cluster_size is not None and max_cluster_size < 1:
+        raise ValueError("HDBSCAN max_cluster_size must be at least one")
+    if alpha <= 0.0:
+        raise ValueError("HDBSCAN alpha must be positive")
+    if not isinstance(distance_matrix, DistanceMatrix):
+        raise TypeError("hdbscan() expects a DistanceMatrix")
+
+    method_map = {
+        "eom": _oecluster.HDBSCANClusterSelectionMethod_EOM,
+        "leaf": _oecluster.HDBSCANClusterSelectionMethod_Leaf,
+    }
+    method_key = str(cluster_selection_method).lower()
+    if method_key not in method_map:
+        raise ValueError(
+            f"Unknown HDBSCAN cluster_selection_method: {cluster_selection_method!r}"
+        )
+
+    options = HDBSCANOptions()
+    options.min_cluster_size = int(min_cluster_size)
+    options.min_samples = 0 if min_samples is None else int(min_samples)
+    options.cluster_selection_epsilon = float(cluster_selection_epsilon)
+    options.max_cluster_size = 0 if max_cluster_size is None else int(max_cluster_size)
+    options.alpha = float(alpha)
+    options.cluster_selection_method = method_map[method_key]
+    options.allow_single_cluster = bool(allow_single_cluster)
+    options.num_threads = int(num_threads)
+    options.chunk_size = int(chunk_size)
+
+    result = _hdbscan_cluster(distance_matrix.storage, options)
+    return ClusteringResult(
+        result.labels,
+        result.clusters,
+        probabilities=result.probabilities,
+    )
+
+
+def agglomerative(distance_matrix, *, n_clusters=2, distance_threshold=None,
+                  linkage="average", compute_full_tree=True,
+                  num_threads=0, chunk_size=4096):
+    """
+    Cluster a precomputed distance matrix using hierarchical agglomerative clustering.
+
+    :param distance_matrix: DistanceMatrix returned by :func:`pdist`.
+    :param n_clusters: Number of flat clusters when distance_threshold is omitted.
+    :param distance_threshold: Optional merge-distance cutoff for flat clusters.
+    :param linkage: Linkage method: "single", "complete", "average", or "weighted".
+    :param compute_full_tree: Whether to request full-tree computation.
+    :param num_threads: Thread count for initial distance materialization.
+    :param chunk_size: Rows per work unit during distance materialization.
+    :returns: ClusteringResult with labels, clusters, children, distances, and cluster sizes.
+    :raises TypeError: If distance_matrix is not a DistanceMatrix.
+    :raises ValueError: If options are invalid.
+    """
+    if not isinstance(distance_matrix, DistanceMatrix):
+        raise TypeError("agglomerative() expects a DistanceMatrix")
+    if distance_threshold is None and n_clusters < 1:
+        raise ValueError("Agglomerative n_clusters must be at least one")
+    if distance_threshold is not None and distance_threshold < 0.0:
+        raise ValueError("Agglomerative distance_threshold must be non-negative")
+
+    linkage_map = {
+        "single": _oecluster.AgglomerativeLinkageMethod_Single,
+        "complete": _oecluster.AgglomerativeLinkageMethod_Complete,
+        "average": _oecluster.AgglomerativeLinkageMethod_Average,
+        "weighted": _oecluster.AgglomerativeLinkageMethod_Weighted,
+    }
+    linkage_key = str(linkage).lower()
+    if linkage_key not in linkage_map:
+        raise ValueError(f"Unknown agglomerative linkage: {linkage!r}")
+
+    options = AgglomerativeOptions()
+    options.n_clusters = int(n_clusters)
+    options.distance_threshold = (
+        -1.0 if distance_threshold is None else float(distance_threshold)
+    )
+    options.linkage = linkage_map[linkage_key]
+    options.compute_full_tree = bool(compute_full_tree)
+    options.num_threads = int(num_threads)
+    options.chunk_size = int(chunk_size)
+
+    result = _agglomerative_cluster(distance_matrix.storage, options)
+    children = zip(result.children_left, result.children_right)
+    return ClusteringResult(
+        result.labels,
+        result.clusters,
+        children=children,
+        distances=result.distances,
+        cluster_sizes=result.cluster_sizes,
+    )
+
+
+def _bitbirch_merge_criterion(value):
+    criterion_map = {
+        "radius": _oecluster.BitBirchMergeCriterion_Radius,
+        "diameter": _oecluster.BitBirchMergeCriterion_Diameter,
+        "tolerance": _oecluster.BitBirchMergeCriterion_Tolerance,
+        "tolerance_tough": _oecluster.BitBirchMergeCriterion_ToleranceTough,
+    }
+    key = str(value).lower()
+    if key not in criterion_map:
+        raise ValueError(f"Unknown BitBirch merge_criterion: {value!r}")
+    return criterion_map[key]
+
+
+def _bitbirch_mode(value):
+    mode_map = {
+        "strict_parity": _oecluster.BitBirchMode_StrictParity,
+        "fast": _oecluster.BitBirchMode_Fast,
+    }
+    key = str(value).lower()
+    if key not in mode_map:
+        raise ValueError(f"Unknown BitBirch mode: {value!r}")
+    return mode_map[key]
+
+
+def _require_oefp_batch(fingerprints, function_name):
+    try:
+        import oefp as _oefp_api
+    except ImportError as exc:
+        raise TypeError(
+            f"{function_name}() expects an oefp.OEFPBatch and oefp is not importable"
+        ) from exc
+    if not isinstance(fingerprints, _oefp_api.OEFPBatch):
+        raise TypeError(f"{function_name}() expects an oefp.OEFPBatch")
+
+
+def _bitbirch_centroids(native_centroids):
+    import oefp as _oefp_api
+
+    return _oefp_api.OEFPBatch._from_native(native_centroids)
+
+
+def bitbirch(fingerprints, *, threshold=0.65, branching_factor=50,
+             merge_criterion="diameter", tolerance=0.05, singly=True,
+             mode="strict_parity", num_threads=0):
+    """
+    Cluster dense binary OEFP fingerprints using BitBirch.
+
+    :param fingerprints: `oefp.OEFPBatch` containing dense binary fingerprints.
+    :param threshold: Similarity threshold used by the merge criterion.
+    :param branching_factor: Maximum number of subclusters per tree node.
+    :param merge_criterion: "radius", "diameter", "tolerance", or
+        "tolerance_tough".
+    :param tolerance: Tolerance penalty for tolerance-based criteria.
+    :param singly: Whether to skip parent-pointer maintenance for the faster
+        single-pass reference behavior.
+    :param mode: "strict_parity" or "fast".
+    :param num_threads: Thread count for parallel-safe phases.
+    :returns: ClusteringResult with labels, clusters, centroids, and cluster sizes.
+    :raises TypeError: If fingerprints is not an `oefp.OEFPBatch`.
+    :raises ValueError: If an option is invalid.
+    """
+    _require_oefp_batch(fingerprints, "bitbirch")
+    if threshold < 0.0:
+        raise ValueError("BitBirch threshold must be non-negative")
+    if branching_factor < 1:
+        raise ValueError("BitBirch branching_factor must be at least one")
+    if tolerance < 0.0:
+        raise ValueError("BitBirch tolerance must be non-negative")
+
+    options = BitBirchOptions()
+    options.threshold = float(threshold)
+    options.branching_factor = int(branching_factor)
+    options.merge_criterion = _bitbirch_merge_criterion(merge_criterion)
+    options.tolerance = float(tolerance)
+    options.singly = bool(singly)
+    options.mode = _bitbirch_mode(mode)
+    options.num_threads = int(num_threads)
+
+    result = _bitbirch_cluster(fingerprints, options)
+    return ClusteringResult(
+        result.labels,
+        result.clusters,
+        cluster_sizes=result.cluster_sizes,
+        centroids=_bitbirch_centroids(result.centroids),
+        native_owner=result,
+    )
+
+
+def bitbirch_recluster(fingerprints, *, initial_threshold=0.65,
+                       second_threshold=0.7, second_tolerance=0.0,
+                       branching_factor=50, mode="strict_parity",
+                       num_threads=0):
+    """
+    Cluster dense binary OEFP fingerprints using two-stage BitBirch reclustering.
+
+    :param fingerprints: `oefp.OEFPBatch` containing dense binary fingerprints.
+    :param initial_threshold: Diameter threshold for the first pass.
+    :param second_threshold: Tolerance threshold for the second pass.
+    :param second_tolerance: Tolerance penalty for the second pass.
+    :param branching_factor: Maximum number of subclusters per tree node.
+    :param mode: "strict_parity" or "fast".
+    :param num_threads: Thread count for parallel-safe phases.
+    :returns: ClusteringResult with labels, clusters, centroids, and cluster sizes.
+    """
+    _require_oefp_batch(fingerprints, "bitbirch_recluster")
+    if initial_threshold < 0.0 or second_threshold < 0.0:
+        raise ValueError("BitBirch reclustering thresholds must be non-negative")
+    if second_tolerance < 0.0:
+        raise ValueError("BitBirch reclustering tolerance must be non-negative")
+    if branching_factor < 1:
+        raise ValueError("BitBirch branching_factor must be at least one")
+
+    options = BitBirchReclusteringOptions()
+    options.initial_threshold = float(initial_threshold)
+    options.second_threshold = float(second_threshold)
+    options.second_tolerance = float(second_tolerance)
+    options.branching_factor = int(branching_factor)
+    options.mode = _bitbirch_mode(mode)
+    options.num_threads = int(num_threads)
+
+    result = _bitbirch_recluster(fingerprints, options)
+    return ClusteringResult(
+        result.labels,
+        result.clusters,
+        cluster_sizes=result.cluster_sizes,
+        centroids=_bitbirch_centroids(result.centroids),
+        native_owner=result,
+    )
+
+
+def bitbirch_refine(fingerprints, *, threshold=0.65, branching_factor=50,
+                    merge_criterion="diameter", tolerance=0.05, singly=False,
+                    redistribute_largest_cluster=False, reassign_top_clusters=0,
+                    mode="strict_parity", num_threads=0):
+    """
+    Fit BitBirch and apply requested refinement passes.
+
+    :param fingerprints: `oefp.OEFPBatch` containing dense binary fingerprints.
+    :param threshold: Similarity threshold used by the merge criterion.
+    :param branching_factor: Maximum number of subclusters per tree node.
+    :param merge_criterion: "radius", "diameter", "tolerance", or
+        "tolerance_tough".
+    :param tolerance: Tolerance penalty for tolerance-based criteria.
+    :param singly: Whether to skip parent-pointer maintenance during the fit.
+    :param redistribute_largest_cluster: Whether to redistribute molecules from
+        the largest cluster after fitting.
+    :param reassign_top_clusters: Number of largest clusters to reassign by
+        centroid similarity. Use zero to disable reassignment.
+    :param mode: "strict_parity" or "fast".
+    :param num_threads: Thread count for parallel-safe refinement scoring.
+    :returns: ClusteringResult with labels, clusters, centroids, and cluster sizes.
+    """
+    _require_oefp_batch(fingerprints, "bitbirch_refine")
+    if threshold < 0.0:
+        raise ValueError("BitBirch threshold must be non-negative")
+    if branching_factor < 1:
+        raise ValueError("BitBirch branching_factor must be at least one")
+    if tolerance < 0.0:
+        raise ValueError("BitBirch tolerance must be non-negative")
+    if reassign_top_clusters == 1:
+        raise ValueError("BitBirch reassign_top_clusters must be zero or at least two")
+    if redistribute_largest_cluster and singly:
+        raise ValueError("BitBirch redistribute_largest_cluster requires singly=False")
+
+    fit_options = BitBirchOptions()
+    fit_options.threshold = float(threshold)
+    fit_options.branching_factor = int(branching_factor)
+    fit_options.merge_criterion = _bitbirch_merge_criterion(merge_criterion)
+    fit_options.tolerance = float(tolerance)
+    fit_options.singly = bool(singly)
+    fit_options.mode = _bitbirch_mode(mode)
+    fit_options.num_threads = int(num_threads)
+
+    options = BitBirchRefinementOptions()
+    options.fit_options = fit_options
+    options.redistribute_largest_cluster = bool(redistribute_largest_cluster)
+    options.reassign_top_clusters = int(reassign_top_clusters)
+    options.num_threads = int(num_threads)
+
+    result = _bitbirch_refine(fingerprints, options)
+    return ClusteringResult(
+        result.labels,
+        result.clusters,
+        cluster_sizes=result.cluster_sizes,
+        centroids=_bitbirch_centroids(result.centroids),
+        native_owner=result,
     )
 
 

@@ -25,6 +25,10 @@ set(_OECLUSTER_SWIG_DEPENDS
     ${CMAKE_SOURCE_DIR}/include/oecluster/clustering/ClusterTypes.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/clustering/Butina.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/clustering/Centroid.h
+    ${CMAKE_SOURCE_DIR}/include/oecluster/clustering/DBSCAN.h
+    ${CMAKE_SOURCE_DIR}/include/oecluster/clustering/HDBSCAN.h
+    ${CMAKE_SOURCE_DIR}/include/oecluster/clustering/Agglomerative.h
+    ${CMAKE_SOURCE_DIR}/include/oecluster/clustering/BitBirch.h
 )
 
 set_source_files_properties(oecluster.i PROPERTIES
@@ -39,6 +43,7 @@ openeye_add_swig_module(
     STABLE_ABI ${OECLUSTER_USE_STABLE_ABI}
     SWIG_FLAGS "-doxygen"
         "-I${CMAKE_SOURCE_DIR}/include"
+        "-I${OECLUSTER_OEFP_RESOLVED_SOURCE_DIR}/include"
         "-I${OPENEYE_INCLUDE_DIR}"
     EXPECTED_LIB_VARS ${_OECLUSTER_EXPECTED_LIB_VARS}
     INIT_PY ${CMAKE_SOURCE_DIR}/python/oecluster/__init__.py

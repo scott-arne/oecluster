@@ -11,6 +11,15 @@
 
 using namespace OECluster;
 
+namespace {
+
+std::vector<size_t> neighbor_vector(const ThresholdNeighborGraph& graph, size_t index) {
+    const auto neighbors = graph.Neighbors(index);
+    return std::vector<size_t>(neighbors.begin(), neighbors.end());
+}
+
+}  // namespace
+
 TEST(ButinaClusteringTest, SingletonInputReturnsSingletonCluster) {
     DenseStorage storage(1);
     ButinaOptions options;
@@ -37,10 +46,10 @@ TEST(ThresholdGraphTest, DenseStorageIncludesSelfAndThresholdNeighbors) {
     const ThresholdNeighborGraph graph = BuildThresholdNeighborGraph(storage, options);
 
     ASSERT_EQ(graph.Size(), 4);
-    EXPECT_EQ(graph.Neighbors(0), std::vector<size_t>({0, 1}));
-    EXPECT_EQ(graph.Neighbors(1), std::vector<size_t>({0, 1, 2}));
-    EXPECT_EQ(graph.Neighbors(2), std::vector<size_t>({1, 2, 3}));
-    EXPECT_EQ(graph.Neighbors(3), std::vector<size_t>({2, 3}));
+    EXPECT_EQ(neighbor_vector(graph, 0), std::vector<size_t>({0, 1}));
+    EXPECT_EQ(neighbor_vector(graph, 1), std::vector<size_t>({0, 1, 2}));
+    EXPECT_EQ(neighbor_vector(graph, 2), std::vector<size_t>({1, 2, 3}));
+    EXPECT_EQ(neighbor_vector(graph, 3), std::vector<size_t>({2, 3}));
 }
 
 TEST(ThresholdGraphTest, EmptyAndSingletonDenseStorageDoNotRequireData) {
@@ -55,7 +64,7 @@ TEST(ThresholdGraphTest, EmptyAndSingletonDenseStorageDoNotRequireData) {
     const ThresholdNeighborGraph singleton_graph =
         BuildThresholdNeighborGraph(singleton, options);
     ASSERT_EQ(singleton_graph.Size(), 1);
-    EXPECT_EQ(singleton_graph.Neighbors(0), std::vector<size_t>({0}));
+    EXPECT_EQ(neighbor_vector(singleton_graph, 0), std::vector<size_t>({0}));
 }
 
 TEST(ThresholdGraphTest, SparseStorageMatchesDenseStorage) {
@@ -77,7 +86,36 @@ TEST(ThresholdGraphTest, SparseStorageMatchesDenseStorage) {
 
     ASSERT_EQ(sparse_graph.Size(), dense_graph.Size());
     for (size_t i = 0; i < dense_graph.Size(); ++i) {
-        EXPECT_EQ(sparse_graph.Neighbors(i), dense_graph.Neighbors(i));
+        EXPECT_EQ(neighbor_vector(sparse_graph, i), neighbor_vector(dense_graph, i));
+    }
+}
+
+TEST(ThresholdGraphTest, DenseParallelBuildIsDeterministic) {
+    DenseStorage storage(5);
+    storage.Set(0, 1, 0.10);
+    storage.Set(0, 2, 0.10);
+    storage.Set(0, 3, 0.50);
+    storage.Set(0, 4, 0.90);
+    storage.Set(1, 2, 0.20);
+    storage.Set(1, 3, 0.10);
+    storage.Set(1, 4, 0.90);
+    storage.Set(2, 3, 0.10);
+    storage.Set(2, 4, 0.90);
+    storage.Set(3, 4, 0.10);
+
+    ThresholdGraphOptions serial_options;
+    serial_options.threshold = 0.2;
+    serial_options.num_threads = 1;
+
+    ThresholdGraphOptions parallel_options = serial_options;
+    parallel_options.num_threads = 4;
+
+    const auto serial_graph = BuildThresholdNeighborGraph(storage, serial_options);
+    const auto parallel_graph = BuildThresholdNeighborGraph(storage, parallel_options);
+
+    ASSERT_EQ(serial_graph.Size(), parallel_graph.Size());
+    for (size_t i = 0; i < serial_graph.Size(); ++i) {
+        EXPECT_EQ(neighbor_vector(serial_graph, i), neighbor_vector(parallel_graph, i));
     }
 }
 
