@@ -56,7 +56,7 @@ include(FetchContent)
 FetchContent_Declare(
     cmake_openeye
     GIT_REPOSITORY https://github.com/scott-arne/cmake-openeye.git
-    GIT_TAG v1.2.0
+    GIT_TAG v1.2.1
     GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(cmake_openeye)
@@ -119,9 +119,18 @@ set(OECLUSTER_SOURCES
     src/comparisons/FingerprintComparison.cpp
     src/comparisons/ROCSComparison.cpp
     src/comparisons/SuperposeComparison.cpp
+    src/clustering/ClusterTypes.cpp
     src/clustering/ThresholdGraph.cpp
     src/clustering/Butina.cpp
     src/clustering/Centroid.cpp
+    src/clustering/DBSCAN.cpp
+    src/clustering/HDBSCANLinkage.cpp
+    src/clustering/HDBSCANTree.cpp
+    src/clustering/HDBSCAN.cpp
+    src/clustering/Agglomerative.cpp
+    src/clustering/BitBirchKernels.cpp
+    src/clustering/BitBirchTree.cpp
+    src/clustering/BitBirch.cpp
 )
 
 add_library(oecluster ${OECLUSTER_SOURCES})
@@ -140,8 +149,8 @@ target_link_libraries(oecluster
         OpenEye::OEShape
         OpenEye::OEBio
         OpenEye::OESpruce
-    PRIVATE
         oefp
+    PRIVATE
         oeselect
 )
 

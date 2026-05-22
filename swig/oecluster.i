@@ -15,6 +15,11 @@
 #include "oecluster/comparisons/FingerprintComparison.h"
 #include "oecluster/comparisons/ROCSComparison.h"
 #include "oecluster/comparisons/SuperposeComparison.h"
+#include "oecluster/clustering/DBSCAN.h"
+#include "oecluster/clustering/HDBSCAN.h"
+#include "oecluster/clustering/Agglomerative.h"
+#include "oecluster/clustering/BitBirch.h"
+#include "oefp/batch.h"
 
 #include <oechem.h>
 #include <oebio.h>
@@ -103,6 +108,62 @@ static void* _oecluster_extract_swig_ptr(PyObject* obj) {
     }
     void* ptr = ((_SwigPyObjectCompat*)thisAttr)->ptr;
     Py_DECREF(thisAttr);
+    return ptr;
+}
+
+static PyObject* _oecluster_oefp_batch_type = NULL;
+static PyObject* _oecluster_oefp_native_batch_type = NULL;
+
+static bool _oecluster_import_oefp_batch_types() {
+    if (_oecluster_oefp_batch_type && _oecluster_oefp_native_batch_type) {
+        return true;
+    }
+
+    PyObject* oefp_mod = PyImport_ImportModule("oefp");
+    if (!oefp_mod) {
+        PyErr_Clear();
+        return false;
+    }
+    _oecluster_oefp_batch_type = PyObject_GetAttrString(oefp_mod, "OEFPBatch");
+    Py_DECREF(oefp_mod);
+
+    PyObject* native_mod = PyImport_ImportModule("oefp._native");
+    if (!native_mod) {
+        PyErr_Clear();
+        return false;
+    }
+    _oecluster_oefp_native_batch_type =
+        PyObject_GetAttrString(native_mod, "_NativeOEFPBatch");
+    Py_DECREF(native_mod);
+
+    return _oecluster_oefp_batch_type && _oecluster_oefp_native_batch_type;
+}
+
+static bool _oecluster_is_oefp_batch(PyObject* obj) {
+    if (!_oecluster_import_oefp_batch_types()) {
+        return false;
+    }
+    if (PyObject_IsInstance(obj, _oecluster_oefp_batch_type) == 1) {
+        return true;
+    }
+    return PyObject_IsInstance(obj, _oecluster_oefp_native_batch_type) == 1;
+}
+
+static void* _oecluster_extract_oefp_batch_ptr(PyObject* obj) {
+    PyObject* native_obj = obj;
+    Py_INCREF(native_obj);
+    if (_oecluster_import_oefp_batch_types() &&
+        PyObject_IsInstance(obj, _oecluster_oefp_batch_type) == 1) {
+        Py_DECREF(native_obj);
+        native_obj = PyObject_GetAttrString(obj, "_native");
+        if (!native_obj) {
+            PyErr_Clear();
+            return NULL;
+        }
+    }
+
+    void* ptr = _oecluster_extract_swig_ptr(native_obj);
+    Py_DECREF(native_obj);
     return ptr;
 }
 
@@ -507,6 +568,8 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, _oecluster_is_oereceptor, "
 // Instantiate vector templates used by the Python layer
 %template(StringVector) std::vector<std::string>;
 %template(SizeTVector) std::vector<size_t>;
+%template(IntVector) std::vector<int>;
+%template(DoubleVector) std::vector<double>;
 %template(ClusterVector) std::vector<std::vector<size_t>>;
 
 // ============================================================================
@@ -595,6 +658,108 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, _oecluster_is_oereceptor, "
     Py_END_ALLOW_THREADS
 }
 
+%exception OECluster::dbscan_cluster {
+    Py_BEGIN_ALLOW_THREADS
+    try {
+        $action
+    } catch (const OECluster::OEClusterError& e) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError, e.what());
+    } catch (const std::exception& e) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError, e.what());
+    } catch (...) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError, "Unknown C++ exception in dbscan_cluster");
+    }
+    Py_END_ALLOW_THREADS
+}
+
+%exception OECluster::hdbscan_cluster {
+    Py_BEGIN_ALLOW_THREADS
+    try {
+        $action
+    } catch (const OECluster::OEClusterError& e) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError, e.what());
+    } catch (const std::exception& e) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError, e.what());
+    } catch (...) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError, "Unknown C++ exception in hdbscan_cluster");
+    }
+    Py_END_ALLOW_THREADS
+}
+
+%exception OECluster::agglomerative_cluster {
+    Py_BEGIN_ALLOW_THREADS
+    try {
+        $action
+    } catch (const OECluster::OEClusterError& e) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError, e.what());
+    } catch (const std::exception& e) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError, e.what());
+    } catch (...) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError, "Unknown C++ exception in agglomerative_cluster");
+    }
+    Py_END_ALLOW_THREADS
+}
+
+%exception OECluster::bitbirch_cluster {
+    Py_BEGIN_ALLOW_THREADS
+    try {
+        $action
+    } catch (const OECluster::OEClusterError& e) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError, e.what());
+    } catch (const std::exception& e) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError, e.what());
+    } catch (...) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError, "Unknown C++ exception in bitbirch_cluster");
+    }
+    Py_END_ALLOW_THREADS
+}
+
+%exception OECluster::bitbirch_recluster {
+    Py_BEGIN_ALLOW_THREADS
+    try {
+        $action
+    } catch (const OECluster::OEClusterError& e) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError, e.what());
+    } catch (const std::exception& e) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError, e.what());
+    } catch (...) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError, "Unknown C++ exception in bitbirch_recluster");
+    }
+    Py_END_ALLOW_THREADS
+}
+
+%exception OECluster::bitbirch_refine {
+    Py_BEGIN_ALLOW_THREADS
+    try {
+        $action
+    } catch (const OECluster::OEClusterError& e) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError, e.what());
+    } catch (const std::exception& e) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError, e.what());
+    } catch (...) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError, "Unknown C++ exception in bitbirch_refine");
+    }
+    Py_END_ALLOW_THREADS
+}
+
 // ============================================================================
 // Ignore problematic members before %include
 //
@@ -634,6 +799,27 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, _oecluster_is_oereceptor, "
 %ignore OECluster::SuperposeComparison::SuperposeComparison(std::shared_ptr<const SharedData>, const Options&);
 // Ignore SparseStorage internals that use unordered_map/shared_mutex/thread
 %ignore OECluster::SparseStorage::Entries;
+
+// Accept high-level oefp.OEFPBatch and native oefp._native._NativeOEFPBatch
+// objects without making oecluster own or duplicate fingerprint wrappers.
+namespace OEFP {
+class OEFPBatch;
+}
+
+%typemap(in) const OEFP::OEFPBatch& (void *argp = 0) {
+    if (!_oecluster_is_oefp_batch($input)) {
+        SWIG_exception_fail(SWIG_TypeError, "Expected an oefp.OEFPBatch.");
+    }
+    argp = _oecluster_extract_oefp_batch_ptr($input);
+    if (!argp) {
+        SWIG_exception_fail(SWIG_NullReferenceError, "Null OEFPBatch reference.");
+    }
+    $1 = reinterpret_cast< $1_ltype >(argp);
+}
+
+%typemap(typecheck, precedence=10) const OEFP::OEFPBatch& {
+    $1 = _oecluster_is_oefp_batch($input) ? 1 : 0;
+}
 
 // ============================================================================
 // Redeclare StorageBackend hierarchy for SWIG
@@ -799,6 +985,10 @@ public:
 %include "oecluster/clustering/ClusterTypes.h"
 %include "oecluster/clustering/Butina.h"
 %include "oecluster/clustering/Centroid.h"
+%include "oecluster/clustering/DBSCAN.h"
+%include "oecluster/clustering/HDBSCAN.h"
+%include "oecluster/clustering/Agglomerative.h"
+%include "oecluster/clustering/BitBirch.h"
 
 // ============================================================================
 // Version macros

@@ -19,16 +19,31 @@ struct ThresholdGraphOptions {
     size_t chunk_size = 4096;
 };
 
+class NeighborRange {
+public:
+    NeighborRange(const size_t* begin, const size_t* end);
+
+    const size_t* begin() const;
+    const size_t* end() const;
+    size_t size() const;
+    bool empty() const;
+
+private:
+    const size_t* begin_;
+    const size_t* end_;
+};
+
 class ThresholdNeighborGraph {
 public:
     explicit ThresholdNeighborGraph(std::vector<std::vector<size_t>> neighbors);
+    ThresholdNeighborGraph(std::vector<size_t> offsets, std::vector<size_t> indices);
 
     size_t Size() const;
-    const std::vector<size_t>& Neighbors(size_t index) const;
-    std::vector<size_t>& MutableNeighbors(size_t index);
+    NeighborRange Neighbors(size_t index) const;
 
 private:
-    std::vector<std::vector<size_t>> neighbors_;
+    std::vector<size_t> offsets_;
+    std::vector<size_t> indices_;
 };
 
 ThresholdNeighborGraph BuildThresholdNeighborGraph(

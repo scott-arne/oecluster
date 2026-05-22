@@ -328,6 +328,216 @@ class SizeTVector(object):
 
 # Register SizeTVector in _oecluster:
 _oecluster.SizeTVector_swigregister(SizeTVector)
+class IntVector(object):
+    thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
+    __repr__ = _swig_repr
+
+    def iterator(self):
+        return _oecluster.IntVector_iterator(self)
+    def __iter__(self):
+        return self.iterator()
+
+    def __nonzero__(self):
+        return _oecluster.IntVector___nonzero__(self)
+
+    def __bool__(self):
+        return _oecluster.IntVector___bool__(self)
+
+    def __len__(self):
+        return _oecluster.IntVector___len__(self)
+
+    def __getslice__(self, i, j):
+        return _oecluster.IntVector___getslice__(self, i, j)
+
+    def __setslice__(self, *args):
+        return _oecluster.IntVector___setslice__(self, *args)
+
+    def __delslice__(self, i, j):
+        return _oecluster.IntVector___delslice__(self, i, j)
+
+    def __delitem__(self, *args):
+        return _oecluster.IntVector___delitem__(self, *args)
+
+    def __getitem__(self, *args):
+        return _oecluster.IntVector___getitem__(self, *args)
+
+    def __setitem__(self, *args):
+        return _oecluster.IntVector___setitem__(self, *args)
+
+    def pop(self):
+        return _oecluster.IntVector_pop(self)
+
+    def append(self, x):
+        return _oecluster.IntVector_append(self, x)
+
+    def empty(self):
+        return _oecluster.IntVector_empty(self)
+
+    def size(self):
+        return _oecluster.IntVector_size(self)
+
+    def swap(self, v):
+        return _oecluster.IntVector_swap(self, v)
+
+    def begin(self):
+        return _oecluster.IntVector_begin(self)
+
+    def end(self):
+        return _oecluster.IntVector_end(self)
+
+    def rbegin(self):
+        return _oecluster.IntVector_rbegin(self)
+
+    def rend(self):
+        return _oecluster.IntVector_rend(self)
+
+    def clear(self):
+        return _oecluster.IntVector_clear(self)
+
+    def get_allocator(self):
+        return _oecluster.IntVector_get_allocator(self)
+
+    def pop_back(self):
+        return _oecluster.IntVector_pop_back(self)
+
+    def erase(self, *args):
+        return _oecluster.IntVector_erase(self, *args)
+
+    def __init__(self, *args):
+        _oecluster.IntVector_swiginit(self, _oecluster.new_IntVector(*args))
+
+    def push_back(self, x):
+        return _oecluster.IntVector_push_back(self, x)
+
+    def front(self):
+        return _oecluster.IntVector_front(self)
+
+    def back(self):
+        return _oecluster.IntVector_back(self)
+
+    def assign(self, n, x):
+        return _oecluster.IntVector_assign(self, n, x)
+
+    def resize(self, *args):
+        return _oecluster.IntVector_resize(self, *args)
+
+    def insert(self, *args):
+        return _oecluster.IntVector_insert(self, *args)
+
+    def reserve(self, n):
+        return _oecluster.IntVector_reserve(self, n)
+
+    def capacity(self):
+        return _oecluster.IntVector_capacity(self)
+    __swig_destroy__ = _oecluster.delete_IntVector
+
+# Register IntVector in _oecluster:
+_oecluster.IntVector_swigregister(IntVector)
+class DoubleVector(object):
+    thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
+    __repr__ = _swig_repr
+
+    def iterator(self):
+        return _oecluster.DoubleVector_iterator(self)
+    def __iter__(self):
+        return self.iterator()
+
+    def __nonzero__(self):
+        return _oecluster.DoubleVector___nonzero__(self)
+
+    def __bool__(self):
+        return _oecluster.DoubleVector___bool__(self)
+
+    def __len__(self):
+        return _oecluster.DoubleVector___len__(self)
+
+    def __getslice__(self, i, j):
+        return _oecluster.DoubleVector___getslice__(self, i, j)
+
+    def __setslice__(self, *args):
+        return _oecluster.DoubleVector___setslice__(self, *args)
+
+    def __delslice__(self, i, j):
+        return _oecluster.DoubleVector___delslice__(self, i, j)
+
+    def __delitem__(self, *args):
+        return _oecluster.DoubleVector___delitem__(self, *args)
+
+    def __getitem__(self, *args):
+        return _oecluster.DoubleVector___getitem__(self, *args)
+
+    def __setitem__(self, *args):
+        return _oecluster.DoubleVector___setitem__(self, *args)
+
+    def pop(self):
+        return _oecluster.DoubleVector_pop(self)
+
+    def append(self, x):
+        return _oecluster.DoubleVector_append(self, x)
+
+    def empty(self):
+        return _oecluster.DoubleVector_empty(self)
+
+    def size(self):
+        return _oecluster.DoubleVector_size(self)
+
+    def swap(self, v):
+        return _oecluster.DoubleVector_swap(self, v)
+
+    def begin(self):
+        return _oecluster.DoubleVector_begin(self)
+
+    def end(self):
+        return _oecluster.DoubleVector_end(self)
+
+    def rbegin(self):
+        return _oecluster.DoubleVector_rbegin(self)
+
+    def rend(self):
+        return _oecluster.DoubleVector_rend(self)
+
+    def clear(self):
+        return _oecluster.DoubleVector_clear(self)
+
+    def get_allocator(self):
+        return _oecluster.DoubleVector_get_allocator(self)
+
+    def pop_back(self):
+        return _oecluster.DoubleVector_pop_back(self)
+
+    def erase(self, *args):
+        return _oecluster.DoubleVector_erase(self, *args)
+
+    def __init__(self, *args):
+        _oecluster.DoubleVector_swiginit(self, _oecluster.new_DoubleVector(*args))
+
+    def push_back(self, x):
+        return _oecluster.DoubleVector_push_back(self, x)
+
+    def front(self):
+        return _oecluster.DoubleVector_front(self)
+
+    def back(self):
+        return _oecluster.DoubleVector_back(self)
+
+    def assign(self, n, x):
+        return _oecluster.DoubleVector_assign(self, n, x)
+
+    def resize(self, *args):
+        return _oecluster.DoubleVector_resize(self, *args)
+
+    def insert(self, *args):
+        return _oecluster.DoubleVector_insert(self, *args)
+
+    def reserve(self, n):
+        return _oecluster.DoubleVector_reserve(self, n)
+
+    def capacity(self):
+        return _oecluster.DoubleVector_capacity(self)
+    __swig_destroy__ = _oecluster.delete_DoubleVector
+
+# Register DoubleVector in _oecluster:
+_oecluster.DoubleVector_swigregister(DoubleVector)
 class ClusterVector(object):
     thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
     __repr__ = _swig_repr
@@ -918,6 +1128,37 @@ class SuperposeComparison(PairwiseComparison):
 
 # Register SuperposeComparison in _oecluster:
 _oecluster.SuperposeComparison_swigregister(SuperposeComparison)
+class ClusteringResult(object):
+    r"""
+    Shared clustering result with integer labels and grouped members.
+
+    Labels use -1 for noise. Non-negative labels identify clusters and are
+    converted to member lists by labels_to_clusters().
+    """
+
+    thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
+    __repr__ = _swig_repr
+    labels = property(_oecluster.ClusteringResult_labels_get, _oecluster.ClusteringResult_labels_set)
+    clusters = property(_oecluster.ClusteringResult_clusters_get, _oecluster.ClusteringResult_clusters_set)
+
+    def __init__(self):
+        _oecluster.ClusteringResult_swiginit(self, _oecluster.new_ClusteringResult())
+    __swig_destroy__ = _oecluster.delete_ClusteringResult
+
+# Register ClusteringResult in _oecluster:
+_oecluster.ClusteringResult_swigregister(ClusteringResult)
+cvar = _oecluster.cvar
+NOISE_LABEL = cvar.NOISE_LABEL
+
+
+def labels_to_clusters(labels):
+    r"""
+    Convert cluster labels into cluster member lists.
+
+    :param labels: Per-item labels, where negative values are ignored as noise.
+    :returns: Clusters ordered by non-negative label, preserving item order.
+    """
+    return _oecluster.labels_to_clusters(labels)
 class ButinaOptions(object):
     r"""Options for Butina clustering."""
 
@@ -965,6 +1206,250 @@ def cluster_centroid(*args):
     :raises std::out_of_range: If a cluster member is outside the storage range.
     """
     return _oecluster.cluster_centroid(*args)
+class DBSCANOptions(object):
+    r"""Options for DBSCAN clustering."""
+
+    thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
+    __repr__ = _swig_repr
+    eps = property(_oecluster.DBSCANOptions_eps_get, _oecluster.DBSCANOptions_eps_set)
+    min_samples = property(_oecluster.DBSCANOptions_min_samples_get, _oecluster.DBSCANOptions_min_samples_set)
+    num_threads = property(_oecluster.DBSCANOptions_num_threads_get, _oecluster.DBSCANOptions_num_threads_set)
+    chunk_size = property(_oecluster.DBSCANOptions_chunk_size_get, _oecluster.DBSCANOptions_chunk_size_set)
+
+    def __init__(self):
+        _oecluster.DBSCANOptions_swiginit(self, _oecluster.new_DBSCANOptions())
+    __swig_destroy__ = _oecluster.delete_DBSCANOptions
+
+# Register DBSCANOptions in _oecluster:
+_oecluster.DBSCANOptions_swigregister(DBSCANOptions)
+class DBSCANResult(ClusteringResult):
+    r"""DBSCAN result with labels, clusters, and core sample indices."""
+
+    thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
+    __repr__ = _swig_repr
+    core_sample_indices = property(_oecluster.DBSCANResult_core_sample_indices_get, _oecluster.DBSCANResult_core_sample_indices_set)
+
+    def __init__(self):
+        _oecluster.DBSCANResult_swiginit(self, _oecluster.new_DBSCANResult())
+    __swig_destroy__ = _oecluster.delete_DBSCANResult
+
+# Register DBSCANResult in _oecluster:
+_oecluster.DBSCANResult_swigregister(DBSCANResult)
+
+def dbscan_cluster(storage, options):
+    r"""
+    Cluster a precomputed distance matrix with DBSCAN.
+
+    :param storage: Pairwise distance storage.
+    :param options: DBSCAN clustering options.
+    :returns: Labels, clusters, and core sample indices.
+    :raises std::invalid_argument: If options are invalid or sparse storage is incomplete.
+    """
+    return _oecluster.dbscan_cluster(storage, options)
+HDBSCANClusterSelectionMethod_EOM = _oecluster.HDBSCANClusterSelectionMethod_EOM
+HDBSCANClusterSelectionMethod_Leaf = _oecluster.HDBSCANClusterSelectionMethod_Leaf
+class HDBSCANOptions(object):
+    r"""Options for HDBSCAN clustering."""
+
+    thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
+    __repr__ = _swig_repr
+    min_cluster_size = property(_oecluster.HDBSCANOptions_min_cluster_size_get, _oecluster.HDBSCANOptions_min_cluster_size_set)
+    min_samples = property(_oecluster.HDBSCANOptions_min_samples_get, _oecluster.HDBSCANOptions_min_samples_set)
+    cluster_selection_epsilon = property(_oecluster.HDBSCANOptions_cluster_selection_epsilon_get, _oecluster.HDBSCANOptions_cluster_selection_epsilon_set)
+    max_cluster_size = property(_oecluster.HDBSCANOptions_max_cluster_size_get, _oecluster.HDBSCANOptions_max_cluster_size_set)
+    alpha = property(_oecluster.HDBSCANOptions_alpha_get, _oecluster.HDBSCANOptions_alpha_set)
+    cluster_selection_method = property(_oecluster.HDBSCANOptions_cluster_selection_method_get, _oecluster.HDBSCANOptions_cluster_selection_method_set)
+    allow_single_cluster = property(_oecluster.HDBSCANOptions_allow_single_cluster_get, _oecluster.HDBSCANOptions_allow_single_cluster_set)
+    num_threads = property(_oecluster.HDBSCANOptions_num_threads_get, _oecluster.HDBSCANOptions_num_threads_set)
+    chunk_size = property(_oecluster.HDBSCANOptions_chunk_size_get, _oecluster.HDBSCANOptions_chunk_size_set)
+
+    def __init__(self):
+        _oecluster.HDBSCANOptions_swiginit(self, _oecluster.new_HDBSCANOptions())
+    __swig_destroy__ = _oecluster.delete_HDBSCANOptions
+
+# Register HDBSCANOptions in _oecluster:
+_oecluster.HDBSCANOptions_swigregister(HDBSCANOptions)
+class HDBSCANResult(ClusteringResult):
+    r"""HDBSCAN result with labels, clusters, and membership probabilities."""
+
+    thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
+    __repr__ = _swig_repr
+    probabilities = property(_oecluster.HDBSCANResult_probabilities_get, _oecluster.HDBSCANResult_probabilities_set)
+
+    def __init__(self):
+        _oecluster.HDBSCANResult_swiginit(self, _oecluster.new_HDBSCANResult())
+    __swig_destroy__ = _oecluster.delete_HDBSCANResult
+
+# Register HDBSCANResult in _oecluster:
+_oecluster.HDBSCANResult_swigregister(HDBSCANResult)
+
+def hdbscan_cluster(storage, options):
+    r"""
+    Cluster a precomputed distance matrix with HDBSCAN.
+
+    :param storage: Complete pairwise distance storage.
+    :param options: HDBSCAN clustering options.
+    :returns: Labels, clusters, and probabilities.
+    """
+    return _oecluster.hdbscan_cluster(storage, options)
+
+def compute_core_distances(storage, min_samples, num_threads):
+    return _oecluster.compute_core_distances(storage, min_samples, num_threads)
+AgglomerativeLinkageMethod_Single = _oecluster.AgglomerativeLinkageMethod_Single
+AgglomerativeLinkageMethod_Complete = _oecluster.AgglomerativeLinkageMethod_Complete
+AgglomerativeLinkageMethod_Average = _oecluster.AgglomerativeLinkageMethod_Average
+AgglomerativeLinkageMethod_Weighted = _oecluster.AgglomerativeLinkageMethod_Weighted
+class AgglomerativeOptions(object):
+    r"""Options for hierarchical agglomerative clustering."""
+
+    thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
+    __repr__ = _swig_repr
+    n_clusters = property(_oecluster.AgglomerativeOptions_n_clusters_get, _oecluster.AgglomerativeOptions_n_clusters_set)
+    distance_threshold = property(_oecluster.AgglomerativeOptions_distance_threshold_get, _oecluster.AgglomerativeOptions_distance_threshold_set)
+    linkage = property(_oecluster.AgglomerativeOptions_linkage_get, _oecluster.AgglomerativeOptions_linkage_set)
+    compute_full_tree = property(_oecluster.AgglomerativeOptions_compute_full_tree_get, _oecluster.AgglomerativeOptions_compute_full_tree_set)
+    num_threads = property(_oecluster.AgglomerativeOptions_num_threads_get, _oecluster.AgglomerativeOptions_num_threads_set)
+    chunk_size = property(_oecluster.AgglomerativeOptions_chunk_size_get, _oecluster.AgglomerativeOptions_chunk_size_set)
+
+    def __init__(self):
+        _oecluster.AgglomerativeOptions_swiginit(self, _oecluster.new_AgglomerativeOptions())
+    __swig_destroy__ = _oecluster.delete_AgglomerativeOptions
+
+# Register AgglomerativeOptions in _oecluster:
+_oecluster.AgglomerativeOptions_swigregister(AgglomerativeOptions)
+class AgglomerativeResult(ClusteringResult):
+    r"""Agglomerative clustering result with labels and merge tree metadata."""
+
+    thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
+    __repr__ = _swig_repr
+    children_left = property(_oecluster.AgglomerativeResult_children_left_get, _oecluster.AgglomerativeResult_children_left_set)
+    children_right = property(_oecluster.AgglomerativeResult_children_right_get, _oecluster.AgglomerativeResult_children_right_set)
+    distances = property(_oecluster.AgglomerativeResult_distances_get, _oecluster.AgglomerativeResult_distances_set)
+    cluster_sizes = property(_oecluster.AgglomerativeResult_cluster_sizes_get, _oecluster.AgglomerativeResult_cluster_sizes_set)
+
+    def __init__(self):
+        _oecluster.AgglomerativeResult_swiginit(self, _oecluster.new_AgglomerativeResult())
+    __swig_destroy__ = _oecluster.delete_AgglomerativeResult
+
+# Register AgglomerativeResult in _oecluster:
+_oecluster.AgglomerativeResult_swigregister(AgglomerativeResult)
+
+def agglomerative_cluster(storage, options):
+    r"""
+    Cluster a complete precomputed distance matrix with agglomerative clustering.
+
+    :param storage: Complete pairwise distance storage.
+    :param options: Agglomerative clustering options.
+    :returns: Labels, clusters, and merge tree metadata.
+    :raises std::invalid_argument: If options are invalid or storage is incomplete.
+    """
+    return _oecluster.agglomerative_cluster(storage, options)
+BitBirchMergeCriterion_Radius = _oecluster.BitBirchMergeCriterion_Radius
+BitBirchMergeCriterion_Diameter = _oecluster.BitBirchMergeCriterion_Diameter
+BitBirchMergeCriterion_Tolerance = _oecluster.BitBirchMergeCriterion_Tolerance
+BitBirchMergeCriterion_ToleranceTough = _oecluster.BitBirchMergeCriterion_ToleranceTough
+BitBirchMode_StrictParity = _oecluster.BitBirchMode_StrictParity
+BitBirchMode_Fast = _oecluster.BitBirchMode_Fast
+class BitBirchOptions(object):
+    r"""Options for one-pass BitBirch clustering."""
+
+    thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
+    __repr__ = _swig_repr
+    threshold = property(_oecluster.BitBirchOptions_threshold_get, _oecluster.BitBirchOptions_threshold_set)
+    branching_factor = property(_oecluster.BitBirchOptions_branching_factor_get, _oecluster.BitBirchOptions_branching_factor_set)
+    merge_criterion = property(_oecluster.BitBirchOptions_merge_criterion_get, _oecluster.BitBirchOptions_merge_criterion_set)
+    tolerance = property(_oecluster.BitBirchOptions_tolerance_get, _oecluster.BitBirchOptions_tolerance_set)
+    singly = property(_oecluster.BitBirchOptions_singly_get, _oecluster.BitBirchOptions_singly_set)
+    mode = property(_oecluster.BitBirchOptions_mode_get, _oecluster.BitBirchOptions_mode_set)
+    num_threads = property(_oecluster.BitBirchOptions_num_threads_get, _oecluster.BitBirchOptions_num_threads_set)
+
+    def __init__(self):
+        _oecluster.BitBirchOptions_swiginit(self, _oecluster.new_BitBirchOptions())
+    __swig_destroy__ = _oecluster.delete_BitBirchOptions
+
+# Register BitBirchOptions in _oecluster:
+_oecluster.BitBirchOptions_swigregister(BitBirchOptions)
+class BitBirchReclusteringOptions(object):
+    r"""Options for two-stage BitBirch reclustering."""
+
+    thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
+    __repr__ = _swig_repr
+    initial_threshold = property(_oecluster.BitBirchReclusteringOptions_initial_threshold_get, _oecluster.BitBirchReclusteringOptions_initial_threshold_set)
+    second_threshold = property(_oecluster.BitBirchReclusteringOptions_second_threshold_get, _oecluster.BitBirchReclusteringOptions_second_threshold_set)
+    second_tolerance = property(_oecluster.BitBirchReclusteringOptions_second_tolerance_get, _oecluster.BitBirchReclusteringOptions_second_tolerance_set)
+    branching_factor = property(_oecluster.BitBirchReclusteringOptions_branching_factor_get, _oecluster.BitBirchReclusteringOptions_branching_factor_set)
+    mode = property(_oecluster.BitBirchReclusteringOptions_mode_get, _oecluster.BitBirchReclusteringOptions_mode_set)
+    num_threads = property(_oecluster.BitBirchReclusteringOptions_num_threads_get, _oecluster.BitBirchReclusteringOptions_num_threads_set)
+
+    def __init__(self):
+        _oecluster.BitBirchReclusteringOptions_swiginit(self, _oecluster.new_BitBirchReclusteringOptions())
+    __swig_destroy__ = _oecluster.delete_BitBirchReclusteringOptions
+
+# Register BitBirchReclusteringOptions in _oecluster:
+_oecluster.BitBirchReclusteringOptions_swigregister(BitBirchReclusteringOptions)
+class BitBirchRefinementOptions(object):
+    r"""Options for refinement passes over a BitBirch fit."""
+
+    thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
+    __repr__ = _swig_repr
+    fit_options = property(_oecluster.BitBirchRefinementOptions_fit_options_get, _oecluster.BitBirchRefinementOptions_fit_options_set)
+    redistribute_largest_cluster = property(_oecluster.BitBirchRefinementOptions_redistribute_largest_cluster_get, _oecluster.BitBirchRefinementOptions_redistribute_largest_cluster_set)
+    reassign_top_clusters = property(_oecluster.BitBirchRefinementOptions_reassign_top_clusters_get, _oecluster.BitBirchRefinementOptions_reassign_top_clusters_set)
+    num_threads = property(_oecluster.BitBirchRefinementOptions_num_threads_get, _oecluster.BitBirchRefinementOptions_num_threads_set)
+
+    def __init__(self):
+        _oecluster.BitBirchRefinementOptions_swiginit(self, _oecluster.new_BitBirchRefinementOptions())
+    __swig_destroy__ = _oecluster.delete_BitBirchRefinementOptions
+
+# Register BitBirchRefinementOptions in _oecluster:
+_oecluster.BitBirchRefinementOptions_swigregister(BitBirchRefinementOptions)
+class BitBirchResult(ClusteringResult):
+    r"""BitBirch clustering result with labels, clusters, and centroid fingerprints."""
+
+    thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
+    __repr__ = _swig_repr
+    centroids = property(_oecluster.BitBirchResult_centroids_get, _oecluster.BitBirchResult_centroids_set)
+    cluster_sizes = property(_oecluster.BitBirchResult_cluster_sizes_get, _oecluster.BitBirchResult_cluster_sizes_set)
+
+    def __init__(self):
+        _oecluster.BitBirchResult_swiginit(self, _oecluster.new_BitBirchResult())
+    __swig_destroy__ = _oecluster.delete_BitBirchResult
+
+# Register BitBirchResult in _oecluster:
+_oecluster.BitBirchResult_swigregister(BitBirchResult)
+
+def bitbirch_cluster(*args):
+    r"""
+    Cluster dense binary OEFP fingerprints with BitBirch.
+
+    :param fingerprints: Dense binary fingerprint batch.
+    :param options: BitBirch clustering options.
+    :returns: Labels, clusters, centroids, and cluster sizes.
+    :raises std::invalid_argument: If options or fingerprints are invalid.
+    """
+    return _oecluster.bitbirch_cluster(*args)
+
+def bitbirch_recluster(*args):
+    r"""
+    Cluster dense binary OEFP fingerprints with two-stage BitBirch reclustering.
+
+    :param fingerprints: Dense binary fingerprint batch.
+    :param options: Reclustering options.
+    :returns: Labels, clusters, centroids, and cluster sizes.
+    :raises std::invalid_argument: If options or fingerprints are invalid.
+    """
+    return _oecluster.bitbirch_recluster(*args)
+
+def bitbirch_refine(*args):
+    r"""
+    Fit BitBirch and apply requested refinement passes.
+
+    :param fingerprints: Dense binary fingerprint batch.
+    :param options: Refinement options.
+    :returns: Labels, clusters, centroids, and cluster sizes.
+    :raises std::invalid_argument: If options or fingerprints are invalid.
+    """
+    return _oecluster.bitbirch_refine(*args)
 OECLUSTER_VERSION_MAJOR = _oecluster.OECLUSTER_VERSION_MAJOR
 OECLUSTER_VERSION_MINOR = _oecluster.OECLUSTER_VERSION_MINOR
 OECLUSTER_VERSION_PATCH = _oecluster.OECLUSTER_VERSION_PATCH
