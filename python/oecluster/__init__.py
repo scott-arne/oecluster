@@ -38,9 +38,13 @@ __all__ = [
     "PDistOptions",
     "DistanceMatrix",
     "ClusteringResult",
+    "RepresentativeMetrics",
+    "ClusterRepresentative",
     "pdist",
     "butina",
-    "centroid",
+    "representative",
+    "rank_representatives",
+    "select_representatives",
     "dbscan",
     "hdbscan",
     "agglomerative",
@@ -48,6 +52,8 @@ __all__ = [
     "bitbirch_recluster",
     "bitbirch_refine",
     "ButinaOptions",
+    "RepresentativeOptions",
+    "RepresentativeWeights",
     "DBSCANOptions",
     "HDBSCANOptions",
     "AgglomerativeOptions",
@@ -573,6 +579,8 @@ try:
         SparseStorage,
         PDistOptions,
         ButinaOptions,
+        RepresentativeOptions,
+        RepresentativeWeights,
         DBSCANOptions,
         HDBSCANOptions,
         AgglomerativeOptions,
@@ -581,7 +589,9 @@ try:
         BitBirchRefinementOptions,
         pdist as _cpp_pdist,
         butina_cluster as _butina_cluster,
-        cluster_centroid as _cluster_centroid,
+        cluster_representative as _cluster_representative,
+        rank_representatives as _rank_representatives,
+        select_representatives as _select_representatives,
         dbscan_cluster as _dbscan_cluster,
         hdbscan_cluster as _hdbscan_cluster,
         agglomerative_cluster as _agglomerative_cluster,
@@ -1086,7 +1096,8 @@ def butina(distance_matrix, threshold, *, reordering=False,
     :param reordering: Recompute candidate neighbor counts after each cluster.
     :param num_threads: Thread count for threshold graph construction.
     :param chunk_size: Condensed-distance pairs per work unit.
-    :returns: Tuple of clusters. The first item in each cluster is the centroid.
+    :returns: Tuple of clusters. The first item in each cluster is the
+        highest-neighborhood representative.
     :raises TypeError: If distance_matrix is not a DistanceMatrix.
     :raises ValueError: If threshold is negative.
     """
@@ -1105,47 +1116,309 @@ def butina(distance_matrix, threshold, *, reordering=False,
     return tuple(tuple(int(member) for member in cluster) for cluster in clusters)
 
 
-def centroid(cluster, distance_matrix, *, method="medoid"):
-    """
-    Select a representative member from a cluster.
+class RepresentativeMetrics:
+    """Quality metrics for one cluster representative."""
 
-    :param cluster: Iterable of item indices, such as one cluster returned by
-        :func:`butina`.
-    :param distance_matrix: DistanceMatrix used to compute the cluster.
-    :param method: Representative selection method: "first", "medoid",
-        "mean", or "minimax". "mean" selects the member with the minimum mean
-        distance to other cluster members, which is equivalent to the medoid for
-        a precomputed distance matrix.
-    :returns: Selected member index.
-    :raises TypeError: If distance_matrix is not a DistanceMatrix.
-    :raises ValueError: If cluster is empty or method is unknown.
-    """
-    if not isinstance(distance_matrix, DistanceMatrix):
-        raise TypeError("centroid() expects a DistanceMatrix")
+    __slots__ = (
+        "mean_distance_to_cluster",
+        "max_distance_to_cluster",
+        "median_distance_to_cluster",
+        "neighbor_fraction_at_threshold",
+        "nearest_external_distance",
+        "cluster_radius",
+        "cluster_diameter",
+        "silhouette_like_score",
+        "scaffold_purity",
+        "representative_rank",
+    )
 
-    method_map = {
-        "first": _oecluster.CentroidMethod_First,
-        "medoid": _oecluster.CentroidMethod_Medoid,
-        "mean": _oecluster.CentroidMethod_Mean,
-        "minimax": _oecluster.CentroidMethod_Minimax,
-    }
-    method_key = str(method).lower()
-    if method_key not in method_map:
-        raise ValueError(f"Unknown centroid method: {method!r}")
+    def __init__(self, native_metrics):
+        """
+        Construct metrics from the native representative result.
 
+        :param native_metrics: Native metrics object returned by the extension.
+        """
+        self.mean_distance_to_cluster = float(
+            native_metrics.mean_distance_to_cluster)
+        self.max_distance_to_cluster = float(native_metrics.max_distance_to_cluster)
+        self.median_distance_to_cluster = float(
+            native_metrics.median_distance_to_cluster)
+        self.neighbor_fraction_at_threshold = float(
+            native_metrics.neighbor_fraction_at_threshold)
+        self.nearest_external_distance = float(
+            native_metrics.nearest_external_distance)
+        self.cluster_radius = float(native_metrics.cluster_radius)
+        self.cluster_diameter = float(native_metrics.cluster_diameter)
+        self.silhouette_like_score = float(native_metrics.silhouette_like_score)
+        self.scaffold_purity = float(native_metrics.scaffold_purity)
+        self.representative_rank = int(native_metrics.representative_rank)
+
+
+class ClusterRepresentative:
+    """A scored cluster representative and its quality metrics."""
+
+    __slots__ = ("member", "score", "metrics")
+
+    def __init__(self, native_representative):
+        """
+        Construct a representative from the native result.
+
+        :param native_representative: Native representative object.
+        """
+        self.member = int(native_representative.member)
+        self.score = float(native_representative.score)
+        self.metrics = RepresentativeMetrics(native_representative.metrics)
+
+
+def _cpp_cluster(cluster, function_name):
     cpp_cluster = _oecluster.SizeTVector()
     for member in cluster:
         cpp_cluster.push_back(int(member))
     if len(cpp_cluster) == 0:
-        raise ValueError("centroid() requires a non-empty cluster")
+        raise ValueError(f"{function_name}() requires a non-empty cluster")
+    return cpp_cluster
 
-    return int(
-        _cluster_centroid(
+
+def _representative_method(method):
+    method_map = {
+        "medoid": _oecluster.RepresentativeMethod_Medoid,
+        "minimax": _oecluster.RepresentativeMethod_Minimax,
+        "highest_neighborhood": _oecluster.RepresentativeMethod_HighestNeighborhood,
+        "weighted_medoid": _oecluster.RepresentativeMethod_WeightedMedoid,
+    }
+    method_key = str(method).lower()
+    if method_key not in method_map:
+        raise ValueError(f"Unknown representative method: {method!r}")
+    return method_key, method_map[method_key]
+
+
+def _representative_selection(selection):
+    selection_map = {
+        "score": _oecluster.RepresentativeSelection_Score,
+        "diversity": _oecluster.RepresentativeSelection_Diversity,
+    }
+    selection_key = str(selection).lower()
+    if selection_key not in selection_map:
+        raise ValueError(f"Unknown representative selection: {selection!r}")
+    return selection_map[selection_key]
+
+
+def _optional_float_vector(values, name, distance_matrix):
+    vector = _oecluster.DoubleVector()
+    if values is None:
+        return vector
+    converted = [float(value) for value in values]
+    if converted and len(converted) != distance_matrix.num_items:
+        raise ValueError(
+            f"{name} must be empty or the same length as the distance matrix")
+    for value in converted:
+        vector.push_back(value)
+    return vector
+
+
+def _optional_string_vector(values, name, distance_matrix):
+    vector = _oecluster.StringVector()
+    if values is None:
+        return vector
+    converted = [str(value) for value in values]
+    if converted and len(converted) != distance_matrix.num_items:
+        raise ValueError(
+            f"{name} must be empty or the same length as the distance matrix")
+    for value in converted:
+        vector.push_back(value)
+    return vector
+
+
+def _representative_options(
+    distance_matrix,
+    *,
+    method,
+    threshold,
+    selection="score",
+    alpha=1.0,
+    beta=1.0,
+    gamma=1.0,
+    liability_penalties=None,
+    priority_scores=None,
+    scaffold_labels=None,
+):
+    if not isinstance(distance_matrix, DistanceMatrix):
+        raise TypeError("representative functions expect a DistanceMatrix")
+
+    method_key, native_method = _representative_method(method)
+    if threshold is None:
+        threshold_value = -1.0
+    else:
+        threshold_value = float(threshold)
+        if threshold_value < 0.0:
+            raise ValueError("Representative threshold must be non-negative")
+    if method_key == "highest_neighborhood" and threshold is None:
+        raise ValueError(
+            "highest_neighborhood representative requires a threshold")
+
+    weights = RepresentativeWeights()
+    weights.alpha = float(alpha)
+    weights.beta = float(beta)
+    weights.gamma = float(gamma)
+
+    options = RepresentativeOptions()
+    options.method = native_method
+    options.selection = _representative_selection(selection)
+    options.neighbor_threshold = threshold_value
+    options.weights = weights
+    options.liability_penalties = _optional_float_vector(
+        liability_penalties,
+        "liability_penalties",
+        distance_matrix,
+    )
+    options.priority_scores = _optional_float_vector(
+        priority_scores,
+        "priority_scores",
+        distance_matrix,
+    )
+    options.scaffold_labels = _optional_string_vector(
+        scaffold_labels,
+        "scaffold_labels",
+        distance_matrix,
+    )
+    return options
+
+
+def _wrap_representatives(native_representatives):
+    return tuple(
+        ClusterRepresentative(representative)
+        for representative in native_representatives
+    )
+
+
+def representative(cluster, distance_matrix, *, method="medoid", threshold=None,
+                   alpha=1.0, beta=1.0, gamma=1.0,
+                   liability_penalties=None, priority_scores=None,
+                   scaffold_labels=None):
+    """
+    Select the best representative member from a cluster.
+
+    :param cluster: Iterable of item indices, such as one cluster returned by
+        :func:`butina`.
+    :param distance_matrix: DistanceMatrix used to compute representative scores.
+    :param method: Scoring method: "medoid", "minimax",
+        "highest_neighborhood", or "weighted_medoid".
+    :param threshold: Distance threshold for highest-neighborhood scoring and
+        neighbor-fraction metrics.
+    :param alpha: Weight applied to mean distance for weighted medoids.
+    :param beta: Weight applied to liability penalties for weighted medoids.
+    :param gamma: Weight applied to priority scores for weighted medoids.
+    :param liability_penalties: Optional per-item penalty vector.
+    :param priority_scores: Optional per-item priority vector.
+    :param scaffold_labels: Optional per-item scaffold label vector.
+    :returns: Selected member index.
+    :raises TypeError: If distance_matrix is not a DistanceMatrix.
+    :raises ValueError: If cluster, method, threshold, or metadata is invalid.
+    """
+    cpp_cluster = _cpp_cluster(cluster, "representative")
+    options = _representative_options(
+        distance_matrix,
+        method=method,
+        threshold=threshold,
+        alpha=alpha,
+        beta=beta,
+        gamma=gamma,
+        liability_penalties=liability_penalties,
+        priority_scores=priority_scores,
+        scaffold_labels=scaffold_labels,
+    )
+    return int(_cluster_representative(cpp_cluster, distance_matrix.storage, options))
+
+
+def rank_representatives(cluster, distance_matrix, *, method="medoid",
+                         threshold=None, alpha=1.0, beta=1.0, gamma=1.0,
+                         liability_penalties=None, priority_scores=None,
+                         scaffold_labels=None):
+    """
+    Rank all cluster members as representatives.
+
+    :param cluster: Iterable of item indices.
+    :param distance_matrix: DistanceMatrix used to compute representative scores.
+    :param method: Scoring method: "medoid", "minimax",
+        "highest_neighborhood", or "weighted_medoid".
+    :param threshold: Distance threshold for highest-neighborhood scoring and
+        neighbor-fraction metrics.
+    :param alpha: Weight applied to mean distance for weighted medoids.
+    :param beta: Weight applied to liability penalties for weighted medoids.
+    :param gamma: Weight applied to priority scores for weighted medoids.
+    :param liability_penalties: Optional per-item penalty vector.
+    :param priority_scores: Optional per-item priority vector.
+    :param scaffold_labels: Optional per-item scaffold label vector.
+    :returns: Tuple of ClusterRepresentative objects sorted by score.
+    :raises TypeError: If distance_matrix is not a DistanceMatrix.
+    :raises ValueError: If cluster, method, threshold, or metadata is invalid.
+    """
+    cpp_cluster = _cpp_cluster(cluster, "rank_representatives")
+    options = _representative_options(
+        distance_matrix,
+        method=method,
+        threshold=threshold,
+        alpha=alpha,
+        beta=beta,
+        gamma=gamma,
+        liability_penalties=liability_penalties,
+        priority_scores=priority_scores,
+        scaffold_labels=scaffold_labels,
+    )
+    return _wrap_representatives(
+        _rank_representatives(cpp_cluster, distance_matrix.storage, options))
+
+
+def select_representatives(cluster, distance_matrix, *, k, method="medoid",
+                           selection="score", threshold=None, alpha=1.0,
+                           beta=1.0, gamma=1.0, liability_penalties=None,
+                           priority_scores=None, scaffold_labels=None):
+    """
+    Select up to k representatives from a cluster.
+
+    :param cluster: Iterable of item indices.
+    :param distance_matrix: DistanceMatrix used to compute representative scores.
+    :param k: Maximum number of representatives to return.
+    :param method: Scoring method: "medoid", "minimax",
+        "highest_neighborhood", or "weighted_medoid".
+    :param selection: "score" for top-k ranking or "diversity" for greedy
+        coverage after the top-scoring representative.
+    :param threshold: Distance threshold for highest-neighborhood scoring and
+        neighbor-fraction metrics.
+    :param alpha: Weight applied to mean distance for weighted medoids.
+    :param beta: Weight applied to liability penalties for weighted medoids.
+    :param gamma: Weight applied to priority scores for weighted medoids.
+    :param liability_penalties: Optional per-item penalty vector.
+    :param priority_scores: Optional per-item priority vector.
+    :param scaffold_labels: Optional per-item scaffold label vector.
+    :returns: Tuple of selected ClusterRepresentative objects.
+    :raises TypeError: If distance_matrix is not a DistanceMatrix.
+    :raises ValueError: If cluster, k, method, selection, threshold, or metadata
+        is invalid.
+    """
+    if k < 0:
+        raise ValueError("k must be non-negative")
+
+    cpp_cluster = _cpp_cluster(cluster, "select_representatives")
+    options = _representative_options(
+        distance_matrix,
+        method=method,
+        threshold=threshold,
+        selection=selection,
+        alpha=alpha,
+        beta=beta,
+        gamma=gamma,
+        liability_penalties=liability_penalties,
+        priority_scores=priority_scores,
+        scaffold_labels=scaffold_labels,
+    )
+    return _wrap_representatives(
+        _select_representatives(
             cpp_cluster,
             distance_matrix.storage,
-            method_map[method_key],
-        )
-    )
+            int(k),
+            options,
+        ))
 
 
 def dbscan(distance_matrix, eps, *, min_samples=5, num_threads=0, chunk_size=4096):

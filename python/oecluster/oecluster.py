@@ -1182,30 +1182,246 @@ def butina_cluster(storage, options):
 
     :param storage: Pairwise distance storage.
     :param options: Butina clustering options.
-    :returns: Clusters where the first member is the centroid.
+    :returns: Clusters where the first member is the highest-neighborhood representative.
     """
     return _oecluster.butina_cluster(storage, options)
-CentroidMethod_First = _oecluster.CentroidMethod_First
-r"""Return the first member stored in the cluster."""
-CentroidMethod_Medoid = _oecluster.CentroidMethod_Medoid
-r"""Return the member with the lowest total in-cluster distance."""
-CentroidMethod_Minimax = _oecluster.CentroidMethod_Minimax
-r"""Return the member with the lowest maximum in-cluster distance."""
-CentroidMethod_Mean = _oecluster.CentroidMethod_Mean
-r"""Alias for medoid over a precomputed distance matrix."""
+RepresentativeMethod_Medoid = _oecluster.RepresentativeMethod_Medoid
+r"""Minimize mean in-cluster distance."""
+RepresentativeMethod_Minimax = _oecluster.RepresentativeMethod_Minimax
+r"""Minimize maximum in-cluster distance."""
+RepresentativeMethod_HighestNeighborhood = _oecluster.RepresentativeMethod_HighestNeighborhood
+r"""Maximize threshold-neighbor fraction."""
+RepresentativeMethod_WeightedMedoid = _oecluster.RepresentativeMethod_WeightedMedoid
+r"""Combine centrality with penalty and priority metadata."""
+RepresentativeSelection_Score = _oecluster.RepresentativeSelection_Score
+r"""Return the top k representatives by score."""
+RepresentativeSelection_Diversity = _oecluster.RepresentativeSelection_Diversity
+r"""Greedily spread representatives across the cluster."""
+class RepresentativeWeights(object):
+    r"""Weights for weighted-medoid scoring."""
 
-def cluster_centroid(*args):
+    thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
+    __repr__ = _swig_repr
+    alpha = property(_oecluster.RepresentativeWeights_alpha_get, _oecluster.RepresentativeWeights_alpha_set)
+    beta = property(_oecluster.RepresentativeWeights_beta_get, _oecluster.RepresentativeWeights_beta_set)
+    gamma = property(_oecluster.RepresentativeWeights_gamma_get, _oecluster.RepresentativeWeights_gamma_set)
+
+    def __init__(self):
+        _oecluster.RepresentativeWeights_swiginit(self, _oecluster.new_RepresentativeWeights())
+    __swig_destroy__ = _oecluster.delete_RepresentativeWeights
+
+# Register RepresentativeWeights in _oecluster:
+_oecluster.RepresentativeWeights_swigregister(RepresentativeWeights)
+class RepresentativeMetrics(object):
+    r"""Quality metrics for one representative member."""
+
+    thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
+    __repr__ = _swig_repr
+    mean_distance_to_cluster = property(_oecluster.RepresentativeMetrics_mean_distance_to_cluster_get, _oecluster.RepresentativeMetrics_mean_distance_to_cluster_set)
+    max_distance_to_cluster = property(_oecluster.RepresentativeMetrics_max_distance_to_cluster_get, _oecluster.RepresentativeMetrics_max_distance_to_cluster_set)
+    median_distance_to_cluster = property(_oecluster.RepresentativeMetrics_median_distance_to_cluster_get, _oecluster.RepresentativeMetrics_median_distance_to_cluster_set)
+    neighbor_fraction_at_threshold = property(_oecluster.RepresentativeMetrics_neighbor_fraction_at_threshold_get, _oecluster.RepresentativeMetrics_neighbor_fraction_at_threshold_set)
+    nearest_external_distance = property(_oecluster.RepresentativeMetrics_nearest_external_distance_get, _oecluster.RepresentativeMetrics_nearest_external_distance_set)
+    cluster_radius = property(_oecluster.RepresentativeMetrics_cluster_radius_get, _oecluster.RepresentativeMetrics_cluster_radius_set)
+    cluster_diameter = property(_oecluster.RepresentativeMetrics_cluster_diameter_get, _oecluster.RepresentativeMetrics_cluster_diameter_set)
+    silhouette_like_score = property(_oecluster.RepresentativeMetrics_silhouette_like_score_get, _oecluster.RepresentativeMetrics_silhouette_like_score_set)
+    scaffold_purity = property(_oecluster.RepresentativeMetrics_scaffold_purity_get, _oecluster.RepresentativeMetrics_scaffold_purity_set)
+    representative_rank = property(_oecluster.RepresentativeMetrics_representative_rank_get, _oecluster.RepresentativeMetrics_representative_rank_set)
+
+    def __init__(self):
+        _oecluster.RepresentativeMetrics_swiginit(self, _oecluster.new_RepresentativeMetrics())
+    __swig_destroy__ = _oecluster.delete_RepresentativeMetrics
+
+# Register RepresentativeMetrics in _oecluster:
+_oecluster.RepresentativeMetrics_swigregister(RepresentativeMetrics)
+class ClusterRepresentative(object):
+    r"""A scored representative member and its quality metrics."""
+
+    thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
+    __repr__ = _swig_repr
+    member = property(_oecluster.ClusterRepresentative_member_get, _oecluster.ClusterRepresentative_member_set)
+    score = property(_oecluster.ClusterRepresentative_score_get, _oecluster.ClusterRepresentative_score_set)
+    metrics = property(_oecluster.ClusterRepresentative_metrics_get, _oecluster.ClusterRepresentative_metrics_set)
+
+    def __init__(self):
+        _oecluster.ClusterRepresentative_swiginit(self, _oecluster.new_ClusterRepresentative())
+    __swig_destroy__ = _oecluster.delete_ClusterRepresentative
+
+# Register ClusterRepresentative in _oecluster:
+_oecluster.ClusterRepresentative_swigregister(ClusterRepresentative)
+class RepresentativeOptions(object):
+    r"""Options for ranking and selecting representative members."""
+
+    thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
+    __repr__ = _swig_repr
+    method = property(_oecluster.RepresentativeOptions_method_get, _oecluster.RepresentativeOptions_method_set)
+    selection = property(_oecluster.RepresentativeOptions_selection_get, _oecluster.RepresentativeOptions_selection_set)
+    neighbor_threshold = property(_oecluster.RepresentativeOptions_neighbor_threshold_get, _oecluster.RepresentativeOptions_neighbor_threshold_set)
+    weights = property(_oecluster.RepresentativeOptions_weights_get, _oecluster.RepresentativeOptions_weights_set)
+    liability_penalties = property(_oecluster.RepresentativeOptions_liability_penalties_get, _oecluster.RepresentativeOptions_liability_penalties_set)
+    priority_scores = property(_oecluster.RepresentativeOptions_priority_scores_get, _oecluster.RepresentativeOptions_priority_scores_set)
+    scaffold_labels = property(_oecluster.RepresentativeOptions_scaffold_labels_get, _oecluster.RepresentativeOptions_scaffold_labels_set)
+
+    def __init__(self):
+        _oecluster.RepresentativeOptions_swiginit(self, _oecluster.new_RepresentativeOptions())
+    __swig_destroy__ = _oecluster.delete_RepresentativeOptions
+
+# Register RepresentativeOptions in _oecluster:
+_oecluster.RepresentativeOptions_swigregister(RepresentativeOptions)
+
+def rank_representatives(*args):
     r"""
-    Select a representative member index from a cluster.
+    Rank every member of a cluster as a possible representative.
 
     :param cluster: Cluster member indices.
-    :param storage: Pairwise distance storage used for distance-based methods.
-    :param method: Centroid selection algorithm.
-    :returns: Member index selected as the cluster representative.
-    :raises std::invalid_argument: If the cluster is empty or sparse distances are incomplete.
+    :param storage: Pairwise distance storage used for scoring and metrics.
+    :param options: Representative scoring options.
+    :returns: Representatives ordered from best to worst under the selected method.
+    :raises std::invalid_argument: If inputs are invalid or sparse distances are incomplete.
     :raises std::out_of_range: If a cluster member is outside the storage range.
     """
-    return _oecluster.cluster_centroid(*args)
+    return _oecluster.rank_representatives(*args)
+
+def select_representatives(*args):
+    r"""
+    Select up to k representatives from a cluster.
+
+    :param cluster: Cluster member indices.
+    :param storage: Pairwise distance storage used for scoring and metrics.
+    :param k: Maximum number of representatives to return.
+    :param options: Representative scoring and selection options.
+    :returns: Selected representatives in selection order.
+    """
+    return _oecluster.select_representatives(*args)
+
+def cluster_representative(*args):
+    r"""
+    *Overload 1:*
+
+    Select the best representative member index from a cluster.
+
+    :param cluster: Cluster member indices.
+    :param storage: Pairwise distance storage used for scoring.
+    :param options: Representative scoring options.
+    :returns: Member index selected as the cluster representative.
+
+    |
+
+    *Overload 2:*
+
+    Select the best representative member index with a scoring method.
+
+    :param cluster: Cluster member indices.
+    :param storage: Pairwise distance storage used for scoring.
+    :param method: Representative scoring method.
+    :returns: Member index selected as the cluster representative.
+    """
+    return _oecluster.cluster_representative(*args)
+class ClusterRepresentativeVector(object):
+    thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
+    __repr__ = _swig_repr
+
+    def iterator(self):
+        return _oecluster.ClusterRepresentativeVector_iterator(self)
+    def __iter__(self):
+        return self.iterator()
+
+    def __nonzero__(self):
+        return _oecluster.ClusterRepresentativeVector___nonzero__(self)
+
+    def __bool__(self):
+        return _oecluster.ClusterRepresentativeVector___bool__(self)
+
+    def __len__(self):
+        return _oecluster.ClusterRepresentativeVector___len__(self)
+
+    def __getslice__(self, i, j):
+        return _oecluster.ClusterRepresentativeVector___getslice__(self, i, j)
+
+    def __setslice__(self, *args):
+        return _oecluster.ClusterRepresentativeVector___setslice__(self, *args)
+
+    def __delslice__(self, i, j):
+        return _oecluster.ClusterRepresentativeVector___delslice__(self, i, j)
+
+    def __delitem__(self, *args):
+        return _oecluster.ClusterRepresentativeVector___delitem__(self, *args)
+
+    def __getitem__(self, *args):
+        return _oecluster.ClusterRepresentativeVector___getitem__(self, *args)
+
+    def __setitem__(self, *args):
+        return _oecluster.ClusterRepresentativeVector___setitem__(self, *args)
+
+    def pop(self):
+        return _oecluster.ClusterRepresentativeVector_pop(self)
+
+    def append(self, x):
+        return _oecluster.ClusterRepresentativeVector_append(self, x)
+
+    def empty(self):
+        return _oecluster.ClusterRepresentativeVector_empty(self)
+
+    def size(self):
+        return _oecluster.ClusterRepresentativeVector_size(self)
+
+    def swap(self, v):
+        return _oecluster.ClusterRepresentativeVector_swap(self, v)
+
+    def begin(self):
+        return _oecluster.ClusterRepresentativeVector_begin(self)
+
+    def end(self):
+        return _oecluster.ClusterRepresentativeVector_end(self)
+
+    def rbegin(self):
+        return _oecluster.ClusterRepresentativeVector_rbegin(self)
+
+    def rend(self):
+        return _oecluster.ClusterRepresentativeVector_rend(self)
+
+    def clear(self):
+        return _oecluster.ClusterRepresentativeVector_clear(self)
+
+    def get_allocator(self):
+        return _oecluster.ClusterRepresentativeVector_get_allocator(self)
+
+    def pop_back(self):
+        return _oecluster.ClusterRepresentativeVector_pop_back(self)
+
+    def erase(self, *args):
+        return _oecluster.ClusterRepresentativeVector_erase(self, *args)
+
+    def __init__(self, *args):
+        _oecluster.ClusterRepresentativeVector_swiginit(self, _oecluster.new_ClusterRepresentativeVector(*args))
+
+    def push_back(self, x):
+        return _oecluster.ClusterRepresentativeVector_push_back(self, x)
+
+    def front(self):
+        return _oecluster.ClusterRepresentativeVector_front(self)
+
+    def back(self):
+        return _oecluster.ClusterRepresentativeVector_back(self)
+
+    def assign(self, n, x):
+        return _oecluster.ClusterRepresentativeVector_assign(self, n, x)
+
+    def resize(self, *args):
+        return _oecluster.ClusterRepresentativeVector_resize(self, *args)
+
+    def insert(self, *args):
+        return _oecluster.ClusterRepresentativeVector_insert(self, *args)
+
+    def reserve(self, n):
+        return _oecluster.ClusterRepresentativeVector_reserve(self, n)
+
+    def capacity(self):
+        return _oecluster.ClusterRepresentativeVector_capacity(self)
+    __swig_destroy__ = _oecluster.delete_ClusterRepresentativeVector
+
+# Register ClusterRepresentativeVector in _oecluster:
+_oecluster.ClusterRepresentativeVector_swigregister(ClusterRepresentativeVector)
 class DBSCANOptions(object):
     r"""Options for DBSCAN clustering."""
 

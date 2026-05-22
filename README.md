@@ -193,10 +193,10 @@ dm = oecluster.pdist(mols, "fingerprint", metric="tanimoto", num_threads=8)
 clusters = oecluster.butina(dm, threshold=0.35, reordering=False)
 
 for cluster in clusters:
-    butina_center = oecluster.centroid(cluster, dm, method="first")
-    medoid = oecluster.centroid(cluster, dm, method="medoid")
-    minimax = oecluster.centroid(cluster, dm, method="minimax")
-    print(butina_center, medoid, minimax, cluster)
+    medoid = oecluster.representative(cluster, dm, method="medoid")
+    minimax = oecluster.representative(cluster, dm, method="minimax")
+    ranked = oecluster.rank_representatives(cluster, dm, method="medoid")
+    print(medoid, minimax, ranked[0].metrics.cluster_radius, cluster)
 ```
 
 **Cross-distance (NxM) via C++ bindings:**

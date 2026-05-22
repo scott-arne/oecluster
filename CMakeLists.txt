@@ -122,7 +122,7 @@ set(OECLUSTER_SOURCES
     src/clustering/ClusterTypes.cpp
     src/clustering/ThresholdGraph.cpp
     src/clustering/Butina.cpp
-    src/clustering/Centroid.cpp
+    src/clustering/Representative.cpp
     src/clustering/DBSCAN.cpp
     src/clustering/HDBSCANLinkage.cpp
     src/clustering/HDBSCANTree.cpp

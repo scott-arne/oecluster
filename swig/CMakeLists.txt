@@ -24,7 +24,7 @@ set(_OECLUSTER_SWIG_DEPENDS
     ${CMAKE_SOURCE_DIR}/include/oecluster/comparisons/SuperposeComparison.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/clustering/ClusterTypes.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/clustering/Butina.h
-    ${CMAKE_SOURCE_DIR}/include/oecluster/clustering/Centroid.h
+    ${CMAKE_SOURCE_DIR}/include/oecluster/clustering/Representative.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/clustering/DBSCAN.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/clustering/HDBSCAN.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/clustering/Agglomerative.h

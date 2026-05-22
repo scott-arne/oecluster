@@ -19,6 +19,7 @@
 #include "oecluster/clustering/HDBSCAN.h"
 #include "oecluster/clustering/Agglomerative.h"
 #include "oecluster/clustering/BitBirch.h"
+#include "oecluster/clustering/Representative.h"
 #include "oefp/batch.h"
 
 #include <oechem.h>
@@ -641,7 +642,7 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, _oecluster_is_oereceptor, "
     Py_END_ALLOW_THREADS
 }
 
-%exception OECluster::cluster_centroid {
+%exception OECluster::cluster_representative {
     Py_BEGIN_ALLOW_THREADS
     try {
         $action
@@ -653,7 +654,41 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, _oecluster_is_oereceptor, "
         SWIG_exception(SWIG_RuntimeError, e.what());
     } catch (...) {
         Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, "Unknown C++ exception in cluster_centroid");
+        SWIG_exception(SWIG_RuntimeError, "Unknown C++ exception in cluster_representative");
+    }
+    Py_END_ALLOW_THREADS
+}
+
+%exception OECluster::rank_representatives {
+    Py_BEGIN_ALLOW_THREADS
+    try {
+        $action
+    } catch (const OECluster::OEClusterError& e) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError, e.what());
+    } catch (const std::exception& e) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError, e.what());
+    } catch (...) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError, "Unknown C++ exception in rank_representatives");
+    }
+    Py_END_ALLOW_THREADS
+}
+
+%exception OECluster::select_representatives {
+    Py_BEGIN_ALLOW_THREADS
+    try {
+        $action
+    } catch (const OECluster::OEClusterError& e) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError, e.what());
+    } catch (const std::exception& e) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError, e.what());
+    } catch (...) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError, "Unknown C++ exception in select_representatives");
     }
     Py_END_ALLOW_THREADS
 }
@@ -984,7 +1019,8 @@ public:
 // ============================================================================
 %include "oecluster/clustering/ClusterTypes.h"
 %include "oecluster/clustering/Butina.h"
-%include "oecluster/clustering/Centroid.h"
+%include "oecluster/clustering/Representative.h"
+%template(ClusterRepresentativeVector) std::vector<OECluster::ClusterRepresentative>;
 %include "oecluster/clustering/DBSCAN.h"
 %include "oecluster/clustering/HDBSCAN.h"
 %include "oecluster/clustering/Agglomerative.h"

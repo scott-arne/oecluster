@@ -6,7 +6,7 @@
 
 #include "oecluster/StorageBackend.h"
 #include "oecluster/clustering/Butina.h"
-#include "oecluster/clustering/Centroid.h"
+#include "oecluster/clustering/Representative.h"
 #include "../../src/clustering/ThresholdGraph.h"
 
 using namespace OECluster;
@@ -174,7 +174,7 @@ TEST(ButinaClusteringTest, ClustersUnseenNeighborsInAscendingNeighborOrder) {
     EXPECT_EQ(clusters[1], Cluster({4}));
 }
 
-TEST(ButinaClusteringTest, ReorderingCanChangeLaterCenters) {
+TEST(ButinaClusteringTest, ReorderingCanChangeLaterRepresentatives) {
     DenseStorage storage(6);
     storage.Set(0, 1, 0.10);
     storage.Set(0, 2, 0.10);
@@ -213,25 +213,17 @@ TEST(ButinaClusteringTest, NegativeThresholdThrows) {
     EXPECT_THROW(butina_cluster(storage, options), std::invalid_argument);
 }
 
-TEST(ClusterCentroidTest, FirstReturnsFirstClusterMember) {
-    DenseStorage storage(5);
-    const Cluster cluster{4, 1, 3};
-
-    EXPECT_EQ(cluster_centroid(cluster, storage, CentroidMethod::First), 4);
-}
-
-TEST(ClusterCentroidTest, MedoidMinimizesTotalDistanceWithClusterOrderTieBreak) {
+TEST(ClusterRepresentativeTest, MedoidMinimizesMeanDistanceWithClusterOrderTieBreak) {
     DenseStorage storage(3);
     storage.Set(0, 1, 1.0);
     storage.Set(0, 2, 1.0);
     storage.Set(1, 2, 0.1);
     const Cluster cluster{0, 1, 2};
 
-    EXPECT_EQ(cluster_centroid(cluster, storage, CentroidMethod::Medoid), 1);
-    EXPECT_EQ(cluster_centroid(cluster, storage, CentroidMethod::Mean), 1);
+    EXPECT_EQ(cluster_representative(cluster, storage, RepresentativeMethod::Medoid), 1);
 }
 
-TEST(ClusterCentroidTest, MinimaxMinimizesWorstNeighborDistance) {
+TEST(ClusterRepresentativeTest, MinimaxMinimizesWorstNeighborDistance) {
     DenseStorage storage(4);
     storage.Set(0, 1, 0.1);
     storage.Set(0, 2, 0.1);
@@ -241,27 +233,138 @@ TEST(ClusterCentroidTest, MinimaxMinimizesWorstNeighborDistance) {
     storage.Set(2, 3, 0.6);
     const Cluster cluster{0, 1, 2, 3};
 
-    EXPECT_EQ(cluster_centroid(cluster, storage, CentroidMethod::Medoid), 0);
-    EXPECT_EQ(cluster_centroid(cluster, storage, CentroidMethod::Minimax), 1);
+    EXPECT_EQ(cluster_representative(cluster, storage, RepresentativeMethod::Medoid), 0);
+    EXPECT_EQ(cluster_representative(cluster, storage, RepresentativeMethod::Minimax), 1);
 }
 
-TEST(ClusterCentroidTest, EmptyClusterThrows) {
+TEST(ClusterRepresentativeTest, HighestNeighborhoodUsesThresholdNeighborCounts) {
+    DenseStorage storage(4);
+    storage.Set(0, 1, 0.1);
+    storage.Set(0, 2, 0.1);
+    storage.Set(0, 3, 1.0);
+    storage.Set(1, 2, 0.6);
+    storage.Set(1, 3, 0.6);
+    storage.Set(2, 3, 0.6);
+    const Cluster cluster{0, 1, 2, 3};
+
+    RepresentativeOptions options;
+    options.method = RepresentativeMethod::HighestNeighborhood;
+    options.neighbor_threshold = 0.2;
+
+    EXPECT_EQ(cluster_representative(cluster, storage, options), 0);
+}
+
+TEST(ClusterRepresentativeTest, RankRepresentativesReportsQualityMetrics) {
+    DenseStorage storage(5);
+    storage.Set(0, 1, 0.1);
+    storage.Set(0, 2, 0.1);
+    storage.Set(0, 3, 1.0);
+    storage.Set(0, 4, 0.9);
+    storage.Set(1, 2, 0.6);
+    storage.Set(1, 3, 0.6);
+    storage.Set(1, 4, 0.7);
+    storage.Set(2, 3, 0.6);
+    storage.Set(2, 4, 0.8);
+    storage.Set(3, 4, 0.2);
+    const Cluster cluster{0, 1, 2, 3};
+
+    RepresentativeOptions options;
+    options.method = RepresentativeMethod::Medoid;
+    options.neighbor_threshold = 0.2;
+    options.scaffold_labels = {"A", "A", "B", "B", "external"};
+
+    const std::vector<ClusterRepresentative> ranked =
+        rank_representatives(cluster, storage, options);
+
+    ASSERT_EQ(ranked.size(), 4u);
+    EXPECT_EQ(ranked[0].member, 0u);
+    EXPECT_DOUBLE_EQ(ranked[0].score, 0.4);
+    EXPECT_DOUBLE_EQ(ranked[0].metrics.mean_distance_to_cluster, 0.4);
+    EXPECT_DOUBLE_EQ(ranked[0].metrics.max_distance_to_cluster, 1.0);
+    EXPECT_DOUBLE_EQ(ranked[0].metrics.median_distance_to_cluster, 0.1);
+    EXPECT_DOUBLE_EQ(ranked[0].metrics.neighbor_fraction_at_threshold, 0.75);
+    EXPECT_DOUBLE_EQ(ranked[0].metrics.nearest_external_distance, 0.9);
+    EXPECT_DOUBLE_EQ(ranked[0].metrics.cluster_radius, 1.0);
+    EXPECT_DOUBLE_EQ(ranked[0].metrics.cluster_diameter, 1.0);
+    EXPECT_NEAR(ranked[0].metrics.silhouette_like_score, (0.9 - 0.4) / 0.9, 1e-12);
+    EXPECT_DOUBLE_EQ(ranked[0].metrics.scaffold_purity, 0.5);
+    EXPECT_EQ(ranked[0].metrics.representative_rank, 1u);
+}
+
+TEST(ClusterRepresentativeTest, WeightedMedoidUsesPenaltyAndPriorityVectors) {
+    DenseStorage storage(4);
+    storage.Set(0, 1, 0.1);
+    storage.Set(0, 2, 0.1);
+    storage.Set(0, 3, 1.0);
+    storage.Set(1, 2, 0.6);
+    storage.Set(1, 3, 0.6);
+    storage.Set(2, 3, 0.6);
+    const Cluster cluster{0, 1, 2, 3};
+
+    RepresentativeOptions options;
+    options.method = RepresentativeMethod::WeightedMedoid;
+    options.weights.alpha = 1.0;
+    options.weights.beta = 1.0;
+    options.weights.gamma = 1.0;
+    options.liability_penalties = {0.0, 0.0, 0.0, 0.0};
+    options.priority_scores = {0.0, 0.4, 0.0, 0.0};
+
+    const std::vector<ClusterRepresentative> ranked =
+        rank_representatives(cluster, storage, options);
+
+    ASSERT_EQ(ranked.size(), 4u);
+    EXPECT_EQ(ranked[0].member, 1u);
+    EXPECT_NEAR(ranked[0].score, ((0.1 + 0.6 + 0.6) / 3.0) - 0.4, 1e-12);
+}
+
+TEST(ClusterRepresentativeTest, SelectRepresentativesSupportsScoreAndDiversityModes) {
+    DenseStorage storage(4);
+    storage.Set(0, 1, 0.1);
+    storage.Set(0, 2, 0.8);
+    storage.Set(0, 3, 0.8);
+    storage.Set(1, 2, 0.8);
+    storage.Set(1, 3, 0.8);
+    storage.Set(2, 3, 0.2);
+    const Cluster cluster{0, 1, 2, 3};
+
+    RepresentativeOptions score_options;
+    score_options.method = RepresentativeMethod::Medoid;
+    score_options.selection = RepresentativeSelection::Score;
+
+    RepresentativeOptions diversity_options = score_options;
+    diversity_options.selection = RepresentativeSelection::Diversity;
+
+    const std::vector<ClusterRepresentative> score_selected =
+        select_representatives(cluster, storage, 2, score_options);
+    const std::vector<ClusterRepresentative> diversity_selected =
+        select_representatives(cluster, storage, 2, diversity_options);
+
+    ASSERT_EQ(score_selected.size(), 2u);
+    ASSERT_EQ(diversity_selected.size(), 2u);
+    EXPECT_EQ(score_selected[0].member, 0u);
+    EXPECT_EQ(score_selected[1].member, 1u);
+    EXPECT_EQ(diversity_selected[0].member, 0u);
+    EXPECT_EQ(diversity_selected[1].member, 2u);
+    EXPECT_EQ(diversity_selected[1].metrics.representative_rank, 3u);
+}
+
+TEST(ClusterRepresentativeTest, EmptyClusterThrows) {
     DenseStorage storage(1);
 
     EXPECT_THROW(
-        cluster_centroid(Cluster{}, storage, CentroidMethod::Medoid),
+        cluster_representative(Cluster{}, storage, RepresentativeMethod::Medoid),
         std::invalid_argument);
 }
 
-TEST(ClusterCentroidTest, InvalidMemberThrows) {
+TEST(ClusterRepresentativeTest, InvalidMemberThrows) {
     DenseStorage storage(2);
 
     EXPECT_THROW(
-        cluster_centroid(Cluster({0, 2}), storage, CentroidMethod::First),
+        cluster_representative(Cluster({0, 2}), storage, RepresentativeMethod::Medoid),
         std::out_of_range);
 }
 
-TEST(ClusterCentroidTest, SparseStorageOnlySupportsFirstMethod) {
+TEST(ClusterRepresentativeTest, SparseStorageRejectsDistanceBasedMethods) {
     SparseStorage storage(3, 0.2);
     storage.Set(0, 1, 0.1);
     storage.Set(0, 2, 0.3);
@@ -269,9 +372,8 @@ TEST(ClusterCentroidTest, SparseStorageOnlySupportsFirstMethod) {
     storage.Finalize();
     const Cluster cluster{1, 0, 2};
 
-    EXPECT_EQ(cluster_centroid(cluster, storage, CentroidMethod::First), 1);
-    EXPECT_EQ(cluster_centroid(Cluster({2}), storage, CentroidMethod::Medoid), 2);
+    EXPECT_EQ(cluster_representative(Cluster({2}), storage, RepresentativeMethod::Medoid), 2);
     EXPECT_THROW(
-        cluster_centroid(cluster, storage, CentroidMethod::Medoid),
+        cluster_representative(cluster, storage, RepresentativeMethod::Medoid),
         std::invalid_argument);
 }

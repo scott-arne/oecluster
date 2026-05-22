@@ -28,7 +28,7 @@ struct ButinaOptions {
  *
  * :param storage: Pairwise distance storage.
  * :param options: Butina clustering options.
- * :returns: Clusters where the first member is the centroid.
+ * :returns: Clusters where the first member is the highest-neighborhood representative.
  */
 Clusters butina_cluster(const StorageBackend& storage, const ButinaOptions& options);
 

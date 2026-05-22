@@ -39,7 +39,7 @@ class DistanceMatrix;
 
 #include "oecluster/clustering/ClusterTypes.h"
 #include "oecluster/clustering/Butina.h"
-#include "oecluster/clustering/Centroid.h"
+#include "oecluster/clustering/Representative.h"
 #include "oecluster/clustering/DBSCAN.h"
 #include "oecluster/clustering/HDBSCAN.h"
 #include "oecluster/clustering/Agglomerative.h"
