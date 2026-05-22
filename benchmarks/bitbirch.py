@@ -33,11 +33,13 @@ class BenchmarkResult:
     n_bits: int
     density: float
     native_seconds: float
-    reference_seconds: float
+    reference_seconds: float | None
 
     @property
-    def speedup(self) -> float:
+    def speedup(self) -> float | None:
         """Return Python BitBirch time divided by native time."""
+        if self.reference_seconds is None:
+            return None
         return self.reference_seconds / self.native_seconds
 
 
@@ -258,16 +260,11 @@ def workflow_calls(
     args: argparse.Namespace,
 ) -> tuple[Callable[[], Any], Callable[[], Any]]:
     """Return reference and native callables for a benchmark workflow."""
+    native_call = native_workflow_call(workflow, batch, args)
     if workflow == "cluster":
         return (
             lambda: reference_cluster(bb, bits, args.threshold, args.branching_factor),
-            lambda: native_cluster(
-                batch,
-                args.threshold,
-                args.branching_factor,
-                args.mode,
-                args.num_threads,
-            ),
+            native_call,
         )
     if workflow == "recluster":
         return (
@@ -279,15 +276,7 @@ def workflow_calls(
                 args.second_tolerance,
                 args.branching_factor,
             ),
-            lambda: native_recluster(
-                batch,
-                args.threshold,
-                args.second_threshold,
-                args.second_tolerance,
-                args.branching_factor,
-                args.mode,
-                args.num_threads,
-            ),
+            native_call,
         )
     if workflow == "reassign":
         return (
@@ -298,14 +287,7 @@ def workflow_calls(
                 args.branching_factor,
                 reassign_top_clusters=args.reassign_top_clusters,
             ),
-            lambda: native_refine(
-                batch,
-                args.threshold,
-                args.branching_factor,
-                args.mode,
-                args.num_threads,
-                reassign_top_clusters=args.reassign_top_clusters,
-            ),
+            native_call,
         )
     if workflow == "prune":
         return (
@@ -316,14 +298,7 @@ def workflow_calls(
                 args.branching_factor,
                 redistribute_largest_cluster=True,
             ),
-            lambda: native_refine(
-                batch,
-                args.threshold,
-                args.branching_factor,
-                args.mode,
-                args.num_threads,
-                redistribute_largest_cluster=True,
-            ),
+            native_call,
         )
     if workflow == "prune_reassign":
         return (
@@ -335,15 +310,58 @@ def workflow_calls(
                 reassign_top_clusters=args.reassign_top_clusters,
                 redistribute_largest_cluster=True,
             ),
-            lambda: native_refine(
-                batch,
-                args.threshold,
-                args.branching_factor,
-                args.mode,
-                args.num_threads,
-                reassign_top_clusters=args.reassign_top_clusters,
-                redistribute_largest_cluster=True,
-            ),
+            native_call,
+        )
+    raise ValueError(f"Unknown BitBirch benchmark workflow: {workflow!r}")
+
+
+def native_workflow_call(workflow: str, batch, args: argparse.Namespace) -> Callable[[], Any]:
+    """Return the native callable for a benchmark workflow."""
+    if workflow == "cluster":
+        return lambda: native_cluster(
+            batch,
+            args.threshold,
+            args.branching_factor,
+            args.mode,
+            args.num_threads,
+        )
+    if workflow == "recluster":
+        return lambda: native_recluster(
+            batch,
+            args.threshold,
+            args.second_threshold,
+            args.second_tolerance,
+            args.branching_factor,
+            args.mode,
+            args.num_threads,
+        )
+    if workflow == "reassign":
+        return lambda: native_refine(
+            batch,
+            args.threshold,
+            args.branching_factor,
+            args.mode,
+            args.num_threads,
+            reassign_top_clusters=args.reassign_top_clusters,
+        )
+    if workflow == "prune":
+        return lambda: native_refine(
+            batch,
+            args.threshold,
+            args.branching_factor,
+            args.mode,
+            args.num_threads,
+            redistribute_largest_cluster=True,
+        )
+    if workflow == "prune_reassign":
+        return lambda: native_refine(
+            batch,
+            args.threshold,
+            args.branching_factor,
+            args.mode,
+            args.num_threads,
+            reassign_top_clusters=args.reassign_top_clusters,
+            redistribute_largest_cluster=True,
         )
     raise ValueError(f"Unknown BitBirch benchmark workflow: {workflow!r}")
 
@@ -358,11 +376,34 @@ def benchmark(
     args: argparse.Namespace,
 ) -> BenchmarkResult:
     """Benchmark one data set."""
+    native_call = native_workflow_call(workflow, batch, args)
+    if args.native_only:
+        native_seconds = time_call(
+            native_call,
+            repeats,
+            warmups,
+        )
+        return BenchmarkResult(
+            workflow=workflow,
+            mode=args.mode,
+            n_samples=bits.shape[0],
+            n_bits=bits.shape[1],
+            density=float(bits.mean()),
+            native_seconds=native_seconds,
+            reference_seconds=None,
+        )
+
     # The reference stores running sums in the input dtype. Use signed integer
     # bits here so larger duplicate-block benchmarks measure algorithm parity
     # instead of NumPy unsigned overflow.
     reference_bits = bits.astype(np.int64, copy=False)
-    reference_call, native_call = workflow_calls(workflow, bb, reference_bits, batch, args)
+    reference_call, native_call = workflow_calls(
+        workflow,
+        bb,
+        reference_bits,
+        batch,
+        args,
+    )
     expected = reference_call()
     observed = native_call()
     assert_same_result(observed, expected, workflow)
@@ -409,6 +450,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--branching-factor", type=int, default=50)
     parser.add_argument("--reassign-top-clusters", type=int, default=2)
     parser.add_argument("--num-threads", type=int, default=0)
+    parser.add_argument("--native-only", action="store_true")
     parser.add_argument("--repeats", type=int, default=5)
     parser.add_argument("--warmups", type=int, default=1)
     parser.add_argument("--seed", type=int, default=13)
@@ -420,7 +462,7 @@ def main() -> None:
     """Run benchmarks and print timing results."""
     args = parse_args()
     results = []
-    bb = load_reference_bitbirch()
+    bb = None if args.native_only else load_reference_bitbirch()
     for n_samples in args.sizes:
         bits = make_bits(
             args.seed,
@@ -452,11 +494,17 @@ def main() -> None:
     print("| workflow | mode | n | bits | density | native_s | python_s | speedup |")
     print("| :--- | :--- | ---: | ---: | ---: | ---: | ---: | ---: |")
     for result in results:
+        reference_seconds = (
+            f"{result.reference_seconds:.6f}"
+            if result.reference_seconds is not None
+            else "n/a"
+        )
+        speedup = f"{result.speedup:.2f}x" if result.speedup is not None else "n/a"
         print(
             f"| {result.workflow} | {result.mode} | "
             f"{result.n_samples} | {result.n_bits} | {result.density:.4f} | "
-            f"{result.native_seconds:.6f} | {result.reference_seconds:.6f} | "
-            f"{result.speedup:.2f}x |"
+            f"{result.native_seconds:.6f} | {reference_seconds} | "
+            f"{speedup} |"
         )
 
 
