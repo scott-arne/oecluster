@@ -19,16 +19,43 @@ uint32_t popcount64(const uint64_t word) {
     return static_cast<uint32_t>(__builtin_popcountll(word));
 }
 
+void IncrementLinearSumFromSetBits(
+    BitBirchLinearSum& linear_sum,
+    const uint64_t* words,
+    const size_t size_bits) {
+    // Fingerprints are sparse in the intended workloads, so touch only set bits
+    // while still masking padding bits beyond the declared fingerprint width.
+    const size_t full_words = size_bits / 64u;
+    for (size_t word_index = 0; word_index < full_words; ++word_index) {
+        uint64_t word = words[word_index];
+        while (word != 0u) {
+            const size_t bit = word_index * 64u +
+                               static_cast<size_t>(__builtin_ctzll(word));
+            ++linear_sum[bit];
+            word &= word - 1u;
+        }
+    }
+
+    const size_t tail_bits = size_bits % 64u;
+    if (tail_bits == 0u) {
+        return;
+    }
+    uint64_t word = words[full_words] & ((uint64_t{1} << tail_bits) - 1u);
+    while (word != 0u) {
+        const size_t bit = full_words * 64u +
+                           static_cast<size_t>(__builtin_ctzll(word));
+        ++linear_sum[bit];
+        word &= word - 1u;
+    }
+}
+
 void AddCentroidWordsToLinearSum(
     BitBirchLinearSum& linear_sum,
     const std::vector<uint64_t>& centroid_words) {
-    const size_t size_bits = linear_sum.size();
-    for (size_t bit = 0; bit < size_bits; ++bit) {
-        const uint64_t mask = uint64_t{1} << (bit % 64u);
-        if ((centroid_words[bit / 64u] & mask) != 0u) {
-            ++linear_sum[bit];
-        }
-    }
+    IncrementLinearSumFromSetBits(
+        linear_sum,
+        centroid_words.data(),
+        linear_sum.size());
 }
 
 }  // namespace
@@ -41,12 +68,7 @@ void UpdateLinearSumFromWords(
         throw std::invalid_argument("BitBirch linear sum size does not match fingerprint size");
     }
 
-    for (size_t bit = 0; bit < size_bits; ++bit) {
-        const uint64_t mask = uint64_t{1} << (bit % 64u);
-        if ((words[bit / 64u] & mask) != 0u) {
-            ++linear_sum[bit];
-        }
-    }
+    IncrementLinearSumFromSetBits(linear_sum, words, size_bits);
 }
 
 std::vector<uint64_t> BinaryCentroid(

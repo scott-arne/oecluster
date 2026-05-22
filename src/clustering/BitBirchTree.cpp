@@ -11,6 +11,8 @@
 #include <map>
 #include <stdexcept>
 
+#include "oecluster/ThreadPool.h"
+
 namespace OECluster::detail {
 namespace {
 
@@ -85,6 +87,30 @@ std::vector<double> similarities_to_centroid(
             centroid_popcount));
     }
     return similarities;
+}
+
+size_t closest_subcluster_index(
+    const std::vector<std::unique_ptr<BitBirchSubcluster>>& subclusters,
+    const BitBirchSubcluster& nominee) {
+    size_t best_index = 0;
+    double best_similarity = TanimotoPackedVectors(
+        subclusters.front()->centroid_words,
+        subclusters.front()->centroid_popcount,
+        nominee.centroid_words,
+        nominee.centroid_popcount);
+
+    for (size_t index = 1; index < subclusters.size(); ++index) {
+        const double similarity = TanimotoPackedVectors(
+            subclusters[index]->centroid_words,
+            subclusters[index]->centroid_popcount,
+            nominee.centroid_words,
+            nominee.centroid_popcount);
+        if (numpy_argmax_greater(similarity, best_similarity)) {
+            best_index = index;
+            best_similarity = similarity;
+        }
+    }
+    return best_index;
 }
 
 std::pair<size_t, size_t> max_separation(
@@ -235,16 +261,7 @@ bool BitBirchNode::InsertSubcluster(
         return false;
     }
 
-    std::vector<double> similarities;
-    similarities.reserve(subclusters_.size());
-    for (const auto& existing : subclusters_) {
-        similarities.push_back(TanimotoPackedVectors(
-            existing->centroid_words,
-            existing->centroid_popcount,
-            subcluster->centroid_words,
-            subcluster->centroid_popcount));
-    }
-    const size_t closest_index = argmax_numpy(similarities);
+    const size_t closest_index = closest_subcluster_index(subclusters_, *subcluster);
     BitBirchSubcluster* closest = subclusters_[closest_index].get();
 
     if (closest->child != nullptr) {
@@ -399,7 +416,7 @@ BitBirchTree::PrepareReclusteringSubclusters(
 void BitBirchTree::ReassignTopClusters(
     const OEFP::OEFPBatch& fingerprints,
     const size_t top_clusters,
-    size_t /*num_threads*/) {
+    const size_t num_threads) {
     if (top_clusters == 0) {
         return;
     }
@@ -441,19 +458,50 @@ void BitBirchTree::ReassignTopClusters(
         centroid_popcounts.push_back(PopCountWords(centroids.back()));
     }
 
-    std::map<size_t, Cluster> reassigned;
-    for (const size_t member : selected_members) {
-        std::vector<double> similarities;
-        similarities.reserve(selected_count);
-        for (size_t centroid_index = 0; centroid_index < selected_count; ++centroid_index) {
-            similarities.push_back(TanimotoWords(
+    auto assign_member = [&](const size_t member) {
+        size_t best_index = 0;
+        double best_similarity = TanimotoWords(
+            fingerprints.RowWords(member),
+            fingerprints.PopCount(member),
+            centroids.front().data(),
+            centroid_popcounts.front(),
+            words_per_fingerprint_);
+        for (size_t centroid_index = 1; centroid_index < selected_count; ++centroid_index) {
+            const double similarity = TanimotoWords(
                 fingerprints.RowWords(member),
                 fingerprints.PopCount(member),
                 centroids[centroid_index].data(),
                 centroid_popcounts[centroid_index],
-                words_per_fingerprint_));
+                words_per_fingerprint_);
+            if (numpy_argmax_greater(similarity, best_similarity)) {
+                best_index = centroid_index;
+                best_similarity = similarity;
+            }
         }
-        reassigned[argmax_numpy(similarities)].push_back(member);
+        return best_index;
+    };
+
+    std::vector<size_t> assigned_centroids(selected_members.size(), 0);
+    if (selected_members.size() >= 256 && (num_threads == 0 || num_threads > 1)) {
+        ThreadPool pool(num_threads);
+        pool.ParallelFor(
+            0,
+            selected_members.size(),
+            256,
+            [&](const size_t begin, const size_t end) {
+                for (size_t index = begin; index < end; ++index) {
+                    assigned_centroids[index] = assign_member(selected_members[index]);
+                }
+            });
+    } else {
+        for (size_t index = 0; index < selected_members.size(); ++index) {
+            assigned_centroids[index] = assign_member(selected_members[index]);
+        }
+    }
+
+    std::map<size_t, Cluster> reassigned;
+    for (size_t index = 0; index < selected_members.size(); ++index) {
+        reassigned[assigned_centroids[index]].push_back(selected_members[index]);
     }
 
     size_t subcluster_index = 0;

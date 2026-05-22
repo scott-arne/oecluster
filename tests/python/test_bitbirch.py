@@ -387,6 +387,34 @@ def _prune_reassign_fixture_bits():
     )
 
 
+def _duplicate_block_bits(*, rows=320, cols=128, density=0.2, prototypes=4):
+    rng = np.random.default_rng(20260520)
+    prototype_bits = (rng.random((prototypes, cols)) < density).astype(np.uint8)
+    empty_rows = np.flatnonzero(prototype_bits.sum(axis=1) == 0)
+    for row in empty_rows:
+        prototype_bits[row, row % cols] = 1
+    return prototype_bits[np.arange(rows) % prototypes].copy()
+
+
+def test_bitbirch_refine_reassign_threads_match_serial_on_duplicate_blocks():
+    bits = _duplicate_block_bits()
+    batch = _batch_from_bits(bits)
+    kwargs = {
+        "threshold": 0.65,
+        "branching_factor": 2,
+        "merge_criterion": "diameter",
+        "singly": False,
+        "reassign_top_clusters": 4,
+    }
+
+    serial = oecluster.bitbirch_refine(batch, num_threads=1, **kwargs)
+    threaded = oecluster.bitbirch_refine(batch, num_threads=2, **kwargs)
+
+    assert threaded.labels.tolist() == serial.labels.tolist()
+    assert threaded.clusters == serial.clusters
+    assert threaded.cluster_sizes == serial.cluster_sizes
+
+
 def test_bitbirch_refine_redistribute_largest_cluster_requires_parent_pointers():
     bits = _prune_redistribution_fixture_bits()
 

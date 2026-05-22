@@ -35,6 +35,25 @@ TEST(BitBirchKernelsTest, UpdatesDenseLinearSumFromWords) {
     EXPECT_EQ(sum, (BitBirchLinearSum{1, 0, 1, 0}));
 }
 
+TEST(BitBirchKernelsTest, IgnoresPaddingBitsWhenUpdatingLinearSum) {
+    BitBirchLinearSum sum(65, 0);
+    const std::vector<uint64_t> row{
+        (uint64_t{1} << 0u) | (uint64_t{1} << 63u),
+        (uint64_t{1} << 0u) | (uint64_t{1} << 2u),
+    };
+
+    UpdateLinearSumFromWords(sum, row.data(), 65);
+
+    EXPECT_EQ(sum[0], 1u);
+    EXPECT_EQ(sum[63], 1u);
+    EXPECT_EQ(sum[64], 1u);
+    uint32_t total = 0;
+    for (const uint32_t count : sum) {
+        total += count;
+    }
+    EXPECT_EQ(total, 3u);
+}
+
 TEST(BitBirchKernelsTest, ComputesCentroidWithReferenceHalfTie) {
     const BitBirchLinearSum sum{2, 1, 0, 1};
 

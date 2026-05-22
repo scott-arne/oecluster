@@ -50,10 +50,27 @@ def load_reference_bitbirch():
     return importlib.reload(module)
 
 
-def make_bits(seed: int, rows: int, cols: int, density: float) -> np.ndarray:
+def make_bits(
+    seed: int,
+    rows: int,
+    cols: int,
+    density: float,
+    regime: str = "random",
+    prototype_count: int = 8,
+) -> np.ndarray:
     """Create deterministic dense binary fingerprints."""
     rng = np.random.default_rng(seed)
-    bits = (rng.random((rows, cols)) < density).astype(np.uint8)
+    if regime == "random":
+        bits = (rng.random((rows, cols)) < density).astype(np.uint8)
+    elif regime == "duplicate_blocks":
+        if prototype_count < 1:
+            raise ValueError("prototype_count must be at least one")
+        prototypes = (rng.random((prototype_count, cols)) < density).astype(np.uint8)
+        prototype_rows = np.arange(rows, dtype=np.intp) % prototype_count
+        bits = prototypes[prototype_rows].copy()
+    else:
+        raise ValueError(f"Unknown BitBirch benchmark regime: {regime!r}")
+
     empty_rows = np.flatnonzero(bits.sum(axis=1) == 0)
     for row in empty_rows:
         bits[row, row % cols] = 1
@@ -129,6 +146,7 @@ def native_cluster(
     threshold: float,
     branching_factor: int,
     mode: str,
+    num_threads: int,
 ) -> tuple[np.ndarray, tuple[tuple[int, ...], ...]]:
     """Return one-pass native BitBirch clustering."""
     return native_result(
@@ -138,6 +156,7 @@ def native_cluster(
             branching_factor=branching_factor,
             merge_criterion="diameter",
             mode=mode,
+            num_threads=num_threads,
         )
     )
 
@@ -169,6 +188,7 @@ def native_recluster(
     second_tolerance: float,
     branching_factor: int,
     mode: str,
+    num_threads: int,
 ) -> tuple[np.ndarray, tuple[tuple[int, ...], ...]]:
     """Return native two-stage BitBirch reclustering."""
     return native_result(
@@ -179,6 +199,7 @@ def native_recluster(
             second_tolerance=second_tolerance,
             branching_factor=branching_factor,
             mode=mode,
+            num_threads=num_threads,
         )
     )
 
@@ -208,6 +229,7 @@ def native_refine(
     threshold: float,
     branching_factor: int,
     mode: str,
+    num_threads: int,
     *,
     reassign_top_clusters: int = 0,
     redistribute_largest_cluster: bool = False,
@@ -221,6 +243,7 @@ def native_refine(
             merge_criterion="diameter",
             singly=False,
             mode=mode,
+            num_threads=num_threads,
             reassign_top_clusters=reassign_top_clusters,
             redistribute_largest_cluster=redistribute_largest_cluster,
         )
@@ -238,7 +261,13 @@ def workflow_calls(
     if workflow == "cluster":
         return (
             lambda: reference_cluster(bb, bits, args.threshold, args.branching_factor),
-            lambda: native_cluster(batch, args.threshold, args.branching_factor, args.mode),
+            lambda: native_cluster(
+                batch,
+                args.threshold,
+                args.branching_factor,
+                args.mode,
+                args.num_threads,
+            ),
         )
     if workflow == "recluster":
         return (
@@ -257,6 +286,7 @@ def workflow_calls(
                 args.second_tolerance,
                 args.branching_factor,
                 args.mode,
+                args.num_threads,
             ),
         )
     if workflow == "reassign":
@@ -273,6 +303,7 @@ def workflow_calls(
                 args.threshold,
                 args.branching_factor,
                 args.mode,
+                args.num_threads,
                 reassign_top_clusters=args.reassign_top_clusters,
             ),
         )
@@ -290,6 +321,7 @@ def workflow_calls(
                 args.threshold,
                 args.branching_factor,
                 args.mode,
+                args.num_threads,
                 redistribute_largest_cluster=True,
             ),
         )
@@ -308,6 +340,7 @@ def workflow_calls(
                 args.threshold,
                 args.branching_factor,
                 args.mode,
+                args.num_threads,
                 reassign_top_clusters=args.reassign_top_clusters,
                 redistribute_largest_cluster=True,
             ),
@@ -325,7 +358,11 @@ def benchmark(
     args: argparse.Namespace,
 ) -> BenchmarkResult:
     """Benchmark one data set."""
-    reference_call, native_call = workflow_calls(workflow, bb, bits, batch, args)
+    # The reference stores running sums in the input dtype. Use signed integer
+    # bits here so larger duplicate-block benchmarks measure algorithm parity
+    # instead of NumPy unsigned overflow.
+    reference_bits = bits.astype(np.int64, copy=False)
+    reference_call, native_call = workflow_calls(workflow, bb, reference_bits, batch, args)
     expected = reference_call()
     observed = native_call()
     assert_same_result(observed, expected, workflow)
@@ -364,11 +401,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sizes", type=int, nargs="+", default=[250, 500, 1000])
     parser.add_argument("--bits", type=int, default=2048)
     parser.add_argument("--density", type=float, default=0.05)
+    parser.add_argument("--regime", choices=["random", "duplicate_blocks"], default="random")
+    parser.add_argument("--prototype-count", type=int, default=8)
     parser.add_argument("--threshold", type=float, default=0.65)
     parser.add_argument("--second-threshold", type=float, default=0.7)
     parser.add_argument("--second-tolerance", type=float, default=0.0)
     parser.add_argument("--branching-factor", type=int, default=50)
     parser.add_argument("--reassign-top-clusters", type=int, default=2)
+    parser.add_argument("--num-threads", type=int, default=0)
     parser.add_argument("--repeats", type=int, default=5)
     parser.add_argument("--warmups", type=int, default=1)
     parser.add_argument("--seed", type=int, default=13)
@@ -382,7 +422,14 @@ def main() -> None:
     results = []
     bb = load_reference_bitbirch()
     for n_samples in args.sizes:
-        bits = make_bits(args.seed, n_samples, args.bits, args.density)
+        bits = make_bits(
+            args.seed,
+            n_samples,
+            args.bits,
+            args.density,
+            args.regime,
+            args.prototype_count,
+        )
         batch = batch_from_bits(bits)
         for workflow in args.workflows:
             results.append(
