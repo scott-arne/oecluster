@@ -1357,7 +1357,8 @@ def bitbirch(fingerprints, *, threshold=0.65, branching_factor=50,
     :param tolerance: Tolerance penalty for tolerance-based criteria.
     :param singly: Whether to skip parent-pointer maintenance for the faster
         single-pass reference behavior.
-    :param mode: "strict_parity" or "fast".
+    :param mode: "strict_parity" or "fast"; fast currently uses the
+        strict-parity path and is reserved for future optimized behavior.
     :param num_threads: Thread count for parallel-safe phases.
     :returns: ClusteringResult with labels, clusters, centroids, and cluster sizes.
     :raises TypeError: If fingerprints is not an `oefp.OEFPBatch`.
@@ -1402,7 +1403,8 @@ def bitbirch_recluster(fingerprints, *, initial_threshold=0.65,
     :param second_threshold: Tolerance threshold for the second pass.
     :param second_tolerance: Tolerance penalty for the second pass.
     :param branching_factor: Maximum number of subclusters per tree node.
-    :param mode: "strict_parity" or "fast".
+    :param mode: "strict_parity" or "fast"; fast currently uses the
+        strict-parity path and is reserved for future optimized behavior.
     :param num_threads: Thread count for parallel-safe phases.
     :returns: ClusteringResult with labels, clusters, centroids, and cluster sizes.
     """
@@ -1450,7 +1452,8 @@ def bitbirch_refine(fingerprints, *, threshold=0.65, branching_factor=50,
         the largest cluster after fitting.
     :param reassign_top_clusters: Number of largest clusters to reassign by
         centroid similarity. Use zero to disable reassignment.
-    :param mode: "strict_parity" or "fast".
+    :param mode: "strict_parity" or "fast"; fast currently uses the
+        strict-parity path and is reserved for future optimized behavior.
     :param num_threads: Thread count for parallel-safe refinement scoring.
     :returns: ClusteringResult with labels, clusters, centroids, and cluster sizes.
     """

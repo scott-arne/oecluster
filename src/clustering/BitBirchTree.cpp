@@ -29,6 +29,17 @@ BitBirchLinearSum add_linear_sums(
     return out;
 }
 
+void add_linear_sum_in_place(
+    BitBirchLinearSum& lhs,
+    const BitBirchLinearSum& rhs) {
+    if (lhs.size() != rhs.size()) {
+        throw std::invalid_argument("BitBirch linear sums must have the same width");
+    }
+    for (size_t i = 0; i < lhs.size(); ++i) {
+        lhs[i] += rhs[i];
+    }
+}
+
 bool numpy_argmax_greater(const double candidate, const double best) {
     if (std::isnan(candidate)) {
         return !std::isnan(best);
@@ -180,7 +191,7 @@ void BitBirchSubcluster::UpdateFrom(const BitBirchSubcluster& other) {
         return;
     }
 
-    linear_sum = add_linear_sums(linear_sum, other.linear_sum);
+    add_linear_sum_in_place(linear_sum, other.linear_sum);
     n_samples += other.n_samples;
     members.insert(members.end(), other.members.begin(), other.members.end());
     centroid_words = BinaryCentroid(linear_sum, n_samples);
@@ -223,7 +234,12 @@ bool BitBirchSubcluster::TryMerge(
     const BitBirchOptions& options) {
     BitBirchLinearSum new_linear_sum = add_linear_sums(linear_sum, nominee.linear_sum);
     const size_t new_n = n_samples + nominee.n_samples;
-    const std::vector<uint64_t> new_centroid = BinaryCentroid(new_linear_sum, new_n);
+    std::vector<uint64_t> new_centroid;
+    bool has_new_centroid = false;
+    if (options.merge_criterion == BitBirchMergeCriterion::Radius) {
+        new_centroid = BinaryCentroid(new_linear_sum, new_n);
+        has_new_centroid = true;
+    }
 
     if (!AcceptBitBirchMerge(
             options.merge_criterion,
@@ -239,9 +255,12 @@ bool BitBirchSubcluster::TryMerge(
         return false;
     }
 
+    if (!has_new_centroid) {
+        new_centroid = BinaryCentroid(new_linear_sum, new_n);
+    }
     n_samples = new_n;
     linear_sum = std::move(new_linear_sum);
-    centroid_words = new_centroid;
+    centroid_words = std::move(new_centroid);
     centroid_popcount = PopCountWords(centroid_words);
     members.insert(members.end(), nominee.members.begin(), nominee.members.end());
     return true;

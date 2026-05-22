@@ -288,6 +288,14 @@ def test_bitbirch_refine_fast_mode_matches_strict_until_optimized():
     assert fast.clusters == strict.clusters
 
 
+def test_bitbirch_fast_mode_docstrings_mark_reserved_alias():
+    expected = "fast currently uses the strict-parity path"
+
+    assert expected in " ".join(oecluster.bitbirch.__doc__.split())
+    assert expected in " ".join(oecluster.bitbirch_recluster.__doc__.split())
+    assert expected in " ".join(oecluster.bitbirch_refine.__doc__.split())
+
+
 def _reference_refine_reassign(bits, *, top=2):
     bb = _load_reference_bitbirch()
     arr = np.asarray(bits, dtype=np.uint8)

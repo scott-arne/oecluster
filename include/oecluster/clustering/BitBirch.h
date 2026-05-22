@@ -26,6 +26,10 @@ enum class BitBirchMergeCriterion {
 
 /**
  * @brief Execution mode for BitBirch.
+ *
+ * `Fast` is reserved for future behavior-changing optimizations. It currently
+ * uses the strict-parity implementation path so callers can opt in before the
+ * first non-parity fast algorithm is introduced.
  */
 enum class BitBirchMode {
     StrictParity,

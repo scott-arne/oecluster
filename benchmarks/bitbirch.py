@@ -438,7 +438,15 @@ def parse_args() -> argparse.Namespace:
         choices=["cluster", "recluster", "reassign", "prune", "prune_reassign"],
         default=["cluster"],
     )
-    parser.add_argument("--mode", choices=["strict_parity", "fast"], default="strict_parity")
+    parser.add_argument(
+        "--mode",
+        choices=["strict_parity", "fast"],
+        default="strict_parity",
+        help=(
+            "BitBirch execution mode. fast currently uses strict_parity and is "
+            "reserved for future optimized behavior."
+        ),
+    )
     parser.add_argument("--sizes", type=int, nargs="+", default=[250, 500, 1000])
     parser.add_argument("--bits", type=int, default=2048)
     parser.add_argument("--density", type=float, default=0.05)
