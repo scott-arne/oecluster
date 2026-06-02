@@ -1096,8 +1096,9 @@ def butina(distance_matrix, threshold, *, reordering=False,
     :param reordering: Recompute candidate neighbor counts after each cluster.
     :param num_threads: Thread count for threshold graph construction.
     :param chunk_size: Condensed-distance pairs per work unit.
-    :returns: Tuple of clusters. The first item in each cluster is the
-        highest-neighborhood representative.
+    :returns: ClusteringResult with per-item labels and grouped clusters. The
+        first member of each cluster is the highest-neighborhood representative,
+        and each member's label equals its cluster index.
     :raises TypeError: If distance_matrix is not a DistanceMatrix.
     :raises ValueError: If threshold is negative.
     """
@@ -1112,8 +1113,8 @@ def butina(distance_matrix, threshold, *, reordering=False,
     options.num_threads = int(num_threads)
     options.chunk_size = int(chunk_size)
 
-    clusters = _butina_cluster(distance_matrix.storage, options)
-    return tuple(tuple(int(member) for member in cluster) for cluster in clusters)
+    result = _butina_cluster(distance_matrix.storage, options)
+    return ClusteringResult(result.labels, result.clusters)
 
 
 class RepresentativeMetrics:
