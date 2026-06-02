@@ -1182,7 +1182,9 @@ def butina_cluster(storage, options):
 
     :param storage: Pairwise distance storage.
     :param options: Butina clustering options.
-    :returns: Clusters where the first member is the highest-neighborhood representative.
+    :returns: ClusteringResult whose clusters are ordered with the
+        highest-neighborhood representative first, and whose per-item labels
+        equal each member's cluster position.
     """
     return _oecluster.butina_cluster(storage, options)
 RepresentativeMethod_Medoid = _oecluster.RepresentativeMethod_Medoid
