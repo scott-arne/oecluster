@@ -7,6 +7,8 @@
 #define OECLUSTER_CLUSTERING_DBSCAN_H
 
 #include <cstddef>
+#include <utility>
+#include <vector>
 
 #include "oecluster/StorageBackend.h"
 #include "oecluster/clustering/ClusterTypes.h"

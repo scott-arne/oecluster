@@ -7,6 +7,7 @@
 #define OECLUSTER_CLUSTERING_BITBIRCH_H
 
 #include <cstddef>
+#include <utility>
 #include <vector>
 
 #include "oefp/batch.h"
