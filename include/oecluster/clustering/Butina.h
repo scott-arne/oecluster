@@ -28,9 +28,11 @@ struct ButinaOptions {
  *
  * :param storage: Pairwise distance storage.
  * :param options: Butina clustering options.
- * :returns: Clusters where the first member is the highest-neighborhood representative.
+ * :returns: ClusteringResult whose clusters are ordered with the
+ *     highest-neighborhood representative first, and whose per-item labels
+ *     equal each member's cluster position.
  */
-Clusters butina_cluster(const StorageBackend& storage, const ButinaOptions& options);
+ClusteringResult butina_cluster(const StorageBackend& storage, const ButinaOptions& options);
 
 }  // namespace OECluster
 
