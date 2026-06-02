@@ -28,6 +28,14 @@ def _rdkit_butina(distance_matrix, threshold, *, reordering=False):
     )
 
 
+def _assert_labels_match_clusters(result, num_items):
+    """Every member's label equals its cluster index, over the full item range."""
+    assert len(result.labels) == num_items
+    for cluster_index, cluster in enumerate(result.clusters):
+        for member in cluster:
+            assert result.labels[member] == cluster_index
+
+
 def test_butina_matches_rdkit_without_reordering():
     """Match RDKit's greedy Butina clustering without count updates."""
     import oecluster
@@ -51,7 +59,8 @@ def test_butina_matches_rdkit_without_reordering():
     observed = oecluster.butina(dm, threshold=0.35, reordering=False)
     expected = _rdkit_butina(dm, 0.35, reordering=False)
 
-    assert observed == expected
+    assert observed.clusters == expected
+    _assert_labels_match_clusters(observed, dm.num_items)
 
 
 def test_butina_matches_rdkit_with_reordering():
@@ -82,7 +91,8 @@ def test_butina_matches_rdkit_with_reordering():
     observed = oecluster.butina(dm, threshold=0.2, reordering=True)
     expected = _rdkit_butina(dm, 0.2, reordering=True)
 
-    assert observed == expected
+    assert observed.clusters == expected
+    _assert_labels_match_clusters(observed, dm.num_items)
 
 
 def test_butina_fingerprint_distance_matrix_matches_rdkit(
@@ -97,7 +107,8 @@ def test_butina_fingerprint_distance_matrix_matches_rdkit(
     observed = oecluster.butina(dm, threshold=1.0)
     expected = _rdkit_butina(dm, 1.0)
 
-    assert observed == expected
+    assert observed.clusters == expected
+    _assert_labels_match_clusters(observed, dm.num_items)
 
 
 def test_butina_rejects_negative_threshold():
