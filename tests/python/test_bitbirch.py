@@ -100,6 +100,8 @@ def test_bitbirch_matches_reference_duplicate_blocks(merge_criterion):
         merge_criterion=merge_criterion,
     )
 
+    assert isinstance(observed, oecluster.BitBirchResult)
+    assert isinstance(observed, oecluster.ClusteringResult)
     assert observed.labels.tolist() == expected_labels.tolist()
     assert observed.clusters == expected_clusters
     assert observed.cluster_sizes == tuple(len(cluster) for cluster in expected_clusters)

@@ -59,6 +59,8 @@ def test_agglomerative_matches_sklearn_precomputed_linkages(linkage):
     expected = _sklearn_agglomerative(square, linkage=linkage, n_clusters=2)
     observed = oecluster.agglomerative(dm, linkage=linkage, n_clusters=2)
 
+    assert isinstance(observed, oecluster.AgglomerativeResult)
+    assert isinstance(observed, oecluster.ClusteringResult)
     assert _cluster_members(observed.labels) == _cluster_members(expected.labels_)
     assert observed.clusters == ((0, 1, 2), (3, 4, 5))
     assert len(observed.children) == square.shape[0] - 1

@@ -40,6 +40,8 @@ def test_hdbscan_matches_sklearn_precomputed_toy():
         cluster_selection_method="leaf",
     )
 
+    assert isinstance(observed, oecluster.HDBSCANResult)
+    assert isinstance(observed, oecluster.ClusteringResult)
     assert observed.labels.tolist() == expected.labels_.tolist()
     np.testing.assert_allclose(observed.probabilities, expected.probabilities_)
     assert observed.clusters == ((0, 1, 2), (3, 4, 5))
