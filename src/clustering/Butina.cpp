@@ -62,18 +62,16 @@ void reorder_unseen_candidates(
 
 }  // namespace
 
-ClusteringResult butina_cluster(const StorageBackend& storage, const ButinaOptions& options) {
+ButinaResult butina_cluster(const StorageBackend& storage, const ButinaOptions& options) {
     if (options.distance_threshold < 0.0) {
         throw std::invalid_argument("Butina distance threshold must be non-negative");
     }
 
     if (storage.NumItems() < 2) {
-        ClusteringResult result;
         if (storage.NumItems() == 1) {
-            result.clusters.push_back(Cluster{0});
-            result.labels.assign(1, 0);
+            return ButinaResult(std::vector<ClusterLabel>{0}, Clusters{Cluster{0}});
         }
-        return result;
+        return ButinaResult();
     }
 
     ThresholdGraphOptions graph_options;
@@ -121,20 +119,17 @@ ClusteringResult butina_cluster(const StorageBackend& storage, const ButinaOptio
         }
     }
 
-    ClusteringResult result;
-    result.clusters = std::move(clusters);
-
     // Butina assigns every item to a cluster; label == cluster position so the
     // representative-first ordering in clusters is preserved alongside the
     // per-item labels view.
-    result.labels.assign(storage.NumItems(), NOISE_LABEL);
-    for (size_t cluster_index = 0; cluster_index < result.clusters.size(); ++cluster_index) {
-        for (const size_t member : result.clusters[cluster_index]) {
-            result.labels[member] = static_cast<ClusterLabel>(cluster_index);
+    std::vector<ClusterLabel> labels(storage.NumItems(), NOISE_LABEL);
+    for (size_t cluster_index = 0; cluster_index < clusters.size(); ++cluster_index) {
+        for (const size_t member : clusters[cluster_index]) {
+            labels[member] = static_cast<ClusterLabel>(cluster_index);
         }
     }
 
-    return result;
+    return ButinaResult(std::move(labels), std::move(clusters));
 }
 
 }  // namespace OECluster

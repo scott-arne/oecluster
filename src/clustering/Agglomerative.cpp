@@ -176,7 +176,9 @@ std::vector<double> initialize_cluster_distances(
 }
 
 std::vector<ClusterLabel> labels_from_cut(
-    const AgglomerativeResult& result,
+    const std::vector<size_t>& children_left,
+    const std::vector<size_t>& children_right,
+    const std::vector<double>& distances,
     size_t n_samples,
     const AgglomerativeOptions& options) {
     if (n_samples == 0) {
@@ -191,18 +193,18 @@ std::vector<ClusterLabel> labels_from_cut(
 
     const bool cut_by_threshold = options.distance_threshold >= 0.0;
     const size_t merges_to_apply =
-        cut_by_threshold ? result.distances.size() : n_samples - options.n_clusters;
+        cut_by_threshold ? distances.size() : n_samples - options.n_clusters;
 
-    for (size_t merge = 0; merge < result.distances.size(); ++merge) {
+    for (size_t merge = 0; merge < distances.size(); ++merge) {
         if (merge >= merges_to_apply) {
             break;
         }
-        if (cut_by_threshold && result.distances[merge] > options.distance_threshold) {
+        if (cut_by_threshold && distances[merge] > options.distance_threshold) {
             break;
         }
 
-        const size_t left = result.children_left[merge];
-        const size_t right = result.children_right[merge];
+        const size_t left = children_left[merge];
+        const size_t right = children_right[merge];
         const size_t root = union_find.Union(
             representatives[left],
             representatives[right]);
@@ -235,14 +237,14 @@ AgglomerativeResult agglomerative_cluster(
     validate_options(storage, options);
 
     const size_t n = storage.NumItems();
-    AgglomerativeResult result;
     if (n == 0) {
-        return result;
+        return AgglomerativeResult();
     }
     if (n == 1) {
-        result.labels = {0};
-        result.clusters = labels_to_clusters(result.labels);
-        return result;
+        std::vector<ClusterLabel> labels{0};
+        Clusters members = labels_to_clusters(labels);
+        return AgglomerativeResult(std::move(labels), std::move(members),
+                                   {}, {}, {}, {});
     }
 
     const bool cut_by_threshold = options.distance_threshold >= 0.0;
@@ -279,14 +281,18 @@ AgglomerativeResult agglomerative_cluster(
         MergeCandidateGreater>
         heap(MergeCandidateGreater{}, std::move(heap_storage));
 
-    result.children_left.reserve(n - 1);
-    result.children_right.reserve(n - 1);
-    result.distances.reserve(n - 1);
-    result.cluster_sizes.reserve(n - 1);
+    std::vector<size_t> children_left;
+    std::vector<size_t> children_right;
+    std::vector<double> distances_out;
+    std::vector<size_t> merge_cluster_sizes;
+    children_left.reserve(n - 1);
+    children_right.reserve(n - 1);
+    distances_out.reserve(n - 1);
+    merge_cluster_sizes.reserve(n - 1);
 
     size_t next_node = n;
     size_t active_count = n;
-    while (active_count > 1 && result.distances.size() < target_merges) {
+    while (active_count > 1 && distances_out.size() < target_merges) {
         MergeCandidate best;
         bool found = false;
         while (!heap.empty()) {
@@ -306,10 +312,10 @@ AgglomerativeResult agglomerative_cluster(
         const size_t merged_node = next_node++;
         const size_t merged_size = cluster_sizes[left] + cluster_sizes[right];
 
-        result.children_left.push_back(left);
-        result.children_right.push_back(right);
-        result.distances.push_back(best.distance);
-        result.cluster_sizes.push_back(merged_size);
+        children_left.push_back(left);
+        children_right.push_back(right);
+        distances_out.push_back(best.distance);
+        merge_cluster_sizes.push_back(merged_size);
 
         active[left] = false;
         active[right] = false;
@@ -333,9 +339,12 @@ AgglomerativeResult agglomerative_cluster(
         }
     }
 
-    result.labels = labels_from_cut(result, n, options);
-    result.clusters = labels_to_clusters(result.labels);
-    return result;
+    std::vector<ClusterLabel> labels =
+        labels_from_cut(children_left, children_right, distances_out, n, options);
+    Clusters members = labels_to_clusters(labels);
+    return AgglomerativeResult(std::move(labels), std::move(members),
+                               std::move(children_left), std::move(children_right),
+                               std::move(distances_out), std::move(merge_cluster_sizes));
 }
 
 }  // namespace OECluster

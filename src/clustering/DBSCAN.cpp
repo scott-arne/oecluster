@@ -26,31 +26,31 @@ DBSCANResult dbscan_cluster(const StorageBackend& storage, const DBSCANOptions& 
     graph_options.chunk_size = options.chunk_size;
     const ThresholdNeighborGraph graph = BuildThresholdNeighborGraph(storage, graph_options);
 
-    DBSCANResult result;
-    result.labels.assign(graph.Size(), NOISE_LABEL);
+    std::vector<ClusterLabel> labels(graph.Size(), NOISE_LABEL);
+    Cluster core_sample_indices;
 
     std::vector<bool> is_core(graph.Size(), false);
     for (size_t i = 0; i < graph.Size(); ++i) {
         if (graph.Neighbors(i).size() >= options.min_samples) {
             is_core[i] = true;
-            result.core_sample_indices.push_back(i);
+            core_sample_indices.push_back(i);
         }
     }
 
     ClusterLabel label = 0;
     std::vector<size_t> stack;
     for (size_t seed = 0; seed < graph.Size(); ++seed) {
-        if (result.labels[seed] != NOISE_LABEL || !is_core[seed]) {
+        if (labels[seed] != NOISE_LABEL || !is_core[seed]) {
             continue;
         }
 
         size_t current = seed;
         while (true) {
-            if (result.labels[current] == NOISE_LABEL) {
-                result.labels[current] = label;
+            if (labels[current] == NOISE_LABEL) {
+                labels[current] = label;
                 if (is_core[current]) {
                     for (const size_t neighbor : graph.Neighbors(current)) {
-                        if (result.labels[neighbor] == NOISE_LABEL) {
+                        if (labels[neighbor] == NOISE_LABEL) {
                             stack.push_back(neighbor);
                         }
                     }
@@ -67,8 +67,9 @@ DBSCANResult dbscan_cluster(const StorageBackend& storage, const DBSCANOptions& 
         ++label;
     }
 
-    result.clusters = labels_to_clusters(result.labels);
-    return result;
+    Clusters members = labels_to_clusters(labels);
+    return DBSCANResult(std::move(labels), std::move(members),
+                        std::move(core_sample_indices));
 }
 
 }  // namespace OECluster

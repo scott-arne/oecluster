@@ -39,11 +39,34 @@ struct AgglomerativeOptions {
 /**
  * @brief Agglomerative clustering result with labels and merge tree metadata.
  */
-struct AgglomerativeResult : public ClusteringResult {
-    std::vector<size_t> children_left;
-    std::vector<size_t> children_right;
-    std::vector<double> distances;
-    std::vector<size_t> cluster_sizes;
+class AgglomerativeResult : public ClusteringResult {
+public:
+    AgglomerativeResult() = default;
+    AgglomerativeResult(std::vector<ClusterLabel> labels, Clusters members,
+                        std::vector<size_t> children_left,
+                        std::vector<size_t> children_right,
+                        std::vector<double> distances,
+                        std::vector<size_t> cluster_sizes)
+        : ClusteringResult(std::move(labels), std::move(members)),
+          children_left_(std::move(children_left)),
+          children_right_(std::move(children_right)),
+          distances_(std::move(distances)),
+          cluster_sizes_(std::move(cluster_sizes)) {}
+
+    /** @brief Left child node index per merge. */
+    const std::vector<size_t>& ChildrenLeft() const { return children_left_; }
+    /** @brief Right child node index per merge. */
+    const std::vector<size_t>& ChildrenRight() const { return children_right_; }
+    /** @brief Merge distance per merge. */
+    const std::vector<double>& Distances() const { return distances_; }
+    /** @brief Merged cluster size per merge. */
+    const std::vector<size_t>& ClusterSizes() const { return cluster_sizes_; }
+
+private:
+    std::vector<size_t> children_left_;
+    std::vector<size_t> children_right_;
+    std::vector<double> distances_;
+    std::vector<size_t> cluster_sizes_;
 };
 
 /**

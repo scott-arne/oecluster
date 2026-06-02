@@ -26,8 +26,19 @@ struct DBSCANOptions {
 /**
  * @brief DBSCAN result with labels, clusters, and core sample indices.
  */
-struct DBSCANResult : public ClusteringResult {
-    Cluster core_sample_indices;
+class DBSCANResult : public ClusteringResult {
+public:
+    DBSCANResult() = default;
+    DBSCANResult(std::vector<ClusterLabel> labels, Clusters members,
+                 Cluster core_sample_indices)
+        : ClusteringResult(std::move(labels), std::move(members)),
+          core_sample_indices_(std::move(core_sample_indices)) {}
+
+    /** @brief Indices of core samples. */
+    const Cluster& CoreSampleIndices() const { return core_sample_indices_; }
+
+private:
+    Cluster core_sample_indices_;
 };
 
 /**

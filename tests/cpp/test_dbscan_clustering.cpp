@@ -20,13 +20,14 @@ TEST(ClusteringResultTest, ConvertsLabelsToClustersInLabelOrder) {
 }
 
 TEST(ClusteringResultTest, ClusteringResultStoresLabelsAndClusters) {
-    ClusteringResult result;
-    result.labels = {0, -1, 0};
-    result.clusters = labels_to_clusters(result.labels);
+    const std::vector<ClusterLabel> labels{0, -1, 0};
+    const ClusteringResult result(labels, labels_to_clusters(labels));
 
-    EXPECT_EQ(result.labels, std::vector<ClusterLabel>({0, -1, 0}));
-    ASSERT_EQ(result.clusters.size(), 1);
-    EXPECT_EQ(result.clusters[0], Cluster({0, 2}));
+    EXPECT_EQ(result.Labels(), std::vector<ClusterLabel>({0, -1, 0}));
+    ASSERT_EQ(result.Members().size(), 1);
+    EXPECT_EQ(result.Members()[0], Cluster({0, 2}));
+    EXPECT_EQ(result.NumClusters(), 1u);
+    EXPECT_EQ(result.NumItems(), 3u);
 }
 
 TEST(DBSCANClusteringTest, MatchesScikitLearnToyCoreSamples) {
@@ -44,10 +45,10 @@ TEST(DBSCANClusteringTest, MatchesScikitLearnToyCoreSamples) {
 
     const DBSCANResult result = dbscan_cluster(storage, options);
 
-    EXPECT_EQ(result.core_sample_indices, Cluster({2}));
-    EXPECT_EQ(result.labels, std::vector<ClusterLabel>({-1, 0, 0, 0, -1, -1, -1}));
-    ASSERT_EQ(result.clusters.size(), 1);
-    EXPECT_EQ(result.clusters[0], Cluster({1, 2, 3}));
+    EXPECT_EQ(result.CoreSampleIndices(), Cluster({2}));
+    EXPECT_EQ(result.Labels(), std::vector<ClusterLabel>({-1, 0, 0, 0, -1, -1, -1}));
+    ASSERT_EQ(result.Members().size(), 1);
+    EXPECT_EQ(result.Members()[0], Cluster({1, 2, 3}));
 }
 
 TEST(DBSCANClusteringTest, AllNoiseWhenNoCoreSamples) {
@@ -62,7 +63,7 @@ TEST(DBSCANClusteringTest, AllNoiseWhenNoCoreSamples) {
 
     const DBSCANResult result = dbscan_cluster(storage, options);
 
-    EXPECT_TRUE(result.core_sample_indices.empty());
-    EXPECT_EQ(result.labels, std::vector<ClusterLabel>({-1, -1, -1}));
-    EXPECT_TRUE(result.clusters.empty());
+    EXPECT_TRUE(result.CoreSampleIndices().empty());
+    EXPECT_EQ(result.Labels(), std::vector<ClusterLabel>({-1, -1, -1}));
+    EXPECT_TRUE(result.Members().empty());
 }

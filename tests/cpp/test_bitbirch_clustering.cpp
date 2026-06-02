@@ -42,14 +42,14 @@ TEST(BitBirchClusteringTest, ClustersDuplicateBlocksWithDiameterCriterion) {
 
     const auto result = OECluster::bitbirch_cluster(batch, options);
 
-    EXPECT_EQ(result.labels, (std::vector<OECluster::ClusterLabel>{0, 0, 1, 1}));
-    ASSERT_EQ(result.clusters.size(), 2u);
-    EXPECT_EQ(result.clusters[0], (OECluster::Cluster{0, 1}));
-    EXPECT_EQ(result.clusters[1], (OECluster::Cluster{2, 3}));
-    EXPECT_EQ(result.cluster_sizes, (std::vector<size_t>{2, 2}));
-    ASSERT_EQ(result.centroids.Size(), 2u);
-    EXPECT_EQ(result.centroids.PopCount(0), 2u);
-    EXPECT_EQ(result.centroids.PopCount(1), 2u);
+    EXPECT_EQ(result.Labels(), (std::vector<OECluster::ClusterLabel>{0, 0, 1, 1}));
+    ASSERT_EQ(result.Members().size(), 2u);
+    EXPECT_EQ(result.Members()[0], (OECluster::Cluster{0, 1}));
+    EXPECT_EQ(result.Members()[1], (OECluster::Cluster{2, 3}));
+    EXPECT_EQ(result.ClusterSizes(), (std::vector<size_t>{2, 2}));
+    ASSERT_EQ(result.Centroids().Size(), 2u);
+    EXPECT_EQ(result.Centroids().PopCount(0), 2u);
+    EXPECT_EQ(result.Centroids().PopCount(1), 2u);
 }
 
 TEST(BitBirchClusteringTest, PreservesReferenceSplitTieOrdering) {
@@ -68,12 +68,12 @@ TEST(BitBirchClusteringTest, PreservesReferenceSplitTieOrdering) {
 
     const auto result = OECluster::bitbirch_cluster(batch, options);
 
-    ASSERT_EQ(result.clusters.size(), 4u);
-    EXPECT_EQ(result.clusters[0], (OECluster::Cluster{0, 1}));
-    EXPECT_EQ(result.clusters[1], (OECluster::Cluster{2, 3}));
-    EXPECT_EQ(result.clusters[2], (OECluster::Cluster{5}));
-    EXPECT_EQ(result.clusters[3], (OECluster::Cluster{4}));
-    EXPECT_EQ(result.labels, (std::vector<OECluster::ClusterLabel>{0, 0, 1, 1, 3, 2}));
+    ASSERT_EQ(result.Members().size(), 4u);
+    EXPECT_EQ(result.Members()[0], (OECluster::Cluster{0, 1}));
+    EXPECT_EQ(result.Members()[1], (OECluster::Cluster{2, 3}));
+    EXPECT_EQ(result.Members()[2], (OECluster::Cluster{5}));
+    EXPECT_EQ(result.Members()[3], (OECluster::Cluster{4}));
+    EXPECT_EQ(result.Labels(), (std::vector<OECluster::ClusterLabel>{0, 0, 1, 1, 3, 2}));
 }
 
 TEST(BitBirchClusteringTest, RejectsInvalidOptions) {
@@ -129,12 +129,12 @@ TEST(BitBirchClusteringTest, RefinePruneRedistributesLargestCluster) {
 
     const auto result = OECluster::bitbirch_refine(batch, options);
 
-    EXPECT_EQ(result.labels.size(), 12u);
-    for (const OECluster::ClusterLabel label : result.labels) {
+    EXPECT_EQ(result.Labels().size(), 12u);
+    for (const OECluster::ClusterLabel label : result.Labels()) {
         EXPECT_GE(label, 0);
     }
     size_t assigned = 0;
-    for (const auto& cluster : result.clusters) {
+    for (const auto& cluster : result.Members()) {
         assigned += cluster.size();
     }
     EXPECT_EQ(assigned, 12u);
@@ -156,11 +156,11 @@ TEST(BitBirchClusteringTest, RefinePruneMatchesZeroSampleReferenceCentroid) {
 
     const auto result = OECluster::bitbirch_refine(batch, options);
 
-    EXPECT_EQ(result.labels, (std::vector<OECluster::ClusterLabel>{2, 1, 0, 3}));
-    ASSERT_EQ(result.clusters.size(), 5u);
-    EXPECT_EQ(result.clusters[0], (OECluster::Cluster{2}));
-    EXPECT_EQ(result.clusters[1], (OECluster::Cluster{1}));
-    EXPECT_EQ(result.clusters[2], (OECluster::Cluster{0}));
-    EXPECT_EQ(result.clusters[3], (OECluster::Cluster{3}));
-    EXPECT_TRUE(result.clusters[4].empty());
+    EXPECT_EQ(result.Labels(), (std::vector<OECluster::ClusterLabel>{2, 1, 0, 3}));
+    ASSERT_EQ(result.Members().size(), 5u);
+    EXPECT_EQ(result.Members()[0], (OECluster::Cluster{2}));
+    EXPECT_EQ(result.Members()[1], (OECluster::Cluster{1}));
+    EXPECT_EQ(result.Members()[2], (OECluster::Cluster{0}));
+    EXPECT_EQ(result.Members()[3], (OECluster::Cluster{3}));
+    EXPECT_TRUE(result.Members()[4].empty());
 }

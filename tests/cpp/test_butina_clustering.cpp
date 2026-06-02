@@ -25,11 +25,11 @@ TEST(ButinaClusteringTest, SingletonInputReturnsSingletonCluster) {
     ButinaOptions options;
     options.distance_threshold = 0.5;
 
-    const ClusteringResult result = butina_cluster(storage, options);
+    const ButinaResult result = butina_cluster(storage, options);
 
-    ASSERT_EQ(result.clusters.size(), 1);
-    ASSERT_EQ(result.clusters[0], Cluster({0}));
-    ASSERT_EQ(result.labels, std::vector<ClusterLabel>({0}));
+    ASSERT_EQ(result.Members().size(), 1);
+    ASSERT_EQ(result.Members()[0], Cluster({0}));
+    ASSERT_EQ(result.Labels(), std::vector<ClusterLabel>({0}));
 }
 
 TEST(ThresholdGraphTest, DenseStorageIncludesSelfAndThresholdNeighbors) {
@@ -145,17 +145,16 @@ TEST(ButinaClusteringTest, ChoosesLargestIndexOnNeighborCountTie) {
     ButinaOptions options;
     options.distance_threshold = 0.2;
 
-    const ClusteringResult result = butina_cluster(storage, options);
+    const ButinaResult result = butina_cluster(storage, options);
 
-    ASSERT_EQ(result.clusters.size(), 2);
-    EXPECT_EQ(result.clusters[0], Cluster({3, 2}));
-    EXPECT_EQ(result.clusters[1], Cluster({1, 0}));
+    ASSERT_EQ(result.Members().size(), 2);
+    EXPECT_EQ(result.Members()[0], Cluster({3, 2}));
+    EXPECT_EQ(result.Members()[1], Cluster({1, 0}));
 
-    // Labels view is consistent with cluster order: label == cluster position.
-    ASSERT_EQ(result.labels.size(), storage.NumItems());
-    for (size_t c = 0; c < result.clusters.size(); ++c) {
-        for (const size_t member : result.clusters[c]) {
-            EXPECT_EQ(result.labels[member], static_cast<ClusterLabel>(c));
+    ASSERT_EQ(result.Labels().size(), storage.NumItems());
+    for (size_t c = 0; c < result.Members().size(); ++c) {
+        for (const size_t member : result.Members()[c]) {
+            EXPECT_EQ(result.Labels()[member], static_cast<ClusterLabel>(c));
         }
     }
 }
@@ -176,15 +175,14 @@ TEST(ButinaClusteringTest, ClustersUnseenNeighborsInAscendingNeighborOrder) {
     ButinaOptions options;
     options.distance_threshold = 0.2;
 
-    const ClusteringResult result = butina_cluster(storage, options);
+    const ButinaResult result = butina_cluster(storage, options);
 
-    ASSERT_EQ(result.clusters.size(), 2);
-    EXPECT_EQ(result.clusters[0], Cluster({0, 1, 2, 3}));
-    EXPECT_EQ(result.clusters[1], Cluster({4}));
+    ASSERT_EQ(result.Members().size(), 2);
+    EXPECT_EQ(result.Members()[0], Cluster({0, 1, 2, 3}));
+    EXPECT_EQ(result.Members()[1], Cluster({4}));
 
-    // Every item is assigned a non-noise label equal to its cluster position.
-    ASSERT_EQ(result.labels.size(), storage.NumItems());
-    EXPECT_EQ(result.labels, std::vector<ClusterLabel>({0, 0, 0, 0, 1}));
+    ASSERT_EQ(result.Labels().size(), storage.NumItems());
+    EXPECT_EQ(result.Labels(), std::vector<ClusterLabel>({0, 0, 0, 0, 1}));
 }
 
 TEST(ButinaClusteringTest, ReorderingCanChangeLaterRepresentatives) {
@@ -212,10 +210,10 @@ TEST(ButinaClusteringTest, ReorderingCanChangeLaterRepresentatives) {
     ButinaOptions reorder = no_reorder;
     reorder.reordering = true;
 
-    const ClusteringResult result_no_reorder = butina_cluster(storage, no_reorder);
-    const ClusteringResult result_reorder = butina_cluster(storage, reorder);
+    const ButinaResult result_no_reorder = butina_cluster(storage, no_reorder);
+    const ButinaResult result_reorder = butina_cluster(storage, reorder);
 
-    EXPECT_NE(result_no_reorder.clusters, result_reorder.clusters);
+    EXPECT_NE(result_no_reorder.Members(), result_reorder.Members());
 }
 
 TEST(ButinaClusteringTest, NegativeThresholdThrows) {

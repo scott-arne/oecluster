@@ -580,8 +580,9 @@ std::vector<const BitBirchSubcluster*> BitBirchTree::LeafSubclusters() const {
 BitBirchResult BitBirchTree::Result(
     const OEFP::FingerprintSpec& spec,
     const size_t n_items) const {
-    BitBirchResult result;
-    result.labels.assign(n_items, NOISE_LABEL);
+    std::vector<ClusterLabel> labels(n_items, NOISE_LABEL);
+    Clusters members;
+    std::vector<size_t> cluster_sizes;
 
     std::vector<const BitBirchSubcluster*> ordered = LeafSubclusters();
     std::stable_sort(
@@ -595,18 +596,19 @@ BitBirchResult BitBirchTree::Result(
     centroid_fingerprints.reserve(ordered.size());
     for (size_t label = 0; label < ordered.size(); ++label) {
         const BitBirchSubcluster& subcluster = *ordered[label];
-        result.clusters.push_back(subcluster.members);
-        result.cluster_sizes.push_back(subcluster.members.size());
+        members.push_back(subcluster.members);
+        cluster_sizes.push_back(subcluster.members.size());
         for (const size_t member : subcluster.members) {
-            result.labels.at(member) = static_cast<ClusterLabel>(label);
+            labels.at(member) = static_cast<ClusterLabel>(label);
         }
         centroid_fingerprints.emplace_back(spec, subcluster.centroid_words);
     }
 
-    result.centroids = centroid_fingerprints.empty()
+    OEFP::OEFPBatch centroids = centroid_fingerprints.empty()
         ? OEFP::OEFPBatch(spec)
         : OEFP::OEFPBatch::FromFingerprints(centroid_fingerprints);
-    return result;
+    return BitBirchResult(std::move(labels), std::move(members),
+                          std::move(centroids), std::move(cluster_sizes));
 }
 
 void BitBirchTree::EnsureInitialized(

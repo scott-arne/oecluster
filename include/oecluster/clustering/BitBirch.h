@@ -74,9 +74,23 @@ struct BitBirchRefinementOptions {
 /**
  * @brief BitBirch clustering result with labels, clusters, and centroid fingerprints.
  */
-struct BitBirchResult : public ClusteringResult {
-    OEFP::OEFPBatch centroids;
-    std::vector<size_t> cluster_sizes;
+class BitBirchResult : public ClusteringResult {
+public:
+    BitBirchResult() = default;
+    BitBirchResult(std::vector<ClusterLabel> labels, Clusters members,
+                   OEFP::OEFPBatch centroids, std::vector<size_t> cluster_sizes)
+        : ClusteringResult(std::move(labels), std::move(members)),
+          centroids_(std::move(centroids)),
+          cluster_sizes_(std::move(cluster_sizes)) {}
+
+    /** @brief Centroid fingerprints, one per cluster. */
+    const OEFP::OEFPBatch& Centroids() const { return centroids_; }
+    /** @brief Member count per cluster. */
+    const std::vector<size_t>& ClusterSizes() const { return cluster_sizes_; }
+
+private:
+    OEFP::OEFPBatch centroids_;
+    std::vector<size_t> cluster_sizes_;
 };
 
 /**

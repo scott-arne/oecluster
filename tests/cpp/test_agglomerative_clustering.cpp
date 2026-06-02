@@ -46,18 +46,18 @@ TEST(AgglomerativeClusteringTest, BuildsAverageLinkageTreeAndClusters) {
 
     const AgglomerativeResult result = agglomerative_cluster(MakeTwoPairStorage(), options);
 
-    EXPECT_EQ(result.labels, std::vector<ClusterLabel>({0, 0, 1, 1}));
-    ASSERT_EQ(result.clusters.size(), 2);
-    EXPECT_EQ(result.clusters[0], Cluster({0, 1}));
-    EXPECT_EQ(result.clusters[1], Cluster({2, 3}));
+    EXPECT_EQ(result.Labels(), std::vector<ClusterLabel>({0, 0, 1, 1}));
+    ASSERT_EQ(result.Members().size(), 2);
+    EXPECT_EQ(result.Members()[0], Cluster({0, 1}));
+    EXPECT_EQ(result.Members()[1], Cluster({2, 3}));
 
-    EXPECT_EQ(result.children_left, std::vector<size_t>({0, 2, 4}));
-    EXPECT_EQ(result.children_right, std::vector<size_t>({1, 3, 5}));
-    EXPECT_EQ(result.cluster_sizes, std::vector<size_t>({2, 2, 4}));
-    ASSERT_EQ(result.distances.size(), 3);
-    EXPECT_DOUBLE_EQ(result.distances[0], 0.1);
-    EXPECT_DOUBLE_EQ(result.distances[1], 0.2);
-    EXPECT_DOUBLE_EQ(result.distances[2], 5.0);
+    EXPECT_EQ(result.ChildrenLeft(), std::vector<size_t>({0, 2, 4}));
+    EXPECT_EQ(result.ChildrenRight(), std::vector<size_t>({1, 3, 5}));
+    EXPECT_EQ(result.ClusterSizes(), std::vector<size_t>({2, 2, 4}));
+    ASSERT_EQ(result.Distances().size(), 3);
+    EXPECT_DOUBLE_EQ(result.Distances()[0], 0.1);
+    EXPECT_DOUBLE_EQ(result.Distances()[1], 0.2);
+    EXPECT_DOUBLE_EQ(result.Distances()[2], 5.0);
 }
 
 TEST(AgglomerativeClusteringTest, HonorsSingleAndCompleteLinkageDistances) {
@@ -72,12 +72,12 @@ TEST(AgglomerativeClusteringTest, HonorsSingleAndCompleteLinkageDistances) {
     const AgglomerativeResult complete =
         agglomerative_cluster(MakeTwoPairStorage(), options);
 
-    ASSERT_EQ(single.distances.size(), 3);
-    ASSERT_EQ(complete.distances.size(), 3);
-    EXPECT_DOUBLE_EQ(single.distances.back(), 4.8);
-    EXPECT_DOUBLE_EQ(complete.distances.back(), 5.2);
-    EXPECT_EQ(single.labels, std::vector<ClusterLabel>({0, 0, 1, 1}));
-    EXPECT_EQ(complete.labels, std::vector<ClusterLabel>({0, 0, 1, 1}));
+    ASSERT_EQ(single.Distances().size(), 3);
+    ASSERT_EQ(complete.Distances().size(), 3);
+    EXPECT_DOUBLE_EQ(single.Distances().back(), 4.8);
+    EXPECT_DOUBLE_EQ(complete.Distances().back(), 5.2);
+    EXPECT_EQ(single.Labels(), std::vector<ClusterLabel>({0, 0, 1, 1}));
+    EXPECT_EQ(complete.Labels(), std::vector<ClusterLabel>({0, 0, 1, 1}));
 }
 
 TEST(AgglomerativeClusteringTest, HonorsWeightedLinkageForUnevenMerges) {
@@ -92,12 +92,12 @@ TEST(AgglomerativeClusteringTest, HonorsWeightedLinkageForUnevenMerges) {
     const AgglomerativeResult weighted =
         agglomerative_cluster(MakeUnevenStorage(), options);
 
-    EXPECT_EQ(average.labels, std::vector<ClusterLabel>({0, 0, 0, 1, 1}));
-    EXPECT_EQ(weighted.labels, std::vector<ClusterLabel>({0, 0, 0, 1, 1}));
-    ASSERT_EQ(average.distances.size(), 4);
-    ASSERT_EQ(weighted.distances.size(), 4);
-    EXPECT_DOUBLE_EQ(average.distances.back(), 14.5);
-    EXPECT_DOUBLE_EQ(weighted.distances.back(), 16.0);
+    EXPECT_EQ(average.Labels(), std::vector<ClusterLabel>({0, 0, 0, 1, 1}));
+    EXPECT_EQ(weighted.Labels(), std::vector<ClusterLabel>({0, 0, 0, 1, 1}));
+    ASSERT_EQ(average.Distances().size(), 4);
+    ASSERT_EQ(weighted.Distances().size(), 4);
+    EXPECT_DOUBLE_EQ(average.Distances().back(), 14.5);
+    EXPECT_DOUBLE_EQ(weighted.Distances().back(), 16.0);
 }
 
 TEST(AgglomerativeClusteringTest, CutsTreeByDistanceThreshold) {
@@ -107,11 +107,11 @@ TEST(AgglomerativeClusteringTest, CutsTreeByDistanceThreshold) {
 
     const AgglomerativeResult result = agglomerative_cluster(MakeTwoPairStorage(), options);
 
-    EXPECT_EQ(result.labels, std::vector<ClusterLabel>({0, 0, 1, 2}));
-    ASSERT_EQ(result.clusters.size(), 3);
-    EXPECT_EQ(result.clusters[0], Cluster({0, 1}));
-    EXPECT_EQ(result.clusters[1], Cluster({2}));
-    EXPECT_EQ(result.clusters[2], Cluster({3}));
+    EXPECT_EQ(result.Labels(), std::vector<ClusterLabel>({0, 0, 1, 2}));
+    ASSERT_EQ(result.Members().size(), 3);
+    EXPECT_EQ(result.Members()[0], Cluster({0, 1}));
+    EXPECT_EQ(result.Members()[1], Cluster({2}));
+    EXPECT_EQ(result.Members()[2], Cluster({3}));
 }
 
 TEST(AgglomerativeClusteringTest, CanStopBeforeFullTreeForClusterCountCut) {
@@ -122,13 +122,13 @@ TEST(AgglomerativeClusteringTest, CanStopBeforeFullTreeForClusterCountCut) {
 
     const AgglomerativeResult result = agglomerative_cluster(MakeTwoPairStorage(), options);
 
-    EXPECT_EQ(result.labels, std::vector<ClusterLabel>({0, 0, 1, 1}));
-    EXPECT_EQ(result.children_left, std::vector<size_t>({0, 2}));
-    EXPECT_EQ(result.children_right, std::vector<size_t>({1, 3}));
-    EXPECT_EQ(result.cluster_sizes, std::vector<size_t>({2, 2}));
-    ASSERT_EQ(result.distances.size(), 2);
-    EXPECT_DOUBLE_EQ(result.distances[0], 0.1);
-    EXPECT_DOUBLE_EQ(result.distances[1], 0.2);
+    EXPECT_EQ(result.Labels(), std::vector<ClusterLabel>({0, 0, 1, 1}));
+    EXPECT_EQ(result.ChildrenLeft(), std::vector<size_t>({0, 2}));
+    EXPECT_EQ(result.ChildrenRight(), std::vector<size_t>({1, 3}));
+    EXPECT_EQ(result.ClusterSizes(), std::vector<size_t>({2, 2}));
+    ASSERT_EQ(result.Distances().size(), 2);
+    EXPECT_DOUBLE_EQ(result.Distances()[0], 0.1);
+    EXPECT_DOUBLE_EQ(result.Distances()[1], 0.2);
 }
 
 TEST(AgglomerativeClusteringTest, RejectsInvalidOptionsAndSparseStorage) {

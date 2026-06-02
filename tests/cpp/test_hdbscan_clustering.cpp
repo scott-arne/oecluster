@@ -63,10 +63,10 @@ TEST(HDBSCANClusteringTest, FindsTwoDenseGroups) {
 
     const HDBSCANResult result = hdbscan_cluster(storage, options);
 
-    ASSERT_EQ(result.labels.size(), 6);
-    ASSERT_EQ(result.clusters.size(), 2);
-    EXPECT_EQ(result.clusters[0], Cluster({0, 1, 2}));
-    EXPECT_EQ(result.clusters[1], Cluster({3, 4, 5}));
+    ASSERT_EQ(result.Labels().size(), 6);
+    ASSERT_EQ(result.Members().size(), 2);
+    EXPECT_EQ(result.Members()[0], Cluster({0, 1, 2}));
+    EXPECT_EQ(result.Members()[1], Cluster({3, 4, 5}));
 }
 
 TEST(HDBSCANClusteringTest, RejectsSparseStorageForExactPrecomputedHDBSCAN) {

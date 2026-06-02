@@ -7,6 +7,7 @@
 #define OECLUSTER_CLUSTERING_CLUSTERTYPES_H
 
 #include <cstddef>
+#include <utility>
 #include <vector>
 
 namespace OECluster {
@@ -20,12 +21,28 @@ constexpr ClusterLabel NOISE_LABEL = -1;
 /**
  * @brief Shared clustering result with integer labels and grouped members.
  *
- * Labels use -1 for noise. Non-negative labels identify clusters and are
- * converted to member lists by labels_to_clusters().
+ * Labels use -1 for noise. Non-negative labels identify clusters. Results are
+ * immutable: construct with labels and members, then read via const getters.
  */
-struct ClusteringResult {
-    std::vector<ClusterLabel> labels;
-    Clusters clusters;
+class ClusteringResult {
+public:
+    ClusteringResult() = default;
+    ClusteringResult(std::vector<ClusterLabel> labels, Clusters members)
+        : labels_(std::move(labels)), members_(std::move(members)) {}
+    virtual ~ClusteringResult() = default;
+
+    /** @brief Per-item labels; -1 marks noise. */
+    const std::vector<ClusterLabel>& Labels() const { return labels_; }
+    /** @brief Cluster member-index lists. */
+    const Clusters& Members() const { return members_; }
+    /** @brief Number of clusters. */
+    size_t NumClusters() const { return members_.size(); }
+    /** @brief Number of items (length of the labels vector). */
+    size_t NumItems() const { return labels_.size(); }
+
+protected:
+    std::vector<ClusterLabel> labels_;
+    Clusters members_;
 };
 
 /**

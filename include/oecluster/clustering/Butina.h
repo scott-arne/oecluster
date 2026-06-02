@@ -24,15 +24,24 @@ struct ButinaOptions {
 };
 
 /**
+ * @brief Butina clustering result. Carries only labels and members; the first
+ *     member of each cluster is the highest-neighborhood representative.
+ */
+class ButinaResult : public ClusteringResult {
+public:
+    using ClusteringResult::ClusteringResult;
+};
+
+/**
  * @brief Cluster a precomputed distance matrix with the Butina algorithm.
  *
  * :param storage: Pairwise distance storage.
  * :param options: Butina clustering options.
- * :returns: ClusteringResult whose clusters are ordered with the
+ * :returns: ButinaResult whose clusters are ordered with the
  *     highest-neighborhood representative first, and whose per-item labels
  *     equal each member's cluster position.
  */
-ClusteringResult butina_cluster(const StorageBackend& storage, const ButinaOptions& options);
+ButinaResult butina_cluster(const StorageBackend& storage, const ButinaOptions& options);
 
 }  // namespace OECluster
 

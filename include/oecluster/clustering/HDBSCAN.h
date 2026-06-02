@@ -41,8 +41,19 @@ struct HDBSCANOptions {
 /**
  * @brief HDBSCAN result with labels, clusters, and membership probabilities.
  */
-struct HDBSCANResult : public ClusteringResult {
-    std::vector<double> probabilities;
+class HDBSCANResult : public ClusteringResult {
+public:
+    HDBSCANResult() = default;
+    HDBSCANResult(std::vector<ClusterLabel> labels, Clusters members,
+                  std::vector<double> probabilities)
+        : ClusteringResult(std::move(labels), std::move(members)),
+          probabilities_(std::move(probabilities)) {}
+
+    /** @brief Per-item membership probabilities. */
+    const std::vector<double>& Probabilities() const { return probabilities_; }
+
+private:
+    std::vector<double> probabilities_;
 };
 
 /**

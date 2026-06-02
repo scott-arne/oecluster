@@ -91,17 +91,17 @@ HDBSCANResult hdbscan_cluster(const StorageBackend& storage, const HDBSCANOption
             options.cluster_selection_epsilon,
             options.max_cluster_size);
 
-    HDBSCANResult result;
-    result.labels = selection.labels;
-    result.probabilities = selection.probabilities;
-    if (result.labels.empty()) {
-        result.labels.assign(storage.NumItems(), NOISE_LABEL);
+    std::vector<ClusterLabel> labels = selection.labels;
+    std::vector<double> probabilities = selection.probabilities;
+    if (labels.empty()) {
+        labels.assign(storage.NumItems(), NOISE_LABEL);
     }
-    if (result.probabilities.empty()) {
-        result.probabilities.assign(storage.NumItems(), 0.0);
+    if (probabilities.empty()) {
+        probabilities.assign(storage.NumItems(), 0.0);
     }
-    result.clusters = labels_to_clusters(result.labels);
-    return result;
+    Clusters members = labels_to_clusters(labels);
+    return HDBSCANResult(std::move(labels), std::move(members),
+                         std::move(probabilities));
 }
 
 }  // namespace OECluster
