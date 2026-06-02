@@ -38,6 +38,11 @@ __all__ = [
     "PDistOptions",
     "DistanceMatrix",
     "ClusteringResult",
+    "ButinaResult",
+    "DBSCANResult",
+    "HDBSCANResult",
+    "AgglomerativeResult",
+    "BitBirchResult",
     "RepresentativeMetrics",
     "ClusterRepresentative",
     "pdist",
@@ -860,58 +865,151 @@ class DistanceMatrix:
 
 
 class ClusteringResult:
-    """Python clustering result with labels and grouped cluster members."""
+    """Base clustering result: per-item labels and grouped clusters.
 
-    def __init__(
-        self,
-        labels,
-        clusters,
-        *,
-        core_sample_indices=(),
-        probabilities=None,
-        children=(),
-        distances=None,
-        cluster_sizes=(),
-        centroids=None,
-        native_owner=None,
-    ):
+    Results are read-only. ``labels`` is a length-n NumPy ``intp`` array where
+    ``-1`` marks noise; ``clusters`` is a tuple of member-index tuples.
+    """
+
+    def __init__(self, labels, clusters, *, native_owner=None):
         """
         Construct a clustering result.
 
         :param labels: Per-item integer labels. Noise is labeled -1.
         :param clusters: Iterable of cluster member iterables.
-        :param core_sample_indices: Optional DBSCAN core sample indices.
-        :param probabilities: Optional per-item HDBSCAN probabilities.
-        :param children: Optional hierarchical merge children.
-        :param distances: Optional hierarchical merge distances.
-        :param cluster_sizes: Optional hierarchical merge cluster sizes.
-        :param centroids: Optional centroid fingerprint batch.
         :param native_owner: Optional native result object that owns borrowed
-            centroid storage.
+            storage (e.g. BitBirch centroids), kept alive by this reference.
         """
-        self.labels = np.asarray(list(labels), dtype=np.intp)
-        self.clusters = tuple(
-            tuple(int(member) for member in cluster)
-            for cluster in clusters
+        self._labels = np.asarray(list(labels), dtype=np.intp)
+        self._clusters = tuple(
+            tuple(int(member) for member in cluster) for cluster in clusters
         )
-        self.core_sample_indices = tuple(int(index) for index in core_sample_indices)
-        self.probabilities = (
-            None
-            if probabilities is None
+        self._native_owner = native_owner
+
+    @property
+    def labels(self):
+        """Per-item integer labels as a NumPy ``intp`` array; -1 is noise."""
+        return self._labels
+
+    @property
+    def clusters(self):
+        """Tuple of clusters, each a tuple of member indices."""
+        return self._clusters
+
+    @property
+    def num_clusters(self):
+        """Number of clusters."""
+        return len(self._clusters)
+
+    @property
+    def num_items(self):
+        """Number of items (length of ``labels``)."""
+        return len(self._labels)
+
+    def __len__(self):
+        """Number of clusters."""
+        return self.num_clusters
+
+    def __iter__(self):
+        """Iterate over clusters (each a tuple of member indices)."""
+        return iter(self._clusters)
+
+    def __getitem__(self, index):
+        """Return the cluster at ``index``."""
+        return self._clusters[index]
+
+    def __repr__(self):
+        return (f"{type(self).__name__}(num_clusters={self.num_clusters}, "
+                f"num_items={self.num_items})")
+
+
+class ButinaResult(ClusteringResult):
+    """Butina clustering result.
+
+    The first member of each cluster is the highest-neighborhood representative.
+    """
+
+
+class DBSCANResult(ClusteringResult):
+    """DBSCAN clustering result with core sample indices."""
+
+    def __init__(self, labels, clusters, *, core_sample_indices=(),
+                 native_owner=None):
+        super().__init__(labels, clusters, native_owner=native_owner)
+        self._core_sample_indices = tuple(int(i) for i in core_sample_indices)
+
+    @property
+    def core_sample_indices(self):
+        """Indices of core samples."""
+        return self._core_sample_indices
+
+
+class HDBSCANResult(ClusteringResult):
+    """HDBSCAN clustering result with membership probabilities."""
+
+    def __init__(self, labels, clusters, *, probabilities=None,
+                 native_owner=None):
+        super().__init__(labels, clusters, native_owner=native_owner)
+        self._probabilities = (
+            None if probabilities is None
             else np.asarray(list(probabilities), dtype=np.float64)
         )
-        self.children = tuple(
-            (int(left), int(right))
-            for left, right in children
+
+    @property
+    def probabilities(self):
+        """Per-item membership probabilities as a NumPy ``float64`` array."""
+        return self._probabilities
+
+
+class AgglomerativeResult(ClusteringResult):
+    """Agglomerative clustering result with merge-tree metadata."""
+
+    def __init__(self, labels, clusters, *, children=(), distances=None,
+                 cluster_sizes=(), native_owner=None):
+        super().__init__(labels, clusters, native_owner=native_owner)
+        self._children = tuple(
+            (int(left), int(right)) for left, right in children
         )
-        self.distances = (
-            None
-            if distances is None
+        self._distances = (
+            None if distances is None
             else np.asarray(list(distances), dtype=np.float64)
         )
-        self.cluster_sizes = tuple(int(size) for size in cluster_sizes)
-        self.centroids = centroids
-        self._native_owner = native_owner
+        self._cluster_sizes = tuple(int(size) for size in cluster_sizes)
+
+    @property
+    def children(self):
+        """Tuple of ``(left, right)`` merge child node indices."""
+        return self._children
+
+    @property
+    def distances(self):
+        """Merge distances as a NumPy ``float64`` array."""
+        return self._distances
+
+    @property
+    def cluster_sizes(self):
+        """Merged cluster size per merge."""
+        return self._cluster_sizes
+
+
+class BitBirchResult(ClusteringResult):
+    """BitBirch clustering result with centroid fingerprints."""
+
+    def __init__(self, labels, clusters, *, centroids=None, cluster_sizes=(),
+                 native_owner=None):
+        super().__init__(labels, clusters, native_owner=native_owner)
+        self._centroids = centroids
+        self._cluster_sizes = tuple(int(size) for size in cluster_sizes)
+
+    @property
+    def centroids(self):
+        """Centroid fingerprints (an ``oefp.OEFPBatch``)."""
+        return self._centroids
+
+    @property
+    def cluster_sizes(self):
+        """Member count per cluster."""
+        return self._cluster_sizes
 
 
 def _extract_labels(items):
@@ -1114,7 +1212,7 @@ def butina(distance_matrix, threshold, *, reordering=False,
     options.chunk_size = int(chunk_size)
 
     result = _butina_cluster(distance_matrix.storage, options)
-    return ClusteringResult(result.labels, result.clusters)
+    return ButinaResult(result.Labels(), result.Members())
 
 
 class RepresentativeMetrics:
@@ -1449,10 +1547,10 @@ def dbscan(distance_matrix, eps, *, min_samples=5, num_threads=0, chunk_size=409
     options.chunk_size = int(chunk_size)
 
     result = _dbscan_cluster(distance_matrix.storage, options)
-    return ClusteringResult(
-        result.labels,
-        result.clusters,
-        core_sample_indices=result.core_sample_indices,
+    return DBSCANResult(
+        result.Labels(),
+        result.Members(),
+        core_sample_indices=result.CoreSampleIndices(),
     )
 
 
@@ -1514,10 +1612,10 @@ def hdbscan(distance_matrix, *, min_cluster_size=5, min_samples=None,
     options.chunk_size = int(chunk_size)
 
     result = _hdbscan_cluster(distance_matrix.storage, options)
-    return ClusteringResult(
-        result.labels,
-        result.clusters,
-        probabilities=result.probabilities,
+    return HDBSCANResult(
+        result.Labels(),
+        result.Members(),
+        probabilities=result.Probabilities(),
     )
 
 
@@ -1566,13 +1664,13 @@ def agglomerative(distance_matrix, *, n_clusters=2, distance_threshold=None,
     options.chunk_size = int(chunk_size)
 
     result = _agglomerative_cluster(distance_matrix.storage, options)
-    children = zip(result.children_left, result.children_right)
-    return ClusteringResult(
-        result.labels,
-        result.clusters,
+    children = zip(result.ChildrenLeft(), result.ChildrenRight())
+    return AgglomerativeResult(
+        result.Labels(),
+        result.Members(),
         children=children,
-        distances=result.distances,
-        cluster_sizes=result.cluster_sizes,
+        distances=result.Distances(),
+        cluster_sizes=result.ClusterSizes(),
     )
 
 
@@ -1656,11 +1754,11 @@ def bitbirch(fingerprints, *, threshold=0.65, branching_factor=50,
     options.num_threads = int(num_threads)
 
     result = _bitbirch_cluster(fingerprints, options)
-    return ClusteringResult(
-        result.labels,
-        result.clusters,
-        cluster_sizes=result.cluster_sizes,
-        centroids=_bitbirch_centroids(result.centroids),
+    return BitBirchResult(
+        result.Labels(),
+        result.Members(),
+        cluster_sizes=result.ClusterSizes(),
+        centroids=_bitbirch_centroids(result.Centroids()),
         native_owner=result,
     )
 
@@ -1699,11 +1797,11 @@ def bitbirch_recluster(fingerprints, *, initial_threshold=0.65,
     options.num_threads = int(num_threads)
 
     result = _bitbirch_recluster(fingerprints, options)
-    return ClusteringResult(
-        result.labels,
-        result.clusters,
-        cluster_sizes=result.cluster_sizes,
-        centroids=_bitbirch_centroids(result.centroids),
+    return BitBirchResult(
+        result.Labels(),
+        result.Members(),
+        cluster_sizes=result.ClusterSizes(),
+        centroids=_bitbirch_centroids(result.Centroids()),
         native_owner=result,
     )
 
@@ -1759,11 +1857,11 @@ def bitbirch_refine(fingerprints, *, threshold=0.65, branching_factor=50,
     options.num_threads = int(num_threads)
 
     result = _bitbirch_refine(fingerprints, options)
-    return ClusteringResult(
-        result.labels,
-        result.clusters,
-        cluster_sizes=result.cluster_sizes,
-        centroids=_bitbirch_centroids(result.centroids),
+    return BitBirchResult(
+        result.Labels(),
+        result.Members(),
+        cluster_sizes=result.ClusterSizes(),
+        centroids=_bitbirch_centroids(result.Centroids()),
         native_owner=result,
     )
 

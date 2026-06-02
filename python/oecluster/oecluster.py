@@ -1132,18 +1132,32 @@ class ClusteringResult(object):
     r"""
     Shared clustering result with integer labels and grouped members.
 
-    Labels use -1 for noise. Non-negative labels identify clusters and are
-    converted to member lists by labels_to_clusters().
+    Labels use -1 for noise. Non-negative labels identify clusters. Results are
+    immutable: construct with labels and members, then read via const getters.
     """
 
     thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
     __repr__ = _swig_repr
-    labels = property(_oecluster.ClusteringResult_labels_get, _oecluster.ClusteringResult_labels_set)
-    clusters = property(_oecluster.ClusteringResult_clusters_get, _oecluster.ClusteringResult_clusters_set)
 
-    def __init__(self):
-        _oecluster.ClusteringResult_swiginit(self, _oecluster.new_ClusteringResult())
+    def __init__(self, *args):
+        _oecluster.ClusteringResult_swiginit(self, _oecluster.new_ClusteringResult(*args))
     __swig_destroy__ = _oecluster.delete_ClusteringResult
+
+    def Labels(self):
+        r"""Per-item labels; -1 marks noise."""
+        return _oecluster.ClusteringResult_Labels(self)
+
+    def Members(self):
+        r"""Cluster member-index lists."""
+        return _oecluster.ClusteringResult_Members(self)
+
+    def NumClusters(self):
+        r"""Number of clusters."""
+        return _oecluster.ClusteringResult_NumClusters(self)
+
+    def NumItems(self):
+        r"""Number of items (length of the labels vector)."""
+        return _oecluster.ClusteringResult_NumItems(self)
 
 # Register ClusteringResult in _oecluster:
 _oecluster.ClusteringResult_swigregister(ClusteringResult)
@@ -1175,6 +1189,21 @@ class ButinaOptions(object):
 
 # Register ButinaOptions in _oecluster:
 _oecluster.ButinaOptions_swigregister(ButinaOptions)
+class ButinaResult(ClusteringResult):
+    r"""
+    Butina clustering result. Carries only labels and members; the first
+        member of each cluster is the highest-neighborhood representative.
+    """
+
+    thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
+    __repr__ = _swig_repr
+
+    def __init__(self, *args):
+        _oecluster.ButinaResult_swiginit(self, _oecluster.new_ButinaResult(*args))
+    __swig_destroy__ = _oecluster.delete_ButinaResult
+
+# Register ButinaResult in _oecluster:
+_oecluster.ButinaResult_swigregister(ButinaResult)
 
 def butina_cluster(storage, options):
     r"""
@@ -1182,7 +1211,7 @@ def butina_cluster(storage, options):
 
     :param storage: Pairwise distance storage.
     :param options: Butina clustering options.
-    :returns: ClusteringResult whose clusters are ordered with the
+    :returns: ButinaResult whose clusters are ordered with the
         highest-neighborhood representative first, and whose per-item labels
         equal each member's cluster position.
     """
@@ -1445,10 +1474,13 @@ class DBSCANResult(ClusteringResult):
 
     thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
     __repr__ = _swig_repr
-    core_sample_indices = property(_oecluster.DBSCANResult_core_sample_indices_get, _oecluster.DBSCANResult_core_sample_indices_set)
 
-    def __init__(self):
-        _oecluster.DBSCANResult_swiginit(self, _oecluster.new_DBSCANResult())
+    def __init__(self, *args):
+        _oecluster.DBSCANResult_swiginit(self, _oecluster.new_DBSCANResult(*args))
+
+    def CoreSampleIndices(self):
+        r"""Indices of core samples."""
+        return _oecluster.DBSCANResult_CoreSampleIndices(self)
     __swig_destroy__ = _oecluster.delete_DBSCANResult
 
 # Register DBSCANResult in _oecluster:
@@ -1492,10 +1524,13 @@ class HDBSCANResult(ClusteringResult):
 
     thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
     __repr__ = _swig_repr
-    probabilities = property(_oecluster.HDBSCANResult_probabilities_get, _oecluster.HDBSCANResult_probabilities_set)
 
-    def __init__(self):
-        _oecluster.HDBSCANResult_swiginit(self, _oecluster.new_HDBSCANResult())
+    def __init__(self, *args):
+        _oecluster.HDBSCANResult_swiginit(self, _oecluster.new_HDBSCANResult(*args))
+
+    def Probabilities(self):
+        r"""Per-item membership probabilities."""
+        return _oecluster.HDBSCANResult_Probabilities(self)
     __swig_destroy__ = _oecluster.delete_HDBSCANResult
 
 # Register HDBSCANResult in _oecluster:
@@ -1540,13 +1575,25 @@ class AgglomerativeResult(ClusteringResult):
 
     thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
     __repr__ = _swig_repr
-    children_left = property(_oecluster.AgglomerativeResult_children_left_get, _oecluster.AgglomerativeResult_children_left_set)
-    children_right = property(_oecluster.AgglomerativeResult_children_right_get, _oecluster.AgglomerativeResult_children_right_set)
-    distances = property(_oecluster.AgglomerativeResult_distances_get, _oecluster.AgglomerativeResult_distances_set)
-    cluster_sizes = property(_oecluster.AgglomerativeResult_cluster_sizes_get, _oecluster.AgglomerativeResult_cluster_sizes_set)
 
-    def __init__(self):
-        _oecluster.AgglomerativeResult_swiginit(self, _oecluster.new_AgglomerativeResult())
+    def __init__(self, *args):
+        _oecluster.AgglomerativeResult_swiginit(self, _oecluster.new_AgglomerativeResult(*args))
+
+    def ChildrenLeft(self):
+        r"""Left child node index per merge."""
+        return _oecluster.AgglomerativeResult_ChildrenLeft(self)
+
+    def ChildrenRight(self):
+        r"""Right child node index per merge."""
+        return _oecluster.AgglomerativeResult_ChildrenRight(self)
+
+    def Distances(self):
+        r"""Merge distance per merge."""
+        return _oecluster.AgglomerativeResult_Distances(self)
+
+    def ClusterSizes(self):
+        r"""Merged cluster size per merge."""
+        return _oecluster.AgglomerativeResult_ClusterSizes(self)
     __swig_destroy__ = _oecluster.delete_AgglomerativeResult
 
 # Register AgglomerativeResult in _oecluster:
@@ -1626,11 +1673,17 @@ class BitBirchResult(ClusteringResult):
 
     thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
     __repr__ = _swig_repr
-    centroids = property(_oecluster.BitBirchResult_centroids_get, _oecluster.BitBirchResult_centroids_set)
-    cluster_sizes = property(_oecluster.BitBirchResult_cluster_sizes_get, _oecluster.BitBirchResult_cluster_sizes_set)
 
-    def __init__(self):
-        _oecluster.BitBirchResult_swiginit(self, _oecluster.new_BitBirchResult())
+    def __init__(self, *args):
+        _oecluster.BitBirchResult_swiginit(self, _oecluster.new_BitBirchResult(*args))
+
+    def Centroids(self):
+        r"""Centroid fingerprints, one per cluster."""
+        return _oecluster.BitBirchResult_Centroids(self)
+
+    def ClusterSizes(self):
+        r"""Member count per cluster."""
+        return _oecluster.BitBirchResult_ClusterSizes(self)
     __swig_destroy__ = _oecluster.delete_BitBirchResult
 
 # Register BitBirchResult in _oecluster:
