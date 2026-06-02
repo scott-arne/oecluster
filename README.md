@@ -261,17 +261,25 @@ with open("clusters.csv", "w", newline="") as handle:
 
 | Algorithm | Input | Best For | Key Parameters | Notes |
 |-----------|-------|----------|----------------|-------|
-| `butina` | `DistanceMatrix` | Classic fingerprint clustering and threshold-neighborhood summaries | `threshold`, `reordering` | Returns a `ClusteringResult`; the first member of each cluster is the highest-neighborhood representative chosen by the Butina pass. |
-| `dbscan` | `DistanceMatrix` | Density clustering with explicit noise points | `eps`, `min_samples` | Uses precomputed distances and returns `ClusteringResult`. |
-| `hdbscan` | `DistanceMatrix` | Variable-density clusters and soft membership | `min_cluster_size`, `min_samples`, `cluster_selection_method` | Requires complete precomputed distances. |
-| `agglomerative` | `DistanceMatrix` | Hierarchical clustering and dendrogram-style analysis | `n_clusters`, `distance_threshold`, `linkage` | Supports single, complete, average, and weighted linkage. |
-| `bitbirch` | `oefp.OEFPBatch` | Large dense binary fingerprint sets where feature-space clustering is preferred | `threshold`, `branching_factor`, `merge_criterion` | `mode="fast"` is currently a reserved strict-parity alias. |
+| `butina` | `DistanceMatrix` | Classic fingerprint clustering and threshold-neighborhood summaries | `threshold`, `reordering` | Returns a `ButinaResult` (subclass of `ClusteringResult`); the first member of each cluster is the highest-neighborhood representative chosen by the Butina pass. |
+| `dbscan` | `DistanceMatrix` | Density clustering with explicit noise points | `eps`, `min_samples` | Returns a `DBSCANResult` (subclass of `ClusteringResult`) with `core_sample_indices`. |
+| `hdbscan` | `DistanceMatrix` | Variable-density clusters and soft membership | `min_cluster_size`, `min_samples`, `cluster_selection_method` | Requires complete precomputed distances. Returns an `HDBSCANResult` (subclass of `ClusteringResult`) with `probabilities`. |
+| `agglomerative` | `DistanceMatrix` | Hierarchical clustering and dendrogram-style analysis | `n_clusters`, `distance_threshold`, `linkage` | Supports single, complete, average, and weighted linkage. Returns an `AgglomerativeResult` (subclass of `ClusteringResult`) with `children`, `distances`, and `cluster_sizes`. |
+| `bitbirch` | `oefp.OEFPBatch` | Large dense binary fingerprint sets where feature-space clustering is preferred | `threshold`, `branching_factor`, `merge_criterion` | `mode="fast"` is currently a reserved strict-parity alias. Returns a `BitBirchResult` (subclass of `ClusteringResult`) with `centroids` and `cluster_sizes`. |
 
 Start with **Butina** for familiar fingerprint threshold clustering. Use
 **DBSCAN/HDBSCAN** when noise and density matter. Use **agglomerative** when
 you need linkage structure. Use **BitBirch** when the workflow already has
 OEFP dense binary fingerprints and you want feature-space clustering without
 materializing an initial pairwise distance matrix.
+
+All clustering functions return a result that subclasses `ClusteringResult`,
+which exposes read-only `labels` (a length-n, scikit-learn-style assignment
+array) and `clusters` (a tuple of member-index tuples). Results support
+`len(result)` (number of clusters), iteration over clusters, and `result[i]`
+indexing. Algorithm-specific outputs live on the specific subclass (for
+example `DBSCANResult.core_sample_indices` or `BitBirchResult.centroids`), so a
+result never carries fields that do not apply to its algorithm.
 
 ---
 
