@@ -21,16 +21,16 @@ def _rdkit_butina(distance_matrix, threshold, *, reordering=False):
 
     return Butina.ClusterData(
         distance_matrix.squareform(),
-        distance_matrix.num_items,
+        distance_matrix.num_samples,
         threshold,
         isDistData=True,
         reordering=reordering,
     )
 
 
-def _assert_labels_match_clusters(result, num_items):
+def _assert_labels_match_clusters(result, num_samples):
     """Every member's label equals its cluster index, over the full item range."""
-    assert len(result.labels) == num_items
+    assert len(result.labels) == num_samples
     for cluster_index, cluster in enumerate(result.clusters):
         for member in cluster:
             assert result.labels[member] == cluster_index
@@ -60,7 +60,7 @@ def test_butina_matches_rdkit_without_reordering():
     expected = _rdkit_butina(dm, 0.35, reordering=False)
 
     assert observed.clusters == expected
-    _assert_labels_match_clusters(observed, dm.num_items)
+    _assert_labels_match_clusters(observed, dm.num_samples)
 
 
 def test_butina_matches_rdkit_with_reordering():
@@ -92,7 +92,7 @@ def test_butina_matches_rdkit_with_reordering():
     expected = _rdkit_butina(dm, 0.2, reordering=True)
 
     assert observed.clusters == expected
-    _assert_labels_match_clusters(observed, dm.num_items)
+    _assert_labels_match_clusters(observed, dm.num_samples)
 
 
 def test_butina_fingerprint_distance_matrix_matches_rdkit(
@@ -108,7 +108,7 @@ def test_butina_fingerprint_distance_matrix_matches_rdkit(
     expected = _rdkit_butina(dm, 1.0)
 
     assert observed.clusters == expected
-    _assert_labels_match_clusters(observed, dm.num_items)
+    _assert_labels_match_clusters(observed, dm.num_samples)
 
 
 def test_butina_rejects_negative_threshold():

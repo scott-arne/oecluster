@@ -664,9 +664,9 @@ class DistanceMatrix:
         return self._labels
 
     @property
-    def num_items(self):
+    def num_samples(self):
         """Get the number of items in the dataset."""
-        return self._storage.NumItems()
+        return self._storage.NumSamples()
 
     @property
     def num_pairs(self):
@@ -676,7 +676,7 @@ class DistanceMatrix:
     @property
     def shape(self):
         """Get the shape of the full distance matrix (N, N)."""
-        n = self.num_items
+        n = self.num_samples
         return (n, n)
 
     @property
@@ -692,7 +692,7 @@ class DistanceMatrix:
         # Check if this is sparse storage
         if isinstance(self._storage, SparseStorage):
             # Sparse storage requires dense conversion
-            n = self.num_items
+            n = self.num_samples
             num_pairs = self.num_pairs
             condensed = np.zeros(num_pairs, dtype=np.float64)
 
@@ -740,7 +740,7 @@ class DistanceMatrix:
                 "Install it with: pip install scipy"
             ) from e
 
-        n = self.num_items
+        n = self.num_samples
 
         if isinstance(self._storage, SparseStorage):
             # Get sparse entries directly
@@ -818,7 +818,7 @@ class DistanceMatrix:
             comparison_name=np.array(self._comparison_name),
             params_json=np.array(json.dumps(self._params)),
             labels=np.array(self._labels),
-            num_items=np.array(self.num_items),
+            num_samples=np.array(self.num_samples),
         )
 
     @classmethod
@@ -840,12 +840,17 @@ class DistanceMatrix:
         except (KeyError, json.JSONDecodeError):
             params = {}
 
-        num_items = int(data['num_items'])
-        storage = DenseStorage(num_items)
+        # Accept the legacy ``num_items`` key so distance matrices saved before
+        # the rename to ``num_samples`` still load.
+        if 'num_samples' in data:
+            num_samples = int(data['num_samples'])
+        else:
+            num_samples = int(data['num_items'])
+        storage = DenseStorage(num_samples)
 
         idx = 0
-        for i in range(num_items):
-            for j in range(i + 1, num_items):
+        for i in range(num_samples):
+            for j in range(i + 1, num_samples):
                 storage.Set(i, j, float(condensed[idx]))
                 idx += 1
 
@@ -861,7 +866,7 @@ class DistanceMatrix:
 
     def __repr__(self):
         return (f"DistanceMatrix(comparison={self._comparison_name!r}, "
-                f"num_items={self.num_items}, num_pairs={self.num_pairs})")
+                f"num_samples={self.num_samples}, num_pairs={self.num_pairs})")
 
 
 class ClusteringResult:
@@ -903,7 +908,7 @@ class ClusteringResult:
         return len(self._clusters)
 
     @property
-    def num_items(self):
+    def num_samples(self):
         """Number of items (length of ``labels``)."""
         return len(self._labels)
 
@@ -921,7 +926,7 @@ class ClusteringResult:
 
     def __repr__(self):
         return (f"{type(self).__name__}(num_clusters={self.num_clusters}, "
-                f"num_items={self.num_items})")
+                f"num_samples={self.num_samples})")
 
 
 class ButinaResult(ClusteringResult):
@@ -1308,7 +1313,7 @@ def _optional_float_vector(values, name, distance_matrix):
     if values is None:
         return vector
     converted = [float(value) for value in values]
-    if converted and len(converted) != distance_matrix.num_items:
+    if converted and len(converted) != distance_matrix.num_samples:
         raise ValueError(
             f"{name} must be empty or the same length as the distance matrix")
     for value in converted:
@@ -1321,7 +1326,7 @@ def _optional_string_vector(values, name, distance_matrix):
     if values is None:
         return vector
     converted = [str(value) for value in values]
-    if converted and len(converted) != distance_matrix.num_items:
+    if converted and len(converted) != distance_matrix.num_samples:
         raise ValueError(
             f"{name} must be empty or the same length as the distance matrix")
     for value in converted:

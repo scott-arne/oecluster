@@ -54,7 +54,7 @@ public:
      *
      * :returns: Number of items N.
      */
-    virtual size_t NumItems() const = 0;
+    virtual size_t NumSamples() const = 0;
 
     /**
      * @brief Get the number of pairwise distances stored.
@@ -115,7 +115,7 @@ public:
 
     void Set(size_t i, size_t j, double value) override;
     double Get(size_t i, size_t j) const override;
-    size_t NumItems() const override;
+    size_t NumSamples() const override;
     size_t NumPairs() const override;
     double* Data() override;
     const double* Data() const override;
@@ -170,7 +170,7 @@ public:
 
     void Set(size_t i, size_t j, double value) override;
     double Get(size_t i, size_t j) const override;
-    size_t NumItems() const override;
+    size_t NumSamples() const override;
     size_t NumPairs() const override;
     double* Data() override;
     const double* Data() const override;
@@ -231,7 +231,7 @@ public:
 
     void Set(size_t i, size_t j, double value) override;
     double Get(size_t i, size_t j) const override;
-    size_t NumItems() const override;
+    size_t NumSamples() const override;
     size_t NumPairs() const override;
 
     /**

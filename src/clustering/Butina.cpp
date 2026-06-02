@@ -67,8 +67,8 @@ ButinaResult butina_cluster(const StorageBackend& storage, const ButinaOptions& 
         throw std::invalid_argument("Butina distance threshold must be non-negative");
     }
 
-    if (storage.NumItems() < 2) {
-        if (storage.NumItems() == 1) {
+    if (storage.NumSamples() < 2) {
+        if (storage.NumSamples() == 1) {
             return ButinaResult(std::vector<ClusterLabel>{0}, Clusters{Cluster{0}});
         }
         return ButinaResult();
@@ -122,7 +122,7 @@ ButinaResult butina_cluster(const StorageBackend& storage, const ButinaOptions& 
     // Butina assigns every item to a cluster; label == cluster position so the
     // representative-first ordering in clusters is preserved alongside the
     // per-item labels view.
-    std::vector<ClusterLabel> labels(storage.NumItems(), NOISE_LABEL);
+    std::vector<ClusterLabel> labels(storage.NumSamples(), NOISE_LABEL);
     for (size_t cluster_index = 0; cluster_index < clusters.size(); ++cluster_index) {
         for (const size_t member : clusters[cluster_index]) {
             labels[member] = static_cast<ClusterLabel>(cluster_index);

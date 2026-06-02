@@ -114,7 +114,7 @@ ThresholdNeighborGraph BuildThresholdNeighborGraph(
         throw std::invalid_argument("ThresholdGraph threshold cannot be negative");
     }
 
-    const size_t n = storage.NumItems();
+    const size_t n = storage.NumSamples();
     std::vector<size_t> offsets(n + 1, 0);
     if (n < 2) {
         std::vector<size_t> indices;

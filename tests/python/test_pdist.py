@@ -11,7 +11,7 @@ def test_dense_storage_roundtrip():
     s = DenseStorage(4)
     s.Set(0, 1, 0.5)
     assert s.Get(0, 1) == pytest.approx(0.5)
-    assert s.NumItems() == 4
+    assert s.NumSamples() == 4
     assert s.NumPairs() == 6
 
 def test_pdist_fingerprint():
@@ -27,7 +27,7 @@ def test_pdist_fingerprint():
         mols.append(mol)
 
     dist = oecluster.pdist(mols, "fingerprint")
-    assert dist.num_items == 4
+    assert dist.num_samples == 4
     assert len(dist) == 6  # 4*3/2
     assert dist.comparison_name == "fingerprint"
     removed_metadata_name = "metr" + "ic_name"
@@ -59,7 +59,7 @@ def test_pdist_fingerprint_atom_pair():
 
     dist = oecluster.pdist(mols, "fingerprint", fp_type="atom_pair")
     arr = np.asarray(dist)
-    assert dist.num_items == 3
+    assert dist.num_samples == 3
     assert arr.shape == (3,)
     assert np.all(arr >= 0.0)
 
@@ -78,7 +78,7 @@ def test_pdist_fingerprint_metric_kwarg():
 
     dist = oecluster.pdist(mols, "fingerprint", metric="dice")
     arr = np.asarray(dist)
-    assert dist.num_items == 3
+    assert dist.num_samples == 3
     assert arr.shape == (3,)
     assert np.all(arr >= 0.0)
 
@@ -135,7 +135,7 @@ def test_pdist_with_cutoff():
         mols.append(mol)
 
     dist = oecluster.pdist(mols, "fingerprint", cutoff=0.5)
-    assert dist.num_items == 3
+    assert dist.num_samples == 3
 
 def test_pdist_progress():
     """Test progress callback is invoked."""

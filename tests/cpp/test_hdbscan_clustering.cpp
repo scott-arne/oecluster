@@ -39,7 +39,7 @@ TEST(HDBSCANInfrastructureTest, BuildsSingleLinkageTreeWithExpectedSize) {
     const std::vector<detail::HDBSCANMSTEdge> mst =
         detail::hdbscan_mutual_reachability_mst(storage, core, 1.0);
     const std::vector<detail::HDBSCANLinkageNode> linkage =
-        detail::make_hdbscan_single_linkage(mst, storage.NumItems());
+        detail::make_hdbscan_single_linkage(mst, storage.NumSamples());
 
     ASSERT_EQ(mst.size(), 3);
     ASSERT_EQ(linkage.size(), 3);

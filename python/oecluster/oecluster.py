@@ -657,8 +657,8 @@ class StorageBackend(object):
     def Get(self, i, j):
         return _oecluster.StorageBackend_Get(self, i, j)
 
-    def NumItems(self):
-        return _oecluster.StorageBackend_NumItems(self)
+    def NumSamples(self):
+        return _oecluster.StorageBackend_NumSamples(self)
 
     def NumPairs(self):
         return _oecluster.StorageBackend_NumPairs(self)
@@ -685,8 +685,8 @@ class DenseStorage(StorageBackend):
     def Get(self, i, j):
         return _oecluster.DenseStorage_Get(self, i, j)
 
-    def NumItems(self):
-        return _oecluster.DenseStorage_NumItems(self)
+    def NumSamples(self):
+        return _oecluster.DenseStorage_NumSamples(self)
 
     def NumPairs(self):
         return _oecluster.DenseStorage_NumPairs(self)
@@ -708,8 +708,8 @@ class MMapStorage(StorageBackend):
     def Get(self, i, j):
         return _oecluster.MMapStorage_Get(self, i, j)
 
-    def NumItems(self):
-        return _oecluster.MMapStorage_NumItems(self)
+    def NumSamples(self):
+        return _oecluster.MMapStorage_NumSamples(self)
 
     def NumPairs(self):
         return _oecluster.MMapStorage_NumPairs(self)
@@ -730,8 +730,8 @@ class SparseStorage(StorageBackend):
     def Get(self, i, j):
         return _oecluster.SparseStorage_Get(self, i, j)
 
-    def NumItems(self):
-        return _oecluster.SparseStorage_NumItems(self)
+    def NumSamples(self):
+        return _oecluster.SparseStorage_NumSamples(self)
 
     def NumPairs(self):
         return _oecluster.SparseStorage_NumPairs(self)
@@ -897,8 +897,8 @@ class DistanceMatrix(object):
     def Labels(self):
         return _oecluster.DistanceMatrix_Labels(self)
 
-    def NumItems(self):
-        return _oecluster.DistanceMatrix_NumItems(self)
+    def NumSamples(self):
+        return _oecluster.DistanceMatrix_NumSamples(self)
 
     def NumPairs(self):
         return _oecluster.DistanceMatrix_NumPairs(self)
@@ -1155,9 +1155,9 @@ class ClusteringResult(object):
         r"""Number of clusters."""
         return _oecluster.ClusteringResult_NumClusters(self)
 
-    def NumItems(self):
+    def NumSamples(self):
         r"""Number of items (length of the labels vector)."""
-        return _oecluster.ClusteringResult_NumItems(self)
+        return _oecluster.ClusteringResult_NumSamples(self)
 
 # Register ClusteringResult in _oecluster:
 _oecluster.ClusteringResult_swigregister(ClusteringResult)

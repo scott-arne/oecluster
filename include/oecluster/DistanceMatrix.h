@@ -66,7 +66,7 @@ public:
      *
      * :returns: Number of items N.
      */
-    size_t NumItems() const;
+    size_t NumSamples() const;
 
     /**
      * @brief Get the number of pairwise distances.

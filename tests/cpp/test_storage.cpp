@@ -6,7 +6,7 @@ using namespace OECluster;
 
 TEST(DenseStorageTest, ConstructorSetsSize) {
     DenseStorage storage(5);
-    EXPECT_EQ(storage.NumItems(), 5);
+    EXPECT_EQ(storage.NumSamples(), 5);
     EXPECT_EQ(storage.NumPairs(), 10);  // 5*4/2
 }
 

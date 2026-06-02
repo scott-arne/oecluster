@@ -24,7 +24,7 @@ bool has_threshold(const double threshold) {
     return threshold >= 0.0;
 }
 
-void validate_cluster_members(const Cluster& cluster, const size_t num_items) {
+void validate_cluster_members(const Cluster& cluster, const size_t num_samples) {
     if (cluster.empty()) {
         throw std::invalid_argument("Cluster representative requires at least one member");
     }
@@ -32,7 +32,7 @@ void validate_cluster_members(const Cluster& cluster, const size_t num_items) {
     std::unordered_set<size_t> seen;
     seen.reserve(cluster.size());
     for (const size_t member : cluster) {
-        if (member >= num_items) {
+        if (member >= num_samples) {
             throw std::out_of_range("Cluster member index is outside the storage range");
         }
         if (!seen.insert(member).second) {
@@ -140,7 +140,7 @@ double nearest_external_distance(
     const StorageBackend& storage,
     const std::vector<bool>& in_cluster) {
     double nearest = std::numeric_limits<double>::infinity();
-    for (size_t item = 0; item < storage.NumItems(); ++item) {
+    for (size_t item = 0; item < storage.NumSamples(); ++item) {
         if (!in_cluster[item]) {
             nearest = std::min(nearest, storage.Get(candidate, item));
         }
@@ -258,24 +258,24 @@ std::vector<ClusterRepresentative> rank_representatives(
     const Cluster& cluster,
     const StorageBackend& storage,
     const RepresentativeOptions& options) {
-    validate_cluster_members(cluster, storage.NumItems());
+    validate_cluster_members(cluster, storage.NumSamples());
     validate_complete_distance_storage(cluster, storage);
     validate_options(options);
     validate_vector_size(
         options.liability_penalties.size(),
-        storage.NumItems(),
+        storage.NumSamples(),
         "liability_penalties");
     validate_vector_size(
         options.priority_scores.size(),
-        storage.NumItems(),
+        storage.NumSamples(),
         "priority_scores");
     validate_vector_size(
         options.scaffold_labels.size(),
-        storage.NumItems(),
+        storage.NumSamples(),
         "scaffold_labels");
 
     const double diameter = cluster_diameter(cluster, storage);
-    const std::vector<bool> in_cluster = cluster_membership(cluster, storage.NumItems());
+    const std::vector<bool> in_cluster = cluster_membership(cluster, storage.NumSamples());
 
     std::vector<ClusterRepresentative> ranked;
     ranked.reserve(cluster.size());

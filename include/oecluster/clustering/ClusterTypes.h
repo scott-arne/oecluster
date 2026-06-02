@@ -38,7 +38,7 @@ public:
     /** @brief Number of clusters. */
     size_t NumClusters() const { return members_.size(); }
     /** @brief Number of items (length of the labels vector). */
-    size_t NumItems() const { return labels_.size(); }
+    size_t NumSamples() const { return labels_.size(); }
 
 protected:
     std::vector<ClusterLabel> labels_;

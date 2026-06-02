@@ -81,7 +81,7 @@ std::vector<HDBSCANMSTEdge> hdbscan_mutual_reachability_mst(
         throw std::invalid_argument("HDBSCAN alpha must be positive");
     }
 
-    const size_t n = storage.NumItems();
+    const size_t n = storage.NumSamples();
     if (core_distances.size() != n) {
         throw std::invalid_argument("Core distance count must match storage item count");
     }

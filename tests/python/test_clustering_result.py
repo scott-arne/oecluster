@@ -41,11 +41,11 @@ def test_dunders_reflect_clusters():
 
     assert len(result) == 2
     assert result.num_clusters == 2
-    assert result.num_items == 4
+    assert result.num_samples == 4
     assert list(iter(result)) == [(0, 1), (2, 3)]
     assert result[0] == (0, 1)
     assert result[1] == (2, 3)
-    assert repr(result) == "ClusteringResult(num_clusters=2, num_items=4)"
+    assert repr(result) == "ClusteringResult(num_clusters=2, num_samples=4)"
 
 
 def test_butina_returns_butina_result_subclass():

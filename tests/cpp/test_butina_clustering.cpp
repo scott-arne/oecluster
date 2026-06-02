@@ -151,7 +151,7 @@ TEST(ButinaClusteringTest, ChoosesLargestIndexOnNeighborCountTie) {
     EXPECT_EQ(result.Members()[0], Cluster({3, 2}));
     EXPECT_EQ(result.Members()[1], Cluster({1, 0}));
 
-    ASSERT_EQ(result.Labels().size(), storage.NumItems());
+    ASSERT_EQ(result.Labels().size(), storage.NumSamples());
     for (size_t c = 0; c < result.Members().size(); ++c) {
         for (const size_t member : result.Members()[c]) {
             EXPECT_EQ(result.Labels()[member], static_cast<ClusterLabel>(c));
@@ -181,7 +181,7 @@ TEST(ButinaClusteringTest, ClustersUnseenNeighborsInAscendingNeighborOrder) {
     EXPECT_EQ(result.Members()[0], Cluster({0, 1, 2, 3}));
     EXPECT_EQ(result.Members()[1], Cluster({4}));
 
-    ASSERT_EQ(result.Labels().size(), storage.NumItems());
+    ASSERT_EQ(result.Labels().size(), storage.NumSamples());
     EXPECT_EQ(result.Labels(), std::vector<ClusterLabel>({0, 0, 0, 0, 1}));
 }
 

@@ -60,7 +60,7 @@ double DenseStorage::Get(size_t i, size_t j) const {
     return data_[index];
 }
 
-size_t DenseStorage::NumItems() const {
+size_t DenseStorage::NumSamples() const {
     return n_;
 }
 
@@ -287,7 +287,7 @@ double MMapStorage::Get(size_t i, size_t j) const {
     return data_[index];
 }
 
-size_t MMapStorage::NumItems() const {
+size_t MMapStorage::NumSamples() const {
     return n_;
 }
 
@@ -353,7 +353,7 @@ double SparseStorage::Get(size_t i, size_t j) const {
     return 0.0;
 }
 
-size_t SparseStorage::NumItems() const {
+size_t SparseStorage::NumSamples() const {
     return n_;
 }
 

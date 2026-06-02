@@ -145,7 +145,7 @@ void validate_options(
         if (options.n_clusters == 0) {
             throw std::invalid_argument("Agglomerative n_clusters must be at least one");
         }
-        if (options.n_clusters > storage.NumItems()) {
+        if (options.n_clusters > storage.NumSamples()) {
             throw std::invalid_argument(
                 "Agglomerative n_clusters must be at most the item count");
         }
@@ -157,7 +157,7 @@ std::vector<double> initialize_cluster_distances(
     size_t max_nodes,
     size_t num_threads,
     size_t chunk_size) {
-    const size_t n = storage.NumItems();
+    const size_t n = storage.NumSamples();
     std::vector<double> distances(max_nodes * (max_nodes - 1) / 2,
                                   std::numeric_limits<double>::infinity());
     const double* data = storage.Data();
@@ -236,7 +236,7 @@ AgglomerativeResult agglomerative_cluster(
     const AgglomerativeOptions& options) {
     validate_options(storage, options);
 
-    const size_t n = storage.NumItems();
+    const size_t n = storage.NumSamples();
     if (n == 0) {
         return AgglomerativeResult();
     }

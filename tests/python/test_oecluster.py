@@ -39,5 +39,5 @@ class TestNativeMoleculePassing:
         """
         import oecluster
         dist = oecluster.pdist([aspirin_mol, ethanol_mol], "fingerprint")
-        assert dist.num_items == 2
+        assert dist.num_samples == 2
         assert dist.num_pairs == 1

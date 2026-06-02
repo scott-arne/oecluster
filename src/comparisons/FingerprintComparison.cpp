@@ -210,7 +210,7 @@ bool FingerprintComparison::TryPDist(StorageBackend& storage,
                                      const PDistOptions& options) {
     const size_t n = pimpl_->batch.Size();
     const size_t total_pairs = n * (n - 1) / 2;
-    if (storage.NumItems() != n) {
+    if (storage.NumSamples() != n) {
         throw ComparisonError("FingerprintComparison pdist storage size mismatch");
     }
 

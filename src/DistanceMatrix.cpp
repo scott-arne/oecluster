@@ -34,8 +34,8 @@ const std::vector<std::string>& DistanceMatrix::Labels() const {
     return labels_;
 }
 
-size_t DistanceMatrix::NumItems() const {
-    return storage_->NumItems();
+size_t DistanceMatrix::NumSamples() const {
+    return storage_->NumSamples();
 }
 
 size_t DistanceMatrix::NumPairs() const {

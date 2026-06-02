@@ -27,7 +27,7 @@ TEST(ClusteringResultTest, ClusteringResultStoresLabelsAndClusters) {
     ASSERT_EQ(result.Members().size(), 1);
     EXPECT_EQ(result.Members()[0], Cluster({0, 2}));
     EXPECT_EQ(result.NumClusters(), 1u);
-    EXPECT_EQ(result.NumItems(), 3u);
+    EXPECT_EQ(result.NumSamples(), 3u);
 }
 
 TEST(DBSCANClusteringTest, MatchesScikitLearnToyCoreSamples) {

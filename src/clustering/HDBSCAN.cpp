@@ -23,7 +23,7 @@ std::vector<double> compute_core_distances(
     size_t min_samples,
     size_t num_threads) {
     validate_complete_distance_storage(storage, "HDBSCAN");
-    const size_t n = storage.NumItems();
+    const size_t n = storage.NumSamples();
     if (min_samples == 0) {
         throw std::invalid_argument("HDBSCAN min_samples must be at least one");
     }
@@ -69,7 +69,7 @@ HDBSCANResult hdbscan_cluster(const StorageBackend& storage, const HDBSCANOption
 
     const size_t min_samples =
         options.min_samples == 0 ? options.min_cluster_size : options.min_samples;
-    if (min_samples > storage.NumItems()) {
+    if (min_samples > storage.NumSamples()) {
         throw std::invalid_argument("HDBSCAN min_samples must be at most the item count");
     }
 
@@ -80,7 +80,7 @@ HDBSCANResult hdbscan_cluster(const StorageBackend& storage, const HDBSCANOption
     const std::vector<detail::HDBSCANMSTEdge> mst =
         detail::hdbscan_mutual_reachability_mst(storage, core_distances, options.alpha);
     const std::vector<detail::HDBSCANLinkageNode> linkage =
-        detail::make_hdbscan_single_linkage(mst, storage.NumItems());
+        detail::make_hdbscan_single_linkage(mst, storage.NumSamples());
     const std::vector<detail::CondensedNode> condensed_tree =
         detail::condense_tree(linkage, options.min_cluster_size);
     const detail::HDBSCANTreeSelection selection =
@@ -94,10 +94,10 @@ HDBSCANResult hdbscan_cluster(const StorageBackend& storage, const HDBSCANOption
     std::vector<ClusterLabel> labels = selection.labels;
     std::vector<double> probabilities = selection.probabilities;
     if (labels.empty()) {
-        labels.assign(storage.NumItems(), NOISE_LABEL);
+        labels.assign(storage.NumSamples(), NOISE_LABEL);
     }
     if (probabilities.empty()) {
-        probabilities.assign(storage.NumItems(), 0.0);
+        probabilities.assign(storage.NumSamples(), 0.0);
     }
     Clusters members = labels_to_clusters(labels);
     return HDBSCANResult(std::move(labels), std::move(members),

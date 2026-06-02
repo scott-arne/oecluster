@@ -867,7 +867,7 @@ public:
     virtual ~StorageBackend() = default;
     virtual void Set(size_t i, size_t j, double value) = 0;
     virtual double Get(size_t i, size_t j) const = 0;
-    virtual size_t NumItems() const = 0;
+    virtual size_t NumSamples() const = 0;
     virtual size_t NumPairs() const = 0;
     virtual void Finalize();
 };
@@ -877,7 +877,7 @@ public:
     explicit DenseStorage(size_t n);
     void Set(size_t i, size_t j, double value) override;
     double Get(size_t i, size_t j) const override;
-    size_t NumItems() const override;
+    size_t NumSamples() const override;
     size_t NumPairs() const override;
 };
 
@@ -887,7 +887,7 @@ public:
     ~MMapStorage() override;
     void Set(size_t i, size_t j, double value) override;
     double Get(size_t i, size_t j) const override;
-    size_t NumItems() const override;
+    size_t NumSamples() const override;
     size_t NumPairs() const override;
 };
 
@@ -897,7 +897,7 @@ public:
     ~SparseStorage() override;
     void Set(size_t i, size_t j, double value) override;
     double Get(size_t i, size_t j) const override;
-    size_t NumItems() const override;
+    size_t NumSamples() const override;
     size_t NumPairs() const override;
     void Finalize() override;
 };
@@ -1001,7 +1001,7 @@ public:
     StorageBackend& Storage();
     const std::string& ComparisonName() const;
     const std::vector<std::string>& Labels() const;
-    size_t NumItems() const;
+    size_t NumSamples() const;
     size_t NumPairs() const;
 };
 
