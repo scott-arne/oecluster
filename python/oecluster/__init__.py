@@ -884,6 +884,7 @@ class ClusteringResult:
         self._clusters = tuple(
             tuple(int(member) for member in cluster) for cluster in clusters
         )
+        # Held only to keep native-owned storage (e.g. BitBirch centroids) alive.
         self._native_owner = native_owner
 
     @property
