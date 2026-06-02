@@ -1030,12 +1030,12 @@ public:
 // Version macros
 // ============================================================================
 #define OECLUSTER_VERSION_MAJOR 3
-#define OECLUSTER_VERSION_MINOR 3
+#define OECLUSTER_VERSION_MINOR 4
 #define OECLUSTER_VERSION_PATCH 0
 
 // ============================================================================
 // Module-level Python convenience code
 // ============================================================================
 %pythoncode %{
-__version__ = "3.3.0"
+__version__ = "3.4.0"
 %}
