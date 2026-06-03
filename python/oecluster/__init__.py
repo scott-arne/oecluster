@@ -38,6 +38,10 @@ __all__ = [
     "PDistOptions",
     "DistanceMatrix",
     "ClusteringResult",
+    "ClusterReport",
+    "ClusterReportComparison",
+    "cluster_report",
+    "compare_reports",
     "ButinaResult",
     "DBSCANResult",
     "HDBSCANResult",
@@ -593,6 +597,7 @@ try:
         BitBirchReclusteringOptions,
         BitBirchRefinementOptions,
         pdist as _cpp_pdist,
+        cluster_report as _cluster_report,
         butina_cluster as _butina_cluster,
         cluster_representative as _cluster_representative,
         rank_representatives as _rank_representatives,
@@ -1870,6 +1875,180 @@ def bitbirch_refine(fingerprints, *, threshold=0.65, branching_factor=50,
         centroids=_bitbirch_centroids(result.Centroids()),
         native_owner=result,
     )
+
+
+def _native_clustering_result(result):
+    """Rebuild a native ClusteringResult from a Python result's labels/clusters."""
+    label_vec = _oecluster.IntVector()
+    for label in result.labels:
+        label_vec.push_back(int(label))
+    member_vec = _oecluster.ClusterVector()
+    for cluster in result.clusters:
+        inner = _oecluster.SizeTVector()
+        for member in cluster:
+            inner.push_back(int(member))
+        member_vec.push_back(inner)
+    return _oecluster.ClusteringResult(label_vec, member_vec)
+
+
+class ClusterReport:
+    """Read-only clustering-quality scorecard.
+
+    Wraps the native report, exposing every metric as a read-only property.
+    Vector metrics (``coverage_thresholds``, ``coverage_at``) are tuples of
+    floats; undefined metrics are NaN.
+    """
+
+    _SCALAR_FIELDS = (
+        "num_samples", "num_clusters", "num_noise", "num_singletons",
+        "noise_fraction", "singleton_fraction", "largest_cluster_fraction",
+        "cluster_size_median", "cluster_size_p90", "size_gini", "size_entropy",
+        "mean_intra_distance", "median_intra_distance", "median_radius",
+        "p95_diameter", "silhouette", "dunn_index", "boundary_violations",
+        "median_medoid_member_distance", "representative_redundancy",
+    )
+
+    def __init__(self, native_report):
+        """Capture every field from the native report into Python values."""
+        for name in self._SCALAR_FIELDS:
+            object.__setattr__(self, f"_{name}", getattr(native_report, name))
+        object.__setattr__(
+            self, "_coverage_thresholds",
+            tuple(float(v) for v in native_report.coverage_thresholds))
+        object.__setattr__(
+            self, "_coverage_at",
+            tuple(float(v) for v in native_report.coverage_at))
+
+    def __getattr__(self, name):
+        if name in ClusterReport._SCALAR_FIELDS:
+            return object.__getattribute__(self, f"_{name}")
+        raise AttributeError(name)
+
+    @property
+    def coverage_thresholds(self):
+        """Distance thresholds for coverage (tuple of floats)."""
+        return self._coverage_thresholds
+
+    @property
+    def coverage_at(self):
+        """Coverage fraction at each threshold (tuple, aligned with coverage_thresholds)."""
+        return self._coverage_at
+
+    def __repr__(self):
+        return (f"ClusterReport(num_clusters={self.num_clusters}, "
+                f"num_samples={self.num_samples}, "
+                f"silhouette={self.silhouette:.4f})")
+
+
+class ClusterReportComparison:
+    """Two ClusterReports aligned for side-by-side reading."""
+
+    def __init__(self, report_a, report_b):
+        self._a = report_a
+        self._b = report_b
+
+    @property
+    def a(self):
+        """First report."""
+        return self._a
+
+    @property
+    def b(self):
+        """Second report."""
+        return self._b
+
+    def to_table(self):
+        """Return a list of (metric, a_value, b_value) rows for display."""
+        rows = []
+        for name in ClusterReport._SCALAR_FIELDS:
+            rows.append((name, getattr(self._a, name), getattr(self._b, name)))
+        for i, t in enumerate(self._a.coverage_thresholds):
+            a_cov = self._a.coverage_at[i] if i < len(self._a.coverage_at) else float("nan")
+            b_cov = self._b.coverage_at[i] if i < len(self._b.coverage_at) else float("nan")
+            rows.append((f"coverage_at[{t}]", a_cov, b_cov))
+        return rows
+
+    def __repr__(self):
+        width = max(len(r[0]) for r in self.to_table())
+        lines = [f"{'metric':<{width}}  {'a':>12}  {'b':>12}"]
+        for name, av, bv in self.to_table():
+            lines.append(f"{name:<{width}}  {av!s:>12}  {bv!s:>12}")
+        return "\n".join(lines)
+
+
+def _cluster_threshold(preset):
+    preset_map = {
+        "default": _oecluster.ClusterThreshold_Default,
+        "tight": _oecluster.ClusterThreshold_Tight,
+        "diversity": _oecluster.ClusterThreshold_Diversity,
+    }
+    key = str(preset).lower()
+    if key not in preset_map:
+        raise ValueError(f"Unknown cluster report preset: {preset!r}")
+    return preset_map[key]
+
+
+def cluster_report(result, distance_matrix, *, preset="default",
+                   coverage_thresholds=None, boundary_threshold=None,
+                   representative_method="medoid",
+                   treat_noise_as_singletons=True, num_threads=0):
+    """
+    Compute a method-agnostic clustering-quality report.
+
+    :param result: A clustering result (e.g. from :func:`butina`/:func:`dbscan`).
+    :param distance_matrix: Complete DistanceMatrix for the same items.
+    :param preset: Threshold preset: "default", "tight", or "diversity".
+    :param coverage_thresholds: Optional override for coverage distances.
+    :param boundary_threshold: Optional override for the boundary-violation distance.
+    :param representative_method: Medoid selection method (default "medoid").
+    :param treat_noise_as_singletons: Fold noise into singleton accounting.
+    :param num_threads: Reserved for parallel-safe computation.
+    :returns: A ClusterReport.
+    :raises TypeError: If result/distance_matrix have the wrong type.
+    :raises ValueError: If a preset/method/threshold is invalid.
+    :raises RuntimeError: If the distance matrix cannot provide complete distances.
+    """
+    if not isinstance(result, ClusteringResult):
+        raise TypeError("cluster_report() expects a ClusteringResult")
+    if not isinstance(distance_matrix, DistanceMatrix):
+        raise TypeError("cluster_report() expects a DistanceMatrix")
+
+    options = _oecluster.ClusterReportOptions(_cluster_threshold(preset))
+    if coverage_thresholds is not None:
+        vec = _oecluster.DoubleVector()
+        for value in coverage_thresholds:
+            v = float(value)
+            if v < 0.0:
+                raise ValueError("coverage thresholds must be non-negative")
+            vec.push_back(v)
+        options.coverage_thresholds = vec
+    if boundary_threshold is not None:
+        bt = float(boundary_threshold)
+        if bt < 0.0:
+            raise ValueError("boundary_threshold must be non-negative")
+        options.boundary_threshold = bt
+    _, native_method = _representative_method(representative_method)
+    options.representative_method = native_method
+    options.treat_noise_as_singletons = bool(treat_noise_as_singletons)
+    options.num_threads = int(num_threads)
+
+    native = _cluster_report(
+        _native_clustering_result(result), distance_matrix.storage, options)
+    return ClusterReport(native)
+
+
+def compare_reports(report_a, report_b):
+    """
+    Pair two ClusterReports for side-by-side reading.
+
+    :param report_a: First ClusterReport.
+    :param report_b: Second ClusterReport.
+    :returns: A ClusterReportComparison.
+    :raises TypeError: If either argument is not a ClusterReport.
+    """
+    if not isinstance(report_a, ClusterReport) or not isinstance(report_b, ClusterReport):
+        raise TypeError("compare_reports() expects two ClusterReport objects")
+    return ClusterReportComparison(report_a, report_b)
 
 
 # Python wrapper classes for comparison construction
