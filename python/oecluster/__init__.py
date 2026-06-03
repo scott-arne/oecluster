@@ -1919,6 +1919,11 @@ class ClusterReport:
             self, "_coverage_at",
             tuple(float(v) for v in native_report.coverage_at))
 
+    def __setattr__(self, name, value):
+        """ClusterReport is read-only; reject external attribute assignment."""
+        raise AttributeError(
+            f"ClusterReport is read-only; cannot set {name!r}")
+
     def __getattr__(self, name):
         if name in ClusterReport._SCALAR_FIELDS:
             return object.__getattribute__(self, f"_{name}")
