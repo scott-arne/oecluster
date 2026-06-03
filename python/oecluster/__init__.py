@@ -23,8 +23,8 @@ from typing import Any
 
 import numpy as np
 
-__version__ = "4.1.0"
-__version_info__ = (4, 1, 0)
+__version__ = "4.1.1"
+__version_info__ = (4, 1, 1)
 
 
 _OPENEYE_COMPAT_PRELOAD_PATHS: list[str] = []

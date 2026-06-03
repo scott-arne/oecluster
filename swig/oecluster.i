@@ -1050,11 +1050,11 @@ public:
 // ============================================================================
 #define OECLUSTER_VERSION_MAJOR 4
 #define OECLUSTER_VERSION_MINOR 1
-#define OECLUSTER_VERSION_PATCH 0
+#define OECLUSTER_VERSION_PATCH 1
 
 // ============================================================================
 // Module-level Python convenience code
 // ============================================================================
 %pythoncode %{
-__version__ = "4.1.0"
+__version__ = "4.1.1"
 %}
