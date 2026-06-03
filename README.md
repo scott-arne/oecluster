@@ -364,6 +364,22 @@ print(butina_report)               # ClusterReport(num_clusters=..., ...)
 print(oecluster.compare_reports(butina_report, dbscan_report))
 ```
 
+Every clustering result and its report expose a read-only `.method` name
+(`"butina"`, `"dbscan"`, `"hdbscan"`, `"agglomerative"`, or `"bitbirch"`).
+`compare_reports` accepts two or more reports and labels each column by method:
+
+```python
+agglomerative_report = oecluster.cluster_report(
+    oecluster.agglomerative(dm, n_clusters=10), dm)
+
+comparison = oecluster.compare_reports(
+    butina_report, dbscan_report, agglomerative_report)
+print(comparison)
+#   metric              butina   dbscan   agglomerative
+#   num_clusters             5        7              10
+#   ...
+```
+
 Distances are Tanimoto/Jaccard (`distance = 1 - similarity`). Choose a threshold
 preset to match the use case:
 
