@@ -85,19 +85,56 @@ def test_report_is_read_only():
         report.coverage_at = ()
 
 
-def test_compare_reports_side_by_side():
+def test_result_method_names():
     import oecluster
 
     dm = _two_cluster_dm()
-    ra = oecluster.cluster_report(oecluster.butina(dm, threshold=0.5), dm)
-    rb = oecluster.cluster_report(oecluster.dbscan(dm, eps=0.5, min_samples=1), dm)
-    cmp = oecluster.compare_reports(ra, rb)
+    assert oecluster.butina(dm, threshold=0.5).method == "butina"
+    assert oecluster.dbscan(dm, eps=0.5, min_samples=1).method == "dbscan"
+    assert oecluster.agglomerative(dm, n_clusters=2).method == "agglomerative"
 
+
+def test_report_captures_method():
+    import oecluster
+
+    dm = _two_cluster_dm()
+    rb = oecluster.cluster_report(oecluster.butina(dm, threshold=0.5), dm)
+    assert rb.method == "butina"
+    assert "method='butina'" in repr(rb)
+
+
+def test_compare_reports_multi_and_labels():
+    import oecluster
+
+    dm = _two_cluster_dm()
+    rb = oecluster.cluster_report(oecluster.butina(dm, threshold=0.5), dm)
+    rd = oecluster.cluster_report(oecluster.dbscan(dm, eps=0.5, min_samples=1), dm)
+    ra = oecluster.cluster_report(oecluster.agglomerative(dm, n_clusters=2), dm)
+
+    cmp = oecluster.compare_reports(rb, rd, ra)
     assert isinstance(cmp, oecluster.ClusterReportComparison)
-    assert cmp.a is ra and cmp.b is rb
+    assert cmp.reports == (rb, rd, ra)
+    assert not hasattr(cmp, "a")
+
     rows = cmp.to_table()
     names = [r[0] for r in rows]
     assert "num_clusters" in names
-    assert "num_noise" in names  # noise/singletons shown distinctly
+    assert "num_noise" in names
+    # one value per report -> length 4
+    assert all(len(r) == 4 for r in rows)
+    # method names appear as column headers in the repr
+    header = repr(cmp).splitlines()[0]
+    assert "butina" in header
+    assert "dbscan" in header
+    assert "agglomerative" in header
+
+
+def test_compare_reports_validation():
+    import oecluster
+
+    dm = _two_cluster_dm()
+    rb = oecluster.cluster_report(oecluster.butina(dm, threshold=0.5), dm)
+    with pytest.raises(ValueError):
+        oecluster.compare_reports(rb)            # fewer than two
     with pytest.raises(TypeError):
-        oecluster.compare_reports(ra, "not a report")
+        oecluster.compare_reports(rb, "not a report")
