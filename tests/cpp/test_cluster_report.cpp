@@ -160,3 +160,45 @@ TEST(ClusterReportTest, SeparationMetricsNaNForSingleCluster) {
     // compactness still defined
     EXPECT_FALSE(std::isnan(r.median_radius));
 }
+
+TEST(ClusterReportTest, RepresentativeAndCoverage) {
+    const DenseStorage storage = MakeTwoClusterStorage();
+    const ClusteringResult result = MakeResult({0, 0, 1, 1});
+
+    ClusterReportOptions options;  // coverage {0.25,0.35,0.45}
+    const ClusterReport r = cluster_report(result, storage, options);
+
+    EXPECT_DOUBLE_EQ(r.median_medoid_member_distance, 0.2);
+    EXPECT_DOUBLE_EQ(r.representative_redundancy, 0.8);
+    ASSERT_EQ(r.coverage_thresholds.size(), 3u);
+    ASSERT_EQ(r.coverage_at.size(), 3u);
+    // Every point is within 0.2 of its cluster medoid, so coverage is 1.0 at
+    // all thresholds >= 0.2.
+    for (const double c : r.coverage_at) {
+        EXPECT_DOUBLE_EQ(c, 1.0);
+    }
+}
+
+TEST(ClusterReportTest, CoverageCountsNoiseInDenominator) {
+    // Cluster {0,1}; points 2,3 noise and far (0.8) from medoid.
+    const DenseStorage storage = MakeTwoClusterStorage();
+    const ClusteringResult result = MakeResult({0, 0, -1, -1});
+
+    ClusterReportOptions options;
+    options.coverage_thresholds = {0.3};
+    const ClusterReport r = cluster_report(result, storage, options);
+
+    ASSERT_EQ(r.coverage_at.size(), 1u);
+    // Only points 0,1 are within 0.3 of the single medoid; 2,3 (0.8) are not.
+    EXPECT_DOUBLE_EQ(r.coverage_at[0], 0.5);
+}
+
+TEST(ClusterReportTest, CompareReportsHoldsBothScorecards) {
+    const DenseStorage storage = MakeTwoClusterStorage();
+    const ClusterReport a = cluster_report(MakeResult({0, 0, 1, 1}), storage, ClusterReportOptions());
+    const ClusterReport b = cluster_report(MakeResult({0, 0, 0, 0}), storage, ClusterReportOptions());
+
+    const ClusterReportComparison cmp = compare_reports(a, b);
+    EXPECT_EQ(cmp.a.num_clusters, 2u);
+    EXPECT_EQ(cmp.b.num_clusters, 1u);
+}

@@ -270,6 +270,56 @@ ClusterReport cluster_report(
             report.silhouette = nan_value();
             report.dunn_index = nan_value();
         }
+
+        // Representative / coverage.
+        std::vector<size_t> medoids;
+        medoids.reserve(members.size());
+        std::vector<double> medoid_member_means;
+        medoid_member_means.reserve(members.size());
+        for (const Cluster& cluster : members) {
+            const size_t medoid =
+                cluster_representative(cluster, storage, options.representative_method);
+            medoids.push_back(medoid);
+            medoid_member_means.push_back(mean_to_cluster(medoid, cluster, storage));
+        }
+        report.median_medoid_member_distance = detail::median_distance(medoid_member_means);
+
+        if (medoids.size() >= 2) {
+            std::vector<double> nearest_medoid;
+            nearest_medoid.reserve(medoids.size());
+            for (size_t i = 0; i < medoids.size(); ++i) {
+                double smallest = std::numeric_limits<double>::infinity();
+                for (size_t j = 0; j < medoids.size(); ++j) {
+                    if (i != j) {
+                        smallest = std::min(smallest, storage.Get(medoids[i], medoids[j]));
+                    }
+                }
+                nearest_medoid.push_back(smallest);
+            }
+            report.representative_redundancy = detail::median_distance(nearest_medoid);
+        } else {
+            report.representative_redundancy = nan_value();
+        }
+
+        // Coverage: fraction of ALL samples within threshold of some medoid.
+        if (report.num_samples > 0 && !medoids.empty()) {
+            report.coverage_at.assign(options.coverage_thresholds.size(), 0.0);
+            for (size_t t = 0; t < options.coverage_thresholds.size(); ++t) {
+                const double threshold = options.coverage_thresholds[t];
+                size_t covered = 0;
+                for (size_t point = 0; point < report.num_samples; ++point) {
+                    double nearest = std::numeric_limits<double>::infinity();
+                    for (const size_t medoid : medoids) {
+                        nearest = std::min(nearest, storage.Get(point, medoid));
+                    }
+                    if (nearest <= threshold) {
+                        ++covered;
+                    }
+                }
+                report.coverage_at[t] =
+                    static_cast<double>(covered) / static_cast<double>(report.num_samples);
+            }
+        }
     } else {
         report.mean_intra_distance = nan_value();
         report.median_intra_distance = nan_value();
@@ -277,6 +327,9 @@ ClusterReport cluster_report(
         report.p95_diameter = nan_value();
         report.silhouette = nan_value();
         report.dunn_index = nan_value();
+        report.median_medoid_member_distance = nan_value();
+        report.representative_redundancy = nan_value();
+        // coverage_at stays empty.
     }
 
     return report;

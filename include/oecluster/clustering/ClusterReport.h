@@ -68,7 +68,7 @@ struct ClusterReport {
     double median_medoid_member_distance = 0.0;
     double representative_redundancy = 0.0;
     std::vector<double> coverage_thresholds;
-    std::vector<double> coverage_at;
+    std::vector<double> coverage_at;  ///< Coverage fraction at each coverage_thresholds entry (parallel-indexed).
 };
 
 /**
