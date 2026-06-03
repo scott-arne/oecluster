@@ -132,6 +132,8 @@ ClusterReport cluster_report(
     report.noise_fraction = n > 0.0 ? static_cast<double>(num_noise) / n : 0.0;
     report.largest_cluster_fraction = n > 0.0 ? static_cast<double>(largest) / n : 0.0;
 
+    // Under the flag, each noise point counts as its own singleton cluster, so
+    // it is folded into both the numerator and the denominator.
     if (options.treat_noise_as_singletons) {
         const double denom = static_cast<double>(report.num_clusters + num_noise);
         report.singleton_fraction =
