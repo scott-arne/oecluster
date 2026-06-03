@@ -360,7 +360,7 @@ dbscan_result = oecluster.dbscan(dm, eps=0.35, min_samples=5)
 butina_report = oecluster.cluster_report(butina_result, dm)
 dbscan_report = oecluster.cluster_report(dbscan_result, dm)
 
-print(butina_report)               # ClusterReport(num_clusters=..., ...)
+print(butina_report)               # ClusterReport(method='butina', num_clusters=..., ...)
 print(oecluster.compare_reports(butina_report, dbscan_report))
 ```
 
