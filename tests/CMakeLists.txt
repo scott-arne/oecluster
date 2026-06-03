@@ -19,6 +19,7 @@ add_executable(oecluster_tests
     cpp/test_agglomerative_clustering.cpp
     cpp/test_bitbirch_kernels.cpp
     cpp/test_bitbirch_clustering.cpp
+    cpp/test_cluster_report.cpp
     cpp/test_fingerprint_comparison.cpp
     cpp/test_rocs_comparison.cpp
     cpp/test_superpose_comparison.cpp
