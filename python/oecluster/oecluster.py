@@ -1453,6 +1453,94 @@ class ClusterRepresentativeVector(object):
 
 # Register ClusterRepresentativeVector in _oecluster:
 _oecluster.ClusterRepresentativeVector_swigregister(ClusterRepresentativeVector)
+ClusterThreshold_Default = _oecluster.ClusterThreshold_Default
+r"""coverage {0.25,0.35,0.45}, boundary 0.30."""
+ClusterThreshold_Tight = _oecluster.ClusterThreshold_Tight
+r"""coverage {0.20,0.30,0.40}, boundary 0.25."""
+ClusterThreshold_Diversity = _oecluster.ClusterThreshold_Diversity
+r"""coverage {0.40,0.50,0.60}, boundary 0.40."""
+class ClusterReportOptions(object):
+    r"""Options controlling clustering-quality report computation."""
+
+    thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
+    __repr__ = _swig_repr
+    coverage_thresholds = property(_oecluster.ClusterReportOptions_coverage_thresholds_get, _oecluster.ClusterReportOptions_coverage_thresholds_set)
+    boundary_threshold = property(_oecluster.ClusterReportOptions_boundary_threshold_get, _oecluster.ClusterReportOptions_boundary_threshold_set)
+    representative_method = property(_oecluster.ClusterReportOptions_representative_method_get, _oecluster.ClusterReportOptions_representative_method_set)
+    treat_noise_as_singletons = property(_oecluster.ClusterReportOptions_treat_noise_as_singletons_get, _oecluster.ClusterReportOptions_treat_noise_as_singletons_set)
+    num_threads = property(_oecluster.ClusterReportOptions_num_threads_get, _oecluster.ClusterReportOptions_num_threads_set)
+
+    def __init__(self, *args):
+        r"""Seed coverage_thresholds and boundary_threshold from a preset."""
+        _oecluster.ClusterReportOptions_swiginit(self, _oecluster.new_ClusterReportOptions(*args))
+    __swig_destroy__ = _oecluster.delete_ClusterReportOptions
+
+# Register ClusterReportOptions in _oecluster:
+_oecluster.ClusterReportOptions_swigregister(ClusterReportOptions)
+class ClusterReport(object):
+    r"""Clustering-quality scorecard. NaN marks an undefined metric."""
+
+    thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
+    __repr__ = _swig_repr
+    num_samples = property(_oecluster.ClusterReport_num_samples_get, _oecluster.ClusterReport_num_samples_set)
+    num_clusters = property(_oecluster.ClusterReport_num_clusters_get, _oecluster.ClusterReport_num_clusters_set)
+    num_noise = property(_oecluster.ClusterReport_num_noise_get, _oecluster.ClusterReport_num_noise_set)
+    num_singletons = property(_oecluster.ClusterReport_num_singletons_get, _oecluster.ClusterReport_num_singletons_set)
+    noise_fraction = property(_oecluster.ClusterReport_noise_fraction_get, _oecluster.ClusterReport_noise_fraction_set)
+    singleton_fraction = property(_oecluster.ClusterReport_singleton_fraction_get, _oecluster.ClusterReport_singleton_fraction_set)
+    largest_cluster_fraction = property(_oecluster.ClusterReport_largest_cluster_fraction_get, _oecluster.ClusterReport_largest_cluster_fraction_set)
+    cluster_size_median = property(_oecluster.ClusterReport_cluster_size_median_get, _oecluster.ClusterReport_cluster_size_median_set)
+    cluster_size_p90 = property(_oecluster.ClusterReport_cluster_size_p90_get, _oecluster.ClusterReport_cluster_size_p90_set)
+    size_gini = property(_oecluster.ClusterReport_size_gini_get, _oecluster.ClusterReport_size_gini_set)
+    size_entropy = property(_oecluster.ClusterReport_size_entropy_get, _oecluster.ClusterReport_size_entropy_set)
+    mean_intra_distance = property(_oecluster.ClusterReport_mean_intra_distance_get, _oecluster.ClusterReport_mean_intra_distance_set)
+    median_intra_distance = property(_oecluster.ClusterReport_median_intra_distance_get, _oecluster.ClusterReport_median_intra_distance_set)
+    median_radius = property(_oecluster.ClusterReport_median_radius_get, _oecluster.ClusterReport_median_radius_set)
+    p95_diameter = property(_oecluster.ClusterReport_p95_diameter_get, _oecluster.ClusterReport_p95_diameter_set)
+    silhouette = property(_oecluster.ClusterReport_silhouette_get, _oecluster.ClusterReport_silhouette_set)
+    dunn_index = property(_oecluster.ClusterReport_dunn_index_get, _oecluster.ClusterReport_dunn_index_set)
+    boundary_violations = property(_oecluster.ClusterReport_boundary_violations_get, _oecluster.ClusterReport_boundary_violations_set)
+    median_medoid_member_distance = property(_oecluster.ClusterReport_median_medoid_member_distance_get, _oecluster.ClusterReport_median_medoid_member_distance_set)
+    representative_redundancy = property(_oecluster.ClusterReport_representative_redundancy_get, _oecluster.ClusterReport_representative_redundancy_set)
+    coverage_thresholds = property(_oecluster.ClusterReport_coverage_thresholds_get, _oecluster.ClusterReport_coverage_thresholds_set)
+    coverage_at = property(_oecluster.ClusterReport_coverage_at_get, _oecluster.ClusterReport_coverage_at_set, doc=r"""Coverage fraction at each coverage_thresholds entry (parallel-indexed).""")
+
+    def __init__(self):
+        _oecluster.ClusterReport_swiginit(self, _oecluster.new_ClusterReport())
+    __swig_destroy__ = _oecluster.delete_ClusterReport
+
+# Register ClusterReport in _oecluster:
+_oecluster.ClusterReport_swigregister(ClusterReport)
+class ClusterReportComparison(object):
+    r"""Two reports aligned for side-by-side comparison."""
+
+    thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
+    __repr__ = _swig_repr
+    a = property(_oecluster.ClusterReportComparison_a_get, _oecluster.ClusterReportComparison_a_set)
+    b = property(_oecluster.ClusterReportComparison_b_get, _oecluster.ClusterReportComparison_b_set)
+
+    def __init__(self):
+        _oecluster.ClusterReportComparison_swiginit(self, _oecluster.new_ClusterReportComparison())
+    __swig_destroy__ = _oecluster.delete_ClusterReportComparison
+
+# Register ClusterReportComparison in _oecluster:
+_oecluster.ClusterReportComparison_swigregister(ClusterReportComparison)
+
+def cluster_report(*args):
+    r"""
+    Compute a clustering-quality report.
+
+    :param result: Any algorithm's clustering result (base ClusteringResult).
+    :param storage: Complete pairwise distance storage.
+    :param options: Report options (thresholds, representative method, flags).
+    :returns: A ClusterReport scorecard.
+    :raises std::invalid_argument: If storage cannot provide complete distances.
+    """
+    return _oecluster.cluster_report(*args)
+
+def compare_reports(a, b):
+    r"""Pair two reports for side-by-side reading. No agreement math."""
+    return _oecluster.compare_reports(a, b)
 class DBSCANOptions(object):
     r"""Options for DBSCAN clustering."""
 

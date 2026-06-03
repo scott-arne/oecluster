@@ -20,6 +20,7 @@
 #include "oecluster/clustering/Agglomerative.h"
 #include "oecluster/clustering/BitBirch.h"
 #include "oecluster/clustering/Representative.h"
+#include "oecluster/clustering/ClusterReport.h"
 #include "oefp/batch.h"
 
 #include <oechem.h>
@@ -693,6 +694,23 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, _oecluster_is_oereceptor, "
     Py_END_ALLOW_THREADS
 }
 
+%exception OECluster::cluster_report {
+    Py_BEGIN_ALLOW_THREADS
+    try {
+        $action
+    } catch (const OECluster::OEClusterError& e) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError, e.what());
+    } catch (const std::exception& e) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError, e.what());
+    } catch (...) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError, "Unknown C++ exception in cluster_report");
+    }
+    Py_END_ALLOW_THREADS
+}
+
 %exception OECluster::dbscan_cluster {
     Py_BEGIN_ALLOW_THREADS
     try {
@@ -1021,6 +1039,7 @@ public:
 %include "oecluster/clustering/Butina.h"
 %include "oecluster/clustering/Representative.h"
 %template(ClusterRepresentativeVector) std::vector<OECluster::ClusterRepresentative>;
+%include "oecluster/clustering/ClusterReport.h"
 %include "oecluster/clustering/DBSCAN.h"
 %include "oecluster/clustering/HDBSCAN.h"
 %include "oecluster/clustering/Agglomerative.h"
