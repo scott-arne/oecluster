@@ -30,6 +30,8 @@ struct ButinaOptions {
 class ButinaResult : public ClusteringResult {
 public:
     using ClusteringResult::ClusteringResult;
+
+    std::string Method() const override { return "butina"; }
 };
 
 /**

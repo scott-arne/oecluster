@@ -39,6 +39,8 @@ public:
     /** @brief Indices of core samples. */
     const Cluster& CoreSampleIndices() const { return core_sample_indices_; }
 
+    std::string Method() const override { return "dbscan"; }
+
 private:
     Cluster core_sample_indices_;
 };

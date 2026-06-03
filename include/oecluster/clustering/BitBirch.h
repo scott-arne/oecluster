@@ -89,6 +89,8 @@ public:
     /** @brief Member count per cluster. */
     const std::vector<size_t>& ClusterSizes() const { return cluster_sizes_; }
 
+    std::string Method() const override { return "bitbirch"; }
+
 private:
     OEFP::OEFPBatch centroids_;
     std::vector<size_t> cluster_sizes_;

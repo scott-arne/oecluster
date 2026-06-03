@@ -4,8 +4,12 @@
 #include <vector>
 
 #include "oecluster/StorageBackend.h"
+#include "oecluster/clustering/Agglomerative.h"
+#include "oecluster/clustering/Butina.h"
 #include "oecluster/clustering/ClusterReport.h"
 #include "oecluster/clustering/ClusterTypes.h"
+#include "oecluster/clustering/DBSCAN.h"
+#include "oecluster/clustering/HDBSCAN.h"
 
 using namespace OECluster;
 
@@ -201,4 +205,12 @@ TEST(ClusterReportTest, CompareReportsHoldsBothScorecards) {
     const ClusterReportComparison cmp = compare_reports(a, b);
     EXPECT_EQ(cmp.a.num_clusters, 2u);
     EXPECT_EQ(cmp.b.num_clusters, 1u);
+}
+
+TEST(ClusterReportTest, ResultMethodNames) {
+    EXPECT_EQ(ClusteringResult().Method(), "");
+    EXPECT_EQ(ButinaResult().Method(), "butina");
+    EXPECT_EQ(DBSCANResult().Method(), "dbscan");
+    EXPECT_EQ(HDBSCANResult().Method(), "hdbscan");
+    EXPECT_EQ(AgglomerativeResult().Method(), "agglomerative");
 }

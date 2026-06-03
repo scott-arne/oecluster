@@ -7,6 +7,7 @@
 #define OECLUSTER_CLUSTERING_CLUSTERTYPES_H
 
 #include <cstddef>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -39,6 +40,9 @@ public:
     size_t NumClusters() const { return members_.size(); }
     /** @brief Number of items (length of the labels vector). */
     size_t NumSamples() const { return labels_.size(); }
+
+    /** @brief Clustering method name (e.g. "butina"); empty for the base. */
+    virtual std::string Method() const { return ""; }
 
 protected:
     std::vector<ClusterLabel> labels_;

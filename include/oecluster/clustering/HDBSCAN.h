@@ -53,6 +53,8 @@ public:
     /** @brief Per-item membership probabilities. */
     const std::vector<double>& Probabilities() const { return probabilities_; }
 
+    std::string Method() const override { return "hdbscan"; }
+
 private:
     std::vector<double> probabilities_;
 };

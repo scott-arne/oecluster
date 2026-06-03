@@ -63,6 +63,8 @@ public:
     /** @brief Merged cluster size per merge. */
     const std::vector<size_t>& ClusterSizes() const { return cluster_sizes_; }
 
+    std::string Method() const override { return "agglomerative"; }
+
 private:
     std::vector<size_t> children_left_;
     std::vector<size_t> children_right_;
