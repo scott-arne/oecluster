@@ -1978,31 +1978,32 @@ class ClusterReport:
 
 
 class ClusterReportComparison:
-    """Two ClusterReports aligned for side-by-side reading."""
+    """Two or more ClusterReports aligned for side-by-side reading."""
 
-    def __init__(self, report_a, report_b):
-        self._a = report_a
-        self._b = report_b
-
-    @property
-    def a(self):
-        """First report."""
-        return self._a
+    def __init__(self, reports):
+        self._reports = tuple(reports)
 
     @property
-    def b(self):
-        """Second report."""
-        return self._b
+    def reports(self):
+        """The compared reports, in input order (tuple)."""
+        return self._reports
+
+    def _column_labels(self):
+        """Per-report column labels: the method name, or report{i} if empty."""
+        labels = []
+        for index, report in enumerate(self._reports):
+            labels.append(report.method if report.method else f"report{index}")
+        return labels
 
     def to_table(self):
-        """Return a list of (metric, a_value, b_value) rows for display.
+        """Return rows ``(metric_name, *values)`` -- one value per report.
 
-        Coverage rows are aligned by threshold value across the two reports;
-        a report that lacks a given threshold shows NaN for that row.
+        Scalar-metric rows come first, then coverage rows aligned by threshold
+        value across all reports; a report lacking a given threshold shows NaN.
         """
         rows = []
         for name in ClusterReport._SCALAR_FIELDS:
-            rows.append((name, getattr(self._a, name), getattr(self._b, name)))
+            rows.append((name, *(getattr(r, name) for r in self._reports)))
 
         def _coverage_lookup(report, threshold):
             for i, t in enumerate(report.coverage_thresholds):
@@ -2011,12 +2012,11 @@ class ClusterReportComparison:
             return float("nan")
 
         thresholds = sorted(
-            set(self._a.coverage_thresholds) | set(self._b.coverage_thresholds))
+            set().union(*(r.coverage_thresholds for r in self._reports)))
         for threshold in thresholds:
             rows.append((
                 f"coverage_at[{threshold}]",
-                _coverage_lookup(self._a, threshold),
-                _coverage_lookup(self._b, threshold),
+                *(_coverage_lookup(r, threshold) for r in self._reports),
             ))
         return rows
 
@@ -2026,11 +2026,19 @@ class ClusterReportComparison:
                 return f"{value:.4g}"
             return str(value)
 
+        labels = self._column_labels()
         rows = self.to_table()
-        width = max(len(r[0]) for r in rows)
-        lines = [f"{'metric':<{width}}  {'a':>12}  {'b':>12}"]
-        for name, av, bv in rows:
-            lines.append(f"{name:<{width}}  {_fmt(av):>12}  {_fmt(bv):>12}")
+        metric_width = max([len("metric")] + [len(r[0]) for r in rows])
+        col_width = max([12] + [len(label) for label in labels])
+        header = f"{'metric':<{metric_width}}"
+        for label in labels:
+            header += f"  {label:>{col_width}}"
+        lines = [header]
+        for row in rows:
+            line = f"{row[0]:<{metric_width}}"
+            for value in row[1:]:
+                line += f"  {_fmt(value):>{col_width}}"
+            lines.append(line)
         return "\n".join(lines)
 
 
@@ -2101,18 +2109,21 @@ def cluster_report(result, distance_matrix, *, preset="default",
     return ClusterReport(native, method=result.method)
 
 
-def compare_reports(report_a, report_b):
+def compare_reports(*reports):
     """
-    Pair two ClusterReports for side-by-side reading.
+    Compare two or more ClusterReports side by side.
 
-    :param report_a: First ClusterReport.
-    :param report_b: Second ClusterReport.
+    :param reports: Two or more ClusterReport objects.
     :returns: A ClusterReportComparison.
-    :raises TypeError: If either argument is not a ClusterReport.
+    :raises TypeError: If any argument is not a ClusterReport.
+    :raises ValueError: If fewer than two reports are given.
     """
-    if not isinstance(report_a, ClusterReport) or not isinstance(report_b, ClusterReport):
-        raise TypeError("compare_reports() expects two ClusterReport objects")
-    return ClusterReportComparison(report_a, report_b)
+    if len(reports) < 2:
+        raise ValueError("compare_reports() requires at least two reports")
+    for report in reports:
+        if not isinstance(report, ClusterReport):
+            raise TypeError("compare_reports() expects ClusterReport objects")
+    return ClusterReportComparison(reports)
 
 
 # Python wrapper classes for comparison construction
