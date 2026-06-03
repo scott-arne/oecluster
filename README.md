@@ -348,6 +348,55 @@ diverse = oecluster.select_representatives(
 
 ---
 
+## Assessing And Comparing Clustering Quality
+
+`cluster_report` computes a method-agnostic scorecard for any clustering result,
+and `compare_reports` aligns two scorecards side by side (e.g. Butina vs DBSCAN).
+
+```python
+butina_result = oecluster.butina(dm, threshold=0.35)
+dbscan_result = oecluster.dbscan(dm, eps=0.35, min_samples=5)
+
+butina_report = oecluster.cluster_report(butina_result, dm)
+dbscan_report = oecluster.cluster_report(dbscan_result, dm)
+
+print(butina_report)               # ClusterReport(num_clusters=..., ...)
+print(oecluster.compare_reports(butina_report, dbscan_report))
+```
+
+Distances are Tanimoto/Jaccard (`distance = 1 - similarity`). Choose a threshold
+preset to match the use case:
+
+| Preset | `coverage_thresholds` | `boundary_threshold` | Tanimoto similarity |
+|--------|-----------------------|----------------------|---------------------|
+| `"tight"` | `[0.20, 0.30, 0.40]` | `0.25` | cover ≥0.80/0.70/0.60; boundary ≥0.75 |
+| `"default"` | `[0.25, 0.35, 0.45]` | `0.30` | cover ≥0.75/0.65/0.55; boundary ≥0.70 |
+| `"diversity"` | `[0.40, 0.50, 0.60]` | `0.40` | cover ≥0.60/0.50/0.40; boundary ≥0.60 |
+
+```python
+report = oecluster.cluster_report(butina_result, dm, preset="tight")
+# or override individual thresholds:
+report = oecluster.cluster_report(
+    butina_result, dm, coverage_thresholds=[0.2, 0.3], boundary_threshold=0.25)
+```
+
+Reported metrics:
+
+| Family | Metrics |
+|--------|---------|
+| Basic profile | `num_samples`, `num_clusters`, `num_noise`, `num_singletons`, `noise_fraction`, `singleton_fraction`, `largest_cluster_fraction`, `cluster_size_median`, `cluster_size_p90`, `size_gini`, `size_entropy` |
+| Compactness / separation | `mean_intra_distance`, `median_intra_distance`, `median_radius`, `p95_diameter`, `silhouette` (true mean per-point), `dunn_index`, `boundary_violations` |
+| Representative / coverage | `median_medoid_member_distance`, `representative_redundancy`, `coverage_thresholds`, `coverage_at` |
+
+`num_noise` (HDBSCAN-style unclustered points, label `-1`) and `num_singletons`
+(size-1 clusters) are always reported separately. By default
+`treat_noise_as_singletons=True` folds noise into the `singleton_fraction`
+interpretation; set it `False` to keep them distinct. The report requires
+complete pairwise distances (dense or memory-mapped storage); a sparse
+(`cutoff`) matrix raises.
+
+---
+
 ## Scaling Guidance
 
 Dense pairwise storage uses scipy-compatible condensed indexing and stores
