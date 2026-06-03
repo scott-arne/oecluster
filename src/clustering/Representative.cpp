@@ -5,6 +5,8 @@
 
 #include "oecluster/clustering/Representative.h"
 
+#include "ClusterMetrics.h"
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -83,48 +85,6 @@ std::vector<double> in_cluster_distances(
         }
     }
     return distances;
-}
-
-double mean_distance(const std::vector<double>& distances) {
-    if (distances.empty()) {
-        return 0.0;
-    }
-
-    double total = 0.0;
-    for (const double distance : distances) {
-        total += distance;
-    }
-    return total / static_cast<double>(distances.size());
-}
-
-double max_distance(const std::vector<double>& distances) {
-    if (distances.empty()) {
-        return 0.0;
-    }
-    return *std::max_element(distances.begin(), distances.end());
-}
-
-double median_distance(std::vector<double> distances) {
-    if (distances.empty()) {
-        return 0.0;
-    }
-
-    std::sort(distances.begin(), distances.end());
-    const size_t middle = distances.size() / 2;
-    if (distances.size() % 2 == 1) {
-        return distances[middle];
-    }
-    return (distances[middle - 1] + distances[middle]) / 2.0;
-}
-
-double cluster_diameter(const Cluster& cluster, const StorageBackend& storage) {
-    double diameter = 0.0;
-    for (size_t i = 0; i < cluster.size(); ++i) {
-        for (size_t j = i + 1; j < cluster.size(); ++j) {
-            diameter = std::max(diameter, storage.Get(cluster[i], cluster[j]));
-        }
-    }
-    return diameter;
 }
 
 std::vector<bool> cluster_membership(const Cluster& cluster, const size_t n_items) {
@@ -208,9 +168,9 @@ RepresentativeMetrics make_metrics(
     const std::vector<double> distances = in_cluster_distances(candidate, cluster, storage);
 
     RepresentativeMetrics metrics;
-    metrics.mean_distance_to_cluster = mean_distance(distances);
-    metrics.max_distance_to_cluster = max_distance(distances);
-    metrics.median_distance_to_cluster = median_distance(distances);
+    metrics.mean_distance_to_cluster = detail::mean_distance(distances);
+    metrics.max_distance_to_cluster = detail::max_distance(distances);
+    metrics.median_distance_to_cluster = detail::median_distance(distances);
     metrics.neighbor_fraction_at_threshold = neighbor_fraction_at_threshold(
         candidate,
         cluster,
@@ -274,7 +234,7 @@ std::vector<ClusterRepresentative> rank_representatives(
         storage.NumSamples(),
         "scaffold_labels");
 
-    const double diameter = cluster_diameter(cluster, storage);
+    const double diameter = detail::cluster_diameter(cluster, storage);
     const std::vector<bool> in_cluster = cluster_membership(cluster, storage.NumSamples());
 
     std::vector<ClusterRepresentative> ranked;
