@@ -908,6 +908,11 @@ class ClusteringResult:
         return self._clusters
 
     @property
+    def method(self):
+        """Clustering method that produced this result; '' if unknown."""
+        return ""
+
+    @property
     def num_clusters(self):
         """Number of clusters."""
         return len(self._clusters)
@@ -940,6 +945,10 @@ class ButinaResult(ClusteringResult):
     The first member of each cluster is the highest-neighborhood representative.
     """
 
+    @property
+    def method(self):
+        return "butina"
+
 
 class DBSCANResult(ClusteringResult):
     """DBSCAN clustering result with core sample indices."""
@@ -953,6 +962,10 @@ class DBSCANResult(ClusteringResult):
     def core_sample_indices(self):
         """Indices of core samples."""
         return self._core_sample_indices
+
+    @property
+    def method(self):
+        return "dbscan"
 
 
 class HDBSCANResult(ClusteringResult):
@@ -970,6 +983,10 @@ class HDBSCANResult(ClusteringResult):
     def probabilities(self):
         """Per-item membership probabilities as a NumPy ``float64`` array."""
         return self._probabilities
+
+    @property
+    def method(self):
+        return "hdbscan"
 
 
 class AgglomerativeResult(ClusteringResult):
@@ -1002,6 +1019,10 @@ class AgglomerativeResult(ClusteringResult):
         """Merged cluster size per merge."""
         return self._cluster_sizes
 
+    @property
+    def method(self):
+        return "agglomerative"
+
 
 class BitBirchResult(ClusteringResult):
     """BitBirch clustering result with centroid fingerprints."""
@@ -1021,6 +1042,10 @@ class BitBirchResult(ClusteringResult):
     def cluster_sizes(self):
         """Member count per cluster."""
         return self._cluster_sizes
+
+    @property
+    def method(self):
+        return "bitbirch"
 
 
 def _extract_labels(items):
@@ -1908,7 +1933,7 @@ class ClusterReport:
         "median_medoid_member_distance", "representative_redundancy",
     )
 
-    def __init__(self, native_report):
+    def __init__(self, native_report, method=""):
         """Capture every field from the native report into Python values."""
         for name in self._SCALAR_FIELDS:
             object.__setattr__(self, f"_{name}", getattr(native_report, name))
@@ -1918,6 +1943,7 @@ class ClusterReport:
         object.__setattr__(
             self, "_coverage_at",
             tuple(float(v) for v in native_report.coverage_at))
+        object.__setattr__(self, "_method", str(method))
 
     def __setattr__(self, name, value):
         """ClusterReport is read-only; reject external attribute assignment."""
@@ -1930,6 +1956,11 @@ class ClusterReport:
         raise AttributeError(name)
 
     @property
+    def method(self):
+        """Clustering method that produced the result this report describes."""
+        return self._method
+
+    @property
     def coverage_thresholds(self):
         """Distance thresholds for coverage (tuple of floats)."""
         return self._coverage_thresholds
@@ -1940,7 +1971,8 @@ class ClusterReport:
         return self._coverage_at
 
     def __repr__(self):
-        return (f"ClusterReport(num_clusters={self.num_clusters}, "
+        return (f"ClusterReport(method={self.method!r}, "
+                f"num_clusters={self.num_clusters}, "
                 f"num_samples={self.num_samples}, "
                 f"silhouette={self.silhouette:.4f})")
 
@@ -2066,7 +2098,7 @@ def cluster_report(result, distance_matrix, *, preset="default",
 
     native = _cluster_report(
         _native_clustering_result(result), distance_matrix.storage, options)
-    return ClusterReport(native)
+    return ClusterReport(native, method=result.method)
 
 
 def compare_reports(report_a, report_b):

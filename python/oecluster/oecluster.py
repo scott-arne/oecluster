@@ -1159,6 +1159,10 @@ class ClusteringResult(object):
         r"""Number of items (length of the labels vector)."""
         return _oecluster.ClusteringResult_NumSamples(self)
 
+    def Method(self):
+        r"""Clustering method name (e.g. "butina"); empty for the base."""
+        return _oecluster.ClusteringResult_Method(self)
+
 # Register ClusteringResult in _oecluster:
 _oecluster.ClusteringResult_swigregister(ClusteringResult)
 cvar = _oecluster.cvar
@@ -1200,6 +1204,9 @@ class ButinaResult(ClusteringResult):
 
     def __init__(self, *args):
         _oecluster.ButinaResult_swiginit(self, _oecluster.new_ButinaResult(*args))
+
+    def Method(self):
+        return _oecluster.ButinaResult_Method(self)
     __swig_destroy__ = _oecluster.delete_ButinaResult
 
 # Register ButinaResult in _oecluster:
@@ -1569,6 +1576,9 @@ class DBSCANResult(ClusteringResult):
     def CoreSampleIndices(self):
         r"""Indices of core samples."""
         return _oecluster.DBSCANResult_CoreSampleIndices(self)
+
+    def Method(self):
+        return _oecluster.DBSCANResult_Method(self)
     __swig_destroy__ = _oecluster.delete_DBSCANResult
 
 # Register DBSCANResult in _oecluster:
@@ -1619,6 +1629,9 @@ class HDBSCANResult(ClusteringResult):
     def Probabilities(self):
         r"""Per-item membership probabilities."""
         return _oecluster.HDBSCANResult_Probabilities(self)
+
+    def Method(self):
+        return _oecluster.HDBSCANResult_Method(self)
     __swig_destroy__ = _oecluster.delete_HDBSCANResult
 
 # Register HDBSCANResult in _oecluster:
@@ -1682,6 +1695,9 @@ class AgglomerativeResult(ClusteringResult):
     def ClusterSizes(self):
         r"""Merged cluster size per merge."""
         return _oecluster.AgglomerativeResult_ClusterSizes(self)
+
+    def Method(self):
+        return _oecluster.AgglomerativeResult_Method(self)
     __swig_destroy__ = _oecluster.delete_AgglomerativeResult
 
 # Register AgglomerativeResult in _oecluster:
@@ -1772,6 +1788,9 @@ class BitBirchResult(ClusteringResult):
     def ClusterSizes(self):
         r"""Member count per cluster."""
         return _oecluster.BitBirchResult_ClusterSizes(self)
+
+    def Method(self):
+        return _oecluster.BitBirchResult_Method(self)
     __swig_destroy__ = _oecluster.delete_BitBirchResult
 
 # Register BitBirchResult in _oecluster:
