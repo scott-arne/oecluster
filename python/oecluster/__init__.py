@@ -1963,21 +1963,42 @@ class ClusterReportComparison:
         return self._b
 
     def to_table(self):
-        """Return a list of (metric, a_value, b_value) rows for display."""
+        """Return a list of (metric, a_value, b_value) rows for display.
+
+        Coverage rows are aligned by threshold value across the two reports;
+        a report that lacks a given threshold shows NaN for that row.
+        """
         rows = []
         for name in ClusterReport._SCALAR_FIELDS:
             rows.append((name, getattr(self._a, name), getattr(self._b, name)))
-        for i, t in enumerate(self._a.coverage_thresholds):
-            a_cov = self._a.coverage_at[i] if i < len(self._a.coverage_at) else float("nan")
-            b_cov = self._b.coverage_at[i] if i < len(self._b.coverage_at) else float("nan")
-            rows.append((f"coverage_at[{t}]", a_cov, b_cov))
+
+        def _coverage_lookup(report, threshold):
+            for i, t in enumerate(report.coverage_thresholds):
+                if t == threshold and i < len(report.coverage_at):
+                    return report.coverage_at[i]
+            return float("nan")
+
+        thresholds = sorted(
+            set(self._a.coverage_thresholds) | set(self._b.coverage_thresholds))
+        for threshold in thresholds:
+            rows.append((
+                f"coverage_at[{threshold}]",
+                _coverage_lookup(self._a, threshold),
+                _coverage_lookup(self._b, threshold),
+            ))
         return rows
 
     def __repr__(self):
-        width = max(len(r[0]) for r in self.to_table())
+        def _fmt(value):
+            if isinstance(value, float):
+                return f"{value:.4g}"
+            return str(value)
+
+        rows = self.to_table()
+        width = max(len(r[0]) for r in rows)
         lines = [f"{'metric':<{width}}  {'a':>12}  {'b':>12}"]
-        for name, av, bv in self.to_table():
-            lines.append(f"{name:<{width}}  {av!s:>12}  {bv!s:>12}")
+        for name, av, bv in rows:
+            lines.append(f"{name:<{width}}  {_fmt(av):>12}  {_fmt(bv):>12}")
         return "\n".join(lines)
 
 
