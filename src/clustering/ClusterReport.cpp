@@ -272,6 +272,9 @@ ClusterReport cluster_report(
         }
 
         // Representative / coverage.
+        // Medoids are re-selected here (also computed above for radii); kept as a
+        // separate pass for sub-block clarity. The cost is dominated by the O(N^2)
+        // silhouette/coverage work below.
         std::vector<size_t> medoids;
         medoids.reserve(members.size());
         std::vector<double> medoid_member_means;
