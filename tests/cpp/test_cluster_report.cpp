@@ -121,3 +121,42 @@ TEST(ClusterReportTest, NoiseTreatedAsSingletonsToggle) {
     EXPECT_DOUBLE_EQ(rs.singleton_fraction, 0.0);
     EXPECT_EQ(rs.num_noise, 2u);  // still reported
 }
+
+TEST(ClusterReportTest, CompactnessTwoClusters) {
+    const DenseStorage storage = MakeTwoClusterStorage();
+    const ClusteringResult result = MakeResult({0, 0, 1, 1});
+
+    const ClusterReport r = cluster_report(result, storage, ClusterReportOptions());
+
+    EXPECT_DOUBLE_EQ(r.mean_intra_distance, 0.2);
+    EXPECT_DOUBLE_EQ(r.median_intra_distance, 0.2);
+    EXPECT_DOUBLE_EQ(r.median_radius, 0.2);
+    EXPECT_DOUBLE_EQ(r.p95_diameter, 0.2);
+    EXPECT_NEAR(r.silhouette, 0.75, 1e-12);
+    EXPECT_NEAR(r.dunn_index, 4.0, 1e-12);
+}
+
+TEST(ClusterReportTest, BoundaryViolationsThreshold) {
+    const DenseStorage storage = MakeTwoClusterStorage();
+    const ClusteringResult result = MakeResult({0, 0, 1, 1});
+
+    ClusterReportOptions strict;
+    strict.boundary_threshold = 0.3;  // cross pairs are 0.8 > 0.3
+    EXPECT_EQ(cluster_report(result, storage, strict).boundary_violations, 0u);
+
+    ClusterReportOptions loose;
+    loose.boundary_threshold = 0.9;  // all 4 cross pairs <= 0.9
+    EXPECT_EQ(cluster_report(result, storage, loose).boundary_violations, 4u);
+}
+
+TEST(ClusterReportTest, SeparationMetricsNaNForSingleCluster) {
+    const DenseStorage storage = MakeTwoClusterStorage();
+    const ClusteringResult result = MakeResult({0, 0, 0, 0});
+
+    const ClusterReport r = cluster_report(result, storage, ClusterReportOptions());
+
+    EXPECT_TRUE(std::isnan(r.silhouette));
+    EXPECT_TRUE(std::isnan(r.dunn_index));
+    // compactness still defined
+    EXPECT_FALSE(std::isnan(r.median_radius));
+}

@@ -69,6 +69,39 @@ double size_gini(const std::vector<double>& sizes) {
            (static_cast<double>(n) + 1.0) / static_cast<double>(n);
 }
 
+double nan_value() {
+    return std::numeric_limits<double>::quiet_NaN();
+}
+
+// Mean distance from `point` to every member of `cluster` except itself.
+double mean_to_cluster(
+    const size_t point,
+    const Cluster& cluster,
+    const StorageBackend& storage) {
+    double total = 0.0;
+    size_t count = 0;
+    for (const size_t member : cluster) {
+        if (member != point) {
+            total += storage.Get(point, member);
+            ++count;
+        }
+    }
+    return count == 0 ? 0.0 : total / static_cast<double>(count);
+}
+
+double min_inter_cluster_distance(
+    const Cluster& a,
+    const Cluster& b,
+    const StorageBackend& storage) {
+    double smallest = std::numeric_limits<double>::infinity();
+    for (const size_t i : a) {
+        for (const size_t j : b) {
+            smallest = std::min(smallest, storage.Get(i, j));
+        }
+    }
+    return smallest;
+}
+
 double size_entropy(const std::vector<double>& sizes) {
     if (sizes.size() <= 1) {
         return 0.0;
@@ -153,6 +186,98 @@ ClusterReport cluster_report(
     }
     report.size_gini = size_gini(sizes);
     report.size_entropy = size_entropy(sizes);
+
+    if (!members.empty()) {
+        // Intra-cluster pair distances, radii, diameters.
+        std::vector<double> intra_pairs;
+        std::vector<double> radii;
+        std::vector<double> diameters;
+        double max_diameter = 0.0;
+        for (const Cluster& cluster : members) {
+            for (size_t i = 0; i < cluster.size(); ++i) {
+                for (size_t j = i + 1; j < cluster.size(); ++j) {
+                    intra_pairs.push_back(storage.Get(cluster[i], cluster[j]));
+                }
+            }
+            const size_t medoid =
+                cluster_representative(cluster, storage, options.representative_method);
+            double radius = 0.0;
+            for (const size_t member : cluster) {
+                radius = std::max(radius, storage.Get(medoid, member));
+            }
+            radii.push_back(radius);
+            const double diameter = detail::cluster_diameter(cluster, storage);
+            diameters.push_back(diameter);
+            max_diameter = std::max(max_diameter, diameter);
+        }
+
+        report.mean_intra_distance =
+            intra_pairs.empty() ? nan_value() : detail::mean_distance(intra_pairs);
+        report.median_intra_distance =
+            intra_pairs.empty() ? nan_value() : detail::median_distance(intra_pairs);
+        report.median_radius = detail::median_distance(radii);
+        report.p95_diameter = percentile(diameters, 0.95);
+
+        // Boundary violations: cross-cluster member pairs within boundary_threshold.
+        size_t violations = 0;
+        for (size_t a = 0; a < members.size(); ++a) {
+            for (size_t b = a + 1; b < members.size(); ++b) {
+                for (const size_t i : members[a]) {
+                    for (const size_t j : members[b]) {
+                        if (storage.Get(i, j) <= options.boundary_threshold) {
+                            ++violations;
+                        }
+                    }
+                }
+            }
+        }
+        report.boundary_violations = violations;
+
+        if (members.size() >= 2) {
+            // True mean per-point silhouette over clustered points.
+            double silhouette_sum = 0.0;
+            size_t silhouette_count = 0;
+            for (size_t k = 0; k < members.size(); ++k) {
+                for (const size_t point : members[k]) {
+                    const double a = mean_to_cluster(point, members[k], storage);
+                    double b = std::numeric_limits<double>::infinity();
+                    for (size_t other = 0; other < members.size(); ++other) {
+                        if (other != k) {
+                            b = std::min(b, mean_to_cluster(point, members[other], storage));
+                        }
+                    }
+                    const double denom = std::max(a, b);
+                    silhouette_sum += denom == 0.0 ? 0.0 : (b - a) / denom;
+                    ++silhouette_count;
+                }
+            }
+            report.silhouette = silhouette_count == 0
+                ? nan_value()
+                : silhouette_sum / static_cast<double>(silhouette_count);
+
+            // Dunn index: min inter-cluster distance / max intra diameter.
+            double min_inter = std::numeric_limits<double>::infinity();
+            for (size_t a = 0; a < members.size(); ++a) {
+                for (size_t b = a + 1; b < members.size(); ++b) {
+                    min_inter = std::min(
+                        min_inter,
+                        min_inter_cluster_distance(members[a], members[b], storage));
+                }
+            }
+            report.dunn_index =
+                max_diameter == 0.0 ? nan_value() : min_inter / max_diameter;
+        } else {
+            report.silhouette = nan_value();
+            report.dunn_index = nan_value();
+        }
+    } else {
+        report.mean_intra_distance = nan_value();
+        report.median_intra_distance = nan_value();
+        report.median_radius = nan_value();
+        report.p95_diameter = nan_value();
+        report.silhouette = nan_value();
+        report.dunn_index = nan_value();
+    }
 
     return report;
 }
