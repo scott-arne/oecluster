@@ -2026,7 +2026,9 @@ def cluster_report(result, distance_matrix, *, preset="default",
     :param preset: Threshold preset: "default", "tight", or "diversity".
     :param coverage_thresholds: Optional override for coverage distances.
     :param boundary_threshold: Optional override for the boundary-violation distance.
-    :param representative_method: Medoid selection method (default "medoid").
+    :param representative_method: Centrality method for medoid selection:
+        "medoid" (default), "minimax", or "weighted_medoid". The
+        "highest_neighborhood" method is not supported.
     :param treat_noise_as_singletons: Fold noise into singleton accounting.
     :param num_threads: Reserved for parallel-safe computation.
     :returns: A ClusterReport.
@@ -2053,7 +2055,11 @@ def cluster_report(result, distance_matrix, *, preset="default",
         if bt < 0.0:
             raise ValueError("boundary_threshold must be non-negative")
         options.boundary_threshold = bt
-    _, native_method = _representative_method(representative_method)
+    method_key, native_method = _representative_method(representative_method)
+    if method_key == "highest_neighborhood":
+        raise ValueError(
+            "cluster_report does not support the 'highest_neighborhood' "
+            "representative method; use 'medoid', 'minimax', or 'weighted_medoid'")
     options.representative_method = native_method
     options.treat_noise_as_singletons = bool(treat_noise_as_singletons)
     options.num_threads = int(num_threads)
