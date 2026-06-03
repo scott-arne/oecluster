@@ -7,6 +7,7 @@
 #define OECLUSTER_CLUSTERING_BUTINA_H
 
 #include <cstddef>
+#include <string>
 
 #include "oecluster/StorageBackend.h"
 #include "oecluster/clustering/ClusterTypes.h"

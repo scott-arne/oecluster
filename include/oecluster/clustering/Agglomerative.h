@@ -7,6 +7,7 @@
 #define OECLUSTER_CLUSTERING_AGGLOMERATIVE_H
 
 #include <cstddef>
+#include <string>
 #include <utility>
 #include <vector>
 
