@@ -396,13 +396,57 @@ report = oecluster.cluster_report(
     butina_result, dm, coverage_thresholds=[0.2, 0.3], boundary_threshold=0.25)
 ```
 
-Reported metrics:
+All distances below are Tanimoto/Jaccard distances, so **smaller means more
+similar** (distance `0.2` ≈ Tanimoto similarity `0.8`). Metrics that are
+undefined for a given clustering (for example separation metrics when there is
+only one cluster) are reported as `NaN`.
 
-| Family | Metrics |
-|--------|---------|
-| Basic profile | `num_samples`, `num_clusters`, `num_noise`, `num_singletons`, `noise_fraction`, `singleton_fraction`, `largest_cluster_fraction`, `cluster_size_median`, `cluster_size_p90`, `size_gini`, `size_entropy` |
-| Compactness / separation | `mean_intra_distance`, `median_intra_distance`, `median_radius`, `p95_diameter`, `silhouette` (true mean per-point), `dunn_index`, `boundary_violations` |
-| Representative / coverage | `median_medoid_member_distance`, `representative_redundancy`, `coverage_thresholds`, `coverage_at` |
+### Basic profile
+
+How many clusters there are and how the molecules are distributed across them —
+pure bookkeeping on the cluster labels, no distances required.
+
+| Metric | What it tells you |
+|--------|-------------------|
+| `num_samples` | Total number of molecules clustered. |
+| `num_clusters` | Number of clusters found (noise points are not counted as a cluster). |
+| `num_noise` | Number of molecules left unassigned. HDBSCAN labels these `-1`; methods like Butina assign everything, so this is `0` for them. |
+| `num_singletons` | Number of clusters containing exactly one molecule. A high count signals over-fragmentation — many compounds that didn't group with anything. |
+| `noise_fraction` | `num_noise / num_samples` — the share of the library left unclustered. |
+| `singleton_fraction` | Share of clusters that are singletons. With `treat_noise_as_singletons=True` (the default) noise points are counted as their own singletons here; set it `False` to base this only on real size-1 clusters. |
+| `largest_cluster_fraction` | Fraction of all molecules sitting in the single biggest cluster. A value near 1.0 means one giant cluster swallowed most of the library (over-merging). |
+| `cluster_size_median` | Median cluster size — the "typical" number of molecules per cluster, robust to a few very large clusters. |
+| `cluster_size_p90` | 90th-percentile cluster size — most clusters are at or below this; useful for spotting a heavy tail of large clusters. |
+| `size_gini` | Gini coefficient of the cluster sizes (0 = all clusters equal in size, approaching 1 = highly uneven). A quick read on whether sizes are balanced or skewed. |
+| `size_entropy` | Shannon entropy (in bits) of the cluster-size distribution. Higher means sizes are more evenly spread; lower means a few clusters dominate. |
+
+### Compactness and separation
+
+Whether clusters are chemically tight inside and well separated from each other —
+the core "are these good clusters?" view. Needs the full distance matrix.
+
+| Metric | What it tells you |
+|--------|-------------------|
+| `mean_intra_distance` | Average distance between all pairs of molecules within the same cluster. Lower means members are, on average, more similar to one another. |
+| `median_intra_distance` | Median of those within-cluster pairwise distances — the same idea as above but less sensitive to a few outlier pairs. |
+| `median_radius` | For each cluster, the distance from its medoid (most central member) to its farthest member; reported as the median across clusters. A small radius means a typical cluster is tightly packed around its center. |
+| `p95_diameter` | Cluster diameter is the largest distance between any two members of a cluster; this reports the 95th percentile across clusters. It surfaces the worst-case internal spread — how heterogeneous the loosest clusters get. |
+| `silhouette` | Mean silhouette score over all clustered molecules (range −1 to 1). For each molecule it compares how close it sits to its own cluster versus the nearest other cluster; values near 1 mean tight, well-separated clusters, near 0 mean overlapping clusters, and negative means molecules may be in the wrong cluster. |
+| `dunn_index` | Smallest between-cluster distance divided by the largest cluster diameter. Higher is better: it rewards clusters that are far apart relative to how wide they are. Sensitive to outliers, so read it alongside the other metrics. |
+| `boundary_violations` | Count of cross-cluster molecule pairs that are closer than `boundary_threshold` — i.e. pairs that look like near-neighbors yet were split into different clusters. A high count suggests the method is cutting through groups of similar compounds. |
+
+### Representatives and coverage
+
+If you pick one representative molecule (medoid) per cluster, how well do those
+representatives stand in for the whole library? Relevant for compound selection,
+purchasing, and diversity triage.
+
+| Metric | What it tells you |
+|--------|-------------------|
+| `median_medoid_member_distance` | For each cluster, the average distance from its medoid to the other members; reported as the median across clusters. A small value means the chosen representative is genuinely typical of its cluster. |
+| `representative_redundancy` | Median nearest-neighbor distance among the medoids themselves. A small value warns that different clusters' representatives are near-duplicates of each other (redundant chemotypes); a larger value means the representatives are diverse. |
+| `coverage_thresholds` | The distance cutoffs at which coverage is evaluated (set by the preset or your override). |
+| `coverage_at` | For each threshold, the fraction of **all** molecules that fall within that distance of some medoid (noise molecules are included in the denominator). It answers "if I only kept the representatives, what fraction of the library would still have a close analog?" |
 
 `num_noise` (HDBSCAN-style unclustered points, label `-1`) and `num_singletons`
 (size-1 clusters) are always reported separately. By default
