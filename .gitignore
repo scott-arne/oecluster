@@ -290,6 +290,7 @@ cython_debug/
 docs/plans/
 docs/specs/
 docs/superpowers/
+docs/hyperpowers/
 CMakeUserPresets.json
 .claude
 build-debug/
