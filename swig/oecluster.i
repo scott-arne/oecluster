@@ -626,6 +626,23 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, _oecluster_is_oereceptor, "
     Py_END_ALLOW_THREADS
 }
 
+%exception OECluster::cdist_into_address {
+    Py_BEGIN_ALLOW_THREADS
+    try {
+        $action
+    } catch (const OECluster::OEClusterError& e) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError, e.what());
+    } catch (const std::exception& e) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError, e.what());
+    } catch (...) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError, "Unknown C++ exception in cdist_into_address");
+    }
+    Py_END_ALLOW_THREADS
+}
+
 %exception OECluster::butina_cluster {
     Py_BEGIN_ALLOW_THREADS
     try {
@@ -1003,10 +1020,19 @@ struct CDistOptions {
     CDistOptions();
 };
 
-void cdist(PairwiseComparison& comparison, size_t n_a, double* output,
-           const CDistOptions& options = CDistOptions());
-
 }  // namespace OECluster
+
+%inline %{
+namespace OECluster {
+// Buffer-address bridge so Python can pass a preallocated numpy array's data
+// pointer (as an integer) instead of an opaque double*. The Python wrapper owns
+// all dtype/shape/lifetime validation; this only forwards the address.
+void cdist_into_address(PairwiseComparison& comparison, size_t n_a,
+                        size_t out_addr, const CDistOptions& options) {
+    cdist(comparison, n_a, reinterpret_cast<double*>(out_addr), options);
+}
+}  // namespace OECluster
+%}
 
 // ============================================================================
 // DistanceMatrix

@@ -879,8 +879,8 @@ class CDistOptions(object):
 # Register CDistOptions in _oecluster:
 _oecluster.CDistOptions_swigregister(CDistOptions)
 
-def cdist(*args):
-    return _oecluster.cdist(*args)
+def cdist_into_address(comparison, n_a, out_addr, options):
+    return _oecluster.cdist_into_address(comparison, n_a, out_addr, options)
 class DistanceMatrix(object):
     thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")
 
