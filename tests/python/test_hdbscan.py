@@ -31,7 +31,7 @@ def test_hdbscan_matches_sklearn_precomputed_toy():
         metric="precomputed",
         cluster_selection_method="leaf",
         allow_single_cluster=False,
-        copy=True,
+        copy=True,  # pyright: ignore[reportArgumentType]
     ).fit(square)
     observed = oecluster.hdbscan(
         dm,
@@ -43,6 +43,7 @@ def test_hdbscan_matches_sklearn_precomputed_toy():
     assert isinstance(observed, oecluster.HDBSCANResult)
     assert isinstance(observed, oecluster.ClusteringResult)
     assert observed.labels.tolist() == expected.labels_.tolist()
+    assert observed.probabilities is not None
     np.testing.assert_allclose(observed.probabilities, expected.probabilities_)
     assert observed.clusters == ((0, 1, 2), (3, 4, 5))
 
@@ -61,7 +62,7 @@ def test_hdbscan_matches_sklearn_with_noise_and_eom():
         metric="precomputed",
         cluster_selection_method="eom",
         allow_single_cluster=False,
-        copy=True,
+        copy=True,  # pyright: ignore[reportArgumentType]
     ).fit(square)
     observed = oecluster.hdbscan(
         dm,
@@ -71,6 +72,7 @@ def test_hdbscan_matches_sklearn_with_noise_and_eom():
     )
 
     assert observed.labels.tolist() == expected.labels_.tolist()
+    assert observed.probabilities is not None
     np.testing.assert_allclose(observed.probabilities, expected.probabilities_)
     assert observed.clusters == ((0, 1, 2), (3, 4, 5))
 
@@ -94,7 +96,7 @@ def test_hdbscan_matches_sklearn_labels_for_tied_mst_edges():
         metric="precomputed",
         cluster_selection_method="eom",
         allow_single_cluster=False,
-        copy=True,
+        copy=True,  # pyright: ignore[reportArgumentType]
     ).fit(square)
     observed = oecluster.hdbscan(
         dm,
@@ -104,6 +106,7 @@ def test_hdbscan_matches_sklearn_labels_for_tied_mst_edges():
     )
 
     assert observed.labels.tolist() == expected.labels_.tolist()
+    assert observed.probabilities is not None
     assert observed.probabilities.shape == expected.probabilities_.shape
     assert np.all(observed.probabilities >= 0.0)
     assert np.all(observed.probabilities <= 1.0)

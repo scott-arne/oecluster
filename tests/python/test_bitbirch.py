@@ -293,9 +293,9 @@ def test_bitbirch_refine_fast_mode_matches_strict_until_optimized():
 def test_bitbirch_fast_mode_docstrings_mark_reserved_alias():
     expected = "fast currently uses the strict-parity path"
 
-    assert expected in " ".join(oecluster.bitbirch.__doc__.split())
-    assert expected in " ".join(oecluster.bitbirch_recluster.__doc__.split())
-    assert expected in " ".join(oecluster.bitbirch_refine.__doc__.split())
+    assert expected in " ".join((oecluster.bitbirch.__doc__ or "").split())
+    assert expected in " ".join((oecluster.bitbirch_recluster.__doc__ or "").split())
+    assert expected in " ".join((oecluster.bitbirch_refine.__doc__ or "").split())
 
 
 def _reference_refine_reassign(bits, *, top=2):

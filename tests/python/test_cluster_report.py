@@ -82,7 +82,7 @@ def test_report_is_read_only():
     with pytest.raises(AttributeError):
         report.num_clusters = 99
     with pytest.raises(AttributeError):
-        report.coverage_at = ()
+        report.coverage_at = ()  # pyright: ignore[reportAttributeAccessIssue]
 
 
 def test_result_method_names():

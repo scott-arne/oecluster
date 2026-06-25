@@ -44,7 +44,7 @@ def _sklearn_agglomerative(square, *, linkage, n_clusters=2, distance_threshold=
     try:
         model = AgglomerativeClustering(metric="precomputed", **kwargs)
     except TypeError:
-        model = AgglomerativeClustering(affinity="precomputed", **kwargs)
+        model = AgglomerativeClustering(affinity="precomputed", **kwargs)  # pyright: ignore[reportCallIssue]
     return model.fit(square)
 
 
@@ -64,6 +64,7 @@ def test_agglomerative_matches_sklearn_precomputed_linkages(linkage):
     assert _cluster_members(observed.labels) == _cluster_members(expected.labels_)
     assert observed.clusters == ((0, 1, 2), (3, 4, 5))
     assert len(observed.children) == square.shape[0] - 1
+    assert observed.distances is not None
     assert observed.distances.shape == (square.shape[0] - 1,)
     assert observed.cluster_sizes[-1] == square.shape[0]
 
@@ -117,6 +118,7 @@ def test_agglomerative_weighted_linkage_returns_tree_metadata():
     assert observed.labels.tolist() == [0, 0, 0, 1, 1]
     assert observed.clusters == ((0, 1, 2), (3, 4))
     assert observed.children == ((0, 1), (2, 5), (3, 4), (6, 7))
+    assert observed.distances is not None
     np.testing.assert_allclose(observed.distances, [0.1, 0.25, 0.4, 16.0])
     assert observed.cluster_sizes == (2, 3, 2, 5)
 
@@ -144,6 +146,7 @@ def test_agglomerative_can_stop_before_full_tree():
 
     assert observed.labels.tolist() == [0, 0, 1, 1]
     assert observed.children == ((0, 1), (2, 3))
+    assert observed.distances is not None
     np.testing.assert_allclose(observed.distances, [0.1, 0.2])
     assert observed.cluster_sizes == (2, 2)
 

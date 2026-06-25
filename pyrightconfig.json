@@ -51,7 +51,7 @@
   "extraPaths": [
     "python"
   ],
-  "venvPath": "/Users/johnss51/Applications/miniforge3/envs",
+  "venvPath": "/Users/johnss51/Applications/micromamba/envs",
   "venv": "main",
   "pythonVersion": "3.10",
   "pythonPlatform": "Darwin",
