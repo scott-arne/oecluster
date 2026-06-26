@@ -22,10 +22,10 @@ DETERMINISM_N = 5000
 
 # Calibrated fast-vs-strict quality tolerances (see plan Task 6).
 FAST_QUALITY_TOL = {
-    "num_clusters_rel": 0.15,        # |fast - strict| / strict
-    "intra_distance_abs": 0.05,      # fast may be at most this much larger
-    "silhouette_abs": 0.05,          # fast may be at most this much lower
-    "coverage_abs": 0.05,            # fast may be at most this much lower
+    "num_clusters_rel": 0.15,        # observed worst-case ~0.7%
+    "intra_distance_abs": 0.05,      # observed: fast ~0.008–0.009 better (lower)
+    "silhouette_abs": 0.05,          # observed worst-case ~0.012 lower
+    "coverage_abs": 0.05,            # observed: no meaningful delta
 }
 
 
@@ -90,7 +90,7 @@ def _tanimoto_distance_matrix(bits):
     """Build a complete SymmetricDistanceMatrix of Tanimoto distances (1 - sim).
 
     Uses a vectorized intersection matmul; only the upper-triangle Set() calls
-    iterate in Python. Intended for modest n (a few hundred rows).
+    iterate in Python. Intended for modest n (thousands of rows, not millions).
     """
     from oecluster import DenseStorage, SymmetricDistanceMatrix
 
