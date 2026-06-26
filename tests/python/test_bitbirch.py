@@ -620,3 +620,36 @@ def test_bitbirch_fast_quality_equivalent_to_strict(merge_criterion, singly):
     for i in range(len(strict_report.coverage_at)):
         assert fast_report.coverage_at[i] >= \
             strict_report.coverage_at[i] - FAST_QUALITY_TOL["coverage_abs"]
+
+
+@pytest.mark.parametrize("num_threads", [1, 2, 4, 0])
+def test_bitbirch_recluster_fast_deterministic_across_threads(num_threads):
+    bits = _random_bits(DETERMINISM_N, 64, seed=21)
+    batch = _batch_from_bits(bits)
+    ref = oecluster.bitbirch_recluster(batch, initial_threshold=0.5,
+                                       second_threshold=0.5, branching_factor=50,
+                                       mode="fast", num_threads=1)
+    obs = oecluster.bitbirch_recluster(batch, initial_threshold=0.5,
+                                       second_threshold=0.5, branching_factor=50,
+                                       mode="fast", num_threads=num_threads)
+    assert obs.labels.tolist() == ref.labels.tolist()
+    assert obs.clusters == ref.clusters
+
+
+def test_bitbirch_recluster_fast_quality_equivalent_to_strict():
+    bits = _random_bits(QUALITY_N, 64, seed=21)
+    batch = _batch_from_bits(bits)
+    dm = _tanimoto_distance_matrix(bits)
+    common = dict(initial_threshold=0.5, second_threshold=0.5, branching_factor=50)
+    strict = oecluster.bitbirch_recluster(batch, mode="strict_parity", **common)
+    fast = oecluster.bitbirch_recluster(batch, mode="fast", **common)
+    strict_report = oecluster.cluster_report(strict, dm)
+    fast_report = oecluster.cluster_report(fast, dm)
+    _assert_non_degenerate(strict_report)
+    _assert_non_degenerate(fast_report)
+    assert abs(fast_report.num_clusters - strict_report.num_clusters) <= \
+        FAST_QUALITY_TOL["num_clusters_rel"] * strict_report.num_clusters
+    assert fast_report.mean_intra_distance <= \
+        strict_report.mean_intra_distance + FAST_QUALITY_TOL["intra_distance_abs"]
+    assert fast_report.silhouette >= \
+        strict_report.silhouette - FAST_QUALITY_TOL["silhouette_abs"]

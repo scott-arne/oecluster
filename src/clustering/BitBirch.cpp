@@ -60,7 +60,11 @@ BitBirchResult bitbirch_recluster(
     validate_batch(fingerprints);
 
     detail::BitBirchTree first_tree(first_options);
-    first_tree.Fit(fingerprints);
+    if (first_options.mode == BitBirchMode::Fast) {
+        detail::BitBirchTree::BuildFastTree(fingerprints, first_options, first_tree);
+    } else {
+        first_tree.Fit(fingerprints);
+    }
     auto [rest, largest_singletons] =
         first_tree.PrepareReclusteringSubclusters(fingerprints);
 

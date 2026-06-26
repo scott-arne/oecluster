@@ -378,3 +378,45 @@ TEST(BitBirchFastTest, BitBirchClusterFastQualityEquivalentToStrict) {
                        static_cast<double>(rs.num_clusters)),
               0.15 * static_cast<double>(rs.num_clusters));
 }
+
+TEST(BitBirchFastTest, ReclusterFastSmallNMatchesStrict) {
+    const auto batch = make_batch({
+        make_fp(4, {0, 1}), make_fp(4, {0, 1}),
+        make_fp(4, {2, 3}), make_fp(4, {2, 3}),
+        make_fp(4, {0, 2}), make_fp(4, {0, 2}),
+    });
+    OECluster::BitBirchReclusteringOptions strict_opts;
+    strict_opts.initial_threshold = 0.5;
+    strict_opts.second_threshold = 0.5;
+    strict_opts.branching_factor = 2;
+    strict_opts.mode = OECluster::BitBirchMode::StrictParity;
+
+    OECluster::BitBirchReclusteringOptions fast_opts = strict_opts;
+    fast_opts.mode = OECluster::BitBirchMode::Fast;
+
+    const auto strict = OECluster::bitbirch_recluster(batch, strict_opts);
+    const auto fast = OECluster::bitbirch_recluster(batch, fast_opts);
+
+    EXPECT_EQ(strict.Labels(), fast.Labels());
+    EXPECT_EQ(strict.Members(), fast.Members());
+}
+
+TEST(BitBirchFastTest, ReclusterFastDeterministicAcrossThreadCounts) {
+    const auto batch = make_random_batch(5000, 64);
+    OECluster::BitBirchReclusteringOptions opts;
+    opts.initial_threshold = 0.5;
+    opts.second_threshold = 0.5;
+    opts.branching_factor = 50;
+    opts.mode = OECluster::BitBirchMode::Fast;
+
+    auto run = [&](size_t threads) {
+        auto o = opts; o.num_threads = threads;
+        return OECluster::bitbirch_recluster(batch, o);
+    };
+    const auto r1 = run(1);
+    for (const size_t threads : {size_t{2}, size_t{4}, size_t{0}}) {
+        const auto r = run(threads);
+        EXPECT_EQ(r1.Labels(), r.Labels()) << "threads=" << threads;
+        EXPECT_EQ(r1.Members(), r.Members()) << "threads=" << threads;
+    }
+}
