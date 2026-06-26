@@ -294,3 +294,24 @@ def test_pdist_unknown_kwargs_raises():
 
     with pytest.raises(TypeError, match="Unknown kwargs"):
         oecluster.pdist(mols, "fingerprint", bogus_option=42)
+
+
+def test_symmetric_distance_matrix_hierarchy():
+    """SymmetricDistanceMatrix is the concrete pdist result; base is abstract."""
+    import oecluster
+    from oecluster import DenseStorage, DistanceMatrix, SymmetricDistanceMatrix
+
+    storage = DenseStorage(3)
+    storage.Set(0, 1, 0.5)
+    storage.Set(0, 2, 0.25)
+    storage.Set(1, 2, 0.75)
+    dm = SymmetricDistanceMatrix(storage, "test", ["a", "b", "c"], {})
+
+    assert isinstance(dm, DistanceMatrix)
+    assert dm.num_samples == 3
+    assert dm.shape == (3, 3)
+    assert dm.comparison_name == "test"
+    assert repr(dm).startswith("SymmetricDistanceMatrix(")
+    # The abstract base must not be directly constructible as a symmetric matrix.
+    with pytest.raises(TypeError):
+        DistanceMatrix("test", {}).num_samples  # type: ignore[call-arg]

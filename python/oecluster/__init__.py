@@ -7,6 +7,7 @@ multiple comparison methods including fingerprint similarity, ROCS shape
 overlay, protein superposition, and binding site comparison.
 """
 
+import abc
 import json
 import hashlib
 import importlib.machinery
@@ -37,6 +38,7 @@ __all__ = [
     "SparseStorage",
     "PDistOptions",
     "DistanceMatrix",
+    "SymmetricDistanceMatrix",
     "ClusteringResult",
     "ClusterReport",
     "ClusterReportComparison",
@@ -625,33 +627,25 @@ from .oecluster import SuperposeComparison as _SuperposeComparison
 from .oecluster import SuperposeOptions
 
 
-class DistanceMatrix:
+class DistanceMatrix(abc.ABC):
     """
-    A distance matrix computed from a set of items using a comparison method.
+    Abstract base for distance matrices computed from a set of items.
 
-    Provides zero-copy access to condensed distance matrix data via numpy arrays,
-    conversion to scipy sparse matrices, and serialization support.
+    Subclasses model specific shapes: :class:`SymmetricDistanceMatrix` for the
+    symmetric within-set result of :func:`pdist`, and
+    :class:`CrossDistanceMatrix` for the rectangular cross-set result of
+    :func:`cdist`. The base holds only the shared comparison metadata.
     """
 
-    def __init__(self, storage, comparison_name, labels=None, params=None):
+    def __init__(self, comparison_name, params=None):
         """
-        Construct a DistanceMatrix wrapper.
+        Initialize shared distance-matrix metadata.
 
-        :param storage: C++ StorageBackend instance.
         :param comparison_name: Name of the comparison method used.
-        :param labels: Optional list of labels for items.
         :param params: Optional dictionary of comparison parameters.
         """
-        self._storage = storage
         self._comparison_name = comparison_name
-        self._labels = labels if labels is not None else []
         self._params = params if params is not None else {}
-        self._condensed_cache = None
-
-    @property
-    def storage(self):
-        """Get the underlying storage backend."""
-        return self._storage
 
     @property
     def comparison_name(self):
@@ -662,6 +656,39 @@ class DistanceMatrix:
     def params(self):
         """Get the comparison parameters dictionary."""
         return self._params
+
+    @abc.abstractmethod
+    def to_file(self, path):
+        """Save the distance matrix to a compressed ``.npz`` file."""
+        raise NotImplementedError
+
+
+class SymmetricDistanceMatrix(DistanceMatrix):
+    """
+    A symmetric (within-set) distance matrix produced by :func:`pdist`.
+
+    Provides zero-copy access to condensed distance matrix data via numpy arrays,
+    conversion to scipy sparse matrices, and serialization support.
+    """
+
+    def __init__(self, storage, comparison_name, labels=None, params=None):
+        """
+        Construct a SymmetricDistanceMatrix wrapper.
+
+        :param storage: C++ StorageBackend instance.
+        :param comparison_name: Name of the comparison method used.
+        :param labels: Optional list of labels for items.
+        :param params: Optional dictionary of comparison parameters.
+        """
+        super().__init__(comparison_name, params)
+        self._storage = storage
+        self._labels = labels if labels is not None else []
+        self._condensed_cache = None
+
+    @property
+    def storage(self):
+        """Get the underlying storage backend."""
+        return self._storage
 
     @property
     def labels(self):
@@ -829,12 +856,26 @@ class DistanceMatrix:
     @classmethod
     def from_file(cls, path):
         """
-        Load a distance matrix from a .npz file.
+        Load a symmetric distance matrix from a .npz file.
 
         :param path: Input file path.
-        :returns: DistanceMatrix instance.
+        :returns: SymmetricDistanceMatrix instance.
+        :raises ValueError: If the file is a cross-distance matrix or malformed.
         """
         data = np.load(path, allow_pickle=False)
+        if 'matrix_kind' in data:
+            kind = str(data['matrix_kind'])
+            if kind == "cross":
+                raise ValueError(
+                    "File is a cross-distance matrix; use "
+                    "CrossDistanceMatrix.from_file or load_distance_matrix")
+            raise ValueError(
+                f"Unknown matrix_kind {kind!r}; a symmetric matrix file must not "
+                f"carry a matrix_kind key")
+        for required in ('condensed', 'comparison_name'):
+            if required not in data:
+                raise ValueError(
+                    f"Malformed symmetric matrix: missing required key {required!r}")
         condensed = data['condensed']
 
         comparison_name = str(data['comparison_name'])
@@ -851,6 +892,12 @@ class DistanceMatrix:
             num_samples = int(data['num_samples'])
         else:
             num_samples = int(data['num_items'])
+
+        expected = num_samples * (num_samples - 1) // 2
+        if condensed.shape[0] != expected:
+            raise ValueError(
+                f"Malformed symmetric matrix: condensed length {condensed.shape[0]} "
+                f"!= expected {expected} for {num_samples} samples")
         storage = DenseStorage(num_samples)
 
         idx = 0
@@ -870,7 +917,7 @@ class DistanceMatrix:
         return self.num_pairs
 
     def __repr__(self):
-        return (f"DistanceMatrix(comparison={self._comparison_name!r}, "
+        return (f"SymmetricDistanceMatrix(comparison={self._comparison_name!r}, "
                 f"num_samples={self.num_samples}, num_pairs={self.num_pairs})")
 
 
@@ -1083,7 +1130,7 @@ def pdist(items,
           cutoff=0.0,
           output=None,
           progress=None,
-          **kwargs) -> DistanceMatrix:
+          **kwargs) -> "SymmetricDistanceMatrix":
     """
     Compute pairwise distances for a collection of items using a comparison.
 
@@ -1217,7 +1264,7 @@ def pdist(items,
         options.progress = progress
 
     _cpp_pdist(comparison_obj, storage, options)
-    return DistanceMatrix(storage, comparison_name, labels, params)
+    return SymmetricDistanceMatrix(storage, comparison_name, labels, params)
 
 
 def butina(distance_matrix, threshold, *, reordering=False,
