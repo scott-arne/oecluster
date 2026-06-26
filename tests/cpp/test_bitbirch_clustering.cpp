@@ -31,6 +31,29 @@ OEFP::OEFPBatch make_batch(std::initializer_list<OEFP::OEFP> fps) {
     return OEFP::OEFPBatch::FromFingerprints(std::vector<OEFP::OEFP>(fps));
 }
 
+OEFP::OEFPBatch make_random_batch(const size_t rows, const size_t bits) {
+    std::vector<OEFP::OEFP> fps;
+    fps.reserve(rows);
+    uint64_t state = 88172645463325252ull;  // fixed seed, xorshift64
+    auto next = [&state]() {
+        state ^= state << 13; state ^= state >> 7; state ^= state << 17;
+        return state;
+    };
+    for (size_t i = 0; i < rows; ++i) {
+        OEFP::FingerprintSpec spec;
+        spec.size_bits = bits;
+        spec.value_type = OEFP::FingerprintValueType::Binary;
+        spec.source_name = "test";
+        OEFP::OEFP fp(spec);
+        for (size_t b = 0; b < bits; ++b) {
+            if ((next() & 7u) == 0u) fp.SetBit(b);  // ~12.5% density
+        }
+        fp.SetBit(i % bits);  // guarantee at least one bit
+        fps.push_back(fp);
+    }
+    return OEFP::OEFPBatch::FromFingerprints(fps);
+}
+
 }  // namespace
 
 TEST(BitBirchClusteringTest, ClustersDuplicateBlocksWithDiameterCriterion) {
@@ -204,4 +227,55 @@ TEST(BitBirchFastTest, FitRangeOverFullRangeMatchesFitAll) {
 
     EXPECT_EQ(result_all.Labels(), result_range.Labels());
     EXPECT_EQ(result_all.Members(), result_range.Members());
+}
+
+TEST(BitBirchFastTest, BuildFastTreeSinglePartitionMatchesStrict) {
+    const auto batch = make_batch({
+        make_fp(4, {0, 1}),
+        make_fp(4, {0, 1}),
+        make_fp(4, {2, 3}),
+        make_fp(4, {2, 3}),
+        make_fp(4, {0, 2}),
+        make_fp(4, {0, 2}),
+    });
+    OECluster::BitBirchOptions options;
+    options.threshold = 0.75;
+    options.branching_factor = 2;
+    options.merge_criterion = OECluster::BitBirchMergeCriterion::Diameter;
+
+    OECluster::detail::BitBirchTree strict_tree(options);
+    strict_tree.Fit(batch);
+    const auto strict = strict_tree.Result(batch.Spec(), batch.Size());
+
+    OECluster::detail::BitBirchTree fast_tree(options);
+    OECluster::detail::BitBirchTree::BuildFastTree(batch, options, fast_tree);
+    const auto fast = fast_tree.Result(batch.Spec(), batch.Size());
+
+    EXPECT_EQ(strict.Labels(), fast.Labels());
+    EXPECT_EQ(strict.Members(), fast.Members());
+    EXPECT_EQ(strict.ClusterSizes(), fast.ClusterSizes());
+}
+
+TEST(BitBirchFastTest, FastResultIsDeterministicAcrossThreadCounts) {
+    const auto batch = make_random_batch(5000, 64);
+
+    OECluster::BitBirchOptions base;
+    base.threshold = 0.5;
+    base.branching_factor = 50;
+    base.merge_criterion = OECluster::BitBirchMergeCriterion::Diameter;
+
+    auto run = [&](size_t threads) {
+        OECluster::BitBirchOptions opts = base;
+        opts.num_threads = threads;
+        OECluster::detail::BitBirchTree tree(opts);
+        OECluster::detail::BitBirchTree::BuildFastTree(batch, opts, tree);
+        return tree.Result(batch.Spec(), batch.Size());
+    };
+
+    const auto r1 = run(1);
+    for (const size_t threads : {size_t{2}, size_t{4}, size_t{0}}) {
+        const auto r = run(threads);
+        EXPECT_EQ(r1.Labels(), r.Labels()) << "threads=" << threads;
+        EXPECT_EQ(r1.Members(), r.Members()) << "threads=" << threads;
+    }
 }

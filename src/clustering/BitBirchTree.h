@@ -105,6 +105,18 @@ public:
     std::vector<const BitBirchSubcluster*> LeafSubclusters() const;
     BitBirchResult Result(const OEFP::FingerprintSpec& spec, size_t n_items) const;
 
+    /**
+     * @brief Fill out_tree with the fast-mode (partition + parallel fit + merge)
+     *        clustering of the batch.
+     *
+     * Deterministic in (fingerprints, options) alone; options.num_threads affects
+     * only concurrency, not the result. For partition_count(N)==1 this is exactly
+     * the sequential Fit. out_tree must be freshly constructed with options.
+     */
+    static void BuildFastTree(const OEFP::OEFPBatch& fingerprints,
+                              const BitBirchOptions& options,
+                              BitBirchTree& out_tree);
+
 private:
     BitBirchOptions options_;
     size_t index_tracker_ = 0;

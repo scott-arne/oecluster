@@ -867,4 +867,47 @@ SplitNode(
     return {std::move(left_summary), std::move(right_summary)};
 }
 
+void BitBirchTree::BuildFastTree(const OEFP::OEFPBatch& fingerprints,
+                                 const BitBirchOptions& options,
+                                 BitBirchTree& out_tree) {
+    const size_t n = fingerprints.Size();
+    const size_t partitions = partition_count(n);
+    if (partitions <= 1) {
+        out_tree.Fit(fingerprints);
+        return;
+    }
+
+    // Contiguous, deterministic chunk boundaries depending on n alone.
+    std::vector<std::pair<size_t, size_t>> ranges;
+    ranges.reserve(partitions);
+    const size_t base = n / partitions;
+    const size_t remainder = n % partitions;
+    size_t cursor = 0;
+    for (size_t p = 0; p < partitions; ++p) {
+        const size_t span = base + (p < remainder ? 1 : 0);
+        ranges.emplace_back(cursor, cursor + span);
+        cursor += span;
+    }
+
+    // Each worker fits its own tree; no shared mutable state.
+    std::vector<std::unique_ptr<BitBirchTree>> chunk_trees(partitions);
+    ThreadPool pool(options.num_threads);
+    pool.ParallelFor(0, partitions, 1, [&](const size_t begin, const size_t end) {
+        for (size_t p = begin; p < end; ++p) {
+            chunk_trees[p] = std::make_unique<BitBirchTree>(options);
+            chunk_trees[p]->Fit(fingerprints, ranges[p].first, ranges[p].second);
+        }
+    });
+
+    // Collect leaf clones in deterministic order: chunk index, then leaf order.
+    std::vector<std::unique_ptr<BitBirchSubcluster>> merged;
+    for (size_t p = 0; p < partitions; ++p) {
+        for (const BitBirchSubcluster* leaf : chunk_trees[p]->LeafSubclusters()) {
+            merged.push_back(clone_leaf_subcluster(*leaf));
+        }
+    }
+    // Clones carry null parent/child; the merge tree rebuilds its own structure.
+    out_tree.FitSubclusters(std::move(merged));
+}
+
 }  // namespace OECluster::detail
