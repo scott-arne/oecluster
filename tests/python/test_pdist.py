@@ -298,7 +298,6 @@ def test_pdist_unknown_kwargs_raises():
 
 def test_symmetric_distance_matrix_hierarchy():
     """SymmetricDistanceMatrix is the concrete pdist result; base is abstract."""
-    import oecluster
     from oecluster import DenseStorage, DistanceMatrix, SymmetricDistanceMatrix
 
     storage = DenseStorage(3)
