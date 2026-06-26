@@ -1396,7 +1396,7 @@ def pdist(items,
     :param output: Optional file path for memory-mapped storage.
     :param progress: Optional callback(completed, total).
     :param kwargs: Comparison-specific options.
-    :returns: DistanceMatrix with computed distances/similarities.
+    :returns: SymmetricDistanceMatrix with computed distances/similarities.
     :raises TypeError: If unknown kwargs are passed.
     """
     if isinstance(comparison, str):
@@ -1511,7 +1511,7 @@ def butina(distance_matrix, threshold, *, reordering=False,
     """
     Cluster a precomputed distance matrix using the Butina algorithm.
 
-    :param distance_matrix: DistanceMatrix returned by :func:`pdist`.
+    :param distance_matrix: SymmetricDistanceMatrix returned by :func:`pdist`.
     :param threshold: Maximum distance for two items to be neighbors.
     :param reordering: Recompute candidate neighbor counts after each cluster.
     :param num_threads: Thread count for threshold graph construction.
@@ -1519,7 +1519,7 @@ def butina(distance_matrix, threshold, *, reordering=False,
     :returns: ButinaResult with per-item labels and grouped clusters. The
         first member of each cluster is the highest-neighborhood representative,
         and each member's label equals its cluster index.
-    :raises TypeError: If distance_matrix is not a DistanceMatrix.
+    :raises TypeError: If distance_matrix is not a SymmetricDistanceMatrix.
     :raises ValueError: If threshold is negative.
     """
     if threshold < 0.0:
@@ -1721,7 +1721,7 @@ def representative(cluster, distance_matrix, *, method="medoid", threshold=None,
 
     :param cluster: Iterable of item indices, such as one cluster returned by
         :func:`butina`.
-    :param distance_matrix: DistanceMatrix used to compute representative scores.
+    :param distance_matrix: SymmetricDistanceMatrix used to compute representative scores.
     :param method: Scoring method: "medoid", "minimax",
         "highest_neighborhood", or "weighted_medoid".
     :param threshold: Distance threshold for highest-neighborhood scoring and
@@ -1733,7 +1733,7 @@ def representative(cluster, distance_matrix, *, method="medoid", threshold=None,
     :param priority_scores: Optional per-item priority vector.
     :param scaffold_labels: Optional per-item scaffold label vector.
     :returns: Selected member index.
-    :raises TypeError: If distance_matrix is not a DistanceMatrix.
+    :raises TypeError: If distance_matrix is not a SymmetricDistanceMatrix.
     :raises ValueError: If cluster, method, threshold, or metadata is invalid.
     """
     cpp_cluster = _cpp_cluster(cluster, "representative")
@@ -1759,7 +1759,7 @@ def rank_representatives(cluster, distance_matrix, *, method="medoid",
     Rank all cluster members as representatives.
 
     :param cluster: Iterable of item indices.
-    :param distance_matrix: DistanceMatrix used to compute representative scores.
+    :param distance_matrix: SymmetricDistanceMatrix used to compute representative scores.
     :param method: Scoring method: "medoid", "minimax",
         "highest_neighborhood", or "weighted_medoid".
     :param threshold: Distance threshold for highest-neighborhood scoring and
@@ -1771,7 +1771,7 @@ def rank_representatives(cluster, distance_matrix, *, method="medoid",
     :param priority_scores: Optional per-item priority vector.
     :param scaffold_labels: Optional per-item scaffold label vector.
     :returns: Tuple of ClusterRepresentative objects sorted by score.
-    :raises TypeError: If distance_matrix is not a DistanceMatrix.
+    :raises TypeError: If distance_matrix is not a SymmetricDistanceMatrix.
     :raises ValueError: If cluster, method, threshold, or metadata is invalid.
     """
     cpp_cluster = _cpp_cluster(cluster, "rank_representatives")
@@ -1798,7 +1798,7 @@ def select_representatives(cluster, distance_matrix, *, k, method="medoid",
     Select up to k representatives from a cluster.
 
     :param cluster: Iterable of item indices.
-    :param distance_matrix: DistanceMatrix used to compute representative scores.
+    :param distance_matrix: SymmetricDistanceMatrix used to compute representative scores.
     :param k: Maximum number of representatives to return.
     :param method: Scoring method: "medoid", "minimax",
         "highest_neighborhood", or "weighted_medoid".
@@ -1813,7 +1813,7 @@ def select_representatives(cluster, distance_matrix, *, k, method="medoid",
     :param priority_scores: Optional per-item priority vector.
     :param scaffold_labels: Optional per-item scaffold label vector.
     :returns: Tuple of selected ClusterRepresentative objects.
-    :raises TypeError: If distance_matrix is not a DistanceMatrix.
+    :raises TypeError: If distance_matrix is not a SymmetricDistanceMatrix.
     :raises ValueError: If cluster, k, method, selection, threshold, or metadata
         is invalid.
     """
@@ -1846,13 +1846,13 @@ def dbscan(distance_matrix, eps, *, min_samples=5, num_threads=0, chunk_size=409
     """
     Cluster a precomputed distance matrix using DBSCAN.
 
-    :param distance_matrix: DistanceMatrix returned by :func:`pdist`.
+    :param distance_matrix: SymmetricDistanceMatrix returned by :func:`pdist`.
     :param eps: Maximum distance for two items to be neighbors.
     :param min_samples: Minimum self-inclusive neighbor count for a core sample.
     :param num_threads: Thread count for threshold graph construction.
     :param chunk_size: Condensed-distance pairs per work unit.
     :returns: DBSCANResult with labels, clusters, and core sample indices.
-    :raises TypeError: If distance_matrix is not a DistanceMatrix.
+    :raises TypeError: If distance_matrix is not a SymmetricDistanceMatrix.
     :raises ValueError: If eps or min_samples are invalid.
     """
     if eps < 0.0:
@@ -1883,7 +1883,7 @@ def hdbscan(distance_matrix, *, min_cluster_size=5, min_samples=None,
     """
     Cluster a precomputed distance matrix using HDBSCAN.
 
-    :param distance_matrix: DistanceMatrix returned by :func:`pdist`.
+    :param distance_matrix: SymmetricDistanceMatrix returned by :func:`pdist`.
     :param min_cluster_size: Minimum size for selected clusters.
     :param min_samples: Self-inclusive core-distance neighbor count. Defaults
         to min_cluster_size when omitted.
@@ -1896,7 +1896,7 @@ def hdbscan(distance_matrix, *, min_cluster_size=5, min_samples=None,
     :param num_threads: Thread count for core-distance computation.
     :param chunk_size: Reserved for parity with other clustering wrappers.
     :returns: HDBSCANResult with labels, clusters, and probabilities.
-    :raises TypeError: If distance_matrix is not a DistanceMatrix.
+    :raises TypeError: If distance_matrix is not a SymmetricDistanceMatrix.
     :raises ValueError: If options are invalid.
     """
     if min_cluster_size < 2:
@@ -1947,7 +1947,7 @@ def agglomerative(distance_matrix, *, n_clusters=2, distance_threshold=None,
     """
     Cluster a precomputed distance matrix using hierarchical agglomerative clustering.
 
-    :param distance_matrix: DistanceMatrix returned by :func:`pdist`.
+    :param distance_matrix: SymmetricDistanceMatrix returned by :func:`pdist`.
     :param n_clusters: Number of flat clusters when distance_threshold is omitted.
     :param distance_threshold: Optional merge-distance cutoff for flat clusters.
     :param linkage: Linkage method: "single", "complete", "average", or "weighted".
@@ -1955,7 +1955,7 @@ def agglomerative(distance_matrix, *, n_clusters=2, distance_threshold=None,
     :param num_threads: Thread count for initial distance materialization.
     :param chunk_size: Rows per work unit during distance materialization.
     :returns: AgglomerativeResult with labels, clusters, children, distances, and cluster sizes.
-    :raises TypeError: If distance_matrix is not a DistanceMatrix.
+    :raises TypeError: If distance_matrix is not a SymmetricDistanceMatrix.
     :raises ValueError: If options are invalid.
     """
     if not isinstance(distance_matrix, SymmetricDistanceMatrix):
@@ -2348,7 +2348,7 @@ def cluster_report(result, distance_matrix, *, preset="default",
     Compute a method-agnostic clustering-quality report.
 
     :param result: A clustering result (e.g. from :func:`butina`/:func:`dbscan`).
-    :param distance_matrix: Complete DistanceMatrix for the same items.
+    :param distance_matrix: Complete SymmetricDistanceMatrix for the same items.
     :param preset: Threshold preset: "default", "tight", or "diversity".
     :param coverage_thresholds: Optional override for coverage distances.
     :param boundary_threshold: Optional override for the boundary-violation distance.
