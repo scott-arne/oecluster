@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import math
 import sys
 from pathlib import Path
 
@@ -18,6 +19,14 @@ ISIM_REPO = Path("/Users/johnss51/Development/python/iSIM")
 
 QUALITY_N = 3000
 DETERMINISM_N = 5000
+
+# Calibrated fast-vs-strict quality tolerances (see plan Task 6).
+FAST_QUALITY_TOL = {
+    "num_clusters_rel": 0.15,        # |fast - strict| / strict
+    "intra_distance_abs": 0.05,      # fast may be at most this much larger
+    "silhouette_abs": 0.05,          # fast may be at most this much lower
+    "coverage_abs": 0.05,            # fast may be at most this much lower
+}
 
 
 def _load_reference_bitbirch():
@@ -75,6 +84,37 @@ def _batch_from_bits(bits):
         on_bits = np.flatnonzero(row).astype(int).tolist()
         fingerprints.append(oefp.OEFP.from_on_bits(arr.shape[1], on_bits))
     return oefp.OEFPBatch.from_fingerprints(fingerprints)
+
+
+def _tanimoto_distance_matrix(bits):
+    """Build a complete SymmetricDistanceMatrix of Tanimoto distances (1 - sim).
+
+    Uses a vectorized intersection matmul; only the upper-triangle Set() calls
+    iterate in Python. Intended for modest n (a few hundred rows).
+    """
+    from oecluster import DenseStorage, SymmetricDistanceMatrix
+
+    arr = np.asarray(bits, dtype=np.float64)
+    n = arr.shape[0]
+    popcounts = arr.sum(axis=1)
+    inter = arr @ arr.T                                  # (n, n) intersection
+    union = popcounts[:, None] + popcounts[None, :] - inter
+    with np.errstate(invalid="ignore", divide="ignore"):
+        sim = np.where(union == 0.0, 1.0, inter / union)
+    dist = 1.0 - sim
+    storage = DenseStorage(n)
+    for i in range(n):
+        for j in range(i + 1, n):
+            storage.Set(i, j, float(dist[i, j]))
+    labels = [str(k) for k in range(n)]
+    return SymmetricDistanceMatrix(storage, "tanimoto", labels, {})
+
+
+def _assert_non_degenerate(report):
+    """Quality fixtures must yield defined metrics (multi-cluster, non-singleton)."""
+    assert report.num_clusters >= 2
+    assert math.isfinite(report.silhouette)
+    assert math.isfinite(report.mean_intra_distance)
 
 
 def _centroid_bits(result):
@@ -550,3 +590,33 @@ def test_bitbirch_fast_is_deterministic_across_threads(num_threads):
                                   mode="fast", num_threads=num_threads)
     assert observed.labels.tolist() == reference.labels.tolist()
     assert observed.clusters == reference.clusters
+
+
+@pytest.mark.parametrize("merge_criterion", ["diameter", "tolerance"])
+@pytest.mark.parametrize("singly", [True, False])
+def test_bitbirch_fast_quality_equivalent_to_strict(merge_criterion, singly):
+    bits = _random_bits(QUALITY_N, 64, seed=7)
+    batch = _batch_from_bits(bits)
+    dm = _tanimoto_distance_matrix(bits)
+
+    common = dict(threshold=0.5, branching_factor=50,
+                  merge_criterion=merge_criterion, singly=singly)
+    strict = oecluster.bitbirch(batch, mode="strict_parity", **common)
+    fast = oecluster.bitbirch(batch, mode="fast", **common)
+
+    strict_report = oecluster.cluster_report(strict, dm)
+    fast_report = oecluster.cluster_report(fast, dm)
+    _assert_non_degenerate(strict_report)
+    _assert_non_degenerate(fast_report)
+
+    assert abs(fast_report.num_clusters - strict_report.num_clusters) <= \
+        FAST_QUALITY_TOL["num_clusters_rel"] * strict_report.num_clusters
+    assert fast_report.mean_intra_distance <= \
+        strict_report.mean_intra_distance + FAST_QUALITY_TOL["intra_distance_abs"]
+    assert fast_report.median_intra_distance <= \
+        strict_report.median_intra_distance + FAST_QUALITY_TOL["intra_distance_abs"]
+    assert fast_report.silhouette >= \
+        strict_report.silhouette - FAST_QUALITY_TOL["silhouette_abs"]
+    for i in range(len(strict_report.coverage_at)):
+        assert fast_report.coverage_at[i] >= \
+            strict_report.coverage_at[i] - FAST_QUALITY_TOL["coverage_abs"]
