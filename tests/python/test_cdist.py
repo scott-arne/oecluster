@@ -72,3 +72,88 @@ def test_cross_from_file_rejects_malformed(tmp_path):
     )
     with pytest.raises(ValueError, match="Malformed cross matrix"):
         CrossDistanceMatrix.from_file(str(path))
+
+
+def test_cdist_fingerprint_matches_scipy():
+    """cdist cross-distances match a scipy reference for fingerprints."""
+    from openeye import oechem
+    import oecluster
+    from oecluster import CrossDistanceMatrix
+
+    smiles_a = ["c1ccccc1", "CCCCCCCC"]
+    smiles_b = ["c1ccc(O)cc1", "c1ccncc1", "CCO"]
+
+    def build(smis):
+        mols = []
+        for smi in smis:
+            mol = oechem.OEGraphMol()
+            oechem.OESmilesToMol(mol, smi)
+            mols.append(mol)
+        return mols
+
+    mols_a = build(smiles_a)
+    mols_b = build(smiles_b)
+
+    result = oecluster.cdist(mols_a, mols_b, "fingerprint")
+    assert isinstance(result, CrossDistanceMatrix)
+    assert result.shape == (2, 3)
+    assert result.labels_a == ["mol_0", "mol_1"]
+    assert result.labels_b == ["mol_0", "mol_1", "mol_2"]
+
+    # Reference: full symmetric pdist over the concatenated set, then slice the
+    # rectangular A-vs-B block out of the squareform.
+    all_mols = mols_a + mols_b
+    full = oecluster.pdist(all_mols, "fingerprint").squareform()
+    expected = full[:2, 2:]
+    np.testing.assert_allclose(result.matrix, expected, atol=1e-9)
+
+
+def test_cdist_orientation_is_a_rows_b_cols():
+    """Entry [i, j] pairs items_a[i] with items_b[j]."""
+    from openeye import oechem
+    import oecluster
+
+    def build(smis):
+        mols = []
+        for smi in smis:
+            mol = oechem.OEGraphMol()
+            oechem.OESmilesToMol(mol, smi)
+            mols.append(mol)
+        return mols
+
+    a = build(["c1ccccc1", "CCCCCCCC", "CCO"])
+    b = build(["c1ccccc1"])  # identical to a[0]
+    result = oecluster.cdist(a, b, "fingerprint")
+    assert result.shape == (3, 1)
+    # a[0] vs b[0] are the same molecule -> distance ~0; others larger.
+    assert result.matrix[0, 0] == pytest.approx(0.0, abs=1e-9)
+    assert result.matrix[1, 0] > result.matrix[0, 0]
+
+
+def test_cdist_empty_input_raises():
+    """Empty set A or B raises ValueError before any C++ call."""
+    import oecluster
+    with pytest.raises(ValueError, match="empty"):
+        oecluster.cdist([], [1], "fingerprint")
+    with pytest.raises(ValueError, match="empty"):
+        oecluster.cdist([1], [], "fingerprint")
+
+
+def test_cdist_similarity_with_cutoff_raises():
+    """cutoff > 0 with similarity=True is rejected."""
+    import oecluster
+    with pytest.raises(ValueError, match="cutoff"):
+        oecluster.cdist([1], [1], "fingerprint", similarity=True, cutoff=0.5)
+
+
+def test_cdist_rejects_prebuilt_comparison_object():
+    """A non-string comparison is rejected by cdist."""
+    from openeye import oechem
+    import oecluster
+    from oecluster import FingerprintComparison
+
+    mol = oechem.OEGraphMol()
+    oechem.OESmilesToMol(mol, "c1ccccc1")
+    comp = FingerprintComparison([mol])
+    with pytest.raises(TypeError, match="comparison"):
+        oecluster.cdist([mol], [mol], comp)

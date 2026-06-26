@@ -53,6 +53,7 @@ __all__ = [
     "RepresentativeMetrics",
     "ClusterRepresentative",
     "pdist",
+    "cdist",
     "butina",
     "representative",
     "rank_representatives",
@@ -590,6 +591,7 @@ try:
         MMapStorage,
         SparseStorage,
         PDistOptions,
+        CDistOptions,
         ButinaOptions,
         RepresentativeOptions,
         RepresentativeWeights,
@@ -600,6 +602,7 @@ try:
         BitBirchReclusteringOptions,
         BitBirchRefinementOptions,
         pdist as _cpp_pdist,
+        cdist_into_address as _cpp_cdist_into_address,
         cluster_report as _cluster_report,
         butina_cluster as _butina_cluster,
         cluster_representative as _cluster_representative,
@@ -1404,6 +1407,82 @@ def pdist(items,
 
     _cpp_pdist(comparison_obj, storage, options)
     return SymmetricDistanceMatrix(storage, comparison_name, labels, params)
+
+
+def cdist(items_a, items_b, comparison, *,
+          similarity=False,
+          num_threads=0,
+          chunk_size=256,
+          cutoff=0.0,
+          progress=None,
+          **kwargs) -> "CrossDistanceMatrix":
+    """
+    Compute cross-distances between two item sets using a comparison.
+
+    Entry ``[i, j]`` of the returned matrix compares ``items_a[i]`` (reference)
+    against ``items_b[j]`` (fit). For asymmetric comparisons (e.g. Superpose with
+    distinct reference/fit predicates), ``cdist(A, B)`` is not guaranteed to equal
+    ``cdist(B, A).T``.
+
+    :param items_a: Reference items (rows of the result).
+    :param items_b: Fit items (columns of the result).
+    :param comparison: Comparison method name: "fingerprint", "rocs", "superpose",
+                       or "sitehopper". Prebuilt comparison objects are not
+                       supported.
+    :param similarity: Return similarities instead of distances.
+    :param num_threads: Number of threads (0 = auto).
+    :param chunk_size: Pairs per work unit.
+    :param cutoff: Distance cutoff (0 = no cutoff); values above are zeroed.
+    :param progress: Optional callback(completed, total).
+    :param kwargs: Comparison-specific options.
+    :returns: CrossDistanceMatrix of shape (len(items_a), len(items_b)).
+    :raises TypeError: If a prebuilt comparison object is passed, or unknown kwargs.
+    :raises ValueError: If either input is empty, or cutoff > 0 with similarity=True.
+    """
+    if not isinstance(comparison, str):
+        raise TypeError(
+            "cdist requires a string comparison name (e.g. 'fingerprint'); "
+            "prebuilt comparison objects are not supported because cdist must "
+            "construct the combined A+B comparison itself")
+
+    if cutoff > 0.0 and similarity:
+        raise ValueError(
+            "cutoff > 0 is not supported with similarity=True: the cutoff zeroes "
+            "values above the threshold, which would discard high similarities")
+
+    # Materialize to lists (SWIG comparison constructors require Python lists) and
+    # validate non-empty before allocating or calling into C++.
+    a = list(items_a)
+    b = list(items_b)
+    n_a = len(a)
+    n_b = len(b)
+    if n_a == 0 or n_b == 0:
+        raise ValueError("cdist requires non-empty input sets (set A or B is empty)")
+
+    comparison_obj, comparison_name, params = _build_comparison(
+        a + b, comparison, similarity, **kwargs)
+
+    # Guard the raw-pointer write with an explicit runtime check (not assert,
+    # which -O strips).
+    if comparison_obj.Size() != n_a + n_b:
+        raise RuntimeError(
+            f"Combined comparison size {comparison_obj.Size()} != "
+            f"n_a + n_b ({n_a + n_b})")
+
+    output = np.empty((n_a, n_b), dtype=np.float64)
+
+    options = CDistOptions()
+    options.num_threads = num_threads
+    options.chunk_size = chunk_size
+    options.cutoff = cutoff
+    if progress is not None:
+        options.progress = progress
+
+    _cpp_cdist_into_address(comparison_obj, n_a, output.ctypes.data, options)
+
+    return CrossDistanceMatrix(
+        output, comparison_name,
+        labels_a=_extract_labels(a), labels_b=_extract_labels(b), params=params)
 
 
 def butina(distance_matrix, threshold, *, reordering=False,
