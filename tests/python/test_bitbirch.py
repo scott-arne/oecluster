@@ -16,6 +16,9 @@ import oefp
 BITBIRCH_REPO = Path("/Users/johnss51/Development/python/bitbirch")
 ISIM_REPO = Path("/Users/johnss51/Development/python/iSIM")
 
+QUALITY_N = 3000
+DETERMINISM_N = 5000
+
 
 def _load_reference_bitbirch():
     for repo in (str(ISIM_REPO), str(BITBIRCH_REPO)):
@@ -54,6 +57,15 @@ def _reference_result(
     }
     centroids = np.asarray([centroid_by_cluster[cluster] for cluster in clusters])
     return labels.astype(np.intp), clusters, centroids
+
+
+def _random_bits(rows, cols, seed=13, density=0.125):
+    rng = np.random.default_rng(seed)
+    bits = (rng.random((rows, cols)) < density).astype(np.uint8)
+    empty = np.flatnonzero(bits.sum(axis=1) == 0)
+    for row in empty:
+        bits[row, row % cols] = 1
+    return bits
 
 
 def _batch_from_bits(bits):
@@ -511,3 +523,30 @@ def test_bitbirch_refine_prune_then_reassign_matches_reference():
 
     assert observed.labels.tolist() == expected_labels.tolist()
     assert observed.clusters == expected_clusters
+
+
+def test_bitbirch_fast_small_n_matches_strict():
+    bits = np.array(
+        [[1, 1, 0, 0], [1, 1, 0, 0], [0, 0, 1, 1], [0, 0, 1, 1]],
+        dtype=np.uint8,
+    )
+    batch = _batch_from_bits(bits)
+    strict = oecluster.bitbirch(batch, threshold=0.75, branching_factor=2,
+                                mode="strict_parity")
+    fast = oecluster.bitbirch(batch, threshold=0.75, branching_factor=2,
+                              mode="fast")
+    assert fast.labels.tolist() == strict.labels.tolist()
+    assert fast.clusters == strict.clusters
+    assert fast.cluster_sizes == strict.cluster_sizes
+
+
+@pytest.mark.parametrize("num_threads", [1, 2, 4, 0])
+def test_bitbirch_fast_is_deterministic_across_threads(num_threads):
+    bits = _random_bits(DETERMINISM_N, 64)
+    batch = _batch_from_bits(bits)
+    reference = oecluster.bitbirch(batch, threshold=0.5, branching_factor=50,
+                                   mode="fast", num_threads=1)
+    observed = oecluster.bitbirch(batch, threshold=0.5, branching_factor=50,
+                                  mode="fast", num_threads=num_threads)
+    assert observed.labels.tolist() == reference.labels.tolist()
+    assert observed.clusters == reference.clusters
