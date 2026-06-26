@@ -7,14 +7,14 @@ import pytest
 def _dense_distance_matrix(square):
     """Build a dense DistanceMatrix from a square distance matrix."""
     from oecluster import DenseStorage
-    from oecluster import DistanceMatrix
+    from oecluster import SymmetricDistanceMatrix
 
     square = np.asarray(square, dtype=np.float64)
     storage = DenseStorage(square.shape[0])
     for i in range(square.shape[0]):
         for j in range(i + 1, square.shape[0]):
             storage.Set(i, j, float(square[i, j]))
-    return DistanceMatrix(storage, "test", [f"item_{i}" for i in range(square.shape[0])], {})
+    return SymmetricDistanceMatrix(storage, "test", [f"item_{i}" for i in range(square.shape[0])], {})
 
 
 def _cluster_members(labels):

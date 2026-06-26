@@ -7,7 +7,7 @@ import pytest
 
 def _two_cluster_dm():
     """Two clusters {0,1},{2,3}; intra 0.2, cross 0.8."""
-    from oecluster import DenseStorage, DistanceMatrix
+    from oecluster import DenseStorage, SymmetricDistanceMatrix
 
     s = DenseStorage(4)
     s.Set(0, 1, 0.2)
@@ -16,7 +16,7 @@ def _two_cluster_dm():
     s.Set(0, 3, 0.8)
     s.Set(1, 2, 0.8)
     s.Set(1, 3, 0.8)
-    return DistanceMatrix(s, "test", ["a", "b", "c", "d"], {})
+    return SymmetricDistanceMatrix(s, "test", ["a", "b", "c", "d"], {})
 
 
 def test_report_basic_and_compactness():

@@ -170,7 +170,7 @@ def test_distance_matrix_serialization(tmp_path):
     path = str(tmp_path / "test.npz")
     dist.to_file(path)
 
-    loaded = oecluster.DistanceMatrix.from_file(path)
+    loaded = oecluster.SymmetricDistanceMatrix.from_file(path)
     np.testing.assert_array_almost_equal(
         np.asarray(dist), np.asarray(loaded)
     )

@@ -59,7 +59,7 @@ def dense_distance_matrix(square: np.ndarray):
     for i in range(square.shape[0]):
         for j in range(i + 1, square.shape[0]):
             storage.Set(i, j, float(square[i, j]))
-    return oecluster.DistanceMatrix(
+    return oecluster.SymmetricDistanceMatrix(
         storage,
         "synthetic",
         [f"item_{i}" for i in range(square.shape[0])],

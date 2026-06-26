@@ -6,12 +6,12 @@ import pytest
 def _dense_distance_matrix(values, n):
     """Build a dense DistanceMatrix from explicit upper-triangle values."""
     from oecluster import DenseStorage
-    from oecluster import DistanceMatrix
+    from oecluster import SymmetricDistanceMatrix
 
     storage = DenseStorage(n)
     for (i, j), value in values.items():
         storage.Set(i, j, value)
-    return DistanceMatrix(storage, "test", [f"item_{i}" for i in range(n)], {})
+    return SymmetricDistanceMatrix(storage, "test", [f"item_{i}" for i in range(n)], {})
 
 
 def _rdkit_butina(distance_matrix, threshold, *, reordering=False):
@@ -130,7 +130,7 @@ def test_butina_rejects_sparse_cutoff_below_threshold():
     storage.Set(0, 2, 0.3)
     storage.Set(1, 2, 0.3)
     storage.Finalize()
-    dm = oecluster.DistanceMatrix(storage, "test", [], {})
+    dm = oecluster.SymmetricDistanceMatrix(storage, "test", [], {})
 
     with pytest.raises(RuntimeError, match="cutoff"):
         oecluster.butina(dm, threshold=0.3)

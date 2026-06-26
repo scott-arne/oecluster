@@ -5,7 +5,7 @@ import numpy as np
 
 def _toy_distance_matrix():
     """Build a small DistanceMatrix with two clear clusters of two items."""
-    from oecluster import DenseStorage, DistanceMatrix
+    from oecluster import DenseStorage, SymmetricDistanceMatrix
 
     storage = DenseStorage(4)
     storage.Set(0, 1, 0.1)
@@ -14,7 +14,7 @@ def _toy_distance_matrix():
     storage.Set(1, 2, 0.9)
     storage.Set(1, 3, 0.9)
     storage.Set(2, 3, 0.1)
-    return DistanceMatrix(storage, "test", ["a", "b", "c", "d"], {})
+    return SymmetricDistanceMatrix(storage, "test", ["a", "b", "c", "d"], {})
 
 
 def test_base_normalizes_labels_and_clusters():

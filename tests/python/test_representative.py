@@ -8,12 +8,12 @@ import pytest
 def _dense_distance_matrix(values, n):
     """Build a dense DistanceMatrix from explicit upper-triangle values."""
     from oecluster import DenseStorage
-    from oecluster import DistanceMatrix
+    from oecluster import SymmetricDistanceMatrix
 
     storage = DenseStorage(n)
     for (i, j), value in values.items():
         storage.Set(i, j, value)
-    return DistanceMatrix(storage, "test", [f"item_{i}" for i in range(n)], {})
+    return SymmetricDistanceMatrix(storage, "test", [f"item_{i}" for i in range(n)], {})
 
 
 def test_centroid_api_is_not_exported():
