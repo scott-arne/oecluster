@@ -1121,6 +1121,115 @@ def _extract_labels(items):
     return labels
 
 
+def _build_comparison(items, comparison, similarity, **kwargs):
+    """
+    Build a C++ comparison object from items and a comparison spec.
+
+    Shared by :func:`pdist` and :func:`cdist`. Only string comparison specs are
+    supported here ("fingerprint", "rocs", "superpose", "sitehopper").
+
+    :param items: List of molecules, design units, or other items.
+    :param comparison: Comparison method name (string).
+    :param similarity: Whether to compute similarities instead of distances.
+    :param kwargs: Comparison-specific options.
+    :returns: Tuple of (comparison_obj, comparison_name, params).
+    :raises ValueError: If the comparison/score/method name is unknown.
+    :raises TypeError: If unknown kwargs are passed for the comparison.
+    """
+    comparison_lower = comparison.lower()
+    params = {'comparison_type': comparison_lower, 'similarity': similarity}
+    comparison_obj: Any
+
+    if comparison_lower == "fingerprint":
+        fp_opts = FingerprintOptions()
+        fp_opts.similarity = similarity
+        if 'fp_type' in kwargs:
+            fp_opts.fp_type = kwargs.pop('fp_type')
+        if 'numbits' in kwargs:
+            fp_opts.numbits = kwargs.pop('numbits')
+        if 'min_distance' in kwargs:
+            fp_opts.min_distance = kwargs.pop('min_distance')
+        if 'max_distance' in kwargs:
+            fp_opts.max_distance = kwargs.pop('max_distance')
+        if 'metric' in kwargs:
+            fp_opts.metric = kwargs.pop('metric')
+        if kwargs:
+            raise TypeError(
+                f"Unknown kwargs for fingerprint comparison: {list(kwargs)}")
+        comparison_obj = _FingerprintComparison(items, fp_opts)
+        comparison_name = "fingerprint"
+
+    elif comparison_lower == "rocs":
+        rocs_opts = ROCSOptions()
+        rocs_opts.similarity = similarity
+        if 'score_type' in kwargs:
+            st = kwargs.pop('score_type')
+            score_map = {
+                'combo_norm': _oecluster.ROCSScoreType_ComboNorm,
+                'combo': _oecluster.ROCSScoreType_Combo,
+                'shape': _oecluster.ROCSScoreType_Shape,
+                'color': _oecluster.ROCSScoreType_Color,
+            }
+            if st not in score_map:
+                raise ValueError(f"Unknown ROCS score type: {st}")
+            rocs_opts.score_type = score_map[st]
+        if 'color_ff_type' in kwargs:
+            rocs_opts.color_ff_type = kwargs.pop('color_ff_type')
+        if kwargs:
+            raise TypeError(
+                f"Unknown kwargs for rocs comparison: {list(kwargs)}")
+        comparison_obj = _ROCSComparison(items, rocs_opts)
+        comparison_name = "rocs"
+
+    elif comparison_lower in ("superpose", "sitehopper"):
+        superpose_opts = SuperposeOptions()
+        superpose_opts.similarity = similarity
+        method = kwargs.pop('method', None)
+        if comparison_lower == "sitehopper":
+            method = method or "sitehopper"
+        if method is not None:
+            method_map = {
+                'global_carbon_alpha': _oecluster.SuperposeMethod_GlobalCarbonAlpha,
+                'global': _oecluster.SuperposeMethod_Global,
+                'ddm': _oecluster.SuperposeMethod_DDM,
+                'weighted': _oecluster.SuperposeMethod_Weighted,
+                'sse': _oecluster.SuperposeMethod_SSE,
+                'sitehopper': _oecluster.SuperposeMethod_SiteHopper,
+            }
+            if method not in method_map:
+                raise ValueError(f"Unknown superpose method: {method}")
+            superpose_opts.method = method_map[method]
+        if 'score_type' in kwargs:
+            st = kwargs.pop('score_type')
+            st_map = {
+                'auto': _oecluster.SuperposeScoreType_Auto,
+                'rmsd': _oecluster.SuperposeScoreType_RMSD,
+                'tanimoto': _oecluster.SuperposeScoreType_Tanimoto,
+                'patch_score': _oecluster.SuperposeScoreType_PatchScore,
+            }
+            if st not in st_map:
+                raise ValueError(f"Unknown superpose score type: {st}")
+            superpose_opts.score_type = st_map[st]
+        if 'predicate' in kwargs:
+            superpose_opts.predicate = kwargs.pop('predicate')
+        if 'ref_predicate' in kwargs:
+            superpose_opts.ref_predicate = kwargs.pop('ref_predicate')
+        if 'fit_predicate' in kwargs:
+            superpose_opts.fit_predicate = kwargs.pop('fit_predicate')
+        if kwargs:
+            raise TypeError(
+                f"Unknown kwargs for superpose comparison: {list(kwargs)}")
+        comparison_obj = _SuperposeComparison(items, superpose_opts)
+        comparison_name = comparison_obj.ComparisonName()
+
+    else:
+        raise ValueError(
+            f"Unknown comparison: {comparison!r}. "
+            f"Valid options: 'fingerprint', 'rocs', 'superpose', 'sitehopper'")
+
+    return comparison_obj, comparison_name, params
+
+
 def pdist(items,
           comparison,
           *,
@@ -1148,98 +1257,9 @@ def pdist(items,
     :raises TypeError: If unknown kwargs are passed.
     """
     if isinstance(comparison, str):
-        comparison_lower = comparison.lower()
         labels = _extract_labels(items)
-        params = {'comparison_type': comparison_lower, 'similarity': similarity}
-        comparison_obj: Any
-
-        if comparison_lower == "fingerprint":
-            fp_opts = FingerprintOptions()
-            fp_opts.similarity = similarity
-            if 'fp_type' in kwargs:
-                fp_opts.fp_type = kwargs.pop('fp_type')
-            if 'numbits' in kwargs:
-                fp_opts.numbits = kwargs.pop('numbits')
-            if 'min_distance' in kwargs:
-                fp_opts.min_distance = kwargs.pop('min_distance')
-            if 'max_distance' in kwargs:
-                fp_opts.max_distance = kwargs.pop('max_distance')
-            if 'metric' in kwargs:
-                fp_opts.metric = kwargs.pop('metric')
-            if kwargs:
-                raise TypeError(
-                    f"Unknown kwargs for fingerprint comparison: {list(kwargs)}")
-            comparison_obj = _FingerprintComparison(items, fp_opts)
-            comparison_name = "fingerprint"
-
-        elif comparison_lower == "rocs":
-            rocs_opts = ROCSOptions()
-            rocs_opts.similarity = similarity
-            if 'score_type' in kwargs:
-                st = kwargs.pop('score_type')
-                score_map = {
-                    'combo_norm': _oecluster.ROCSScoreType_ComboNorm,
-                    'combo': _oecluster.ROCSScoreType_Combo,
-                    'shape': _oecluster.ROCSScoreType_Shape,
-                    'color': _oecluster.ROCSScoreType_Color,
-                }
-                if st not in score_map:
-                    raise ValueError(f"Unknown ROCS score type: {st}")
-                rocs_opts.score_type = score_map[st]
-            if 'color_ff_type' in kwargs:
-                rocs_opts.color_ff_type = kwargs.pop('color_ff_type')
-            if kwargs:
-                raise TypeError(
-                    f"Unknown kwargs for rocs comparison: {list(kwargs)}")
-            comparison_obj = _ROCSComparison(items, rocs_opts)
-            comparison_name = "rocs"
-
-        elif comparison_lower in ("superpose", "sitehopper"):
-            superpose_opts = SuperposeOptions()
-            superpose_opts.similarity = similarity
-            method = kwargs.pop('method', None)
-            if comparison_lower == "sitehopper":
-                method = method or "sitehopper"
-            if method is not None:
-                method_map = {
-                    'global_carbon_alpha': _oecluster.SuperposeMethod_GlobalCarbonAlpha,
-                    'global': _oecluster.SuperposeMethod_Global,
-                    'ddm': _oecluster.SuperposeMethod_DDM,
-                    'weighted': _oecluster.SuperposeMethod_Weighted,
-                    'sse': _oecluster.SuperposeMethod_SSE,
-                    'sitehopper': _oecluster.SuperposeMethod_SiteHopper,
-                }
-                if method not in method_map:
-                    raise ValueError(f"Unknown superpose method: {method}")
-                superpose_opts.method = method_map[method]
-            if 'score_type' in kwargs:
-                st = kwargs.pop('score_type')
-                st_map = {
-                    'auto': _oecluster.SuperposeScoreType_Auto,
-                    'rmsd': _oecluster.SuperposeScoreType_RMSD,
-                    'tanimoto': _oecluster.SuperposeScoreType_Tanimoto,
-                    'patch_score': _oecluster.SuperposeScoreType_PatchScore,
-                }
-                if st not in st_map:
-                    raise ValueError(f"Unknown superpose score type: {st}")
-                superpose_opts.score_type = st_map[st]
-            if 'predicate' in kwargs:
-                superpose_opts.predicate = kwargs.pop('predicate')
-            if 'ref_predicate' in kwargs:
-                superpose_opts.ref_predicate = kwargs.pop('ref_predicate')
-            if 'fit_predicate' in kwargs:
-                superpose_opts.fit_predicate = kwargs.pop('fit_predicate')
-            if kwargs:
-                raise TypeError(
-                    f"Unknown kwargs for superpose comparison: {list(kwargs)}")
-            comparison_obj = _SuperposeComparison(items, superpose_opts)
-            comparison_name = comparison_obj.ComparisonName()
-
-        else:
-            raise ValueError(
-                f"Unknown comparison: {comparison!r}. "
-                f"Valid options: 'fingerprint', 'rocs', 'superpose', 'sitehopper'")
-
+        comparison_obj, comparison_name, params = _build_comparison(
+            items, comparison, similarity, **kwargs)
     else:
         comparison_obj = comparison
         comparison_name = comparison_obj.ComparisonName()
