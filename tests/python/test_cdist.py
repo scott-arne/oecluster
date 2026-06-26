@@ -185,3 +185,38 @@ def test_load_distance_matrix_dispatches(tmp_path):
     assert isinstance(loaded_cross, CrossDistanceMatrix)
     assert loaded_sym.num_samples == 3
     assert loaded_cross.shape == (2, 2)
+
+
+def test_cross_matrix_rejected_by_clustering():
+    """Passing a CrossDistanceMatrix to any clustering/report entry point raises TypeError."""
+    import oecluster
+    from oecluster import CrossDistanceMatrix, DenseStorage, SymmetricDistanceMatrix
+
+    mat = np.array([[0.1, 0.2], [0.3, 0.4]], dtype=np.float64)
+    cross = CrossDistanceMatrix(mat, "fingerprint", ["a", "b"], ["x", "y"], {})
+
+    # Guard sites whose first inspected argument is distance_matrix.
+    with pytest.raises(TypeError):
+        oecluster.butina(cross, 0.5)
+    with pytest.raises(TypeError):
+        oecluster.dbscan(cross, 0.5)
+    with pytest.raises(TypeError):
+        oecluster.hdbscan(cross)
+    with pytest.raises(TypeError):
+        oecluster.agglomerative(cross, n_clusters=2)
+    # representative(cluster, distance_matrix): the distance_matrix guard runs
+    # before any cluster work.
+    with pytest.raises(TypeError):
+        oecluster.representative((0, 1), cross)
+
+    # cluster_report(result, distance_matrix): the result-type guard runs FIRST,
+    # so a valid ClusteringResult is required to reach the distance_matrix guard.
+    # Build a real result from a small symmetric matrix.
+    storage = DenseStorage(4)
+    for i in range(4):
+        for j in range(i + 1, 4):
+            storage.Set(i, j, 0.5)
+    sym = SymmetricDistanceMatrix(storage, "test", ["a", "b", "c", "d"], {})
+    result = oecluster.butina(sym, 0.6)
+    with pytest.raises(TypeError):
+        oecluster.cluster_report(result, cross)

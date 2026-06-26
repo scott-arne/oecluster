@@ -1524,8 +1524,8 @@ def butina(distance_matrix, threshold, *, reordering=False,
     """
     if threshold < 0.0:
         raise ValueError("Butina threshold must be non-negative")
-    if not isinstance(distance_matrix, DistanceMatrix):
-        raise TypeError("butina() expects a DistanceMatrix")
+    if not isinstance(distance_matrix, SymmetricDistanceMatrix):
+        raise TypeError("butina() expects a SymmetricDistanceMatrix")
 
     options = ButinaOptions()
     options.distance_threshold = float(threshold)
@@ -1663,8 +1663,8 @@ def _representative_options(
     priority_scores=None,
     scaffold_labels=None,
 ):
-    if not isinstance(distance_matrix, DistanceMatrix):
-        raise TypeError("representative functions expect a DistanceMatrix")
+    if not isinstance(distance_matrix, SymmetricDistanceMatrix):
+        raise TypeError("representative functions expect a SymmetricDistanceMatrix")
 
     method_key, native_method = _representative_method(method)
     if threshold is None:
@@ -1859,8 +1859,8 @@ def dbscan(distance_matrix, eps, *, min_samples=5, num_threads=0, chunk_size=409
         raise ValueError("DBSCAN eps must be non-negative")
     if min_samples < 1:
         raise ValueError("DBSCAN min_samples must be at least one")
-    if not isinstance(distance_matrix, DistanceMatrix):
-        raise TypeError("dbscan() expects a DistanceMatrix")
+    if not isinstance(distance_matrix, SymmetricDistanceMatrix):
+        raise TypeError("dbscan() expects a SymmetricDistanceMatrix")
 
     options = DBSCANOptions()
     options.eps = float(eps)
@@ -1909,8 +1909,8 @@ def hdbscan(distance_matrix, *, min_cluster_size=5, min_samples=None,
         raise ValueError("HDBSCAN max_cluster_size must be at least one")
     if alpha <= 0.0:
         raise ValueError("HDBSCAN alpha must be positive")
-    if not isinstance(distance_matrix, DistanceMatrix):
-        raise TypeError("hdbscan() expects a DistanceMatrix")
+    if not isinstance(distance_matrix, SymmetricDistanceMatrix):
+        raise TypeError("hdbscan() expects a SymmetricDistanceMatrix")
 
     method_map = {
         "eom": _oecluster.HDBSCANClusterSelectionMethod_EOM,
@@ -1958,8 +1958,8 @@ def agglomerative(distance_matrix, *, n_clusters=2, distance_threshold=None,
     :raises TypeError: If distance_matrix is not a DistanceMatrix.
     :raises ValueError: If options are invalid.
     """
-    if not isinstance(distance_matrix, DistanceMatrix):
-        raise TypeError("agglomerative() expects a DistanceMatrix")
+    if not isinstance(distance_matrix, SymmetricDistanceMatrix):
+        raise TypeError("agglomerative() expects a SymmetricDistanceMatrix")
     if distance_threshold is None and n_clusters < 1:
         raise ValueError("Agglomerative n_clusters must be at least one")
     if distance_threshold is not None and distance_threshold < 0.0:
@@ -2364,8 +2364,8 @@ def cluster_report(result, distance_matrix, *, preset="default",
     """
     if not isinstance(result, ClusteringResult):
         raise TypeError("cluster_report() expects a ClusteringResult")
-    if not isinstance(distance_matrix, DistanceMatrix):
-        raise TypeError("cluster_report() expects a DistanceMatrix")
+    if not isinstance(distance_matrix, SymmetricDistanceMatrix):
+        raise TypeError("cluster_report() expects a SymmetricDistanceMatrix")
 
     options = _oecluster.ClusterReportOptions(_cluster_threshold(preset))
     if coverage_thresholds is not None:
