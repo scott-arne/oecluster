@@ -14,6 +14,19 @@
 #include "oecluster/ThreadPool.h"
 
 namespace OECluster::detail {
+
+constexpr size_t BITBIRCH_FAST_CHUNK_TARGET = 2048;
+constexpr size_t BITBIRCH_FAST_MAX_CHUNKS = 64;
+
+size_t partition_count(const size_t n) {
+    if (n <= BITBIRCH_FAST_CHUNK_TARGET) {
+        return 1;
+    }
+    const size_t by_target =
+        (n + BITBIRCH_FAST_CHUNK_TARGET - 1) / BITBIRCH_FAST_CHUNK_TARGET;
+    return by_target < BITBIRCH_FAST_MAX_CHUNKS ? by_target : BITBIRCH_FAST_MAX_CHUNKS;
+}
+
 namespace {
 
 BitBirchLinearSum add_linear_sums(
@@ -380,6 +393,19 @@ void BitBirchTree::Fit(const OEFP::OEFPBatch& fingerprints) {
             options_,
             nullptr,
             nodes_);
+        SplitRootIfNeeded(split);
+        ++index_tracker_;
+    }
+}
+
+void BitBirchTree::Fit(const OEFP::OEFPBatch& fingerprints,
+                       const size_t begin, const size_t end) {
+    EnsureInitialized(fingerprints.SizeBits(), fingerprints.WordsPerFingerprint());
+    for (size_t row = begin; row < end; ++row) {
+        std::unique_ptr<BitBirchSubcluster> subcluster =
+            MakeSubclusterForMember(fingerprints, row);
+        const bool split = root_->InsertSubcluster(
+            std::move(subcluster), options_, nullptr, nodes_);
         SplitRootIfNeeded(split);
         ++index_tracker_;
     }

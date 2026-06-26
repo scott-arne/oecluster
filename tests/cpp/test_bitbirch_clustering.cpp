@@ -7,6 +7,11 @@
 #include "oefp/batch.h"
 #include "oefp/fingerprint.h"
 #include "oecluster/clustering/BitBirch.h"
+#include "../../src/clustering/BitBirchTree.h"
+
+namespace OECluster::detail {
+size_t partition_count(size_t n);
+}  // namespace OECluster::detail
 
 namespace {
 
@@ -163,4 +168,40 @@ TEST(BitBirchClusteringTest, RefinePruneMatchesZeroSampleReferenceCentroid) {
     EXPECT_EQ(result.Members()[2], (OECluster::Cluster{0}));
     EXPECT_EQ(result.Members()[3], (OECluster::Cluster{3}));
     EXPECT_TRUE(result.Members()[4].empty());
+}
+
+TEST(BitBirchFastTest, PartitionCountIsDeterministicInNAlone) {
+    using OECluster::detail::partition_count;
+    EXPECT_EQ(partition_count(0u), 1u);
+    EXPECT_EQ(partition_count(1u), 1u);
+    EXPECT_EQ(partition_count(2048u), 1u);     // at target -> single partition
+    EXPECT_EQ(partition_count(2049u), 2u);     // just over target -> two
+    EXPECT_EQ(partition_count(4096u), 2u);
+    EXPECT_EQ(partition_count(4097u), 3u);
+    // Capped at BITBIRCH_FAST_MAX_CHUNKS (64).
+    EXPECT_EQ(partition_count(64u * 2048u * 4u), 64u);
+}
+
+TEST(BitBirchFastTest, FitRangeOverFullRangeMatchesFitAll) {
+    const auto batch = make_batch({
+        make_fp(4, {0, 1}),
+        make_fp(4, {0, 1}),
+        make_fp(4, {2, 3}),
+        make_fp(4, {2, 3}),
+    });
+    OECluster::BitBirchOptions options;
+    options.threshold = 0.75;
+    options.branching_factor = 2;
+    options.merge_criterion = OECluster::BitBirchMergeCriterion::Diameter;
+
+    OECluster::detail::BitBirchTree tree_all(options);
+    tree_all.Fit(batch);
+    const auto result_all = tree_all.Result(batch.Spec(), batch.Size());
+
+    OECluster::detail::BitBirchTree tree_range(options);
+    tree_range.Fit(batch, 0, batch.Size());
+    const auto result_range = tree_range.Result(batch.Spec(), batch.Size());
+
+    EXPECT_EQ(result_all.Labels(), result_range.Labels());
+    EXPECT_EQ(result_all.Members(), result_range.Members());
 }

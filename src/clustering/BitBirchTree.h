@@ -84,6 +84,14 @@ public:
     explicit BitBirchTree(const BitBirchOptions& options);
 
     void Fit(const OEFP::OEFPBatch& fingerprints);
+    /**
+     * @brief Fit rows [begin, end) of the batch, storing global member ids.
+     *
+     * Identical to fitting the whole batch when begin==0 and end==Size(). Used by
+     * the fast-mode parallel engine so each chunk tree carries original row
+     * indices into the merge phase.
+     */
+    void Fit(const OEFP::OEFPBatch& fingerprints, size_t begin, size_t end);
     void FitSubclusters(std::vector<std::unique_ptr<BitBirchSubcluster>> subclusters);
     std::pair<
         std::vector<std::unique_ptr<BitBirchSubcluster>>,
@@ -129,6 +137,15 @@ SplitNode(
     BitBirchNode& node,
     const BitBirchOptions& options,
     std::vector<std::unique_ptr<BitBirchNode>>& node_owner);
+
+/**
+ * @brief Number of contiguous fast-mode partitions for an input of size n.
+ *
+ * Deterministic in n alone (independent of thread count) so fast-mode output
+ * does not depend on num_threads. Returns 1 for inputs at or below the chunk
+ * target, which makes fast mode byte-identical to strict parity for small n.
+ */
+size_t partition_count(size_t n);
 
 }  // namespace OECluster::detail
 
