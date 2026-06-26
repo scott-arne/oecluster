@@ -40,6 +40,7 @@ __all__ = [
     "DistanceMatrix",
     "SymmetricDistanceMatrix",
     "CrossDistanceMatrix",
+    "load_distance_matrix",
     "ClusteringResult",
     "ClusterReport",
     "ClusterReportComparison",
@@ -1041,6 +1042,26 @@ class CrossDistanceMatrix(DistanceMatrix):
         n_a, n_b = self._matrix.shape
         return (f"CrossDistanceMatrix(comparison={self._comparison_name!r}, "
                 f"shape=({n_a}, {n_b}))")
+
+
+def load_distance_matrix(path):
+    """
+    Load a distance matrix from a .npz file, dispatching on its stored kind.
+
+    Symmetric files (written by :class:`SymmetricDistanceMatrix`) have no
+    ``matrix_kind`` key; cross files carry ``matrix_kind="cross"``.
+
+    :param path: Input file path.
+    :returns: A :class:`SymmetricDistanceMatrix` or :class:`CrossDistanceMatrix`.
+    """
+    data = np.load(path, allow_pickle=False)
+    if 'matrix_kind' in data:
+        kind = str(data['matrix_kind'])
+        if kind == "cross":
+            return CrossDistanceMatrix.from_file(path)
+        raise ValueError(f"Unknown matrix_kind {kind!r} in {path}")
+    # No matrix_kind key => legacy/symmetric format.
+    return SymmetricDistanceMatrix.from_file(path)
 
 
 class ClusteringResult:

@@ -157,3 +157,31 @@ def test_cdist_rejects_prebuilt_comparison_object():
     comp = FingerprintComparison([mol])
     with pytest.raises(TypeError, match="comparison"):
         oecluster.cdist([mol], [mol], comp)
+
+
+def test_load_distance_matrix_dispatches(tmp_path):
+    """load_distance_matrix returns the correct subclass by file kind."""
+    import oecluster
+    from oecluster import (CrossDistanceMatrix, DenseStorage,
+                           SymmetricDistanceMatrix)
+
+    storage = DenseStorage(3)
+    storage.Set(0, 1, 0.5)
+    storage.Set(0, 2, 0.25)
+    storage.Set(1, 2, 0.75)
+    sym = SymmetricDistanceMatrix(storage, "test", ["a", "b", "c"], {})
+    sym_path = tmp_path / "sym.npz"
+    sym.to_file(str(sym_path))
+
+    mat = np.array([[0.1, 0.2], [0.3, 0.4]], dtype=np.float64)
+    cross = CrossDistanceMatrix(mat, "rocs", ["a", "b"], ["x", "y"], {})
+    cross_path = tmp_path / "cross.npz"
+    cross.to_file(str(cross_path))
+
+    loaded_sym = oecluster.load_distance_matrix(str(sym_path))
+    loaded_cross = oecluster.load_distance_matrix(str(cross_path))
+
+    assert isinstance(loaded_sym, SymmetricDistanceMatrix)
+    assert isinstance(loaded_cross, CrossDistanceMatrix)
+    assert loaded_sym.num_samples == 3
+    assert loaded_cross.shape == (2, 2)
