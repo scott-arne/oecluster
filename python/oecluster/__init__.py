@@ -39,6 +39,7 @@ __all__ = [
     "PDistOptions",
     "DistanceMatrix",
     "SymmetricDistanceMatrix",
+    "CrossDistanceMatrix",
     "ClusteringResult",
     "ClusterReport",
     "ClusterReportComparison",
@@ -919,6 +920,124 @@ class SymmetricDistanceMatrix(DistanceMatrix):
     def __repr__(self):
         return (f"SymmetricDistanceMatrix(comparison={self._comparison_name!r}, "
                 f"num_samples={self.num_samples}, num_pairs={self.num_pairs})")
+
+
+class CrossDistanceMatrix(DistanceMatrix):
+    """
+    A rectangular cross-distance matrix produced by :func:`cdist`.
+
+    Holds an ``(n_a, n_b)`` numpy array of distances between two item sets,
+    where entry ``[i, j]`` compares ``items_a[i]`` (reference) against
+    ``items_b[j]`` (fit). Unlike :class:`SymmetricDistanceMatrix`, it has no
+    condensed or squareform representation — cross-distances are not symmetric.
+    """
+
+    def __init__(self, matrix, comparison_name, labels_a=None, labels_b=None,
+                 params=None):
+        """
+        Construct a CrossDistanceMatrix wrapper.
+
+        :param matrix: 2D numpy array of shape (n_a, n_b), dtype float64.
+        :param comparison_name: Name of the comparison method used.
+        :param labels_a: Optional labels for set A (the rows / reference side).
+        :param labels_b: Optional labels for set B (the columns / fit side).
+        :param params: Optional dictionary of comparison parameters.
+        """
+        super().__init__(comparison_name, params)
+        self._matrix = matrix
+        self._labels_a = labels_a if labels_a is not None else []
+        self._labels_b = labels_b if labels_b is not None else []
+
+    @property
+    def matrix(self):
+        """Get the rectangular cross-distance array of shape (n_a, n_b)."""
+        return self._matrix
+
+    @property
+    def shape(self):
+        """Get the shape of the cross-distance matrix (n_a, n_b)."""
+        return tuple(self._matrix.shape)
+
+    @property
+    def labels_a(self):
+        """Get the labels for set A (rows / reference side)."""
+        return self._labels_a
+
+    @property
+    def labels_b(self):
+        """Get the labels for set B (columns / fit side)."""
+        return self._labels_b
+
+    def to_file(self, path):
+        """
+        Save the cross-distance matrix to a compressed .npz file.
+
+        :param path: Output file path.
+        """
+        n_a, n_b = self._matrix.shape
+        np.savez_compressed(
+            path,
+            matrix_kind=np.array("cross"),
+            matrix=self._matrix,
+            n_a=np.array(n_a),
+            n_b=np.array(n_b),
+            labels_a=np.array(self._labels_a),
+            labels_b=np.array(self._labels_b),
+            comparison_name=np.array(self._comparison_name),
+            params_json=np.array(json.dumps(self._params)),
+        )
+
+    @classmethod
+    def from_file(cls, path):
+        """
+        Load a cross-distance matrix from a .npz file.
+
+        :param path: Input file path.
+        :returns: CrossDistanceMatrix instance.
+        :raises ValueError: If the file is not a cross-distance matrix or is malformed.
+        """
+        data = np.load(path, allow_pickle=False)
+        if 'matrix_kind' not in data or str(data['matrix_kind']) != "cross":
+            raise ValueError(
+                "File is a symmetric distance matrix; use "
+                "SymmetricDistanceMatrix.from_file or load_distance_matrix")
+        for required in ('matrix', 'n_a', 'n_b', 'comparison_name'):
+            if required not in data:
+                raise ValueError(
+                    f"Malformed cross matrix: missing required key {required!r}")
+        matrix = data['matrix']
+        n_a = int(data['n_a'])
+        n_b = int(data['n_b'])
+        if matrix.shape != (n_a, n_b):
+            raise ValueError(
+                f"Malformed cross matrix: matrix shape {tuple(matrix.shape)} "
+                f"!= ({n_a}, {n_b})")
+        labels_a = list(data.get('labels_a', np.array([])))
+        labels_b = list(data.get('labels_b', np.array([])))
+        if labels_a and len(labels_a) != n_a:
+            raise ValueError(
+                f"Malformed cross matrix: labels_a length {len(labels_a)} != {n_a}")
+        if labels_b and len(labels_b) != n_b:
+            raise ValueError(
+                f"Malformed cross matrix: labels_b length {len(labels_b)} != {n_b}")
+        try:
+            params = json.loads(str(data['params_json']))
+        except (KeyError, json.JSONDecodeError):
+            params = {}
+        return cls(matrix, str(data['comparison_name']), labels_a, labels_b, params)
+
+    def __array__(self):
+        """Support numpy array interface."""
+        return self._matrix
+
+    def __len__(self):
+        """Return the number of rows (size of set A)."""
+        return self._matrix.shape[0]
+
+    def __repr__(self):
+        n_a, n_b = self._matrix.shape
+        return (f"CrossDistanceMatrix(comparison={self._comparison_name!r}, "
+                f"shape=({n_a}, {n_b}))")
 
 
 class ClusteringResult:
