@@ -29,9 +29,14 @@ enum class BitBirchMergeCriterion {
 /**
  * @brief Execution mode for BitBirch.
  *
- * `Fast` is reserved for future behavior-changing optimizations. It currently
- * uses the strict-parity implementation path so callers can opt in before the
- * first non-parity fast algorithm is introduced.
+ * `StrictParity` (default) preserves exact Python BitBirch reference behavior.
+ * `Fast` partitions the input, fits chunk trees in parallel, and merges their
+ * leaf summaries in a single sequential reclustering pass. `Fast` output is a
+ * deterministic function of the clustering inputs and is independent of
+ * `num_threads`; it may differ from `StrictParity` cluster shapes but is
+ * quality-equivalent. For inputs at or below the internal chunk target, `Fast`
+ * is byte-identical to `StrictParity`. Implemented for `bitbirch_cluster` and
+ * `bitbirch_recluster`; `bitbirch_refine` always runs `StrictParity`.
  */
 enum class BitBirchMode {
     StrictParity,

@@ -1,3 +1,4 @@
+#include <cmath>
 #include <initializer_list>
 #include <stdexcept>
 #include <vector>
@@ -7,6 +8,8 @@
 #include "oefp/batch.h"
 #include "oefp/fingerprint.h"
 #include "oecluster/clustering/BitBirch.h"
+#include "oecluster/clustering/ClusterReport.h"
+#include "oecluster/StorageBackend.h"
 #include "../../src/clustering/BitBirchTree.h"
 
 namespace OECluster::detail {
@@ -52,6 +55,28 @@ OEFP::OEFPBatch make_random_batch(const size_t rows, const size_t bits) {
         fps.push_back(fp);
     }
     return OEFP::OEFPBatch::FromFingerprints(fps);
+}
+
+OECluster::DenseStorage tanimoto_storage(const OEFP::OEFPBatch& batch) {
+    const size_t n = batch.Size();
+    const size_t words = batch.WordsPerFingerprint();
+    OECluster::DenseStorage storage(n);
+    for (size_t i = 0; i < n; ++i) {
+        const uint64_t* wi = batch.RowWords(i);
+        const uint32_t pi = batch.PopCount(i);
+        for (size_t j = i + 1; j < n; ++j) {
+            const uint64_t* wj = batch.RowWords(j);
+            uint32_t inter = 0;
+            for (size_t w = 0; w < words; ++w) {
+                inter += static_cast<uint32_t>(__builtin_popcountll(wi[w] & wj[w]));
+            }
+            const uint32_t uni = pi + batch.PopCount(j) - inter;
+            const double sim = uni == 0u ? 1.0 : static_cast<double>(inter) /
+                                                  static_cast<double>(uni);
+            storage.Set(i, j, 1.0 - sim);
+        }
+    }
+    return storage;
 }
 
 }  // namespace
@@ -278,4 +303,78 @@ TEST(BitBirchFastTest, FastResultIsDeterministicAcrossThreadCounts) {
         EXPECT_EQ(r1.Labels(), r.Labels()) << "threads=" << threads;
         EXPECT_EQ(r1.Members(), r.Members()) << "threads=" << threads;
     }
+}
+
+TEST(BitBirchFastTest, BitBirchClusterFastSmallNMatchesStrict) {
+    const auto batch = make_batch({
+        make_fp(4, {0, 1}),
+        make_fp(4, {0, 1}),
+        make_fp(4, {2, 3}),
+        make_fp(4, {2, 3}),
+    });
+    OECluster::BitBirchOptions strict_opts;
+    strict_opts.threshold = 0.75;
+    strict_opts.branching_factor = 2;
+    strict_opts.merge_criterion = OECluster::BitBirchMergeCriterion::Diameter;
+    strict_opts.mode = OECluster::BitBirchMode::StrictParity;
+
+    OECluster::BitBirchOptions fast_opts = strict_opts;
+    fast_opts.mode = OECluster::BitBirchMode::Fast;
+
+    const auto strict = OECluster::bitbirch_cluster(batch, strict_opts);
+    const auto fast = OECluster::bitbirch_cluster(batch, fast_opts);
+
+    EXPECT_EQ(strict.Labels(), fast.Labels());
+    EXPECT_EQ(strict.Members(), fast.Members());
+}
+
+TEST(BitBirchFastTest, BitBirchClusterFastRoutesThroughEngine) {
+    const auto batch = make_random_batch(5000, 64);
+    OECluster::BitBirchOptions opts;
+    opts.threshold = 0.5;
+    opts.branching_factor = 50;
+    opts.merge_criterion = OECluster::BitBirchMergeCriterion::Diameter;
+    opts.mode = OECluster::BitBirchMode::Fast;
+
+    const auto via_api = OECluster::bitbirch_cluster(batch, opts);
+
+    OECluster::detail::BitBirchTree tree(opts);
+    OECluster::detail::BitBirchTree::BuildFastTree(batch, opts, tree);
+    const auto via_engine = tree.Result(batch.Spec(), batch.Size());
+
+    EXPECT_EQ(via_api.Labels(), via_engine.Labels());
+    EXPECT_EQ(via_api.Members(), via_engine.Members());
+}
+
+TEST(BitBirchFastTest, BitBirchClusterFastQualityEquivalentToStrict) {
+    const auto batch = make_random_batch(3000, 64);  // > chunk target -> P >= 2
+    const auto storage = tanimoto_storage(batch);
+
+    OECluster::BitBirchOptions strict_opts;
+    strict_opts.threshold = 0.5;
+    strict_opts.branching_factor = 50;
+    strict_opts.merge_criterion = OECluster::BitBirchMergeCriterion::Diameter;
+    OECluster::BitBirchOptions fast_opts = strict_opts;
+    fast_opts.mode = OECluster::BitBirchMode::Fast;
+
+    const auto strict = OECluster::bitbirch_cluster(batch, strict_opts);
+    const auto fast = OECluster::bitbirch_cluster(batch, fast_opts);
+
+    const auto rs = OECluster::cluster_report(strict, storage, OECluster::ClusterReportOptions());
+    const auto rf = OECluster::cluster_report(fast, storage, OECluster::ClusterReportOptions());
+
+    // Non-degenerate in both modes.
+    ASSERT_GE(rs.num_clusters, 2u);
+    ASSERT_GE(rf.num_clusters, 2u);
+    ASSERT_FALSE(std::isnan(rs.silhouette));
+    ASSERT_FALSE(std::isnan(rf.silhouette));
+
+    // Fast must be quality-equivalent: tighter-or-equal intra distance and
+    // not-much-lower silhouette, cluster count within 15%. Tolerances mirror
+    // the Python FAST_QUALITY_TOL constants (Task 6); keep the two in sync.
+    EXPECT_LE(rf.mean_intra_distance, rs.mean_intra_distance + 0.05);
+    EXPECT_GE(rf.silhouette, rs.silhouette - 0.05);
+    EXPECT_LE(std::abs(static_cast<double>(rf.num_clusters) -
+                       static_cast<double>(rs.num_clusters)),
+              0.15 * static_cast<double>(rs.num_clusters));
 }

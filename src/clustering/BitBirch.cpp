@@ -39,7 +39,11 @@ BitBirchResult bitbirch_cluster(
     validate_batch(fingerprints);
 
     detail::BitBirchTree tree(options);
-    tree.Fit(fingerprints);
+    if (options.mode == BitBirchMode::Fast) {
+        detail::BitBirchTree::BuildFastTree(fingerprints, options, tree);
+    } else {
+        tree.Fit(fingerprints);
+    }
     return tree.Result(fingerprints.Spec(), fingerprints.Size());
 }
 
