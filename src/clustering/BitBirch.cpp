@@ -98,7 +98,15 @@ BitBirchResult bitbirch_refine(
             "BitBirch reassign_top_clusters must be zero or at least two");
     }
 
-    detail::BitBirchTree tree(options.fit_options);
+    // Refine's prune/reassign passes are parent-pointer- and order-sensitive;
+    // the fast partition-merge path is out of scope here. Force strict parity
+    // for the fit regardless of the forwarded mode (BitBirchTree::Fit does not
+    // branch on mode today, but this makes refine's strictness explicit and
+    // future-proof against any later mode routing inside Fit).
+    BitBirchOptions fit_options = options.fit_options;
+    fit_options.mode = BitBirchMode::StrictParity;
+
+    detail::BitBirchTree tree(fit_options);
     tree.Fit(fingerprints);
     if (options.redistribute_largest_cluster) {
         tree.RedistributeLargestCluster(fingerprints);

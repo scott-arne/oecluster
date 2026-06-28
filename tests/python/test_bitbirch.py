@@ -653,3 +653,14 @@ def test_bitbirch_recluster_fast_quality_equivalent_to_strict():
         strict_report.mean_intra_distance + FAST_QUALITY_TOL["intra_distance_abs"]
     assert fast_report.silhouette >= \
         strict_report.silhouette - FAST_QUALITY_TOL["silhouette_abs"]
+
+
+def test_bitbirch_refine_fast_equals_strict():
+    bits = _random_bits(5000, 64, seed=33)
+    batch = _batch_from_bits(bits)
+    common = dict(threshold=0.5, branching_factor=50, singly=False,
+                  reassign_top_clusters=2)
+    strict = oecluster.bitbirch_refine(batch, mode="strict_parity", **common)
+    fast = oecluster.bitbirch_refine(batch, mode="fast", **common)
+    assert fast.labels.tolist() == strict.labels.tolist()
+    assert fast.clusters == strict.clusters

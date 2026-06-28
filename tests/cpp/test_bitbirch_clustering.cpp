@@ -420,3 +420,22 @@ TEST(BitBirchFastTest, ReclusterFastDeterministicAcrossThreadCounts) {
         EXPECT_EQ(r1.Members(), r.Members()) << "threads=" << threads;
     }
 }
+
+TEST(BitBirchFastTest, RefineIgnoresFastModeAndStaysStrict) {
+    const auto batch = make_random_batch(5000, 64);
+    OECluster::BitBirchRefinementOptions strict_opts;
+    strict_opts.fit_options.threshold = 0.5;
+    strict_opts.fit_options.branching_factor = 50;
+    strict_opts.fit_options.singly = false;
+    strict_opts.fit_options.mode = OECluster::BitBirchMode::StrictParity;
+    strict_opts.reassign_top_clusters = 2;
+
+    OECluster::BitBirchRefinementOptions fast_opts = strict_opts;
+    fast_opts.fit_options.mode = OECluster::BitBirchMode::Fast;
+
+    const auto strict = OECluster::bitbirch_refine(batch, strict_opts);
+    const auto fast = OECluster::bitbirch_refine(batch, fast_opts);
+
+    EXPECT_EQ(strict.Labels(), fast.Labels());
+    EXPECT_EQ(strict.Members(), fast.Members());
+}
