@@ -22,6 +22,10 @@ import oefp
 BITBIRCH_REPO = Path("/Users/johnss51/Development/python/bitbirch")
 ISIM_REPO = Path("/Users/johnss51/Development/python/iSIM")
 
+# Must equal BITBIRCH_FAST_CHUNK_TARGET in src/clustering/BitBirchTree.cpp.
+# A batch larger than this triggers fast-mode partitioning (P >= 2).
+FAST_CHUNK_TARGET = 2048
+
 
 @dataclass(frozen=True)
 class BenchmarkResult:
@@ -86,6 +90,26 @@ def batch_from_bits(bits: np.ndarray):
         for row in bits
     ]
     return oefp.OEFPBatch.from_fingerprints(fingerprints)
+
+
+def _tanimoto_distance_matrix(bits):
+    """Complete SymmetricDistanceMatrix of Tanimoto distances for a bit matrix."""
+    import oecluster
+
+    arr = np.asarray(bits, dtype=np.float64)
+    n = arr.shape[0]
+    popcounts = arr.sum(axis=1)
+    inter = arr @ arr.T
+    union = popcounts[:, None] + popcounts[None, :] - inter
+    with np.errstate(invalid="ignore", divide="ignore"):
+        sim = np.where(union == 0.0, 1.0, inter / union)
+    dist = 1.0 - sim
+    storage = oecluster.DenseStorage(n)
+    for i in range(n):
+        for j in range(i + 1, n):
+            storage.Set(i, j, float(dist[i, j]))
+    return oecluster.SymmetricDistanceMatrix(storage, "tanimoto",
+                                             [str(k) for k in range(n)], {})
 
 
 def reference_result(model, n_items: int) -> tuple[np.ndarray, tuple[tuple[int, ...], ...]]:
@@ -366,6 +390,45 @@ def native_workflow_call(workflow: str, batch, args: argparse.Namespace) -> Call
     raise ValueError(f"Unknown BitBirch benchmark workflow: {workflow!r}")
 
 
+def _run_native(workflow: str, batch, args: argparse.Namespace, num_threads: int | None = None):
+    """Run native workflow and return the result object (not labels/clusters tuple)."""
+    actual_threads = num_threads if num_threads is not None else args.num_threads
+    if workflow == "cluster":
+        return oecluster.bitbirch(
+            batch,
+            threshold=args.threshold,
+            branching_factor=args.branching_factor,
+            merge_criterion="diameter",
+            mode=args.mode,
+            num_threads=actual_threads,
+        )
+    if workflow == "recluster":
+        return oecluster.bitbirch_recluster(
+            batch,
+            initial_threshold=args.threshold,
+            second_threshold=args.second_threshold,
+            second_tolerance=args.second_tolerance,
+            branching_factor=args.branching_factor,
+            mode=args.mode,
+            num_threads=actual_threads,
+        )
+    if workflow in ("reassign", "prune", "prune_reassign"):
+        kwargs = {"reassign_top_clusters": args.reassign_top_clusters} if workflow in ("reassign", "prune_reassign") else {}
+        if workflow in ("prune", "prune_reassign"):
+            kwargs["redistribute_largest_cluster"] = True
+        return oecluster.bitbirch_refine(
+            batch,
+            threshold=args.threshold,
+            branching_factor=args.branching_factor,
+            merge_criterion="diameter",
+            singly=False,
+            mode=args.mode,
+            num_threads=actual_threads,
+            **kwargs,
+        )
+    raise ValueError(f"Unknown BitBirch benchmark workflow: {workflow!r}")
+
+
 def benchmark(
     workflow: str,
     bb,
@@ -406,7 +469,15 @@ def benchmark(
     )
     expected = reference_call()
     observed = native_call()
-    assert_same_result(observed, expected, workflow)
+    # Partitioned fast cluster/recluster may diverge from the reference by
+    # design; assert exact parity only where it must hold.
+    partitioned_fast = (
+        args.mode == "fast"
+        and workflow in ("cluster", "recluster")
+        and bits.shape[0] > FAST_CHUNK_TARGET
+    )
+    if not partitioned_fast:
+        assert_same_result(observed, expected, workflow)
 
     reference_seconds = time_call(
         reference_call,
@@ -427,6 +498,51 @@ def benchmark(
         native_seconds=native_seconds,
         reference_seconds=reference_seconds,
     )
+
+
+def compare_modes(args):
+    """Print strict-vs-fast speedup, quality delta, and fast determinism."""
+    import oecluster
+
+    print("| workflow | n | strict_s | fast_s | speedup | d_num_clusters | "
+          "d_mean_intra | d_silhouette | deterministic |")
+    print("| :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :--- |")
+    for n in args.sizes:
+        bits = make_bits(args.seed, n, args.bits, args.density, args.regime,
+                         args.prototype_count)
+        batch = batch_from_bits(bits)
+        for workflow in args.workflows:
+            if workflow not in ("cluster", "recluster"):
+                continue
+            strict_args = argparse.Namespace(**{**vars(args), "mode": "strict_parity"})
+            fast_args = argparse.Namespace(**{**vars(args), "mode": "fast"})
+            strict_call = native_workflow_call(workflow, batch, strict_args)
+            fast_call = native_workflow_call(workflow, batch, fast_args)
+            strict_s = time_call(strict_call, args.repeats, args.warmups)
+            fast_s = time_call(fast_call, args.repeats, args.warmups)
+
+            # Quality delta via cluster_report on a Tanimoto matrix.
+            dm = _tanimoto_distance_matrix(bits)
+            strict_result = _run_native(workflow, batch, strict_args)
+            fast_result = _run_native(workflow, batch, fast_args)
+            rs = oecluster.cluster_report(strict_result, dm)
+            rf = oecluster.cluster_report(fast_result, dm)
+            d_clusters = rf.num_clusters - rs.num_clusters
+            d_intra = rf.mean_intra_distance - rs.mean_intra_distance
+            d_sil = rf.silhouette - rs.silhouette
+
+            # Determinism across thread counts (labels only).
+            ref = _run_native(workflow, batch, fast_args, num_threads=1)
+            deterministic = all(
+                _run_native(workflow, batch, fast_args, num_threads=t).labels.tolist()
+                == ref.labels.tolist()
+                for t in (2, 4, 0)
+            )
+
+            speedup = strict_s / fast_s if fast_s else float("nan")
+            print(f"| {workflow} | {n} | {strict_s:.6f} | {fast_s:.6f} | "
+                  f"{speedup:.2f}x | {d_clusters:+d} | {d_intra:+.4f} | "
+                  f"{d_sil:+.4f} | {deterministic} |")
 
 
 def parse_args() -> argparse.Namespace:
@@ -463,12 +579,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--warmups", type=int, default=1)
     parser.add_argument("--seed", type=int, default=13)
     parser.add_argument("--json", action="store_true", dest="as_json")
+    parser.add_argument("--compare-modes", action="store_true",
+                        help="Report strict-vs-fast native speedup, quality delta, "
+                             "and fast determinism across thread counts.")
     return parser.parse_args()
 
 
 def main() -> None:
     """Run benchmarks and print timing results."""
     args = parse_args()
+    if args.compare_modes:
+        compare_modes(args)
+        return
     results = []
     bb = None if args.native_only else load_reference_bitbirch()
     for n_samples in args.sizes:
