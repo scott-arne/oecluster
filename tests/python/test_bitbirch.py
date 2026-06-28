@@ -261,7 +261,7 @@ def test_bitbirch_recluster_matches_reference():
     assert observed.clusters == expected_clusters
 
 
-def test_bitbirch_fast_mode_matches_strict_until_optimized():
+def test_bitbirch_fast_mode_matches_strict_for_single_partition():
     bits = np.array(
         [
             [1, 1, 0, 0],
@@ -280,7 +280,7 @@ def test_bitbirch_fast_mode_matches_strict_until_optimized():
     assert fast.clusters == strict.clusters
 
 
-def test_bitbirch_recluster_fast_mode_matches_strict_until_optimized():
+def test_bitbirch_recluster_fast_mode_matches_strict_for_single_partition():
     bits = np.array(
         [
             [1, 1, 0, 0],
@@ -313,7 +313,7 @@ def test_bitbirch_recluster_fast_mode_matches_strict_until_optimized():
     assert fast.clusters == strict.clusters
 
 
-def test_bitbirch_refine_fast_mode_matches_strict_until_optimized():
+def test_bitbirch_refine_fast_mode_matches_strict():
     bits = _prune_reassign_fixture_bits()
     batch = _batch_from_bits(bits)
 
