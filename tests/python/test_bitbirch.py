@@ -343,11 +343,13 @@ def test_bitbirch_refine_fast_mode_matches_strict_until_optimized():
 
 
 def test_bitbirch_fast_mode_docstrings_mark_reserved_alias():
-    expected = "fast currently uses the strict-parity path"
-
-    assert expected in " ".join((oecluster.bitbirch.__doc__ or "").split())
-    assert expected in " ".join((oecluster.bitbirch_recluster.__doc__ or "").split())
-    assert expected in " ".join((oecluster.bitbirch_refine.__doc__ or "").split())
+    # bitbirch / bitbirch_recluster now document real fast behavior.
+    fast_text = "partitions the input, fits chunk trees in parallel"
+    assert fast_text in " ".join((oecluster.bitbirch.__doc__ or "").split())
+    assert fast_text in " ".join((oecluster.bitbirch_recluster.__doc__ or "").split())
+    # refine still runs the strict path; its docstring keeps the reserved note.
+    refine_text = "refinement always runs the strict-parity path"
+    assert refine_text in " ".join((oecluster.bitbirch_refine.__doc__ or "").split())
 
 
 def _reference_refine_reassign(bits, *, top=2):
