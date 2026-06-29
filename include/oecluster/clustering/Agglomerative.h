@@ -30,12 +30,12 @@ enum class AgglomerativeLinkageMethod {
  * @brief Options for hierarchical agglomerative clustering.
  */
 struct AgglomerativeOptions {
-    size_t n_clusters = 2;
-    double distance_threshold = -1.0;
-    AgglomerativeLinkageMethod linkage = AgglomerativeLinkageMethod::Average;
-    bool compute_full_tree = true;
-    size_t num_threads = 0;
-    size_t chunk_size = 4096;
+    size_t n_clusters = 2;                        ///< Number of clusters to form; ignored if distance_threshold >= 0.
+    double distance_threshold = -1.0;             ///< Stop merging above this distance; negative means use n_clusters instead.
+    AgglomerativeLinkageMethod linkage = AgglomerativeLinkageMethod::Average;  ///< Linkage update method.
+    bool compute_full_tree = true;                ///< Build full dendrogram even when stopping early.
+    size_t num_threads = 0;                       ///< Worker threads; 0 auto-detects hardware concurrency.
+    size_t chunk_size = 4096;                     ///< Chunk size for parallelized linkage updates.
 };
 
 /**

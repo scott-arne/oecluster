@@ -95,6 +95,10 @@ ClusterReport cluster_report(
 
 /**
  * @brief Pair two reports for side-by-side reading. No agreement math.
+ *
+ * :param a: First clustering-quality report.
+ * :param b: Second clustering-quality report.
+ * :returns: A comparison structure containing both reports.
  */
 ClusterReportComparison compare_reports(const ClusterReport& a, const ClusterReport& b);
 

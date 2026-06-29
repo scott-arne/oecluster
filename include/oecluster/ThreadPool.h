@@ -15,6 +15,11 @@ namespace OECluster {
 
 class ThreadPool {
 public:
+    /**
+     * @brief Construct a thread pool with the specified worker count.
+     *
+     * :param num_threads: Number of worker threads; 0 auto-detects hardware concurrency.
+     */
     explicit ThreadPool(size_t num_threads = 0);
     ~ThreadPool();
 
@@ -36,8 +41,23 @@ public:
     void ParallelFor(size_t begin, size_t end, size_t chunk_size,
                      std::function<void(size_t, size_t)> body);
 
+    /**
+     * @brief Get the configured worker count.
+     *
+     * :returns: Number of worker threads in the pool.
+     */
     size_t NumThreads() const;
+
+    /**
+     * @brief Signal queued and running tasks to stop.
+     */
     void Cancel();
+
+    /**
+     * @brief Check whether cancellation was requested.
+     *
+     * :returns: True if Cancel() has been called, false otherwise.
+     */
     bool IsCancelled() const;
 
 private:

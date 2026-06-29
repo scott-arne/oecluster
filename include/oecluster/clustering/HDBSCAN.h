@@ -66,6 +66,7 @@ private:
  * :param storage: Complete pairwise distance storage.
  * :param options: HDBSCAN clustering options.
  * :returns: Labels, clusters, and probabilities.
+ * :raises std::invalid_argument: If min_cluster_size < 2, alpha <= 0, min_samples > NumSamples(), or storage is incomplete.
  */
 HDBSCANResult hdbscan_cluster(const StorageBackend& storage, const HDBSCANOptions& options);
 
