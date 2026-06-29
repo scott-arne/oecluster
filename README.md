@@ -635,33 +635,9 @@ Runnable examples live in `examples/`:
 Run them with the local package on your `PYTHONPATH`:
 
 ```bash
-PYTHONPATH=python python examples/quickstart_smiles.py
-PYTHONPATH=python python examples/rank_representatives.py
+python examples/quickstart_smiles.py
+python examples/rank_representatives.py
 ```
-
----
-
-## Project Structure
-
-```text
-oecluster/
-  include/oecluster/         C++ public headers
-    comparisons/             Comparison-specific headers
-    clustering/              Clustering and representative APIs
-  src/                        C++ implementation
-  tools/                      CLI tool
-  swig/                       SWIG interface for Python bindings
-  python/oecluster/           Python package
-  examples/                   Runnable examples
-  tests/
-    cpp/                      C++ tests
-    python/                   Python tests
-  scripts/                    Build and packaging utilities
-  CMakeLists.txt              Root build configuration
-  pyproject.toml              Python package configuration
-```
-
----
 
 ## License
 

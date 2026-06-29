@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.21)
 
 if(POLICY CMP0144)
     cmake_policy(SET CMP0144 NEW)
@@ -74,19 +74,24 @@ else()
         "${CMAKE_CURRENT_SOURCE_DIR}/${OECLUSTER_OEFP_SOURCE_DIR}")
 endif()
 
-if(EXISTS "${OECLUSTER_OEFP_RESOLVED_SOURCE_DIR}/CMakeLists.txt")
-    add_subdirectory(
-        "${OECLUSTER_OEFP_RESOLVED_SOURCE_DIR}"
-        "${CMAKE_BINARY_DIR}/_deps/oefp"
-    )
-else()
-    FetchContent_Declare(
-        oefp
-        GIT_REPOSITORY https://github.com/scott-arne/oefp.git
-        GIT_TAG v0.2.4
-        GIT_SHALLOW TRUE
-    )
-    FetchContent_MakeAvailable(oefp)
+# Skip when oefp already exists as a target: this happens when oecluster is
+# itself built as a subproject of oefp (e.g. oefp's parity benchmarks), where
+# re-adding it would redefine the oefp and ArrowPython::* targets.
+if(NOT TARGET oefp)
+    if(EXISTS "${OECLUSTER_OEFP_RESOLVED_SOURCE_DIR}/CMakeLists.txt")
+        add_subdirectory(
+            "${OECLUSTER_OEFP_RESOLVED_SOURCE_DIR}"
+            "${CMAKE_BINARY_DIR}/_deps/oefp"
+        )
+    else()
+        FetchContent_Declare(
+            oefp
+            GIT_REPOSITORY https://github.com/scott-arne/oefp.git
+            GIT_TAG v0.2.4
+            GIT_SHALLOW TRUE
+        )
+        FetchContent_MakeAvailable(oefp)
+    endif()
 endif()
 
 FetchContent_Declare(
