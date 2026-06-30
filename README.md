@@ -48,11 +48,11 @@ cluster summaries as well as lower-level control over distance computation.
 
 ## Requirements
 
-- **Python** 3.10+ with NumPy.
+- **Python** 3.10+ with NumPy 1.20 or later.
 - **OpenEye Toolkits** 2025.2 or later.
 - **A valid OpenEye license** at build time and runtime.
 - **OEFP** 0.2.4 or later for fingerprint generation and comparison.
-- **C++17**, **CMake** 3.16+, and **SWIG** 4.0+ when building from source.
+- **C++17**, **CMake** 3.21+, and **SWIG** 4.0+ when building from source.
 
 ---
 
@@ -212,6 +212,18 @@ Use `output` when dense distances are large enough to keep on disk:
 dm = oecluster.pdist(mols, "fingerprint", output="distances.mmap")
 ```
 
+**Cross-distance** (`cdist`) computes the rectangular NxM distance matrix between two distinct item sets:
+
+```python
+queries = [...]  # N query molecules
+targets = [...]  # M target molecules
+cross_dm = oecluster.cdist(queries, targets, "fingerprint", metric="tanimoto")
+# cross_dm is a CrossDistanceMatrix with shape (N, M)
+print(cross_dm.matrix[0, :])  # distances from first query to all targets
+```
+
+Use `cdist` when you need distances from one set (e.g., virtual screening hits) to another (e.g., in-house compounds), rather than the symmetric within-set distances that `pdist` computes.
+
 ### 3. Cluster And Select Representatives
 
 ```python
@@ -279,6 +291,36 @@ array) and `clusters` (a tuple of member-index tuples). Results support
 indexing. Algorithm-specific outputs live on the specific subclass (for
 example `DBSCANResult.core_sample_indices` or `BitBirchResult.centroids`), so a
 result never carries fields that do not apply to its algorithm.
+
+### BitBirch Variants
+
+Beyond the standard `bitbirch` function, two specialized clustering strategies are available for binary fingerprint batches:
+
+**`bitbirch_recluster`** applies a two-stage reclustering pass. The first pass fits the fingerprints at `initial_threshold`, then the second pass re-clusters the leaf summaries at `second_threshold` with an optional `second_tolerance` penalty. This approach is useful when you want to first group locally similar molecules and then merge those groups at a coarser level.
+
+```python
+result = oecluster.bitbirch_recluster(
+    fingerprints,
+    initial_threshold=0.65,
+    second_threshold=0.7,
+    branching_factor=50,
+    mode="strict_parity",
+)
+```
+
+**`bitbirch_refine`** fits a BitBirch tree and then applies refinement passes to improve cluster quality. You can enable `redistribute_largest_cluster` to redistribute molecules from the largest cluster, or set `reassign_top_clusters` to a count (≥2) to reassign molecules from the top-K largest clusters by comparing them to cluster centroids. Refinement is helpful when the initial fit produces one or a few oversized clusters.
+
+```python
+result = oecluster.bitbirch_refine(
+    fingerprints,
+    threshold=0.65,
+    branching_factor=50,
+    redistribute_largest_cluster=True,
+    reassign_top_clusters=3,
+)
+```
+
+Both functions return a `BitBirchResult` with `labels`, `clusters`, `centroids`, and `cluster_sizes`. The `mode` parameter accepts `"strict_parity"` (exact reference-implementation parity) or `"fast"` (partition-merge parallelism with deterministic output). Fast mode applies to `bitbirch` and `bitbirch_recluster`; `bitbirch_refine` always runs in strict parity because its prune/reassign passes are order-sensitive (the `mode` argument is accepted for API symmetry but does not change refine's behavior).
 
 ---
 
@@ -507,10 +549,10 @@ Tanimoto.
 
 | Parameter | Values | Default |
 |-----------|--------|---------|
-| `score_type` | `ComboNorm`, `Combo`, `Shape`, `Color` | `ComboNorm` |
+| `score_type` | `combo_norm`, `combo`, `shape`, `color` | `combo_norm` |
 | `color_ff_type` | `1` (ImplicitMillsDean), `2` (ExplicitMillsDean) | `1` |
 
-Distance ranges: ComboNorm [0, 1], Combo [0, 2], Shape [0, 1], Color [0, 1].
+Distance ranges: combo_norm [0, 1], combo [0, 2], shape [0, 1], color [0, 1].
 
 ### Superpose
 
