@@ -624,6 +624,39 @@ except ImportError as e:
 
 from . import oecluster as _oecluster
 
+# Docstrings for SWIG-imported storage backend classes
+DenseStorage.__doc__ = """
+Default in-memory storage backend for dense distance matrices.
+
+Stores the full condensed distance matrix in contiguous memory. Best for
+datasets where most distances will be accessed and the matrix fits in RAM.
+"""
+
+MMapStorage.__doc__ = """
+Memory-mapped file storage backend for large distance matrices.
+
+Backs the condensed distance matrix with a memory-mapped file, allowing
+out-of-core computation for datasets larger than available RAM. The file
+persists after computation and can be reloaded.
+"""
+
+SparseStorage.__doc__ = """
+Sparse storage backend that stores only distances below a cutoff.
+
+Stores only non-zero entries (distances below a threshold) in a sparse
+representation. Efficient for large, sparse distance graphs where most
+pairwise distances exceed the cutoff.
+"""
+
+PDistOptions.__doc__ = """
+Options for parallel pairwise-distance computation.
+
+:ivar num_threads: Number of threads (0 = auto-detect).
+:ivar chunk_size: Pairs processed per work unit.
+:ivar cutoff: Distance cutoff for sparse storage (0 = store all).
+:ivar progress: Optional callback(completed, total) for progress reporting.
+"""
+
 from .oecluster import FingerprintComparison as _FingerprintComparison
 from .oecluster import FingerprintOptions
 from .oecluster import ROCSComparison as _ROCSComparison
@@ -1077,8 +1110,9 @@ class ClusteringResult:
 
         :param labels: Per-item integer labels. Noise is labeled -1.
         :param clusters: Iterable of cluster member iterables.
-        :param native_owner: Optional native result object that owns borrowed
-            storage (e.g. BitBirch centroids), kept alive by this reference.
+        :param native_owner: Native C++ result object that owns borrowed arrays
+            (e.g. BitBirch centroids). Kept alive by this Python reference to
+            prevent premature deallocation of zero-copy numpy views.
         """
         self._labels = np.asarray(list(labels), dtype=np.intp)
         self._clusters = tuple(
@@ -1132,7 +1166,10 @@ class ClusteringResult:
 class ButinaResult(ClusteringResult):
     """Butina clustering result.
 
-    The first member of each cluster is the highest-neighborhood representative.
+    Butina clusters in descending order by representative neighborhood size.
+    The first member of each cluster is the highest-neighborhood representative,
+    selected as the molecule with the largest number of unassigned neighbors at
+    the time it was chosen.
     """
 
     @property
@@ -1141,7 +1178,13 @@ class ButinaResult(ClusteringResult):
 
 
 class DBSCANResult(ClusteringResult):
-    """DBSCAN clustering result with core sample indices."""
+    """DBSCAN clustering result with core sample indices.
+
+    Core samples have at least ``min_samples`` neighbors within ``eps`` and
+    form the skeletons of clusters. Border points (non-core members) are
+    assigned to clusters via core samples; noise points have no core neighbor
+    within eps.
+    """
 
     def __init__(self, labels, clusters, *, core_sample_indices=(),
                  native_owner=None):
@@ -1150,7 +1193,7 @@ class DBSCANResult(ClusteringResult):
 
     @property
     def core_sample_indices(self):
-        """Indices of core samples."""
+        """Tuple of core sample indices (items with >= min_samples neighbors)."""
         return self._core_sample_indices
 
     @property
@@ -1159,7 +1202,12 @@ class DBSCANResult(ClusteringResult):
 
 
 class HDBSCANResult(ClusteringResult):
-    """HDBSCAN clustering result with membership probabilities."""
+    """HDBSCAN clustering result with membership probabilities.
+
+    Probabilities reflect the stability of each item's cluster assignment,
+    ranging from 0 (weakly assigned / noise) to 1 (strongly assigned core
+    member). Noise points typically have probabilities near 0.
+    """
 
     def __init__(self, labels, clusters, *, probabilities=None,
                  native_owner=None):
@@ -1171,7 +1219,7 @@ class HDBSCANResult(ClusteringResult):
 
     @property
     def probabilities(self):
-        """Per-item membership probabilities as a NumPy ``float64`` array."""
+        """Per-item cluster membership probabilities (0=noise, 1=core)."""
         return self._probabilities
 
     @property
@@ -1180,7 +1228,14 @@ class HDBSCANResult(ClusteringResult):
 
 
 class AgglomerativeResult(ClusteringResult):
-    """Agglomerative clustering result with merge-tree metadata."""
+    """Agglomerative clustering result with merge-tree metadata.
+
+    The merge tree encodes the hierarchical dendrogram: ``children[i]`` holds
+    the ``(left, right)`` child-node indices merged at step ``i``, with
+    ``distances[i]`` as the linkage distance and ``cluster_sizes[i]`` as the
+    resulting cluster size. Node indices < n are leaf samples; indices >= n
+    are internal merge nodes.
+    """
 
     def __init__(self, labels, clusters, *, children=(), distances=None,
                  cluster_sizes=(), native_owner=None):
@@ -1196,17 +1251,17 @@ class AgglomerativeResult(ClusteringResult):
 
     @property
     def children(self):
-        """Tuple of ``(left, right)`` merge child node indices."""
+        """Merge tree: tuple of ``(left, right)`` child-node indices per merge."""
         return self._children
 
     @property
     def distances(self):
-        """Merge distances as a NumPy ``float64`` array."""
+        """Linkage distance per merge, as a NumPy ``float64`` array."""
         return self._distances
 
     @property
     def cluster_sizes(self):
-        """Merged cluster size per merge."""
+        """Cluster size after each merge, as a tuple of ints."""
         return self._cluster_sizes
 
     @property
@@ -1215,7 +1270,13 @@ class AgglomerativeResult(ClusteringResult):
 
 
 class BitBirchResult(ClusteringResult):
-    """BitBirch clustering result with centroid fingerprints."""
+    """BitBirch clustering result with centroid fingerprints.
+
+    Centroids are arithmetic-mean binary fingerprints computed by averaging
+    the binary vectors of each cluster's members. They can be used for
+    representative selection, reclustering, or refinement without reloading
+    the input.
+    """
 
     def __init__(self, labels, clusters, *, centroids=None, cluster_sizes=(),
                  native_owner=None):
@@ -1225,12 +1286,12 @@ class BitBirchResult(ClusteringResult):
 
     @property
     def centroids(self):
-        """Centroid fingerprints (an ``oefp.OEFPBatch``)."""
+        """Cluster centroid fingerprints as an ``oefp.OEFPBatch``."""
         return self._centroids
 
     @property
     def cluster_sizes(self):
-        """Member count per cluster."""
+        """Tuple of cluster sizes (member counts), aligned with centroids."""
         return self._cluster_sizes
 
     @property
@@ -1538,7 +1599,24 @@ def butina(distance_matrix, threshold, *, reordering=False,
 
 
 class RepresentativeMetrics:
-    """Quality metrics for one cluster representative."""
+    """Quality metrics for one cluster representative.
+
+    :ivar mean_distance_to_cluster: Mean distance to cluster members.
+    :ivar max_distance_to_cluster: Maximum distance to any cluster member.
+    :ivar median_distance_to_cluster: Median distance to cluster members.
+    :ivar neighbor_fraction_at_threshold: Fraction of cluster members within
+        the threshold distance.
+    :ivar nearest_external_distance: Distance to the nearest non-cluster item.
+    :ivar cluster_radius: Maximum distance from the representative to any
+        cluster member (same as max_distance_to_cluster).
+    :ivar cluster_diameter: Maximum pairwise distance within the cluster.
+    :ivar silhouette_like_score: Silhouette-like separation score
+        (higher = better separation).
+    :ivar scaffold_purity: Fraction of cluster members sharing the
+        representative's scaffold (when scaffold labels are provided).
+    :ivar representative_rank: Zero-based rank of this representative by score
+        (0 = best).
+    """
 
     __slots__ = (
         "mean_distance_to_cluster",
@@ -1576,7 +1654,13 @@ class RepresentativeMetrics:
 
 
 class ClusterRepresentative:
-    """A scored cluster representative and its quality metrics."""
+    """A scored cluster representative and its quality metrics.
+
+    :ivar member: Item index of the representative (int).
+    :ivar score: Representative score (float). Lower is better for
+        distance-based methods; interpretation depends on the scoring method.
+    :ivar metrics: Quality metrics as a :class:`RepresentativeMetrics` instance.
+    """
 
     __slots__ = ("member", "score", "metrics")
 
@@ -2212,9 +2296,16 @@ def _native_clustering_result(result):
 class ClusterReport:
     """Read-only clustering-quality scorecard.
 
-    Wraps the native report, exposing every metric as a read-only property.
-    Vector metrics (``coverage_thresholds``, ``coverage_at``) are tuples of
-    floats; undefined metrics are NaN.
+    Provides 20 scalar quality metrics plus threshold-coverage curves for
+    evaluating clustering results. Key metrics include silhouette (separation),
+    Dunn index (compactness vs. isolation), size Gini coefficient (imbalance),
+    median radius/diameter, and coverage fractions at user-specified thresholds.
+
+    Users should construct reports via the :func:`cluster_report` function,
+    not by calling ``__init__`` directly.
+
+    All metrics are exposed as read-only properties. Undefined metrics are NaN.
+    Vector metrics (``coverage_thresholds``, ``coverage_at``) are tuples.
     """
 
     _SCALAR_FIELDS = (
@@ -2227,7 +2318,13 @@ class ClusterReport:
     )
 
     def __init__(self, native_report, method=""):
-        """Capture every field from the native report into Python values."""
+        """Capture every field from the native report into Python values.
+
+        Internal constructor; users should call :func:`cluster_report` instead.
+
+        :param native_report: Native C++ ClusterReport object.
+        :param method: Clustering method name.
+        """
         for name in self._SCALAR_FIELDS:
             object.__setattr__(self, f"_{name}", getattr(native_report, name))
         object.__setattr__(
