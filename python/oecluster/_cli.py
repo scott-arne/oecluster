@@ -1,4 +1,10 @@
-"""Wrapper to invoke the bundled oepdist binary."""
+"""Wrapper to invoke the bundled oepdist binary.
+
+This module provides a lightweight CLI wrapper for the oepdist binary
+distributed with oecluster. It handles locating the binary in either
+installed or development environments and setting up the library search
+paths needed to run the binary.
+"""
 
 import os
 import re
@@ -6,6 +12,10 @@ import sys
 
 
 def _binary_path():
+    """Locate the oepdist binary in installed or development locations.
+
+    :returns: Path to the oepdist binary (may not exist).
+    """
     name = "oepdist.exe" if sys.platform == "win32" else "oepdist"
 
     # Installed location (wheel)
@@ -113,6 +123,12 @@ def _setup_library_env():
 
 
 def main():
+    """CLI entry point: locate binary, configure environment, and exec.
+
+    This entry point locates the oepdist binary, sets up OpenEye library
+    compatibility symlinks if needed, configures library search paths, and
+    transfers control to the binary via :func:`os.execv`.
+    """
     binary = _binary_path()
     if not os.path.isfile(binary):
         print("Error: oepdist binary not found. Build with CMake first, or install the wheel.", file=sys.stderr)

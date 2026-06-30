@@ -11,6 +11,13 @@ import sys
 
 
 def _find_binary():
+    """Locate the oepdist binary and return its path and package directory.
+
+    Searches installed wheel location and development build directories.
+
+    :returns: Tuple of (binary_path, package_dir). The binary path may not
+        exist if the binary has not been built or installed.
+    """
     name = "oepdist.exe" if sys.platform == "win32" else "oepdist"
 
     # Installed location (wheel): _oepdist_main.py sits next to oecluster/
@@ -121,6 +128,15 @@ def _setup_library_env(pkg_dir):
 
 
 def main():
+    """CLI entry point: locate binary, configure environment, and exec.
+
+    This entry point locates the oepdist binary, ensures OpenEye library
+    compatibility symlinks are in place, configures library search paths,
+    and transfers control to the binary via :func:`os.execv`.
+
+    This function does not return on success (exec replaces the process).
+    Exits with code 1 if the binary cannot be found.
+    """
     binary, pkg_dir = _find_binary()
     if not os.path.isfile(binary):
         print("Error: oepdist binary not found. Build with CMake first, or install the wheel.", file=sys.stderr)

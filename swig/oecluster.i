@@ -3,6 +3,9 @@
 // SWIG interface file for oecluster Python bindings
 %module _oecluster
 
+// ============================================================================
+// C++ header includes for wrapped API
+// ============================================================================
 %{
 #include "oecluster/oecluster.h"
 #include "oecluster/Error.h"
@@ -188,6 +191,7 @@ static void* _oecluster_extract_oefp_batch_ptr(PyObject* obj) {
         return PyObject_IsInstance(obj, _oecluster_oe_##TAG##_type) == 1; \
     }
 
+// ---- Type checker instantiations ----
 // ---- Molecule types (openeye.oechem) ----
 DEFINE_OE_TYPE_CHECKER(oemolbase,    "openeye.oechem", "OEMolBase")
 DEFINE_OE_TYPE_CHECKER(oemcmolbase,  "openeye.oechem", "OEMCMolBase")
