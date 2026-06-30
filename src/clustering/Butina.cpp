@@ -29,6 +29,8 @@ std::vector<Candidate> make_sorted_candidates(const ThresholdNeighborGraph& grap
     return candidates;
 }
 
+// After forming a cluster, recompute unseen-neighbor counts for affected candidates
+// to prioritize high-connectivity nodes in remaining items.
 void reorder_unseen_candidates(
     std::vector<Candidate>& candidates,
     const ThresholdNeighborGraph& graph,

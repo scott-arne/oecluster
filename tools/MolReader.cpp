@@ -1,3 +1,8 @@
+/**
+ * @file MolReader.cpp
+ * @brief Implementation of molecular structure readers for OEChem and Maestro formats.
+ */
+
 #include "MolReader.h"
 #include <iostream>
 #include <oemaestro/OEMaestroReader.h>

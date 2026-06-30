@@ -29,6 +29,7 @@ namespace {
  * :param out_i: Output row index.
  * :param out_j: Output column index.
  */
+// Closed-form inverse of condensed indexing using quadratic solve to avoid O(n) scan.
 void condensed_to_pair(size_t k, size_t n, size_t& out_i, size_t& out_j) {
     auto nd = static_cast<double>(n);
     auto kd = static_cast<double>(k);

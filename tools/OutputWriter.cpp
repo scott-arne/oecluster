@@ -1,3 +1,8 @@
+/**
+ * @file OutputWriter.cpp
+ * @brief Implementation of distance matrix output writers.
+ */
+
 #include "OutputWriter.h"
 
 #include <algorithm>

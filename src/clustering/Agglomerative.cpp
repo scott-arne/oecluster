@@ -101,6 +101,7 @@ double cluster_distance(
     return distances[detail::condensed_index(max_nodes, left, right)];
 }
 
+// Canonical ordering (left < right) ensures consistent heap key structure for the priority queue.
 MergeCandidate make_candidate(double distance, size_t left, size_t right) {
     if (right < left) {
         std::swap(left, right);
@@ -108,6 +109,8 @@ MergeCandidate make_candidate(double distance, size_t left, size_t right) {
     return MergeCandidate{distance, left, right};
 }
 
+// Average linkage weighs by cluster sizes; Weighted uses unweighted 0.5 factor
+// per the reference definition.
 double update_linkage_distance(
     AgglomerativeLinkageMethod linkage,
     double left_distance,

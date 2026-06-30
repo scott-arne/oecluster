@@ -271,6 +271,8 @@ std::unordered_set<size_t> epsilon_search(
     return selected_clusters;
 }
 
+// Root node ID separates cluster labels (>= root) from point labels (< root);
+// infers n from largest point label.
 size_t infer_sample_count(const std::vector<CondensedNode>& condensed_tree) {
     size_t root = condensed_tree.front().parent;
     size_t max_point = 0;
@@ -376,6 +378,8 @@ std::vector<double> get_probabilities(
 
 }  // namespace
 
+// Condensed tree construction prunes subtrees below min_cluster_size and relabels
+// internal nodes to pack cluster IDs; ignore flags prevent double-processing of pruned branches.
 std::vector<CondensedNode> condense_tree(
     const std::vector<HDBSCANLinkageNode>& hierarchy,
     size_t min_cluster_size) {
@@ -497,6 +501,8 @@ HDBSCANTreeSelection select_clusters(
         cluster_sizes[root] = root_size;
     }
 
+    // Excess-of-mass selects clusters where parent stability exceeds sum of child stabilities;
+    // enforces max_cluster_size constraint.
     if (cluster_selection_method == HDBSCANClusterSelectionMethod::EOM) {
         for (const size_t node : node_list) {
             double subtree_stability = 0.0;
@@ -519,6 +525,8 @@ HDBSCANTreeSelection select_clusters(
             }
         }
 
+        // When cluster_selection_epsilon is set, EOM leaves are merged upward until
+        // parent distance exceeds epsilon threshold.
         if (cluster_selection_epsilon != 0.0 && !cluster_tree.empty()) {
             std::vector<size_t> eom_clusters;
             for (const auto& [cluster, selected] : is_cluster) {

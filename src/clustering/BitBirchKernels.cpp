@@ -19,6 +19,8 @@ uint32_t popcount64(const uint64_t word) {
     return static_cast<uint32_t>(__builtin_popcountll(word));
 }
 
+// Iterating only set bits (via ctz/word&word-1) is faster than dense loop
+// for typical sparse fingerprints.
 void IncrementLinearSumFromSetBits(
     BitBirchLinearSum& linear_sum,
     const uint64_t* words,
@@ -71,6 +73,8 @@ void UpdateLinearSumFromWords(
     IncrementLinearSumFromSetBits(linear_sum, words, size_bits);
 }
 
+// >= 0.5 threshold matches the reference BitBirch majority-vote rule;
+// empty clusters produce all-ones.
 std::vector<uint64_t> BinaryCentroid(
     const BitBirchLinearSum& linear_sum,
     const size_t n_samples) {
@@ -139,6 +143,9 @@ double JaccardTanimotoISim(
     return a / (a + static_cast<double>(n_objects) * sum_kq - sum_kqsq);
 }
 
+// Radius/Diameter/Tolerance/ToleranceTough implement distinct merge acceptance rules
+// from the reference BitBirch paper; formulas are non-obvious algebraic transforms of
+// centroid-based similarity changes.
 bool AcceptBitBirchMerge(
     const BitBirchMergeCriterion criterion,
     const double threshold,

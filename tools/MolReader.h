@@ -1,3 +1,8 @@
+/**
+ * @file MolReader.h
+ * @brief OEChem/Maestro molecular structure reader helpers for oepdist CLI.
+ */
+
 #ifndef OEPDIST_MOLREADER_H
 #define OEPDIST_MOLREADER_H
 
@@ -25,28 +30,64 @@ inline bool IsMaestroFile(const std::string& path) {
         || ends_with(path, ".maegz");
 }
 
+/**
+ * @brief Container for loaded molecular structures with ownership and label tracking.
+ */
 struct MolSet {
     std::vector<OEChem::OEGraphMol> owned_mols;
     std::vector<OEChem::OEMolBase*> ptrs;
     std::vector<std::string> labels;
 };
 
+/**
+ * @brief Reads molecular structures from a file, supporting OEChem and Maestro formats.
+ *
+ * :param path: File path to read from.
+ * :param verbose: Enable verbose logging to stderr.
+ * :param progress: Optional callback for read progress updates.
+ * :returns: MolSet containing owned molecules, pointers, and labels.
+ * :raises std::runtime_error: if file cannot be opened.
+ */
 MolSet ReadMolecules(const std::string& path, bool verbose = false,
                      ReadProgress progress = nullptr);
 
+/**
+ * @brief Container for multi-conformer molecules with shared ownership.
+ */
 struct MultiConfMolSet {
     std::vector<std::shared_ptr<OEChem::OEMol>> mols;
     std::vector<std::string> labels;
 };
 
+/**
+ * @brief Reads multi-conformer molecules from a file.
+ *
+ * :param path: File path to read from.
+ * :param verbose: Enable verbose logging to stderr.
+ * :param progress: Optional callback for read progress updates.
+ * :returns: MultiConfMolSet with shared pointers to OEMol instances.
+ * :raises std::runtime_error: if file cannot be opened.
+ */
 MultiConfMolSet ReadMultiConfMolecules(const std::string& path, bool verbose = false,
                                       ReadProgress progress = nullptr);
 
+/**
+ * @brief Container for OEDesignUnit structures with shared ownership.
+ */
 struct DesignUnitSet {
     std::vector<std::shared_ptr<OEBio::OEDesignUnit>> dus;
     std::vector<std::string> labels;
 };
 
+/**
+ * @brief Reads design unit structures from a file.
+ *
+ * :param path: File path to read from.
+ * :param verbose: Enable verbose logging to stderr.
+ * :param progress: Optional callback for read progress updates.
+ * :returns: DesignUnitSet with shared pointers to OEDesignUnit instances.
+ * :raises std::runtime_error: if file cannot be opened.
+ */
 DesignUnitSet ReadDesignUnits(const std::string& path, bool verbose = false,
                              ReadProgress progress = nullptr);
 

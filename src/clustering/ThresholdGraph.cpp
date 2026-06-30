@@ -19,6 +19,7 @@ namespace OECluster {
 
 namespace {
 
+// Maps condensed linear index k back to (i,j) pair by computing row start offsets.
 void for_each_condensed_pair(size_t begin, size_t end, size_t n,
                              const std::function<void(size_t, size_t, size_t)>& body) {
     size_t row_start = 0;
@@ -149,6 +150,8 @@ ThresholdNeighborGraph BuildThresholdNeighborGraph(
                 "Threshold graph requires contiguous or sparse storage");
         }
 
+        // Two-pass build: count neighbors in parallel, then atomically write indices
+        // at pre-computed offsets to avoid races.
         std::vector<std::atomic<size_t>> counts(n);
         for (size_t i = 0; i < n; ++i) {
             counts[i].store(1, std::memory_order_relaxed);

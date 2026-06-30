@@ -34,6 +34,7 @@ ClusterReportOptions::ClusterReportOptions(ClusterThreshold preset) {
 
 namespace {
 
+// Fractional-rank percentile matches NumPy/Pandas default interpolation (not nearest-rank).
 double percentile(std::vector<double> values, const double q) {
     if (values.empty()) {
         return std::numeric_limits<double>::quiet_NaN();
@@ -49,6 +50,8 @@ double percentile(std::vector<double> values, const double q) {
     return values[lo] + frac * (values[hi] - values[lo]);
 }
 
+// Gini coefficient via weighted sum (Lorenz curve area) not pairwise differences
+// for O(n log n) not O(n²).
 double size_gini(const std::vector<double>& sizes) {
     const size_t n = sizes.size();
     if (n <= 1) {
@@ -218,7 +221,8 @@ ClusterReport cluster_report(
         report.median_radius = detail::median_distance(radii);
         report.p95_diameter = percentile(diameters, 0.95);
 
-        // Boundary violations: cross-cluster member pairs within boundary_threshold.
+        // Counts all member pairs across distinct clusters within boundary_threshold;
+        // measures cluster separation quality.
         size_t violations = 0;
         for (size_t a = 0; a < members.size(); ++a) {
             for (size_t b = a + 1; b < members.size(); ++b) {

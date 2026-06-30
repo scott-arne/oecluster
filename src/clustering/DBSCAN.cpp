@@ -37,6 +37,7 @@ DBSCANResult dbscan_cluster(const StorageBackend& storage, const DBSCANOptions& 
         }
     }
 
+    // Iterative stack-based region growing avoids stack overflow on large clusters.
     ClusterLabel label = 0;
     std::vector<size_t> stack;
     for (size_t seed = 0; seed < graph.Size(); ++seed) {

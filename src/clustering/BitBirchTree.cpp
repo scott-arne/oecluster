@@ -53,6 +53,10 @@ void add_linear_sum_in_place(
     }
 }
 
+// Matches NumPy argmax/argmin NaN handling: a NaN candidate replaces a numeric best and a
+// numeric candidate never replaces a NaN best, so once a NaN is seen its index is locked in
+// (NumPy returns the first NaN's index). First index wins for equal finite values, ensuring
+// exact parity with reference BitBirch.
 bool numpy_argmax_greater(const double candidate, const double best) {
     if (std::isnan(candidate)) {
         return !std::isnan(best);
@@ -73,6 +77,8 @@ bool numpy_argmin_less(const double candidate, const double best) {
     return candidate < best;
 }
 
+// First index wins for equal values; a NaN propagates as the selected extreme (its index
+// wins), matching NumPy argmax semantics.
 size_t argmax_numpy(const std::vector<double>& values) {
     size_t best_index = 0;
     double best_value = values.front();
@@ -137,6 +143,8 @@ size_t closest_subcluster_index(
     return best_index;
 }
 
+// Two-seed split using centroid-based farthest-first initialization
+// to maximize inter-cluster separation.
 std::pair<size_t, size_t> max_separation(
     const std::vector<std::unique_ptr<BitBirchSubcluster>>& subclusters) {
     if (subclusters.size() < 2) {
@@ -245,6 +253,8 @@ void BitBirchSubcluster::Subtract(const BitBirchSubcluster& removed) {
 bool BitBirchSubcluster::TryMerge(
     const BitBirchSubcluster& nominee,
     const BitBirchOptions& options) {
+    // Only Radius criterion requires the merged centroid before accept/reject decision;
+    // deferred for others to reduce work on rejected merges.
     BitBirchLinearSum new_linear_sum = add_linear_sums(linear_sum, nominee.linear_sum);
     const size_t new_n = n_samples + nominee.n_samples;
     std::vector<uint64_t> new_centroid;
@@ -282,6 +292,8 @@ bool BitBirchSubcluster::TryMerge(
 BitBirchNode::BitBirchNode(const size_t branching_factor, const bool is_leaf)
     : branching_factor_(branching_factor), is_leaf_(is_leaf) {}
 
+// Singly mode freezes parent pointers at insertion time; non-singly updates them
+// during split propagation to maintain tree consistency.
 bool BitBirchNode::InsertSubcluster(
     std::unique_ptr<BitBirchSubcluster> subcluster,
     const BitBirchOptions& options,
@@ -428,6 +440,10 @@ void BitBirchTree::FitSubclusters(
     }
 }
 
+// Reclustering breaks the single largest leaf subcluster back into per-member singletons
+// so the second pass can redistribute them under its tolerance criterion instead of
+// preserving one oversized cluster. Returns {rest, largest_singletons}; the caller
+// (bitbirch_recluster) inserts `rest` first, then the singletons.
 std::pair<
     std::vector<std::unique_ptr<BitBirchSubcluster>>,
     std::vector<std::unique_ptr<BitBirchSubcluster>>>
@@ -458,6 +474,7 @@ BitBirchTree::PrepareReclusteringSubclusters(
     return {std::move(rest), std::move(largest_singletons)};
 }
 
+// Fixed-centroids pass to refine cluster boundaries after initial tree construction.
 void BitBirchTree::ReassignTopClusters(
     const OEFP::OEFPBatch& fingerprints,
     const size_t top_clusters,
@@ -867,6 +884,8 @@ SplitNode(
     return {std::move(left_summary), std::move(right_summary)};
 }
 
+// Partition boundaries depend only on n to guarantee identical results across thread counts;
+// merge order is deterministic (chunk index, then leaf order).
 void BitBirchTree::BuildFastTree(const OEFP::OEFPBatch& fingerprints,
                                  const BitBirchOptions& options,
                                  BitBirchTree& out_tree) {

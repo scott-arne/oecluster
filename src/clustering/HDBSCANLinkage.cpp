@@ -26,6 +26,7 @@ public:
         }
     }
 
+    // Two-pass path compression flattens union-find trees to maintain O(α(n)) amortized time.
     size_t Find(size_t node) {
         size_t root = node;
         while (parent_[root] != kInvalid) {
@@ -59,6 +60,8 @@ private:
     size_t next_label_;
 };
 
+// HDBSCAN mutual reachability is max(core_i, core_j, d(i,j)/alpha)
+// to incorporate density-based reachability.
 double mutual_reachability(
     const double* data,
     size_t n,

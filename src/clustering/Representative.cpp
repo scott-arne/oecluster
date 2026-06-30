@@ -144,6 +144,8 @@ double scaffold_purity(
     return static_cast<double>(matching) / static_cast<double>(cluster.size());
 }
 
+// Denominator is max(a,b) not (a+b) to match the reference silhouette formula;
+// returns 1.0 when b is infinite (single-cluster case).
 double silhouette_like_score(
     const double mean_in_cluster_distance,
     const double nearest_external) {
@@ -293,6 +295,8 @@ std::vector<ClusterRepresentative> select_representatives(
     selected.push_back(ranked.front());
     used.front() = true;
 
+    // Iteratively selects the candidate farthest from all previously selected representatives
+    // to maximize diversity.
     while (selected.size() < limit) {
         size_t best_index = ranked.size();
         double best_nearest_selected_distance = -1.0;
