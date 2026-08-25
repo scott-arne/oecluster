@@ -1,0 +1,25 @@
+# OECluster Documentation Build Dependencies
+# Install with: uv pip install -r docs/requirements.txt
+
+# Core Sphinx
+sphinx>=7.0
+
+# Theme
+sphinx-rtd-theme>=2.0
+
+# Markdown support
+myst-parser>=2.0
+
+# C++ documentation
+breathe>=4.35
+exhale>=0.3
+
+# Python documentation
+sphinx-autodoc-typehints>=2.0
+
+# The pure-Python package imports NumPy at module import time, so autodoc
+# needs it available even though the SWIG/OpenEye layers are mocked.
+numpy>=1.20
+
+# Live-reload helper for local doc development
+sphinx-autobuild>=2024.0
