@@ -294,8 +294,13 @@ docs/hyperpowers/
 CMakeUserPresets.json
 .claude
 build-debug/
-python/oemmpa/_build_info.py
-python/oemmpa/oemmpa.py
+
+# Build outputs written into the package tree by swig/CMakeLists.txt. Both are
+# regenerated on every build (and vary with the SWIG and OpenEye versions in
+# use), so tracking them only produces churn and lets a stale copy disagree
+# with the extension actually loaded.
+python/oecluster/_build_info.py
+python/oecluster/oecluster.py
 
 # PyCharm
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
