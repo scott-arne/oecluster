@@ -8,8 +8,20 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
+
+# Keep in step with benchmarks/bitbirch.py. Unless --native-only is passed the
+# harness compares against the upstream BitBirch reference, which ships as a
+# source checkout rather than a distribution, so those runs are skipped wherever
+# the sibling repository is absent.
+BITBIRCH_REPO = Path("/Users/johnss51/Development/python/bitbirch")
+
+requires_bitbirch_reference = pytest.mark.skipif(
+    not BITBIRCH_REPO.is_dir(),
+    reason=f"BitBirch reference checkout not found at {BITBIRCH_REPO}",
+)
 
 
 def _load_benchmark_module():
@@ -25,6 +37,7 @@ def _load_benchmark_module():
     return module
 
 
+@requires_bitbirch_reference
 def test_bitbirch_benchmark_supports_refinement_workflows():
     env = os.environ.copy()
     env["PYTHONPATH"] = (
@@ -82,6 +95,7 @@ def test_bitbirch_benchmark_supports_refinement_workflows():
     assert "| prune_reassign |" in result.stdout
 
 
+@requires_bitbirch_reference
 def test_bitbirch_benchmark_handles_duplicate_block_reassign():
     env = os.environ.copy()
     env["PYTHONPATH"] = (

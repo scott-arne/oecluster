@@ -30,10 +30,21 @@ FAST_QUALITY_TOL = {
 
 
 def _load_reference_bitbirch():
+    """Import the upstream BitBirch reference implementation.
+
+    The reference is published as a source checkout rather than a distribution,
+    so these parity tests can only run where the sibling repositories exist.
+    Anywhere else, including CI and fresh clones, they skip.
+
+    :returns: The reloaded ``bitbirch.bitbirch`` reference module.
+    """
     for repo in (str(ISIM_REPO), str(BITBIRCH_REPO)):
         if repo not in sys.path:
             sys.path.insert(0, repo)
-    module = importlib.import_module("bitbirch.bitbirch")
+    try:
+        module = importlib.import_module("bitbirch.bitbirch")
+    except ImportError:
+        pytest.skip(f"BitBirch reference checkout not found at {BITBIRCH_REPO}")
     return importlib.reload(module)
 
 
