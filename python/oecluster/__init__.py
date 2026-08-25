@@ -24,8 +24,8 @@ from typing import Any
 
 import numpy as np
 
-__version__ = "4.2.1"
-__version_info__ = (4, 2, 1)
+__version__ = "4.2.2"
+__version_info__ = (4, 2, 2)
 
 
 _OPENEYE_COMPAT_PRELOAD_PATHS: list[str] = []
