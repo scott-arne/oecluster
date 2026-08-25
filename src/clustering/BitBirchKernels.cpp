@@ -8,6 +8,10 @@
 #include <limits>
 #include <stdexcept>
 
+#ifdef _MSC_VER
+#include <intrin.h>
+#endif
+
 namespace OECluster::detail {
 namespace {
 
@@ -15,8 +19,45 @@ size_t dense_word_count(const size_t size_bits) {
     return (size_bits + 63u) / 64u;
 }
 
+// MSVC provides no __builtin_* bit intrinsics, so dispatch per compiler the way
+// oefp's fingerprint kernels do. The software fallbacks only matter on
+// toolchains offering neither form; C++20's <bit> would replace all of this,
+// but this target is pinned to C++17.
 uint32_t popcount64(const uint64_t word) {
-    return static_cast<uint32_t>(__builtin_popcountll(word));
+#if defined(_MSC_VER)
+    return static_cast<uint32_t>(__popcnt64(word));
+#elif defined(__clang__) || defined(__GNUC__)
+    return static_cast<uint32_t>(
+        __builtin_popcountll(static_cast<unsigned long long>(word)));
+#else
+    uint32_t count = 0;
+    uint64_t remaining = word;
+    while (remaining != 0u) {
+        remaining &= remaining - 1u;
+        ++count;
+    }
+    return count;
+#endif
+}
+
+// Undefined for word == 0; every caller tests the word before calling.
+uint32_t count_trailing_zeros64(const uint64_t word) {
+#if defined(_MSC_VER)
+    unsigned long index = 0;
+    _BitScanForward64(&index, word);
+    return static_cast<uint32_t>(index);
+#elif defined(__clang__) || defined(__GNUC__)
+    return static_cast<uint32_t>(
+        __builtin_ctzll(static_cast<unsigned long long>(word)));
+#else
+    uint32_t count = 0;
+    uint64_t remaining = word;
+    while ((remaining & 1u) == 0u) {
+        remaining >>= 1;
+        ++count;
+    }
+    return count;
+#endif
 }
 
 // Iterating only set bits (via ctz/word&word-1) is faster than dense loop
@@ -32,7 +73,7 @@ void IncrementLinearSumFromSetBits(
         uint64_t word = words[word_index];
         while (word != 0u) {
             const size_t bit = word_index * 64u +
-                               static_cast<size_t>(__builtin_ctzll(word));
+                               static_cast<size_t>(count_trailing_zeros64(word));
             ++linear_sum[bit];
             word &= word - 1u;
         }
@@ -45,7 +86,7 @@ void IncrementLinearSumFromSetBits(
     uint64_t word = words[full_words] & ((uint64_t{1} << tail_bits) - 1u);
     while (word != 0u) {
         const size_t bit = full_words * 64u +
-                           static_cast<size_t>(__builtin_ctzll(word));
+                           static_cast<size_t>(count_trailing_zeros64(word));
         ++linear_sum[bit];
         word &= word - 1u;
     }
