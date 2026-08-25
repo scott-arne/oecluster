@@ -1,5 +1,11 @@
 [build-system]
-requires = ["scikit-build-core>=0.8", "swig>=4.0"]
+# pyarrow is a build-only dependency: the oefp core compiled into this extension
+# calls find_package(ArrowPython REQUIRED), and pyarrow's wheel is where the
+# Arrow headers and libraries come from. The repaired wheel vendors its Arrow,
+# so this constraint decides which Arrow gets bundled and must stay in step with
+# the pyarrow oefp itself links against. Mirrored by PYARROW_REQUIREMENT in
+# .github/workflows/build-wheels.yml.
+requires = ["scikit-build-core>=0.8", "swig>=4.0", "pyarrow>=25,<26"]
 build-backend = "scikit_build_core.build"
 
 [project]
@@ -15,13 +21,17 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering :: Chemistry",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
 ]
-requires-python = ">=3.10"
-dependencies = ["openeye-toolkits>=2025.2", "numpy>=1.20", "oefp>=0.2.4"]
+# The floor is set by openeye-toolkits, not by anything in this package: 2026.1
+# is the first release with py314 wheels and the first to drop py310, and the
+# extension links its OpenEye shared libraries by versioned soname, so the
+# runtime toolkit has to be the one the wheel was built against.
+requires-python = ">=3.11"
+dependencies = ["openeye-toolkits>=2026.1", "numpy>=1.20", "oefp>=0.2.4"]
 
 [project.scripts]
 oepdist = "_oepdist_main:main"
@@ -35,6 +45,9 @@ cmake.build-type = "Release"
 build.targets = ["oecluster_python", "oepdist"]
 build-dir = "build/{wheel_tag}"
 wheel.install-dir = "."
+# Stable-ABI floor for the compiled extension, deliberately lower than
+# requires-python: cp310-abi3 wheels load on every later minor, and lowering the
+# floor costs nothing while requires-python is what actually gates installs.
 wheel.py-api = "cp310"
 wheel.exclude = ["**.pyc", "**/__pycache__", "*.a", "CMakeFiles/**"]
 logging.level = "INFO"
@@ -88,7 +101,7 @@ extend-exclude = [
 "python/oecluster/__init__.py" = ["E402"]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 ignore_missing_imports = true
 exclude = [
     "^python/oecluster/oecluster\\.py$",
