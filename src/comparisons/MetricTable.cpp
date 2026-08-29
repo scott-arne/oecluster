@@ -95,8 +95,14 @@ void validate_params(const std::string& name, const MetricParams& params) {
         message << "Minkowski exponent p must be positive (got " << params.p << ")";
         throw ComparisonError(message.str());
     }
-    if (name == "tversky" && (params.tversky_alpha < 0.0 || params.tversky_beta < 0.0)) {
-        throw ComparisonError("Tversky alpha and beta must be non-negative");
+    // Mirrors OEFP's own bound (metric.cpp validate_tversky_parameter) exactly.
+    // Written as a negated range rather than two comparisons so NaN — which
+    // compares false against everything — is rejected here instead of leaking
+    // out of OEFP as a std::invalid_argument.
+    if (name == "tversky" &&
+        (!(params.tversky_alpha >= 0.0 && params.tversky_alpha <= 1.0) ||
+         !(params.tversky_beta >= 0.0 && params.tversky_beta <= 1.0))) {
+        throw ComparisonError("Tversky alpha and beta must be in [0.0, 1.0]");
     }
 }
 

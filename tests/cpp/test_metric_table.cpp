@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 #include <oefp/oefp.h>
+#include <limits>
 #include <string>
+#include <utility>
 #include <vector>
 #include "../../src/comparisons/MetricTable.h"
 #include "oecluster/Error.h"
@@ -97,20 +99,65 @@ TEST(MetricTableTest, TverskyIsNotAMetricSpace) {
     const OEFP::Metric metric = resolve_metric("tversky", false, params, MetricSurface::Fingerprint);
     EXPECT_EQ(metric.Name(), OEFP::MetricName::Tversky);
     EXPECT_FALSE(metric.HasZeroSelfDistance());
+    // Tversky is asymmetric. Swapping the weights changes which side of the
+    // comparison is penalised while leaving every capability flag identical,
+    // so the flags alone cannot pin the forwarding.
+    EXPECT_DOUBLE_EQ(metric.Alpha(), 0.3);
+    EXPECT_DOUBLE_EQ(metric.Beta(), 0.7);
 }
 
-TEST(MetricTableTest, TverskyRejectsNegativeWeights) {
-    MetricParams params;
-    params.tversky_alpha = -1.0;
-    EXPECT_THROW(resolve_metric("tversky", false, params, MetricSurface::Fingerprint),
-                 ComparisonError);
+TEST(MetricTableTest, TverskyRejectsWeightsOutsideTheUnitInterval) {
+    const std::vector<std::pair<double, double>> rejected{
+        {-1.0, 0.5},
+        {0.5, -1.0},
+        {1.5, 0.5},
+        {0.5, 42.0},
+        {std::numeric_limits<double>::quiet_NaN(), 0.5},
+        {0.5, std::numeric_limits<double>::quiet_NaN()},
+    };
+
+    for (const auto& weights : rejected) {
+        MetricParams params;
+        params.tversky_alpha = weights.first;
+        params.tversky_beta = weights.second;
+        EXPECT_THROW(resolve_metric("tversky", false, params, MetricSurface::Fingerprint),
+                     ComparisonError)
+            << "alpha=" << weights.first << " beta=" << weights.second;
+    }
+
+    // The bounds are closed, so both endpoints must still resolve.
+    MetricParams bounds;
+    bounds.tversky_alpha = 0.0;
+    bounds.tversky_beta = 1.0;
+    EXPECT_NO_THROW(resolve_metric("tversky", false, bounds, MetricSurface::Fingerprint));
 }
 
 TEST(MetricTableTest, SeuclideanIsAnAliasOfStandardizedEuclidean) {
     MetricParams params;
     params.variances = {1.0, 2.0};
-    EXPECT_EQ(resolve_metric("seuclidean", false, params, MetricSurface::Descriptor).Name(),
-              resolve_metric("standardized_euclidean", false, params, MetricSurface::Descriptor).Name());
+    const OEFP::Metric alias =
+        resolve_metric("seuclidean", false, params, MetricSurface::Descriptor);
+    const OEFP::Metric canonical =
+        resolve_metric("standardized_euclidean", false, params, MetricSurface::Descriptor);
+    EXPECT_EQ(alias.Name(), canonical.Name());
+    // Name() is StandardizedEuclidean whatever was forwarded, so the variances
+    // are the only thing that actually pins the alias to the same construction.
+    EXPECT_EQ(alias.Variances(), params.variances);
+    EXPECT_EQ(canonical.Variances(), params.variances);
+}
+
+TEST(MetricTableTest, MahalanobisForwardsTheInverseCovariance) {
+    // variances is deliberately populated and different: the mahalanobis row
+    // sits directly beneath two rows that forward params.variances, and
+    // forwarding the wrong member is otherwise invisible.
+    MetricParams params;
+    params.variances = {9.0, 9.0};
+    params.inverse_covariance = {1.0, 0.0, 0.0, 1.0};
+    const OEFP::Metric metric =
+        resolve_metric("mahalanobis", false, params, MetricSurface::Descriptor);
+    EXPECT_EQ(metric.Name(), OEFP::MetricName::Mahalanobis);
+    EXPECT_EQ(metric.InverseCovariance(), params.inverse_covariance);
+    EXPECT_TRUE(metric.Variances().empty());
 }
 
 TEST(MetricTableTest, DescriptorMetricOnFingerprintSurfaceIsRejected) {
@@ -166,15 +213,22 @@ TEST(MetricTableTest, UnknownMetricListsTheSupportedNames) {
     } catch (const ComparisonError& error) {
         const std::string message(error.what());
         EXPECT_NE(message.find("cosine"), std::string::npos);
-        EXPECT_NE(message.find("tanimoto"), std::string::npos);
+        EXPECT_NE(message.find(supported_metric_names(MetricSurface::Fingerprint)),
+                  std::string::npos);
     }
 }
 
-TEST(MetricTableTest, SupportedNamesDifferBySurface) {
-    const std::string fingerprint = supported_metric_names(MetricSurface::Fingerprint);
-    const std::string descriptor = supported_metric_names(MetricSurface::Descriptor);
-    EXPECT_NE(fingerprint.find("jaccard"), std::string::npos);
-    EXPECT_EQ(fingerprint.find("mahalanobis"), std::string::npos);
-    EXPECT_NE(descriptor.find("mahalanobis"), std::string::npos);
-    EXPECT_EQ(descriptor.find("jaccard"), std::string::npos);
+// Pinned in full rather than by sampled needles. A single flipped surface flag
+// routes a metric to an OEFP path that refuses it with a bare
+// std::invalid_argument, bypassing this layer's ComparisonError contract. A
+// later task adding a metric is expected to update this expectation
+// deliberately.
+TEST(MetricTableTest, SupportedNamesAreTheFullPerSurfaceAcceptSets) {
+    EXPECT_EQ(supported_metric_names(MetricSurface::Fingerprint),
+              "jaccard, tanimoto, dice, sokal_sneath, matching, rogers_tanimoto, russell_rao, "
+              "kulsinski, sokal_michener, euclidean, manhattan, chebyshev, hamming, canberra, "
+              "bray_curtis, minkowski, tversky");
+    EXPECT_EQ(supported_metric_names(MetricSurface::Descriptor),
+              "euclidean, manhattan, chebyshev, hamming, canberra, bray_curtis, minkowski, "
+              "standardized_euclidean, seuclidean, mahalanobis");
 }
