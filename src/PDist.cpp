@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "oecluster/CondensedIndex.h"
+#include "oecluster/Error.h"
 #include "oecluster/PairwiseComparison.h"
 #include "oecluster/StorageBackend.h"
 #include "oecluster/ThreadPool.h"
@@ -19,6 +20,16 @@ namespace OECluster {
 void pdist(PairwiseComparison& comparison, StorageBackend& storage,
            const PDistOptions& options) {
     const size_t n = comparison.Size();
+
+    // Each backend's Set() re-maps the pair through its own sample count and
+    // writes without a bounds check, so a storage sized differently from the
+    // comparison corrupts a neighbouring slot or runs off the end of its
+    // buffer. Checked before the empty-domain shortcut so the contract does
+    // not depend on how many pairs there happen to be.
+    if (storage.NumSamples() != n) {
+        throw ComparisonError("pdist storage size does not match the comparison size");
+    }
+
     const size_t total_pairs = n * (n - 1) / 2;
 
     if (total_pairs == 0) {

@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <cmath>
 #include "oecluster/PDist.h"
+#include "oecluster/Error.h"
 #include "oecluster/StorageBackend.h"
 #include "oecluster/PairwiseComparison.h"
 
@@ -124,4 +125,18 @@ TEST(PDistTest, UsesBulkComparisonWhenAvailable) {
     EXPECT_FALSE(comparison.used_compare);
     EXPECT_EQ(callback_count, 1);
     EXPECT_DOUBLE_EQ(storage.Get(0, 1), 0.125);
+}
+
+// A backend sized differently from the comparison maps (i, j) through its own
+// sample count: at n=4 into DenseStorage(3), pair (0, 3) overwrites pair
+// (1, 2)'s slot and pair (2, 3) writes index 3 of a 3-element vector. Only a
+// debug-only assert stood between that and a release-build heap write.
+TEST(PDistTest, RejectsStorageSizeMismatch) {
+    MockComparison comparison(4);
+
+    DenseStorage too_small(3);
+    EXPECT_THROW(pdist(comparison, too_small), ComparisonError);
+
+    DenseStorage too_large(5);
+    EXPECT_THROW(pdist(comparison, too_large), ComparisonError);
 }
