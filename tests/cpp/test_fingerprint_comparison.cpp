@@ -70,6 +70,25 @@ TEST_F(FingerprintComparisonTest, IntegrationWithPDist) {
     }
 }
 
+// SparseStorage is the only backend whose Data() is null, so it is the only one
+// that reaches TryPDist's fallback branch through the shared condensed_to_pair.
+TEST_F(FingerprintComparisonTest, IntegrationWithPDistSparseStorage) {
+    FingerprintComparison comparison(mols_);
+
+    DenseStorage dense(3);
+    pdist(comparison, dense);
+
+    SparseStorage sparse(3, 1.0);
+    pdist(comparison, sparse);
+
+    for (size_t i = 0; i < 3; ++i) {
+        for (size_t j = i + 1; j < 3; ++j) {
+            EXPECT_GT(sparse.Get(i, j), 0.0);
+            EXPECT_DOUBLE_EQ(sparse.Get(i, j), dense.Get(i, j));
+        }
+    }
+}
+
 TEST_F(FingerprintComparisonTest, MorganFingerprintType) {
     FingerprintOptions opts;
     opts.fp_type = "morgan";

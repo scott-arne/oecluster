@@ -21,10 +21,17 @@ namespace OECluster {
  * :param j: Second item index, distinct from ``i``.
  * :param n: Number of items.
  * :returns: The offset of the pair within the condensed vector.
+ * :raises ComparisonError: When the indices are identical or either is not less than ``n``.
  */
 inline size_t pair_to_condensed(size_t i, size_t j, size_t n) {
+    if (i == j) {
+        throw ComparisonError("Condensed pair indices must be distinct");
+    }
     const size_t lo = i < j ? i : j;
     const size_t hi = i < j ? j : i;
+    if (hi >= n) {
+        throw ComparisonError("Condensed pair index is out of range");
+    }
     return n * lo + hi - ((lo + 2) * (lo + 1)) / 2;
 }
 
