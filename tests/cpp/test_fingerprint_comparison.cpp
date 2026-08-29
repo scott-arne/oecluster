@@ -1,6 +1,10 @@
 #include <gtest/gtest.h>
 #include "oecluster/oecluster.h"
 #include "oecluster/comparisons/FingerprintComparison.h"
+#include "oecluster/GateFacts.h"
+#include "oecluster/StorageBackend.h"
+#include "oecluster/PDist.h"
+#include "oecluster/Error.h"
 #include <oechem.h>
 
 using namespace OECluster;
@@ -93,7 +97,7 @@ TEST_F(FingerprintComparisonTest, MorganFingerprintType) {
     FingerprintOptions opts;
     opts.fp_type = "morgan";
     opts.numbits = 2048;
-    opts.max_distance = 2;
+    opts.radius = 2;
     FingerprintComparison comparison(mols_, opts);
     EXPECT_EQ(comparison.Size(), 3);
     double d = comparison.Compare(0, 1);
@@ -143,14 +147,114 @@ TEST_F(FingerprintComparisonTest, RemovedOpenEyeFingerprintTypesThrow) {
     }
 }
 
-TEST_F(FingerprintComparisonTest, EuclideanSimilarityFunctionThrows) {
+TEST_F(FingerprintComparisonTest, EuclideanMetric) {
     FingerprintOptions opts;
     opts.metric = "euclidean";
-    EXPECT_THROW(FingerprintComparison(mols_, opts), ComparisonError);
+    FingerprintComparison comparison(mols_, opts);
+    double d = comparison.Compare(0, 1);
+    EXPECT_GE(d, 0.0);
 }
 
 TEST_F(FingerprintComparisonTest, InvalidFpTypeThrows) {
     FingerprintOptions opts;
     opts.fp_type = "invalid";
+    EXPECT_THROW(FingerprintComparison(mols_, opts), ComparisonError);
+}
+
+TEST_F(FingerprintComparisonTest, DefaultOptionsMatchTheSpecifiedDefaults) {
+    FingerprintOptions opts;
+    EXPECT_EQ(opts.fp_type, "morgan");
+    EXPECT_EQ(opts.storage, "binary");
+    EXPECT_EQ(opts.numbits, 2048u);
+    EXPECT_EQ(opts.metric, "tanimoto");
+    EXPECT_FALSE(opts.similarity);
+    EXPECT_EQ(opts.radius, 2u);
+    EXPECT_EQ(opts.min_distance, 1u);
+    EXPECT_EQ(opts.max_distance, 30u);
+    EXPECT_EQ(opts.torsion_atom_count, 4u);
+    EXPECT_FALSE(opts.use_chirality);
+    EXPECT_DOUBLE_EQ(opts.p, 2.0);
+    EXPECT_DOUBLE_EQ(opts.tversky_alpha, 0.5);
+    EXPECT_DOUBLE_EQ(opts.tversky_beta, 0.5);
+}
+
+TEST_F(FingerprintComparisonTest, DefaultFactsPassBothGateTiers) {
+    FingerprintComparison comparison(mols_);
+    const GateFacts facts = comparison.Facts();
+    EXPECT_EQ(facts.zero_self, Capability::Yes);
+    EXPECT_EQ(facts.triangle, Capability::Yes);
+    EXPECT_EQ(facts.data_integrity, DataIntegrity::Complete);
+}
+
+TEST_F(FingerprintComparisonTest, SimilarityFactsFailTierOne) {
+    FingerprintOptions opts;
+    opts.similarity = true;
+    FingerprintComparison comparison(mols_, opts);
+    EXPECT_EQ(comparison.Facts().zero_self, Capability::No);
+}
+
+TEST_F(FingerprintComparisonTest, DiceFactsFailTierTwoOnly) {
+    FingerprintOptions opts;
+    opts.metric = "dice";
+    FingerprintComparison comparison(mols_, opts);
+    const GateFacts facts = comparison.Facts();
+    EXPECT_EQ(facts.zero_self, Capability::Yes);
+    EXPECT_EQ(facts.triangle, Capability::No);
+}
+
+TEST_F(FingerprintComparisonTest, MorganRadiusIsSeparateFromAtomPairWindow) {
+    FingerprintOptions radius_one;
+    radius_one.radius = 1;
+    FingerprintOptions radius_three;
+    radius_three.radius = 3;
+
+    FingerprintComparison narrow(mols_, radius_one);
+    FingerprintComparison wide(mols_, radius_three);
+    // Larger environments resolve more structure, so phenol and benzene must not
+    // score identically at both radii.
+    EXPECT_NE(narrow.Compare(0, 1), wide.Compare(0, 1));
+}
+
+TEST_F(FingerprintComparisonTest, AtomPairDefaultsUseTheFullOEFPWindow) {
+    FingerprintOptions opts;
+    opts.fp_type = "atom_pair";
+    FingerprintComparison full(mols_, opts);
+
+    FingerprintOptions truncated = opts;
+    truncated.min_distance = 1;
+    truncated.max_distance = 2;
+    FingerprintComparison narrow(mols_, truncated);
+
+    // The pre-5.0.0 defaults truncated the window to [1, 2]; the new defaults use
+    // OEFP's full [1, 30] window. Benzene vs phenol (not octane) detects the change:
+    // aromatic/aliphatic carbons are different atom types, so benzene/octane share
+    // zero atom-pair features in any window (Tanimoto distance = 1.0 in both).
+    // Benzene/phenol share the ring and have longer-range pairs from phenol's oxygen.
+    EXPECT_NE(full.Compare(0, 1), narrow.Compare(0, 1));
+}
+
+TEST_F(FingerprintComparisonTest, MinkowskiExponentIsHonored) {
+    FingerprintOptions opts;
+    opts.metric = "minkowski";
+    opts.p = 0.5;
+    FingerprintComparison comparison(mols_, opts);
+    EXPECT_EQ(comparison.Facts().triangle, Capability::No);
+}
+
+TEST_F(FingerprintComparisonTest, AsymmetricTverskyIsRefusedByPDist) {
+    FingerprintOptions opts;
+    opts.metric = "tversky";
+    opts.tversky_alpha = 0.2;
+    opts.tversky_beta = 0.8;
+    FingerprintComparison comparison(mols_, opts);
+
+    DenseStorage storage(comparison.Size());
+    PDistOptions pdist_opts;
+    EXPECT_THROW(comparison.TryPDist(storage, pdist_opts), ComparisonError);
+}
+
+TEST_F(FingerprintComparisonTest, MahalanobisIsRefusedOnTheFingerprintSurface) {
+    FingerprintOptions opts;
+    opts.metric = "mahalanobis";
     EXPECT_THROW(FingerprintComparison(mols_, opts), ComparisonError);
 }

@@ -15,6 +15,7 @@
 #include "oecluster/Error.h"
 #include "oecluster/PDist.h"
 #include "oecluster/StorageBackend.h"
+#include "MetricTable.h"
 
 namespace OECluster {
 
@@ -44,37 +45,11 @@ static std::string to_lower(std::string s) {
 // ---------------------------------------------------------------------------
 
 static OEFP::Metric make_metric(const FingerprintOptions& opts) {
-    const std::string metric_lower = to_lower(opts.metric);
-
-    if (metric_lower == "tanimoto") {
-        return opts.similarity ? OEFP::Metric::Tanimoto() : OEFP::Metric::Jaccard();
-    }
-    if (metric_lower == "jaccard") {
-        if (opts.similarity) {
-            throw ComparisonError("jaccard is a distance metric; use tanimoto for similarity");
-        }
-        return OEFP::Metric::Jaccard();
-    }
-    if (metric_lower == "dice") {
-        if (opts.similarity) {
-            throw ComparisonError("similarity=true is incompatible with dice distance");
-        }
-        return OEFP::Metric::Dice();
-    }
-    if (metric_lower == "cosine") {
-        throw ComparisonError("OEFP fingerprint metrics do not support cosine");
-    }
-    if (metric_lower == "manhattan") {
-        if (opts.similarity) {
-            throw ComparisonError("similarity=true is incompatible with manhattan distance");
-        }
-        return OEFP::Metric::Manhattan();
-    }
-    if (metric_lower == "euclidean") {
-        throw ComparisonError("OEFP fingerprint metrics do not support euclidean distance");
-    }
-
-    throw ComparisonError("Unknown OEFP fingerprint metric: " + opts.metric);
+    MetricParams params;
+    params.p = opts.p;
+    params.tversky_alpha = opts.tversky_alpha;
+    params.tversky_beta = opts.tversky_beta;
+    return resolve_metric(opts.metric, opts.similarity, params, MetricSurface::Fingerprint);
 }
 
 static OEFP::BatchKernelOptions make_kernel_options(size_t num_threads,
@@ -107,7 +82,8 @@ static std::vector<OEFP::OEFP> make_morgan_fingerprints(
         const FingerprintOptions& opts) {
     OEFP::MorganOptions morgan_opts;
     morgan_opts.num_bits = opts.numbits;
-    morgan_opts.radius = opts.max_distance;
+    morgan_opts.radius = opts.radius;
+    morgan_opts.use_chirality = opts.use_chirality;
 
     OEFP::MorganGenerator generator(morgan_opts);
     std::vector<OEFP::OEFP> fingerprints;
@@ -126,6 +102,7 @@ static std::vector<OEFP::OEFP> make_atom_pair_fingerprints(
     atom_pair_opts.num_bits = opts.numbits;
     atom_pair_opts.min_distance = opts.min_distance;
     atom_pair_opts.max_distance = opts.max_distance;
+    atom_pair_opts.use_chirality = opts.use_chirality;
 
     OEFP::AtomPairGenerator generator(atom_pair_opts);
     std::vector<OEFP::OEFP> fingerprints;
@@ -195,6 +172,15 @@ double FingerprintComparison::Compare(size_t i, size_t j) {
 
 bool FingerprintComparison::TryPDist(StorageBackend& storage,
                                      const PDistOptions& options) {
+    // Asymmetric metrics have no condensed representation. OEFP refuses them
+    // inside its kernel; raising here names the OECluster-level cause.
+    try {
+        pimpl_->metric.ValidateForPDist();
+    } catch (const std::exception& exc) {
+        throw ComparisonError("Metric '" + pimpl_->opts.metric +
+                              "' cannot be used with pdist: " + std::string(exc.what()));
+    }
+
     const size_t n = pimpl_->batch.Size();
     const size_t total_pairs = n * (n - 1) / 2;
     if (storage.NumSamples() != n) {
@@ -284,6 +270,16 @@ size_t FingerprintComparison::Size() const {
 
 std::string FingerprintComparison::ComparisonName() const {
     return "fingerprint";
+}
+
+GateFacts FingerprintComparison::Facts() const {
+    GateFacts facts;
+    facts.zero_self =
+        pimpl_->metric.HasZeroSelfDistance() ? Capability::Yes : Capability::No;
+    facts.triangle =
+        pimpl_->metric.SatisfiesTriangleInequality() ? Capability::Yes : Capability::No;
+    facts.data_integrity = DataIntegrity::Complete;
+    return facts;
 }
 
 }  // namespace OECluster

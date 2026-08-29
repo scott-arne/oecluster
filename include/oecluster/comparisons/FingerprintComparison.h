@@ -10,21 +10,38 @@
 #include <string>
 #include <vector>
 #include "oecluster/PairwiseComparison.h"
+#include "oecluster/GateFacts.h"
 
 namespace OEChem { class OEMolBase; }
 
 namespace OECluster {
 
 /**
- * @brief Configuration options for fingerprint generation.
+ * @brief Configuration for fingerprint-based comparison.
+ *
+ * Fields are grouped by the axis they control. Per-family fields are read only
+ * when the matching ``fp_type`` is selected, and per-metric fields only when the
+ * matching ``metric`` is selected; an unused field is ignored rather than
+ * rejected, so a default-constructed struct is a working Morgan configuration.
+ * The Python layer is stricter, because it can see which arguments the caller
+ * actually named.
  */
 struct FingerprintOptions {
-    std::string fp_type = "morgan";
-    unsigned int numbits = 2048;
-    unsigned int min_distance = 0;
-    unsigned int max_distance = 2;
-    std::string metric = "tanimoto";  ///< OEFP scalar metric name.
-    bool similarity = false;  ///< Return raw similarity instead of distance
+    std::string fp_type = "morgan";   ///< morgan, atom_pair, topological_atom_pair, topological_torsions.
+    std::string storage = "binary";   ///< binary, count, sparse, sparse_count.
+    unsigned int numbits = 2048;      ///< Folding width; ignored for sparse storages.
+    std::string metric = "tanimoto";  ///< User-facing metric name.
+    bool similarity = false;          ///< Return raw similarity instead of distance.
+
+    unsigned int radius = 2;              ///< Morgan only.
+    unsigned int min_distance = 1;        ///< Atom-pair family only (OEFP default).
+    unsigned int max_distance = 30;       ///< Atom-pair family only (OEFP default).
+    unsigned int torsion_atom_count = 4;  ///< Topological torsions only.
+    bool use_chirality = false;           ///< Shared across families.
+
+    double p = 2.0;              ///< Minkowski exponent; minkowski only.
+    double tversky_alpha = 0.5;  ///< tversky only.
+    double tversky_beta = 0.5;   ///< tversky only.
 };
 
 /**
@@ -57,6 +74,7 @@ public:
     std::unique_ptr<PairwiseComparison> Clone() const override;
     size_t Size() const override;
     std::string ComparisonName() const override;
+    GateFacts Facts() const override;
 
 private:
     struct Impl;
