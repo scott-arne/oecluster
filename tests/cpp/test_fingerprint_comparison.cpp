@@ -6,6 +6,7 @@
 #include "oecluster/PDist.h"
 #include "oecluster/Error.h"
 #include <oechem.h>
+#include <cmath>
 
 using namespace OECluster;
 
@@ -151,8 +152,10 @@ TEST_F(FingerprintComparisonTest, EuclideanMetric) {
     FingerprintOptions opts;
     opts.metric = "euclidean";
     FingerprintComparison comparison(mols_, opts);
-    double d = comparison.Compare(0, 1);
-    EXPECT_GE(d, 0.0);
+    // Euclidean over a bit-set is sqrt(popcount of the symmetric difference),
+    // which is above 1.0 here — no bit-set overlap coefficient can return this,
+    // so the assertion fails if the table row stops resolving to Euclidean.
+    EXPECT_DOUBLE_EQ(comparison.Compare(0, 1), std::sqrt(8.0));
 }
 
 TEST_F(FingerprintComparisonTest, InvalidFpTypeThrows) {
@@ -215,6 +218,27 @@ TEST_F(FingerprintComparisonTest, MorganRadiusIsSeparateFromAtomPairWindow) {
     EXPECT_NE(narrow.Compare(0, 1), wide.Compare(0, 1));
 }
 
+TEST_F(FingerprintComparisonTest, MorganUseChiralityDistinguishesEnantiomers) {
+    // The fixture's three molecules are achiral, so this test builds its own
+    // pair: L- and D-alanine, identical except at the stereocenter.
+    std::vector<OEChem::OEGraphMol> chiral_mols(2);
+    OEChem::OESmilesToMol(chiral_mols[0], "C[C@H](N)C(=O)O");
+    OEChem::OESmilesToMol(chiral_mols[1], "C[C@@H](N)C(=O)O");
+    std::vector<OEChem::OEMolBase*> enantiomers;
+    for (auto& gm : chiral_mols) {
+        enantiomers.push_back(&static_cast<OEChem::OEMolBase&>(gm));
+    }
+
+    FingerprintOptions achiral;
+    FingerprintComparison blind(enantiomers, achiral);
+    EXPECT_DOUBLE_EQ(blind.Compare(0, 1), 0.0);
+
+    FingerprintOptions chiral = achiral;
+    chiral.use_chirality = true;
+    FingerprintComparison aware(enantiomers, chiral);
+    EXPECT_GT(aware.Compare(0, 1), 0.0);
+}
+
 TEST_F(FingerprintComparisonTest, AtomPairDefaultsUseTheFullOEFPWindow) {
     FingerprintOptions opts;
     opts.fp_type = "atom_pair";
@@ -225,11 +249,13 @@ TEST_F(FingerprintComparisonTest, AtomPairDefaultsUseTheFullOEFPWindow) {
     truncated.max_distance = 2;
     FingerprintComparison narrow(mols_, truncated);
 
-    // The pre-5.0.0 defaults truncated the window to [1, 2]; the new defaults use
-    // OEFP's full [1, 30] window. Benzene vs phenol (not octane) detects the change:
-    // aromatic/aliphatic carbons are different atom types, so benzene/octane share
-    // zero atom-pair features in any window (Tanimoto distance = 1.0 in both).
-    // Benzene/phenol share the ring and have longer-range pairs from phenol's oxygen.
+    // The 5.0.0 defaults use OEFP's full [1, 30] window; before 5.0.0 they were
+    // [0, 2]. A narrowed [1, 2] window is enough to prove the new default is not
+    // silently truncated. Benzene vs phenol (not octane) detects the change:
+    // aromatic and aliphatic carbons are different atom types, so benzene and
+    // octane share zero atom-pair features in any window (Tanimoto distance 1.0
+    // in both). Benzene and phenol share the ring and gain longer-range pairs
+    // from phenol's oxygen.
     EXPECT_NE(full.Compare(0, 1), narrow.Compare(0, 1));
 }
 
@@ -250,7 +276,18 @@ TEST_F(FingerprintComparisonTest, AsymmetricTverskyIsRefusedByPDist) {
 
     DenseStorage storage(comparison.Size());
     PDistOptions pdist_opts;
-    EXPECT_THROW(comparison.TryPDist(storage, pdist_opts), ComparisonError);
+    try {
+        comparison.TryPDist(storage, pdist_opts);
+        FAIL() << "expected ComparisonError";
+    } catch (const ComparisonError& error) {
+        // The OEFP kernel refuses this too, but with its own wording. Asserting
+        // the OECluster phrasing is what distinguishes our guard from the
+        // fallback conversion in the surrounding catch block.
+        const std::string message(error.what());
+        EXPECT_NE(message.find("cannot be used with pdist"), std::string::npos)
+            << message;
+        EXPECT_NE(message.find("tversky"), std::string::npos) << message;
+    }
 }
 
 TEST_F(FingerprintComparisonTest, MahalanobisIsRefusedOnTheFingerprintSurface) {
