@@ -121,6 +121,7 @@ set(OECLUSTER_SOURCES
     src/PDist.cpp
     src/CDist.cpp
     src/DistanceMatrix.cpp
+    src/comparisons/MetricTable.cpp
     src/comparisons/FingerprintComparison.cpp
     src/comparisons/ROCSComparison.cpp
     src/comparisons/SuperposeComparison.cpp
