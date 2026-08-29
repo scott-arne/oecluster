@@ -1,5 +1,5 @@
-# Asserts that every oepdist "fp" option that shapes the matrix also reaches
-# the JSON sidecar. Run by ctest with -DOEPDIST=<binary> -DWORK_DIR=<dir>.
+# Asserts that oepdist "fp" options reach the JSON sidecar. Exercises defaults,
+# overrides, and similarity. Run by ctest with -DOEPDIST=<binary> -DWORK_DIR=<dir>.
 
 file(REMOVE_RECURSE "${WORK_DIR}")
 file(MAKE_DIRECTORY "${WORK_DIR}")
@@ -44,8 +44,8 @@ expect_param("${defaults}" defaults use_chirality OFF)
 expect_param("${defaults}" defaults metric tanimoto)
 expect_param("${defaults}" defaults similarity OFF)
 
-# Every field above moved off its default, so a hard-coded sidecar field
-# passes the defaults block and fails here.
+# Move every field except similarity off its default, so a hard-coded sidecar
+# field passes the defaults block and fails here.
 run_fp(overrides overrides
        --fp-type topological_torsions --storage count --numbits 1024
        --radius 3 --min-distance 2 --max-distance 12
@@ -60,3 +60,11 @@ expect_param("${overrides}" overrides torsion_atom_count 5)
 expect_param("${overrides}" overrides use_chirality ON)
 expect_param("${overrides}" overrides metric manhattan)
 expect_param("${overrides}" overrides similarity OFF)
+
+# --sim needs its own run: it cannot ride along with the overrides above,
+# because --storage count rejects tanimoto and --sim rejects manhattan. Without
+# this third invocation every assertion on "similarity" would expect OFF, which
+# is the default -- so a hard-coded false would pass, and that is precisely the
+# regression Task 4 shipped and this test exists to prevent.
+run_fp(sim sim --sim)
+expect_param("${sim}" sim similarity ON)
