@@ -181,7 +181,9 @@ static void* _oecluster_extract_oefp_batch_ptr(PyObject* obj) {
 // extension compiled against with the version the installed wheel compiled
 // against, once, before the first pointer crosses.
 static int _oecluster_oefp_abi_state = 0;  // 0 unchecked, 1 ok, -1 mismatch
-static char _oecluster_oefp_abi_message[256];
+// Wide enough for the whole diagnostic even when every version component is a
+// full-width long; 256 truncated it mid-sentence for ordinary version numbers.
+static char _oecluster_oefp_abi_message[512];
 
 static bool _oecluster_check_oefp_abi() {
     if (_oecluster_oefp_abi_state == 1) {
