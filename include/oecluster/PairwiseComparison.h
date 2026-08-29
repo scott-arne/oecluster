@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <memory>
 #include <string>
+#include "oecluster/GateFacts.h"
 
 namespace OECluster {
 
@@ -38,6 +39,19 @@ public:
      * :returns: Comparison value between items i and j.
      */
     virtual double Compare(size_t i, size_t j) = 0;
+
+    /**
+     * @brief Report the metric facts the capability gate checks.
+     *
+     * The base implementation reports ``Capability::Unknown`` for both metric
+     * properties and ``DataIntegrity::Complete``. Subclasses that can prove a
+     * property should override this; the gate reads facts off the comparison
+     * object rather than off the Python builder so that directly constructed
+     * objects cannot bypass it.
+     *
+     * :returns: The facts describing this comparison's scores.
+     */
+    virtual GateFacts Facts() const { return GateFacts(); }
 
     /**
      * @brief Optionally compute all pairwise values in bulk.
