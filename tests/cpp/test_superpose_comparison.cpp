@@ -196,3 +196,38 @@ TEST_F(SuperposeComparisonDUTest, EmptyStructureListThrows) {
     std::vector<std::shared_ptr<OEBio::OEDesignUnit>> empty_dus;
     EXPECT_THROW({ SuperposeComparison m(empty_dus); }, ComparisonError);
 }
+
+TEST_F(SuperposeComparisonDUTest, FactsFollowTheResolvedScoreType) {
+    struct Row {
+        SuperposeMethod method;
+        Capability distance_zero_self;
+        Capability similarity_zero_self;
+    };
+    // The four RMSD-resolving methods ignore the similarity flag, so both
+    // columns are Yes for them.
+    const std::vector<Row> rows{
+        {SuperposeMethod::GlobalCarbonAlpha, Capability::Yes, Capability::Yes},
+        {SuperposeMethod::Global, Capability::Yes, Capability::Yes},
+        {SuperposeMethod::DDM, Capability::Yes, Capability::Yes},
+        {SuperposeMethod::Weighted, Capability::Yes, Capability::Yes},
+        {SuperposeMethod::SSE, Capability::Yes, Capability::No},
+        {SuperposeMethod::SiteHopper, Capability::Yes, Capability::No},
+    };
+    ASSERT_EQ(rows.size(), 6u);
+
+    for (const Row& row : rows) {
+        SuperposeOptions distance_opts;
+        distance_opts.method = row.method;
+        distance_opts.similarity = false;
+        SuperposeComparison distance_comparison(dus_, distance_opts);
+        EXPECT_EQ(distance_comparison.Facts().zero_self, row.distance_zero_self)
+            << static_cast<int>(row.method);
+        EXPECT_EQ(distance_comparison.Facts().triangle, Capability::Unknown);
+
+        SuperposeOptions similarity_opts = distance_opts;
+        similarity_opts.similarity = true;
+        SuperposeComparison similarity_comparison(dus_, similarity_opts);
+        EXPECT_EQ(similarity_comparison.Facts().zero_self, row.similarity_zero_self)
+            << static_cast<int>(row.method);
+    }
+}

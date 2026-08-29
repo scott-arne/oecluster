@@ -126,3 +126,17 @@ TEST_F(ROCSComparisonTest, ColorForceFieldConfiguration) {
     EXPECT_GE(d, 0.0);
     EXPECT_LE(d, 1.0);
 }
+
+TEST_F(ROCSComparisonTest, FactsFollowTheSimilarityFlag) {
+    ROCSOptions distance_opts;
+    distance_opts.similarity = false;
+    ROCSComparison distance_comparison(mols_, distance_opts);
+    EXPECT_EQ(distance_comparison.Facts().zero_self, Capability::Yes);
+    EXPECT_EQ(distance_comparison.Facts().triangle, Capability::Unknown);
+    EXPECT_EQ(distance_comparison.Facts().data_integrity, DataIntegrity::Complete);
+
+    ROCSOptions similarity_opts;
+    similarity_opts.similarity = true;
+    ROCSComparison similarity_comparison(mols_, similarity_opts);
+    EXPECT_EQ(similarity_comparison.Facts().zero_self, Capability::No);
+}

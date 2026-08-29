@@ -332,4 +332,19 @@ std::string SuperposeComparison::ComparisonName() const {
     return "superpose:" + method_name(opts_.method);
 }
 
+GateFacts SuperposeComparison::Facts() const {
+    GateFacts facts;
+    const SuperposeScoreType resolved = resolve_score_type(opts_.method, opts_.score_type);
+    if (resolved == SuperposeScoreType::RMSD) {
+        // The similarity flag is a documented no-op on this branch, so reading
+        // it here would refuse the four methods that resolve to RMSD.
+        facts.zero_self = Capability::Yes;
+    } else {
+        facts.zero_self = opts_.similarity ? Capability::No : Capability::Yes;
+    }
+    facts.triangle = Capability::Unknown;
+    facts.data_integrity = DataIntegrity::Complete;
+    return facts;
+}
+
 }  // namespace OECluster

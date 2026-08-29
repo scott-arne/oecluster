@@ -96,6 +96,7 @@ public:
     std::unique_ptr<PairwiseComparison> Clone() const override;
     size_t Size() const override;
     std::string ComparisonName() const override;
+    GateFacts Facts() const override;
 
 private:
     struct SharedData;

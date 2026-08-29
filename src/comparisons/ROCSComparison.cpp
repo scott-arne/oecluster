@@ -101,4 +101,15 @@ std::string ROCSComparison::ComparisonName() const {
     return "rocs";
 }
 
+GateFacts ROCSComparison::Facts() const {
+    GateFacts facts;
+    // Shape overlap is a similarity: a molecule's self-overlap is its maximum,
+    // not zero. The distance forms are max - score, which do vanish on the
+    // diagonal. No triangle inequality is provable either way.
+    facts.zero_self = opts_.similarity ? Capability::No : Capability::Yes;
+    facts.triangle = Capability::Unknown;
+    facts.data_integrity = DataIntegrity::Complete;
+    return facts;
+}
+
 }  // namespace OECluster
