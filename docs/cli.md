@@ -42,7 +42,7 @@ oepdist fp molecules.sdf -o distances.npy \
 |--------|--------|---------|
 | `--fp-type` | `morgan`, `atom_pair`, `topological_atom_pair`, `topological_torsions` | `morgan` |
 | `--storage` | `binary`, `count`, `sparse`, `sparse_count` | `binary` |
-| `--metric` | `tanimoto`, `dice`, `manhattan` | `tanimoto` |
+| `--metric` | `tanimoto`, `dice`, `manhattan`, `euclidean`, `canberra`, `bray_curtis`, and others | `tanimoto` |
 | `--numbits` | Fingerprint size | `2048` |
 | `--radius` | Morgan radius | `2` |
 | `--min-distance` | Atom-pair minimum graph distance | `1` |
@@ -50,6 +50,10 @@ oepdist fp molecules.sdf -o distances.npy \
 | `--torsion-atom-count` | Path length for topological_torsions | `4` |
 | `--use-chirality` | Encode CIP stereochemistry in atom invariants | off |
 | `--sim` | Return similarity instead of distance | off |
+
+Note: The `topological_torsions` / `sparse_count` combination is not supported.
+The `count` and `sparse_count` storages require numeric metrics such as
+`manhattan`, `euclidean`, `canberra`, or `bray_curtis`.
 
 ## ROCS Distance
 

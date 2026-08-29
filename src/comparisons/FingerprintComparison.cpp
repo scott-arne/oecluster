@@ -20,7 +20,7 @@
 namespace OECluster {
 
 // ---------------------------------------------------------------------------
-// Helper: lowercase a string in place
+// Helpers
 // ---------------------------------------------------------------------------
 
 static std::string to_lower(std::string s) {
@@ -28,10 +28,6 @@ static std::string to_lower(std::string s) {
                    [](unsigned char c) { return std::tolower(c); });
     return s;
 }
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 static OEFP::Metric make_metric(const FingerprintOptions& opts) {
     MetricParams params;

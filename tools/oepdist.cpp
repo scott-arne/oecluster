@@ -419,7 +419,7 @@ int main(int argc, char** argv) {
     fp_cmd->add_flag("--use-chirality", fp_use_chirality,
         "Encode CIP stereochemistry in atom invariants");
     fp_cmd->add_option("--metric", fp_metric,
-        "Scalar metric: tanimoto, dice, manhattan");
+        "Scalar metric: tanimoto, dice, manhattan, euclidean, canberra, bray_curtis, and others");
     bool fp_sim = false;
     fp_cmd->add_flag("--sim", fp_sim, "Return similarity instead of distance");
 

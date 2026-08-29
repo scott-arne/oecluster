@@ -635,3 +635,18 @@ TEST_F(FingerprintComparisonTest, CDistAgreesWithComparePairForSparseStorage) {
     EXPECT_NEAR(output[0], comparison.Compare(0, 1), 1e-12);
     EXPECT_NEAR(output[1], comparison.Compare(0, 2), 1e-12);
 }
+
+TEST_F(FingerprintComparisonTest, TorsionAtomCountReachesCountStorage) {
+    FingerprintOptions opts_4;
+    opts_4.fp_type = "topological_torsions";
+    opts_4.storage = "count";
+    opts_4.metric = "manhattan";
+    opts_4.torsion_atom_count = 4;
+    FingerprintComparison comparison_4(mols_, opts_4);
+
+    FingerprintOptions opts_5 = opts_4;
+    opts_5.torsion_atom_count = 5;
+    FingerprintComparison comparison_5(mols_, opts_5);
+
+    EXPECT_NE(comparison_4.Compare(0, 1), comparison_5.Compare(0, 1));
+}
