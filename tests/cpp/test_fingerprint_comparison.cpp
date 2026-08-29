@@ -590,14 +590,23 @@ TEST_F(FingerprintComparisonTest, CountStorageDistinguishesRepeatedSubstructures
     counted.storage = "count";
     counted.metric = "bray_curtis";
     FingerprintComparison count_comparison(pair, counted);
-    EXPECT_GT(count_comparison.Compare(0, 1), 0.0);
+    // 42/134: sum|a-b| over sum(a+b) across the eight shared Morgan indices.
+    EXPECT_NEAR(count_comparison.Compare(0, 1), 42.0 / 134.0, 1e-9);
 }
 
-TEST_F(FingerprintComparisonTest, BooleanMetricOnCountStorageIsRejected) {
-    FingerprintOptions opts;
-    opts.storage = "count";
-    opts.metric = "tanimoto";
-    EXPECT_THROW(FingerprintComparison(mols_, opts), ComparisonError);
+TEST_F(FingerprintComparisonTest, BooleanMetricOnCountedStorageIsRejected) {
+    for (const char* storage : {"count", "sparse_count"}) {
+        FingerprintOptions explicit_metric;
+        explicit_metric.storage = storage;
+        explicit_metric.metric = "tanimoto";
+        EXPECT_THROW(FingerprintComparison(mols_, explicit_metric), ComparisonError) << storage;
+
+        // tanimoto is also the default, so a user who changes only the storage
+        // meets the same rejection without ever naming a metric.
+        FingerprintOptions default_metric;
+        default_metric.storage = storage;
+        EXPECT_THROW(FingerprintComparison(mols_, default_metric), ComparisonError) << storage;
+    }
 }
 
 TEST_F(FingerprintComparisonTest, UnknownStorageIsRejected) {
@@ -623,17 +632,23 @@ TEST_F(FingerprintComparisonTest, PDistAgreesWithComparePairForEveryStorage) {
     }
 }
 
-TEST_F(FingerprintComparisonTest, CDistAgreesWithComparePairForSparseStorage) {
-    FingerprintOptions opts;
-    opts.storage = "sparse";
-    FingerprintComparison comparison(mols_, opts);
+TEST_F(FingerprintComparisonTest, CDistAgreesWithComparePairForEveryStorage) {
+    for (const char* storage : {"binary", "count", "sparse", "sparse_count"}) {
+        FingerprintOptions opts;
+        opts.storage = storage;
+        // manhattan is defined on all four storages and is not a bit-set metric,
+        // so one metric covers the whole loop without tripping the counted-storage
+        // rule.
+        opts.metric = "manhattan";
+        FingerprintComparison comparison(mols_, opts);
 
-    std::vector<double> output(1 * 2, -1.0);
-    CDistOptions cdist_opts;
-    cdist_opts.num_threads = 1;
-    ASSERT_TRUE(comparison.TryCDist(1, output.data(), cdist_opts));
-    EXPECT_NEAR(output[0], comparison.Compare(0, 1), 1e-12);
-    EXPECT_NEAR(output[1], comparison.Compare(0, 2), 1e-12);
+        std::vector<double> output(1 * 2, -1.0);
+        CDistOptions cdist_opts;
+        cdist_opts.num_threads = 1;
+        ASSERT_TRUE(comparison.TryCDist(1, output.data(), cdist_opts)) << storage;
+        EXPECT_NEAR(output[0], comparison.Compare(0, 1), 1e-12) << storage;
+        EXPECT_NEAR(output[1], comparison.Compare(0, 2), 1e-12) << storage;
+    }
 }
 
 TEST_F(FingerprintComparisonTest, TorsionAtomCountReachesCountStorage) {
@@ -649,4 +664,22 @@ TEST_F(FingerprintComparisonTest, TorsionAtomCountReachesCountStorage) {
     FingerprintComparison comparison_5(mols_, opts_5);
 
     EXPECT_NE(comparison_4.Compare(0, 1), comparison_5.Compare(0, 1));
+}
+
+TEST_F(FingerprintComparisonTest, UnsupportedCellIsNamedBeforeTheMetricRule) {
+    // The default metric is tanimoto, so this request violates the counted-storage
+    // metric rule as well. It must be told the thing it can act on: no choice of
+    // metric makes this cell work.
+    FingerprintOptions opts;
+    opts.fp_type = "topological_torsions";
+    opts.storage = "sparse_count";
+    try {
+        FingerprintComparison comparison(mols_, opts);
+        FAIL() << "expected ComparisonError";
+    } catch (const ComparisonError& error) {
+        const std::string message(error.what());
+        EXPECT_NE(message.find("does not support"), std::string::npos) << message;
+        EXPECT_NE(message.find("sparse_count"), std::string::npos) << message;
+        EXPECT_EQ(message.find("bit-set metric"), std::string::npos) << message;
+    }
 }

@@ -271,13 +271,6 @@ static std::shared_ptr<const BatchHolder> make_holder(
             std::move(fingerprints));
     }
 
-    if (storage == "sparse_count" && family == "topological_torsions") {
-        throw ComparisonError(
-            "Fingerprint type 'topological_torsions' does not support storage='sparse_count': "
-            "OEFP returns OEFPCount64 for that combination and provides no batch or bulk kernel "
-            "for it. Use 'binary', 'count', or 'sparse'");
-    }
-
     std::vector<OEFP::OEFPCount> fingerprints;
     fingerprints.reserve(mols.size());
     const bool folded = (storage == "count");
@@ -312,6 +305,15 @@ FingerprintComparison::FingerprintComparison(const std::vector<OEChem::OEMolBase
 
     const std::string family = normalize_family(opts.fp_type);
     const std::string storage = normalize_storage(opts.storage);
+
+    // An unsupported cell cannot be fixed by changing the metric, so this guard
+    // must run before the metric rule.
+    if (storage == "sparse_count" && family == "topological_torsions") {
+        throw ComparisonError(
+            "Fingerprint type 'topological_torsions' does not support storage='sparse_count': "
+            "OEFP returns OEFPCount64 for that combination and provides no batch or bulk kernel "
+            "for it. Use 'binary', 'count', or 'sparse'");
+    }
 
     // A boolean metric binarizes its inputs, discarding exactly the counts that
     // are the reason to select a counted storage.

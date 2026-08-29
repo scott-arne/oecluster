@@ -29,7 +29,10 @@ namespace OECluster {
 struct FingerprintOptions {
     std::string fp_type = "morgan";   ///< morgan, atom_pair, topological_atom_pair, topological_torsions.
     std::string storage = "binary";   ///< binary, count, sparse, sparse_count.
-    unsigned int numbits = 2048;      ///< Folding width; ignored for sparse storages.
+    /// Folding width. The sparse storages do not fold, so this value does not
+    /// shape their output -- but OEFP still validates it for the Morgan family,
+    /// which rejects zero even there. Leave it nonzero.
+    unsigned int numbits = 2048;
     std::string metric = "tanimoto";  ///< User-facing metric name.
     bool similarity = false;          ///< Return raw similarity instead of distance.
 
