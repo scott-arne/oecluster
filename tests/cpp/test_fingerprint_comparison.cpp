@@ -364,3 +364,74 @@ TEST_F(FingerprintComparisonTest, MahalanobisIsRefusedOnTheFingerprintSurface) {
     opts.metric = "mahalanobis";
     EXPECT_THROW(FingerprintComparison(mols_, opts), ComparisonError);
 }
+
+TEST_F(FingerprintComparisonTest, AllFourFamiliesConstructAndScore) {
+    // Exact benzene/phenol Jaccard distances at each family's defaults,
+    // measured against OEFP 0.3.0. A range assertion here would pass even if
+    // every family silently fell back to the same generator.
+    const std::vector<std::pair<std::string, double>> expected{
+        {"morgan", 0.72727272727272729},
+        {"atom_pair", 0.57894736842105265},
+        {"topological_atom_pair", 0.57894736842105265},
+        {"topological_torsions", 0.77777777777777779},
+    };
+
+    for (const auto& [family, distance] : expected) {
+        FingerprintOptions opts;
+        opts.fp_type = family;
+        FingerprintComparison comparison(mols_, opts);
+        EXPECT_EQ(comparison.Size(), 3u) << family;
+        EXPECT_DOUBLE_EQ(comparison.Compare(0, 1), distance) << family;
+    }
+}
+
+TEST_F(FingerprintComparisonTest, TopologicalAtomPairIsAnAliasOfAtomPair) {
+    FingerprintOptions plain;
+    plain.fp_type = "atom_pair";
+    FingerprintOptions aliased;
+    aliased.fp_type = "topological_atom_pair";
+
+    FingerprintComparison a(mols_, plain);
+    FingerprintComparison b(mols_, aliased);
+    EXPECT_DOUBLE_EQ(a.Compare(0, 1), b.Compare(0, 1));
+    EXPECT_DOUBLE_EQ(a.Compare(0, 2), b.Compare(0, 2));
+}
+
+TEST_F(FingerprintComparisonTest, TorsionAtomCountChangesTheFingerprint) {
+    // Benzene/phenol, not benzene/octane: octane shares no torsion with either
+    // aromatic at any atom count, so that pair sits at distance 1.0 for every
+    // setting and cannot observe the option at all.
+    const std::vector<std::pair<unsigned int, double>> expected{
+        {3u, 0.75},
+        {4u, 0.77777777777777779},
+        {5u, 0.90000000000000002},
+    };
+
+    for (const auto& [count, distance] : expected) {
+        FingerprintOptions opts;
+        opts.fp_type = "topological_torsions";
+        opts.torsion_atom_count = count;
+        FingerprintComparison comparison(mols_, opts);
+        EXPECT_DOUBLE_EQ(comparison.Compare(0, 1), distance) << count;
+    }
+
+    // The default must be 4, not merely "one of the three".
+    FingerprintOptions defaulted;
+    defaulted.fp_type = "topological_torsions";
+    FingerprintComparison implicit(mols_, defaulted);
+    EXPECT_DOUBLE_EQ(implicit.Compare(0, 1), 0.77777777777777779);
+}
+
+TEST_F(FingerprintComparisonTest, DistanceAtomPairIsRejectedAsUnimplemented) {
+    FingerprintOptions opts;
+    opts.fp_type = "distance_atom_pair";
+    EXPECT_THROW(FingerprintComparison(mols_, opts), ComparisonError);
+}
+
+TEST_F(FingerprintComparisonTest, LegacyOpenEyeTypesStillNameTheReplacements) {
+    for (const char* legacy : {"circular", "tree", "path", "maccs", "lingo"}) {
+        FingerprintOptions opts;
+        opts.fp_type = legacy;
+        EXPECT_THROW(FingerprintComparison(mols_, opts), ComparisonError) << legacy;
+    }
+}

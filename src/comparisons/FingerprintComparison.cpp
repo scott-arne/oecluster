@@ -77,40 +77,77 @@ static void validate_molecule(const OEChem::OEMolBase* mol, size_t index) {
     }
 }
 
-static std::vector<OEFP::OEFP> make_morgan_fingerprints(
-        const std::vector<OEChem::OEMolBase*>& mols,
-        const FingerprintOptions& opts) {
-    OEFP::MorganOptions morgan_opts;
-    morgan_opts.num_bits = opts.numbits;
-    morgan_opts.radius = opts.radius;
-    morgan_opts.use_chirality = opts.use_chirality;
-
-    OEFP::MorganGenerator generator(morgan_opts);
-    std::vector<OEFP::OEFP> fingerprints;
-    fingerprints.reserve(mols.size());
-    for (size_t i = 0; i < mols.size(); ++i) {
-        validate_molecule(mols[i], i);
-        fingerprints.push_back(generator.Fingerprint(*mols[i]));
+/// Fold user-facing family spellings onto the three OEFP generators.
+static std::string normalize_family(const std::string& fp_type) {
+    const std::string lower = to_lower(fp_type);
+    if (lower == "morgan") {
+        return "morgan";
     }
-    return fingerprints;
+    if (lower == "atom_pair" || lower == "atompair" || lower == "topological_atom_pair") {
+        // OEFP has a single AtomPairGenerator; the "topological" spelling is the
+        // 2D graph-distance model, which is the only one OEFP implements.
+        return "atom_pair";
+    }
+    if (lower == "topological_torsions" || lower == "topological_torsion") {
+        return "topological_torsions";
+    }
+    if (lower == "distance_atom_pair") {
+        throw ComparisonError(
+            "Fingerprint type 'distance_atom_pair' is not implemented by OEFP 0.3.0; "
+            "use 'atom_pair' for the topological (2D) model");
+    }
+    if (lower == "circular" || lower == "tree" || lower == "path" || lower == "maccs" ||
+        lower == "lingo") {
+        throw ComparisonError("OpenEye fingerprint type '" + fp_type +
+                              "' is no longer supported; use one of 'morgan', 'atom_pair', "
+                              "'topological_atom_pair', 'topological_torsions'");
+    }
+    throw ComparisonError("Unknown OEFP fingerprint type: " + fp_type +
+                          ". Supported types are 'morgan', 'atom_pair', "
+                          "'topological_atom_pair', 'topological_torsions'");
 }
 
-static std::vector<OEFP::OEFP> make_atom_pair_fingerprints(
+static std::vector<OEFP::OEFP> make_binary_fingerprints(
         const std::vector<OEChem::OEMolBase*>& mols,
-        const FingerprintOptions& opts) {
-    OEFP::AtomPairOptions atom_pair_opts;
-    atom_pair_opts.num_bits = opts.numbits;
-    atom_pair_opts.min_distance = opts.min_distance;
-    atom_pair_opts.max_distance = opts.max_distance;
-    atom_pair_opts.use_chirality = opts.use_chirality;
-
-    OEFP::AtomPairGenerator generator(atom_pair_opts);
+        const FingerprintOptions& opts,
+        const std::string& family) {
     std::vector<OEFP::OEFP> fingerprints;
     fingerprints.reserve(mols.size());
-    for (size_t i = 0; i < mols.size(); ++i) {
-        validate_molecule(mols[i], i);
-        fingerprints.push_back(generator.Fingerprint(*mols[i]));
+
+    if (family == "morgan") {
+        OEFP::MorganOptions generator_opts;
+        generator_opts.num_bits = opts.numbits;
+        generator_opts.radius = opts.radius;
+        generator_opts.use_chirality = opts.use_chirality;
+        OEFP::MorganGenerator generator(generator_opts);
+        for (size_t i = 0; i < mols.size(); ++i) {
+            validate_molecule(mols[i], i);
+            fingerprints.push_back(generator.Fingerprint(*mols[i]));
+        }
+    } else if (family == "atom_pair") {
+        OEFP::AtomPairOptions generator_opts;
+        generator_opts.num_bits = opts.numbits;
+        generator_opts.min_distance = opts.min_distance;
+        generator_opts.max_distance = opts.max_distance;
+        generator_opts.use_chirality = opts.use_chirality;
+        generator_opts.use_2d = true;
+        OEFP::AtomPairGenerator generator(generator_opts);
+        for (size_t i = 0; i < mols.size(); ++i) {
+            validate_molecule(mols[i], i);
+            fingerprints.push_back(generator.Fingerprint(*mols[i]));
+        }
+    } else {
+        OEFP::TopologicalTorsionsOptions generator_opts;
+        generator_opts.num_bits = opts.numbits;
+        generator_opts.torsion_atom_count = opts.torsion_atom_count;
+        generator_opts.use_chirality = opts.use_chirality;
+        OEFP::TopologicalTorsionsGenerator generator(generator_opts);
+        for (size_t i = 0; i < mols.size(); ++i) {
+            validate_molecule(mols[i], i);
+            fingerprints.push_back(generator.Fingerprint(*mols[i]));
+        }
     }
+
     return fingerprints;
 }
 
@@ -124,29 +161,13 @@ FingerprintComparison::FingerprintComparison(const std::vector<OEChem::OEMolBase
     impl->opts = opts;
     impl->metric = make_metric(opts);
 
-    const std::string fp_lower = to_lower(opts.fp_type);
+    const std::string family = normalize_family(opts.fp_type);
     try {
-        if (fp_lower == "morgan") {
-            impl->fingerprints = make_morgan_fingerprints(mols, opts);
-        } else if (fp_lower == "atom_pair" || fp_lower == "atompair") {
-            impl->fingerprints = make_atom_pair_fingerprints(mols, opts);
-        } else if (fp_lower == "circular" || fp_lower == "tree" ||
-                   fp_lower == "path" || fp_lower == "maccs" ||
-                   fp_lower == "lingo") {
-            throw ComparisonError(
-                "OpenEye fingerprint type '" + opts.fp_type +
-                "' is no longer supported; use OEFP fingerprint type "
-                "'morgan' or 'atom_pair'");
-        } else {
-            throw ComparisonError(
-                "Unknown OEFP fingerprint type: " + opts.fp_type +
-                ". Supported types are 'morgan' and 'atom_pair'");
-        }
+        impl->fingerprints = make_binary_fingerprints(mols, opts, family);
     } catch (const ComparisonError&) {
         throw;
     } catch (const std::exception& exc) {
-        throw ComparisonError("Failed to compute OEFP fingerprints: " +
-                          std::string(exc.what()));
+        throw ComparisonError("Failed to compute OEFP fingerprints: " + std::string(exc.what()));
     }
     impl->batch = OEFP::OEFPBatch::FromFingerprints(impl->fingerprints);
 
