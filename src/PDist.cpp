@@ -6,41 +6,15 @@
 #include "oecluster/PDist.h"
 
 #include <atomic>
-#include <cmath>
 #include <mutex>
 #include <vector>
 
+#include "oecluster/CondensedIndex.h"
 #include "oecluster/PairwiseComparison.h"
 #include "oecluster/StorageBackend.h"
 #include "oecluster/ThreadPool.h"
 
 namespace OECluster {
-
-namespace {
-
-/**
- * @brief Convert condensed index k back to pair (i, j).
- *
- * Given condensed index k for N items, recovers the row i and column j
- * such that i < j.
- *
- * :param k: Condensed index in [0, N*(N-1)/2).
- * :param n: Total number of items.
- * :param out_i: Output row index.
- * :param out_j: Output column index.
- */
-// Closed-form inverse of condensed indexing using quadratic solve to avoid O(n) scan.
-void condensed_to_pair(size_t k, size_t n, size_t& out_i, size_t& out_j) {
-    auto nd = static_cast<double>(n);
-    auto kd = static_cast<double>(k);
-    auto i_d = nd - 2.0 - std::floor(std::sqrt(-8.0 * kd + 4.0 * nd * (nd - 1.0) - 7.0) / 2.0 - 0.5);
-    auto i = static_cast<size_t>(i_d);
-    auto j = k + i + 1 - n * (n - 1) / 2 + (n - i) * ((n - i) - 1) / 2;
-    out_i = i;
-    out_j = j;
-}
-
-}  // namespace
 
 void pdist(PairwiseComparison& comparison, StorageBackend& storage,
            const PDistOptions& options) {
