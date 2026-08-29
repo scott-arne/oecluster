@@ -77,19 +77,98 @@ TEST(MetricTableTest, EuclideanIsNowSupportedOnFingerprints) {
     EXPECT_NO_THROW(resolve_metric("euclidean", false, params, MetricSurface::Fingerprint));
 }
 
+TEST(MetricTableTest, EveryTableRowResolvesToItsOwnMetric) {
+    // One shared params object with every field populated to a valid value, so a
+    // single params satisfies all 29 rows.
+    MetricParams params;
+    params.p = 2.0;
+    params.tversky_alpha = 0.5;
+    params.tversky_beta = 0.5;
+    params.variances = {1.0, 2.0};
+    params.inverse_covariance = {1.0, 0.0, 0.0, 1.0};
+
+    struct Row {
+        const char* name;
+        MetricSurface surface;
+        bool similarity;
+        OEFP::MetricName expected;
+    };
+
+    const std::vector<Row> rows{
+        // Fingerprint surface, similarity=false (17 rows)
+        {"jaccard", MetricSurface::Fingerprint, false, OEFP::MetricName::Jaccard},
+        {"tanimoto", MetricSurface::Fingerprint, false, OEFP::MetricName::Jaccard},
+        {"dice", MetricSurface::Fingerprint, false, OEFP::MetricName::Dice},
+        {"sokal_sneath", MetricSurface::Fingerprint, false, OEFP::MetricName::SokalSneath},
+        {"matching", MetricSurface::Fingerprint, false, OEFP::MetricName::Matching},
+        {"rogers_tanimoto", MetricSurface::Fingerprint, false, OEFP::MetricName::RogersTanimoto},
+        {"russell_rao", MetricSurface::Fingerprint, false, OEFP::MetricName::RussellRao},
+        {"kulsinski", MetricSurface::Fingerprint, false, OEFP::MetricName::Kulsinski},
+        {"sokal_michener", MetricSurface::Fingerprint, false, OEFP::MetricName::SokalMichener},
+        {"euclidean", MetricSurface::Fingerprint, false, OEFP::MetricName::Euclidean},
+        {"manhattan", MetricSurface::Fingerprint, false, OEFP::MetricName::Manhattan},
+        {"chebyshev", MetricSurface::Fingerprint, false, OEFP::MetricName::Chebyshev},
+        {"hamming", MetricSurface::Fingerprint, false, OEFP::MetricName::Hamming},
+        {"canberra", MetricSurface::Fingerprint, false, OEFP::MetricName::Canberra},
+        {"bray_curtis", MetricSurface::Fingerprint, false, OEFP::MetricName::BrayCurtis},
+        {"minkowski", MetricSurface::Fingerprint, false, OEFP::MetricName::Minkowski},
+        {"tversky", MetricSurface::Fingerprint, false, OEFP::MetricName::Tversky},
+        // Fingerprint surface, similarity=true (2 rows)
+        {"tanimoto", MetricSurface::Fingerprint, true, OEFP::MetricName::Tanimoto},
+        {"tversky", MetricSurface::Fingerprint, true, OEFP::MetricName::Tversky},
+        // Descriptor surface, similarity=false (10 rows)
+        {"euclidean", MetricSurface::Descriptor, false, OEFP::MetricName::Euclidean},
+        {"manhattan", MetricSurface::Descriptor, false, OEFP::MetricName::Manhattan},
+        {"chebyshev", MetricSurface::Descriptor, false, OEFP::MetricName::Chebyshev},
+        {"hamming", MetricSurface::Descriptor, false, OEFP::MetricName::Hamming},
+        {"canberra", MetricSurface::Descriptor, false, OEFP::MetricName::Canberra},
+        {"bray_curtis", MetricSurface::Descriptor, false, OEFP::MetricName::BrayCurtis},
+        {"minkowski", MetricSurface::Descriptor, false, OEFP::MetricName::Minkowski},
+        {"standardized_euclidean", MetricSurface::Descriptor, false, OEFP::MetricName::StandardizedEuclidean},
+        {"seuclidean", MetricSurface::Descriptor, false, OEFP::MetricName::StandardizedEuclidean},
+        {"mahalanobis", MetricSurface::Descriptor, false, OEFP::MetricName::Mahalanobis},
+    };
+
+    ASSERT_EQ(rows.size(), 29u);
+    for (const Row& row : rows) {
+        SCOPED_TRACE(std::string(row.name) + " on " +
+                     (row.surface == MetricSurface::Fingerprint ? "Fingerprint" : "Descriptor"));
+        const OEFP::Metric metric = resolve_metric(row.name, row.similarity, params, row.surface);
+        EXPECT_EQ(metric.Name(), row.expected);
+    }
+}
+
 TEST(MetricTableTest, MinkowskiUsesTheSuppliedExponent) {
     MetricParams params;
     params.p = 0.5;
     const OEFP::Metric metric = resolve_metric("minkowski", false, params, MetricSurface::Descriptor);
     EXPECT_EQ(metric.Name(), OEFP::MetricName::Minkowski);
+    EXPECT_DOUBLE_EQ(metric.P(), 0.5);
     EXPECT_FALSE(metric.SatisfiesTriangleInequality());
 }
 
-TEST(MetricTableTest, MinkowskiRejectsNonPositiveExponent) {
+TEST(MetricTableTest, MinkowskiAboveOneSatisfiesTheTriangleInequality) {
     MetricParams params;
-    params.p = 0.0;
-    EXPECT_THROW(resolve_metric("minkowski", false, params, MetricSurface::Descriptor),
-                 ComparisonError);
+    params.p = 3.0;
+    const OEFP::Metric metric = resolve_metric("minkowski", false, params, MetricSurface::Descriptor);
+    EXPECT_DOUBLE_EQ(metric.P(), 3.0);
+    EXPECT_TRUE(metric.SatisfiesTriangleInequality());
+}
+
+TEST(MetricTableTest, MinkowskiRejectsNonPositiveOrNaNExponent) {
+    const std::vector<double> invalid_exponents{
+        0.0,
+        -1.0,
+        std::numeric_limits<double>::quiet_NaN(),
+    };
+
+    for (double p : invalid_exponents) {
+        SCOPED_TRACE(p);
+        MetricParams params;
+        params.p = p;
+        EXPECT_THROW(resolve_metric("minkowski", false, params, MetricSurface::Descriptor),
+                     ComparisonError);
+    }
 }
 
 TEST(MetricTableTest, TverskyIsNotAMetricSpace) {
