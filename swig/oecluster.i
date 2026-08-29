@@ -25,7 +25,9 @@
 #include "oecluster/clustering/Representative.h"
 #include "oecluster/clustering/ClusterReport.h"
 #include "oefp/batch.h"
+#include "oefp/oefp.h"
 
+#include <cstdio>
 #include <oechem.h>
 #include <oebio.h>
 #include <oespruce.h>
@@ -170,6 +172,67 @@ static void* _oecluster_extract_oefp_batch_ptr(PyObject* obj) {
     void* ptr = _oecluster_extract_swig_ptr(native_obj);
     Py_DECREF(native_obj);
     return ptr;
+}
+
+// The installed oefp wheel and this extension each carry their own compiled
+// copy of OEFP, and the OEFPBatch typemap hands a raw pointer from one to the
+// other. BitBirch then reads that object's words directly, so a layout
+// disagreement corrupts memory rather than raising. Compare the version this
+// extension compiled against with the version the installed wheel compiled
+// against, once, before the first pointer crosses.
+static int _oecluster_oefp_abi_state = 0;  // 0 unchecked, 1 ok, -1 mismatch
+static char _oecluster_oefp_abi_message[256];
+
+static bool _oecluster_check_oefp_abi() {
+    if (_oecluster_oefp_abi_state == 1) {
+        return true;
+    }
+    if (_oecluster_oefp_abi_state == -1) {
+        PyErr_SetString(PyExc_ImportError, _oecluster_oefp_abi_message);
+        return false;
+    }
+
+    PyObject* native_mod = PyImport_ImportModule("oefp._native");
+    if (!native_mod) {
+        return false;  // propagate the import error unchanged
+    }
+
+    long installed[3] = {-1, -1, -1};
+    const char* names[3] = {"OEFP_VERSION_MAJOR", "OEFP_VERSION_MINOR",
+                            "OEFP_VERSION_PATCH"};
+    for (int i = 0; i < 3; ++i) {
+        PyObject* value = PyObject_GetAttrString(native_mod, names[i]);
+        if (!value) {
+            Py_DECREF(native_mod);
+            return false;
+        }
+        installed[i] = PyLong_AsLong(value);
+        Py_DECREF(value);
+        if (installed[i] == -1 && PyErr_Occurred()) {
+            Py_DECREF(native_mod);
+            return false;
+        }
+    }
+    Py_DECREF(native_mod);
+
+    if (installed[0] == OEFP_VERSION_MAJOR && installed[1] == OEFP_VERSION_MINOR &&
+        installed[2] == OEFP_VERSION_PATCH) {
+        _oecluster_oefp_abi_state = 1;
+        return true;
+    }
+
+    std::snprintf(_oecluster_oefp_abi_message, sizeof(_oecluster_oefp_abi_message),
+                  "oecluster was compiled against OEFP %d.%d.%d but the installed oefp "
+                  "package was compiled against %ld.%ld.%ld. oecluster passes raw "
+                  "fingerprint-batch pointers to OEFP, so the two must match exactly. "
+                  "Install oefp %d.%d.%d, or rebuild oecluster against the installed "
+                  "version.",
+                  OEFP_VERSION_MAJOR, OEFP_VERSION_MINOR, OEFP_VERSION_PATCH,
+                  installed[0], installed[1], installed[2],
+                  OEFP_VERSION_MAJOR, OEFP_VERSION_MINOR, OEFP_VERSION_PATCH);
+    _oecluster_oefp_abi_state = -1;
+    PyErr_SetString(PyExc_ImportError, _oecluster_oefp_abi_message);
+    return false;
 }
 
 // ---- Type checker generator macro ----
@@ -881,6 +944,9 @@ class OEFPBatch;
 }
 
 %typemap(in) const OEFP::OEFPBatch& (void *argp = 0) {
+    if (!_oecluster_check_oefp_abi()) {
+        SWIG_fail;
+    }
     if (!_oecluster_is_oefp_batch($input)) {
         SWIG_exception_fail(SWIG_TypeError, "Expected an oefp.OEFPBatch.");
     }
