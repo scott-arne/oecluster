@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <sstream>
 #include "oecluster/Error.h"
 
@@ -90,9 +91,14 @@ bool visible_on(const MetricEntry& entry, MetricSurface surface) {
 
 /// Reject parameter values OEFP would either accept silently or fail on obscurely.
 void validate_params(const std::string& name, const MetricParams& params) {
-    if (name == "minkowski" && !(params.p > 0.0)) {
+    // Minkowski must reject both non-positive and non-finite exponents. For
+    // identical fingerprints, OEFP computes pow(0, 1/p), which closes to
+    // pow(0, 0) == 1 when p is infinite. This makes Compare(i, i) return 1.0
+    // while Facts() stamps zero_self = Yes, so the capability stamp would be
+    // an overstated lie that passes the gate and returns wrong answers.
+    if (name == "minkowski" && !(params.p > 0.0 && std::isfinite(params.p))) {
         std::ostringstream message;
-        message << "Minkowski exponent p must be positive (got " << params.p << ")";
+        message << "Minkowski exponent p must be a positive finite number (got " << params.p << ")";
         throw ComparisonError(message.str());
     }
     // Mirrors OEFP's own bound (metric.cpp validate_tversky_parameter) exactly.

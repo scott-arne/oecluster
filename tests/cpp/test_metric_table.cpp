@@ -160,6 +160,8 @@ TEST(MetricTableTest, MinkowskiRejectsNonPositiveOrNaNExponent) {
         0.0,
         -1.0,
         std::numeric_limits<double>::quiet_NaN(),
+        std::numeric_limits<double>::infinity(),
+        -std::numeric_limits<double>::infinity(),
     };
 
     for (double p : invalid_exponents) {

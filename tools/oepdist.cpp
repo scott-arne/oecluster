@@ -397,15 +397,18 @@ int main(int argc, char** argv) {
     CommonOpts fp_co;
     std::string fp_type = "morgan";
     std::string fp_metric = "tanimoto";
-    unsigned int fp_numbits = 2048, fp_min = 0, fp_max = 2;
+    unsigned int fp_numbits = 2048;
+    unsigned int fp_radius = 2;
+    unsigned int fp_min = 1, fp_max = 30;
 
     auto* fp_cmd = app.add_subcommand("fp", "Fingerprint distance");
     AddCommonOpts(fp_cmd, fp_co);
     fp_cmd->add_option("--fp-type", fp_type,
         "OEFP fingerprint type: morgan, atom_pair");
     fp_cmd->add_option("--numbits", fp_numbits, "Number of bits");
-    fp_cmd->add_option("--min-distance", fp_min, "Minimum Atom Pair graph distance");
-    fp_cmd->add_option("--max-distance", fp_max, "Morgan radius or maximum Atom Pair graph distance");
+    fp_cmd->add_option("--radius", fp_radius, "Morgan radius");
+    fp_cmd->add_option("--min-distance", fp_min, "Atom-pair minimum graph distance");
+    fp_cmd->add_option("--max-distance", fp_max, "Atom-pair maximum graph distance");
     fp_cmd->add_option("--metric", fp_metric,
         "Scalar metric: tanimoto, dice, manhattan");
     bool fp_sim = false;
@@ -415,6 +418,7 @@ int main(int argc, char** argv) {
         OECluster::FingerprintOptions opts;
         opts.fp_type = fp_type;
         opts.numbits = fp_numbits;
+        opts.radius = fp_radius;
         opts.min_distance = fp_min;
         opts.max_distance = fp_max;
         opts.metric = fp_metric;
@@ -422,6 +426,7 @@ int main(int argc, char** argv) {
 
         std::string params = "{" + JsonStr("fp_type", fp_type) + ","
             + JsonNum("numbits", fp_numbits) + ","
+            + JsonNum("radius", fp_radius) + ","
             + JsonNum("min_distance", fp_min) + ","
             + JsonNum("max_distance", fp_max) + ","
             + JsonStr("metric", fp_metric) + "}";

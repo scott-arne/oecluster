@@ -43,8 +43,9 @@ oepdist fp molecules.sdf -o distances.npy \
 | `--fp-type` | `morgan`, `atom_pair` | `morgan` |
 | `--metric` | `tanimoto`, `dice`, `manhattan` | `tanimoto` |
 | `--numbits` | Fingerprint size | `2048` |
-| `--min-distance` | Minimum Atom Pair graph distance | `0` |
-| `--max-distance` | Morgan radius or maximum Atom Pair graph distance | `2` |
+| `--radius` | Morgan radius | `2` |
+| `--min-distance` | Atom-pair minimum graph distance | `1` |
+| `--max-distance` | Atom-pair maximum graph distance | `30` |
 | `--sim` | Return similarity instead of distance | off |
 
 ## ROCS Distance

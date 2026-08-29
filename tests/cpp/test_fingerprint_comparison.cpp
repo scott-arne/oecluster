@@ -206,16 +206,20 @@ TEST_F(FingerprintComparisonTest, DiceFactsFailTierTwoOnly) {
 }
 
 TEST_F(FingerprintComparisonTest, MorganRadiusIsSeparateFromAtomPairWindow) {
-    FingerprintOptions radius_one;
-    radius_one.radius = 1;
-    FingerprintOptions radius_three;
-    radius_three.radius = 3;
+    // Exact values are pinned because an off-by-one in the radius forwarding
+    // survives any inequality assertion.
+    FingerprintOptions opts;
+    opts.radius = 1;
+    FingerprintComparison r1(mols_, opts);
+    EXPECT_DOUBLE_EQ(r1.Compare(0, 1), 5.0 / 7.0);
 
-    FingerprintComparison narrow(mols_, radius_one);
-    FingerprintComparison wide(mols_, radius_three);
-    // Larger environments resolve more structure, so phenol and benzene must not
-    // score identically at both radii.
-    EXPECT_NE(narrow.Compare(0, 1), wide.Compare(0, 1));
+    opts.radius = 2;
+    FingerprintComparison r2(mols_, opts);
+    EXPECT_DOUBLE_EQ(r2.Compare(0, 1), 8.0 / 11.0);
+
+    opts.radius = 3;
+    FingerprintComparison r3(mols_, opts);
+    EXPECT_DOUBLE_EQ(r3.Compare(0, 1), 11.0 / 14.0);
 }
 
 TEST_F(FingerprintComparisonTest, MorganUseChiralityDistinguishesEnantiomers) {
@@ -239,24 +243,66 @@ TEST_F(FingerprintComparisonTest, MorganUseChiralityDistinguishesEnantiomers) {
     EXPECT_GT(aware.Compare(0, 1), 0.0);
 }
 
+TEST_F(FingerprintComparisonTest, AtomPairUseChiralityDistinguishesSpecifiedStereo) {
+    // Atom-pair enantiomers do NOT distinguish with use_chirality at OEFP 0.3.0;
+    // the flag widens the atom code but does not flip the bit pattern for
+    // opposite CIP labels. What does work is specified versus unspecified: a
+    // resolved stereocenter stops matching the same center with no label. The
+    // stereocenter must carry four heavy substituents; a center with an implicit
+    // hydrogen does not resolve through OEFP molecule preparation.
+    std::vector<OEChem::OEGraphMol> stereo_mols(2);
+    OEChem::OESmilesToMol(stereo_mols[0], "F[C@](Cl)(Br)I");
+    OEChem::OESmilesToMol(stereo_mols[1], "FC(Cl)(Br)I");
+    std::vector<OEChem::OEMolBase*> mols;
+    for (auto& gm : stereo_mols) {
+        mols.push_back(&static_cast<OEChem::OEMolBase&>(gm));
+    }
+
+    FingerprintOptions achiral;
+    achiral.fp_type = "atom_pair";
+    FingerprintComparison blind(mols, achiral);
+    EXPECT_DOUBLE_EQ(blind.Compare(0, 1), 0.0);
+
+    FingerprintOptions chiral = achiral;
+    chiral.use_chirality = true;
+    FingerprintComparison aware(mols, chiral);
+    EXPECT_DOUBLE_EQ(aware.Compare(0, 1), 0.5714285714285714);
+}
+
 TEST_F(FingerprintComparisonTest, AtomPairDefaultsUseTheFullOEFPWindow) {
-    FingerprintOptions opts;
-    opts.fp_type = "atom_pair";
-    FingerprintComparison full(mols_, opts);
+    // The fixture's benzene and phenol are too short; their maximum topological
+    // distance saturates at 4, so any window from [1, 4] upward gives identical
+    // distances and an off-by-one below 30 would survive. (Benzene vs octane was
+    // abandoned for saturating at 1.0.) Instead, use a 31-carbon chain and an
+    // oxygen + 30-carbon chain so the top of the window is reachable.
+    std::vector<OEChem::OEGraphMol> long_mols(2);
+    OEChem::OESmilesToMol(long_mols[0], std::string(31, 'C'));
+    OEChem::OESmilesToMol(long_mols[1], "O" + std::string(30, 'C'));
+    std::vector<OEChem::OEMolBase*> chains;
+    for (auto& gm : long_mols) {
+        chains.push_back(&static_cast<OEChem::OEMolBase&>(gm));
+    }
 
-    FingerprintOptions truncated = opts;
+    FingerprintOptions default_opts;
+    default_opts.fp_type = "atom_pair";
+    FingerprintComparison defaults(chains, default_opts);
+
+    FingerprintOptions explicit_30 = default_opts;
+    explicit_30.min_distance = 1;
+    explicit_30.max_distance = 30;
+    FingerprintComparison full_window(chains, explicit_30);
+
+    // The default equals the explicit [1, 30] window, which is what pins the
+    // default max_distance at exactly 30.
+    EXPECT_DOUBLE_EQ(defaults.Compare(0, 1), full_window.Compare(0, 1));
+
+    FingerprintOptions truncated = default_opts;
     truncated.min_distance = 1;
-    truncated.max_distance = 2;
-    FingerprintComparison narrow(mols_, truncated);
+    truncated.max_distance = 29;
+    FingerprintComparison narrow(chains, truncated);
 
-    // The 5.0.0 defaults use OEFP's full [1, 30] window; before 5.0.0 they were
-    // [0, 2]. A narrowed [1, 2] window is enough to prove the new default is not
-    // silently truncated. Benzene vs phenol (not octane) detects the change:
-    // aromatic and aliphatic carbons are different atom types, so benzene and
-    // octane share zero atom-pair features in any window (Tanimoto distance 1.0
-    // in both). Benzene and phenol share the ring and gain longer-range pairs
-    // from phenol's oxygen.
-    EXPECT_NE(full.Compare(0, 1), narrow.Compare(0, 1));
+    // And [1, 29] differs, so any off-by-one or clamp below 30 fails this.
+    EXPECT_NE(defaults.Compare(0, 1), narrow.Compare(0, 1));
 }
 
 TEST_F(FingerprintComparisonTest, MinkowskiExponentIsHonored) {
@@ -287,6 +333,29 @@ TEST_F(FingerprintComparisonTest, AsymmetricTverskyIsRefusedByPDist) {
         EXPECT_NE(message.find("cannot be used with pdist"), std::string::npos)
             << message;
         EXPECT_NE(message.find("tversky"), std::string::npos) << message;
+    }
+}
+
+TEST_F(FingerprintComparisonTest, AsymmetricTverskyGuardRunsBeforeSizeCheck) {
+    // The metric guard runs first, so asymmetric Tversky must fail with the
+    // metric error even when storage size is wrong.
+    FingerprintOptions opts;
+    opts.metric = "tversky";
+    opts.tversky_alpha = 0.2;
+    opts.tversky_beta = 0.8;
+    FingerprintComparison comparison(mols_, opts);
+
+    DenseStorage storage(comparison.Size() + 1);
+    PDistOptions pdist_opts;
+    try {
+        comparison.TryPDist(storage, pdist_opts);
+        FAIL() << "expected ComparisonError";
+    } catch (const ComparisonError& error) {
+        const std::string message(error.what());
+        EXPECT_NE(message.find("cannot be used with pdist"), std::string::npos)
+            << message;
+        EXPECT_EQ(message.find("storage size mismatch"), std::string::npos)
+            << message;
     }
 }
 
