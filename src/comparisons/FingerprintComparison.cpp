@@ -11,6 +11,7 @@
 #include <oechem.h>
 #include <oefp/oefp.h>
 #include "oecluster/CDist.h"
+#include "oecluster/CondensedIndex.h"
 #include "oecluster/Error.h"
 #include "oecluster/PDist.h"
 #include "oecluster/StorageBackend.h"
@@ -82,20 +83,6 @@ static OEFP::BatchKernelOptions make_kernel_options(size_t num_threads,
     options.num_threads = num_threads;
     options.chunk_size = chunk_size > 0 ? chunk_size : 256;
     return options;
-}
-
-static void condensed_to_pair(size_t k, size_t n, size_t& out_i, size_t& out_j) {
-    size_t row_start = 0;
-    for (size_t i = 0; i < n; ++i) {
-        const size_t row_pairs = n - i - 1;
-        if (k < row_start + row_pairs) {
-            out_i = i;
-            out_j = i + 1 + (k - row_start);
-            return;
-        }
-        row_start += row_pairs;
-    }
-    throw ComparisonError("Condensed fingerprint index is out of range");
 }
 
 static OEFP::OEFPBatch make_batch_slice(const std::vector<OEFP::OEFP>& fingerprints,
