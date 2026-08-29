@@ -429,7 +429,8 @@ int main(int argc, char** argv) {
             + JsonNum("radius", fp_radius) + ","
             + JsonNum("min_distance", fp_min) + ","
             + JsonNum("max_distance", fp_max) + ","
-            + JsonStr("metric", fp_metric) + "}";
+            + JsonStr("metric", fp_metric) + ","
+            + JsonBool("similarity", fp_sim) + "}";
 
         if (fp_co.input2.empty()) {
             auto ms = ReadMolsProgress(fp_co.input1, fp_co);
