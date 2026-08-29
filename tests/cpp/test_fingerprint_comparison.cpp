@@ -538,3 +538,100 @@ TEST_F(FingerprintComparisonTest, NumbitsReachesEveryFamilyGenerator) {
         EXPECT_DOUBLE_EQ(wide_comparison.Compare(0, 1), unfolded) << family << " at 2048 bits";
     }
 }
+
+TEST_F(FingerprintComparisonTest, FifteenSupportedFamilyStorageCombinations) {
+    const std::vector<std::string> families{"morgan", "atom_pair", "topological_atom_pair",
+                                            "topological_torsions"};
+    const std::vector<std::string> storages{"binary", "count", "sparse", "sparse_count"};
+
+    size_t supported = 0;
+    for (const std::string& family : families) {
+        for (const std::string& storage : storages) {
+            FingerprintOptions opts;
+            opts.fp_type = family;
+            opts.storage = storage;
+            // Counts are real-valued, so the default boolean metric does not apply.
+            opts.metric = (storage == "count" || storage == "sparse_count") ? "manhattan"
+                                                                            : "tanimoto";
+            const bool unsupported =
+                (family == "topological_torsions" && storage == "sparse_count");
+            if (unsupported) {
+                EXPECT_THROW(FingerprintComparison(mols_, opts), ComparisonError)
+                    << family << "/" << storage;
+                continue;
+            }
+            FingerprintComparison comparison(mols_, opts);
+            EXPECT_EQ(comparison.Size(), 3u) << family << "/" << storage;
+            EXPECT_GE(comparison.Compare(0, 1), 0.0) << family << "/" << storage;
+            ++supported;
+        }
+    }
+    EXPECT_EQ(supported, 15u);
+}
+
+TEST_F(FingerprintComparisonTest, CountStorageDistinguishesRepeatedSubstructures) {
+    std::vector<OEChem::OEGraphMol> alkanes(2);
+    OEChem::OESmilesToMol(alkanes[0], "CCCCCCCCCCCCCCCC");
+    OEChem::OESmilesToMol(alkanes[1], "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCC");
+    std::vector<OEChem::OEMolBase*> pair{&static_cast<OEChem::OEMolBase&>(alkanes[0]),
+                                         &static_cast<OEChem::OEMolBase&>(alkanes[1])};
+
+    FingerprintOptions binary;
+    FingerprintComparison binary_comparison(pair, binary);
+    EXPECT_DOUBLE_EQ(binary_comparison.Compare(0, 1), 0.0);
+
+    // The metric here must read magnitudes, not just which bits are on. Both
+    // alkanes occupy the same eight Morgan indices and differ only in their
+    // counts (46 vs 88 total), so every set-based metric collapses: tanimoto
+    // returns 1.0 and dice 0.0 on the counted fingerprints exactly as they do
+    // on the binary ones. bray_curtis returns 0.3134. Do not substitute a
+    // boolean metric here — the test would then assert the opposite of its name.
+    FingerprintOptions counted;
+    counted.storage = "count";
+    counted.metric = "bray_curtis";
+    FingerprintComparison count_comparison(pair, counted);
+    EXPECT_GT(count_comparison.Compare(0, 1), 0.0);
+}
+
+TEST_F(FingerprintComparisonTest, BooleanMetricOnCountStorageIsRejected) {
+    FingerprintOptions opts;
+    opts.storage = "count";
+    opts.metric = "tanimoto";
+    EXPECT_THROW(FingerprintComparison(mols_, opts), ComparisonError);
+}
+
+TEST_F(FingerprintComparisonTest, UnknownStorageIsRejected) {
+    FingerprintOptions opts;
+    opts.storage = "dense";
+    EXPECT_THROW(FingerprintComparison(mols_, opts), ComparisonError);
+}
+
+TEST_F(FingerprintComparisonTest, PDistAgreesWithComparePairForEveryStorage) {
+    for (const char* storage : {"binary", "count", "sparse", "sparse_count"}) {
+        FingerprintOptions opts;
+        opts.storage = storage;
+        opts.metric = (std::string(storage).find("count") != std::string::npos) ? "manhattan"
+                                                                                : "tanimoto";
+        FingerprintComparison comparison(mols_, opts);
+
+        DenseStorage storage_backend(comparison.Size());
+        PDistOptions pdist_opts;
+        pdist_opts.num_threads = 1;
+        ASSERT_TRUE(comparison.TryPDist(storage_backend, pdist_opts)) << storage;
+        EXPECT_NEAR(storage_backend.Get(0, 1), comparison.Compare(0, 1), 1e-12) << storage;
+        EXPECT_NEAR(storage_backend.Get(1, 2), comparison.Compare(1, 2), 1e-12) << storage;
+    }
+}
+
+TEST_F(FingerprintComparisonTest, CDistAgreesWithComparePairForSparseStorage) {
+    FingerprintOptions opts;
+    opts.storage = "sparse";
+    FingerprintComparison comparison(mols_, opts);
+
+    std::vector<double> output(1 * 2, -1.0);
+    CDistOptions cdist_opts;
+    cdist_opts.num_threads = 1;
+    ASSERT_TRUE(comparison.TryCDist(1, output.data(), cdist_opts));
+    EXPECT_NEAR(output[0], comparison.Compare(0, 1), 1e-12);
+    EXPECT_NEAR(output[1], comparison.Compare(0, 2), 1e-12);
+}

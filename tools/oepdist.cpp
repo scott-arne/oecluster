@@ -396,19 +396,28 @@ int main(int argc, char** argv) {
 
     CommonOpts fp_co;
     std::string fp_type = "morgan";
+    std::string fp_storage = "binary";
     std::string fp_metric = "tanimoto";
     unsigned int fp_numbits = 2048;
     unsigned int fp_radius = 2;
     unsigned int fp_min = 1, fp_max = 30;
+    unsigned int fp_torsion_atom_count = 4;
+    bool fp_use_chirality = false;
 
     auto* fp_cmd = app.add_subcommand("fp", "Fingerprint distance");
     AddCommonOpts(fp_cmd, fp_co);
     fp_cmd->add_option("--fp-type", fp_type,
-        "OEFP fingerprint type: morgan, atom_pair");
+        "OEFP fingerprint type: morgan, atom_pair, topological_atom_pair, topological_torsions");
+    fp_cmd->add_option("--storage", fp_storage,
+        "Fingerprint storage: binary, count, sparse, sparse_count");
     fp_cmd->add_option("--numbits", fp_numbits, "Number of bits");
     fp_cmd->add_option("--radius", fp_radius, "Morgan radius");
     fp_cmd->add_option("--min-distance", fp_min, "Atom-pair minimum graph distance");
     fp_cmd->add_option("--max-distance", fp_max, "Atom-pair maximum graph distance");
+    fp_cmd->add_option("--torsion-atom-count", fp_torsion_atom_count,
+        "Path length for topological_torsions");
+    fp_cmd->add_flag("--use-chirality", fp_use_chirality,
+        "Encode CIP stereochemistry in atom invariants");
     fp_cmd->add_option("--metric", fp_metric,
         "Scalar metric: tanimoto, dice, manhattan");
     bool fp_sim = false;
@@ -417,18 +426,24 @@ int main(int argc, char** argv) {
     fp_cmd->callback([&]() {
         OECluster::FingerprintOptions opts;
         opts.fp_type = fp_type;
+        opts.storage = fp_storage;
         opts.numbits = fp_numbits;
         opts.radius = fp_radius;
         opts.min_distance = fp_min;
         opts.max_distance = fp_max;
+        opts.torsion_atom_count = fp_torsion_atom_count;
+        opts.use_chirality = fp_use_chirality;
         opts.metric = fp_metric;
         opts.similarity = fp_sim;
 
         std::string params = "{" + JsonStr("fp_type", fp_type) + ","
+            + JsonStr("storage", fp_storage) + ","
             + JsonNum("numbits", fp_numbits) + ","
             + JsonNum("radius", fp_radius) + ","
             + JsonNum("min_distance", fp_min) + ","
             + JsonNum("max_distance", fp_max) + ","
+            + JsonNum("torsion_atom_count", fp_torsion_atom_count) + ","
+            + JsonBool("use_chirality", fp_use_chirality) + ","
             + JsonStr("metric", fp_metric) + ","
             + JsonBool("similarity", fp_sim) + "}";
 

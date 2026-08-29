@@ -46,3 +46,11 @@ if(OECLUSTER_BUILD_PYTHON)
     install(TARGETS oepdist RUNTIME DESTINATION oecluster/_bin)
     install(FILES ${CMAKE_SOURCE_DIR}/python/_oepdist_main.py DESTINATION .)
 endif()
+
+if(OECLUSTER_BUILD_TESTS)
+    add_test(NAME oepdist_fp_metadata
+             COMMAND ${CMAKE_COMMAND}
+                     -DOEPDIST=$<TARGET_FILE:oepdist>
+                     -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/oepdist_fp_metadata
+                     -P ${CMAKE_SOURCE_DIR}/tests/cli/oepdist_fp_metadata.cmake)
+endif()

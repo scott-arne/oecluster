@@ -40,12 +40,15 @@ oepdist fp molecules.sdf -o distances.npy \
 
 | Option | Values | Default |
 |--------|--------|---------|
-| `--fp-type` | `morgan`, `atom_pair` | `morgan` |
+| `--fp-type` | `morgan`, `atom_pair`, `topological_atom_pair`, `topological_torsions` | `morgan` |
+| `--storage` | `binary`, `count`, `sparse`, `sparse_count` | `binary` |
 | `--metric` | `tanimoto`, `dice`, `manhattan` | `tanimoto` |
 | `--numbits` | Fingerprint size | `2048` |
 | `--radius` | Morgan radius | `2` |
 | `--min-distance` | Atom-pair minimum graph distance | `1` |
 | `--max-distance` | Atom-pair maximum graph distance | `30` |
+| `--torsion-atom-count` | Path length for topological_torsions | `4` |
+| `--use-chirality` | Encode CIP stereochemistry in atom invariants | off |
 | `--sim` | Return similarity instead of distance | off |
 
 ## ROCS Distance

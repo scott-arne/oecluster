@@ -20,17 +20,6 @@
 namespace OECluster {
 
 // ---------------------------------------------------------------------------
-// Impl
-// ---------------------------------------------------------------------------
-
-struct FingerprintComparison::Impl {
-    std::vector<OEFP::OEFP> fingerprints;
-    OEFP::OEFPBatch batch;
-    FingerprintOptions opts;
-    OEFP::Metric metric = OEFP::Metric::Jaccard();
-};
-
-// ---------------------------------------------------------------------------
 // Helper: lowercase a string in place
 // ---------------------------------------------------------------------------
 
@@ -60,15 +49,80 @@ static OEFP::BatchKernelOptions make_kernel_options(size_t num_threads,
     return options;
 }
 
-static OEFP::OEFPBatch make_batch_slice(const std::vector<OEFP::OEFP>& fingerprints,
-                                        size_t begin,
-                                        size_t end) {
-    OEFP::OEFPBatch batch(fingerprints.front().Spec());
-    for (size_t i = begin; i < end; ++i) {
-        batch.Append(fingerprints[i]);
+/**
+ * Type-erased handle over one of OEFP's three batch representations.
+ *
+ * Immutable after construction, which is what lets ``Clone()`` keep sharing a
+ * single ``shared_ptr<const Impl>`` across worker threads.
+ */
+struct BatchHolder {
+    virtual ~BatchHolder() = default;
+    virtual size_t Size() const = 0;
+    virtual double ComparePair(size_t i, size_t j, const OEFP::Metric& metric) const = 0;
+    virtual std::vector<double> PDist(const OEFP::Metric& metric,
+                                      const OEFP::BatchKernelOptions& kernel) const = 0;
+    virtual void PDistInto(const OEFP::Metric& metric, double* output, size_t length,
+                           const OEFP::BatchKernelOptions& kernel) const = 0;
+    virtual void CDistInto(size_t n_a, const OEFP::Metric& metric, double* output, size_t length,
+                           const OEFP::BatchKernelOptions& kernel) const = 0;
+};
+
+template <typename FingerprintT, typename BatchT>
+class TypedBatchHolder : public BatchHolder {
+public:
+    explicit TypedBatchHolder(std::vector<FingerprintT> fingerprints)
+        : fingerprints_(std::move(fingerprints)),
+          batch_(BatchT::FromFingerprints(fingerprints_)) {}
+
+    size_t Size() const override { return fingerprints_.size(); }
+
+    double ComparePair(size_t i, size_t j, const OEFP::Metric& metric) const override {
+        return OEFP::Compare(fingerprints_[i], fingerprints_[j], metric);
     }
-    return batch;
-}
+
+    std::vector<double> PDist(const OEFP::Metric& metric,
+                              const OEFP::BatchKernelOptions& kernel) const override {
+        return OEFP::PDist(batch_, metric, kernel);
+    }
+
+    void PDistInto(const OEFP::Metric& metric, double* output, size_t length,
+                   const OEFP::BatchKernelOptions& kernel) const override {
+        OEFP::PDistInto(batch_, metric, output, length, kernel);
+    }
+
+    void CDistInto(size_t n_a, const OEFP::Metric& metric, double* output, size_t length,
+                   const OEFP::BatchKernelOptions& kernel) const override {
+        const BatchT batch_a = Slice(0, n_a);
+        const BatchT batch_b = Slice(n_a, fingerprints_.size());
+        OEFP::CDistInto(batch_a, batch_b, metric, output, length, kernel);
+    }
+
+private:
+    BatchT Slice(size_t begin, size_t end) const {
+        BatchT slice(batch_.Spec());
+        for (size_t i = begin; i < end; ++i) {
+            slice.Append(fingerprints_[i]);
+        }
+        return slice;
+    }
+
+    std::vector<FingerprintT> fingerprints_;
+    BatchT batch_;
+};
+
+// ---------------------------------------------------------------------------
+// Impl
+// ---------------------------------------------------------------------------
+
+struct FingerprintComparison::Impl {
+    std::shared_ptr<const BatchHolder> holder;
+    FingerprintOptions opts;
+    OEFP::Metric metric = OEFP::Metric::Jaccard();
+};
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 static void validate_molecule(const OEChem::OEMolBase* mol, size_t index) {
     if (mol == nullptr) {
@@ -107,6 +161,51 @@ static std::string normalize_family(const std::string& fp_type) {
                           "'topological_atom_pair', 'topological_torsions'");
 }
 
+static std::string normalize_storage(const std::string& storage) {
+    const std::string lower = to_lower(storage);
+    if (lower == "binary" || lower == "count" || lower == "sparse" || lower == "sparse_count") {
+        return lower;
+    }
+    throw ComparisonError("Unknown fingerprint storage: " + storage +
+                          ". Supported storages are 'binary', 'count', 'sparse', 'sparse_count'");
+}
+
+// OEFP's count_simulation approximates a repeat count by setting several bits
+// for one feature in a *binary* fingerprint. The count generators already
+// carry real counts, so it is switched off for them. On the binary path
+// OEFP's per-family defaults are restated rather than unified: Task 5 pinned
+// exact distances measured against those defaults, and quietly changing them
+// here would move values in tests that are not about storage at all.
+static OEFP::MorganOptions morgan_options(const FingerprintOptions& opts) {
+    OEFP::MorganOptions generator_opts;
+    generator_opts.num_bits = opts.numbits;
+    generator_opts.radius = opts.radius;
+    generator_opts.use_chirality = opts.use_chirality;
+    generator_opts.count_simulation = false;
+    return generator_opts;
+}
+
+static OEFP::AtomPairOptions atom_pair_options(const FingerprintOptions& opts, bool counted) {
+    OEFP::AtomPairOptions generator_opts;
+    generator_opts.num_bits = opts.numbits;
+    generator_opts.min_distance = opts.min_distance;
+    generator_opts.max_distance = opts.max_distance;
+    generator_opts.use_chirality = opts.use_chirality;
+    generator_opts.use_2d = true;
+    generator_opts.count_simulation = !counted;
+    return generator_opts;
+}
+
+static OEFP::TopologicalTorsionsOptions torsions_options(const FingerprintOptions& opts,
+                                                         bool counted) {
+    OEFP::TopologicalTorsionsOptions generator_opts;
+    generator_opts.num_bits = opts.numbits;
+    generator_opts.torsion_atom_count = opts.torsion_atom_count;
+    generator_opts.use_chirality = opts.use_chirality;
+    generator_opts.count_simulation = !counted;
+    return generator_opts;
+}
+
 static std::vector<OEFP::OEFP> make_binary_fingerprints(
         const std::vector<OEChem::OEMolBase*>& mols,
         const FingerprintOptions& opts,
@@ -115,23 +214,13 @@ static std::vector<OEFP::OEFP> make_binary_fingerprints(
     fingerprints.reserve(mols.size());
 
     if (family == "morgan") {
-        OEFP::MorganOptions generator_opts;
-        generator_opts.num_bits = opts.numbits;
-        generator_opts.radius = opts.radius;
-        generator_opts.use_chirality = opts.use_chirality;
-        OEFP::MorganGenerator generator(generator_opts);
+        OEFP::MorganGenerator generator(morgan_options(opts));
         for (size_t i = 0; i < mols.size(); ++i) {
             validate_molecule(mols[i], i);
             fingerprints.push_back(generator.Fingerprint(*mols[i]));
         }
     } else if (family == "atom_pair") {
-        OEFP::AtomPairOptions generator_opts;
-        generator_opts.num_bits = opts.numbits;
-        generator_opts.min_distance = opts.min_distance;
-        generator_opts.max_distance = opts.max_distance;
-        generator_opts.use_chirality = opts.use_chirality;
-        generator_opts.use_2d = true;
-        OEFP::AtomPairGenerator generator(generator_opts);
+        OEFP::AtomPairGenerator generator(atom_pair_options(opts, /*counted=*/false));
         for (size_t i = 0; i < mols.size(); ++i) {
             validate_molecule(mols[i], i);
             fingerprints.push_back(generator.Fingerprint(*mols[i]));
@@ -139,11 +228,8 @@ static std::vector<OEFP::OEFP> make_binary_fingerprints(
     } else {
         // normalize_family returns exactly three values, so this is the
         // topological torsions case. Any new caller must normalize first.
-        OEFP::TopologicalTorsionsOptions generator_opts;
-        generator_opts.num_bits = opts.numbits;
-        generator_opts.torsion_atom_count = opts.torsion_atom_count;
-        generator_opts.use_chirality = opts.use_chirality;
-        OEFP::TopologicalTorsionsGenerator generator(generator_opts);
+        OEFP::TopologicalTorsionsGenerator generator(
+            torsions_options(opts, /*counted=*/false));
         for (size_t i = 0; i < mols.size(); ++i) {
             validate_molecule(mols[i], i);
             fingerprints.push_back(generator.Fingerprint(*mols[i]));
@@ -151,6 +237,71 @@ static std::vector<OEFP::OEFP> make_binary_fingerprints(
     }
 
     return fingerprints;
+}
+
+/// Build the per-molecule fingerprints for one family/storage cell and wrap
+/// them in the matching batch holder.
+static std::shared_ptr<const BatchHolder> make_holder(
+        const std::vector<OEChem::OEMolBase*>& mols,
+        const FingerprintOptions& opts,
+        const std::string& family,
+        const std::string& storage) {
+    for (size_t i = 0; i < mols.size(); ++i) {
+        validate_molecule(mols[i], i);
+    }
+
+    if (storage == "binary") {
+        return std::make_shared<TypedBatchHolder<OEFP::OEFP, OEFP::OEFPBatch>>(
+            make_binary_fingerprints(mols, opts, family));
+    }
+
+    if (storage == "sparse") {
+        std::vector<OEFP::OEFPSparse> fingerprints;
+        fingerprints.reserve(mols.size());
+        for (OEChem::OEMolBase* mol : mols) {
+            // Sparse storage is still a set of on-bits, so it takes the binary
+            // path's count-simulation setting, not the count path's.
+            if (family == "morgan") {
+                fingerprints.push_back(OEFP::MakeMorganSparseFingerprint(*mol, morgan_options(opts)));
+            } else if (family == "atom_pair") {
+                fingerprints.push_back(OEFP::MakeAtomPairSparseFingerprint(
+                    *mol, atom_pair_options(opts, /*counted=*/false)));
+            } else {
+                fingerprints.push_back(OEFP::MakeTopologicalTorsionsSparseFingerprint(
+                    *mol, torsions_options(opts, /*counted=*/false)));
+            }
+        }
+        return std::make_shared<TypedBatchHolder<OEFP::OEFPSparse, OEFP::OEFPSparseBatch>>(
+            std::move(fingerprints));
+    }
+
+    if (storage == "sparse_count" && family == "topological_torsions") {
+        throw ComparisonError(
+            "Fingerprint type 'topological_torsions' does not support storage='sparse_count': "
+            "OEFP returns OEFPCount64 for that combination and provides no batch or bulk kernel "
+            "for it. Use 'binary', 'count', or 'sparse'");
+    }
+
+    std::vector<OEFP::OEFPCount> fingerprints;
+    fingerprints.reserve(mols.size());
+    const bool folded = (storage == "count");
+    for (OEChem::OEMolBase* mol : mols) {
+        if (family == "morgan") {
+            fingerprints.push_back(
+                folded ? OEFP::MakeMorganCountFingerprint(*mol, morgan_options(opts))
+                       : OEFP::MakeMorganSparseCountFingerprint(*mol, morgan_options(opts)));
+        } else if (family == "atom_pair") {
+            const OEFP::AtomPairOptions generator_opts = atom_pair_options(opts, /*counted=*/true);
+            fingerprints.push_back(
+                folded ? OEFP::MakeAtomPairCountFingerprint(*mol, generator_opts)
+                       : OEFP::MakeAtomPairSparseCountFingerprint(*mol, generator_opts));
+        } else {
+            fingerprints.push_back(OEFP::MakeTopologicalTorsionsCountFingerprint(
+                *mol, torsions_options(opts, /*counted=*/true)));
+        }
+    }
+    return std::make_shared<TypedBatchHolder<OEFP::OEFPCount, OEFP::OEFPCountBatch>>(
+        std::move(fingerprints));
 }
 
 // ---------------------------------------------------------------------------
@@ -164,14 +315,25 @@ FingerprintComparison::FingerprintComparison(const std::vector<OEChem::OEMolBase
     impl->metric = make_metric(opts);
 
     const std::string family = normalize_family(opts.fp_type);
+    const std::string storage = normalize_storage(opts.storage);
+
+    // A boolean metric binarizes its inputs, discarding exactly the counts that
+    // are the reason to select a counted storage.
+    if ((storage == "count" || storage == "sparse_count") &&
+        impl->metric.Space() == OEFP::MetricSpace::Boolean) {
+        throw ComparisonError("Metric '" + opts.metric + "' is a bit-set metric and discards the "
+                              "counts in storage='" + storage +
+                              "'. Use a numeric metric such as 'manhattan', 'canberra', or "
+                              "'bray_curtis'");
+    }
+
     try {
-        impl->fingerprints = make_binary_fingerprints(mols, opts, family);
+        impl->holder = make_holder(mols, opts, family, storage);
     } catch (const ComparisonError&) {
         throw;
     } catch (const std::exception& exc) {
         throw ComparisonError("Failed to compute OEFP fingerprints: " + std::string(exc.what()));
     }
-    impl->batch = OEFP::OEFPBatch::FromFingerprints(impl->fingerprints);
 
     pimpl_ = std::move(impl);
 }
@@ -188,9 +350,7 @@ FingerprintComparison::FingerprintComparison(std::shared_ptr<const Impl> impl)
 // ---------------------------------------------------------------------------
 
 double FingerprintComparison::Compare(size_t i, size_t j) {
-    const auto& fp_i = pimpl_->fingerprints[i];
-    const auto& fp_j = pimpl_->fingerprints[j];
-    return OEFP::Compare(fp_i, fp_j, pimpl_->metric);
+    return pimpl_->holder->ComparePair(i, j, pimpl_->metric);
 }
 
 bool FingerprintComparison::TryPDist(StorageBackend& storage,
@@ -204,7 +364,7 @@ bool FingerprintComparison::TryPDist(StorageBackend& storage,
                               "' cannot be used with pdist: " + std::string(exc.what()));
     }
 
-    const size_t n = pimpl_->batch.Size();
+    const size_t n = pimpl_->holder->Size();
     const size_t total_pairs = n * (n - 1) / 2;
     if (storage.NumSamples() != n) {
         throw ComparisonError("FingerprintComparison pdist storage size mismatch");
@@ -216,11 +376,10 @@ bool FingerprintComparison::TryPDist(StorageBackend& storage,
     try {
         double* data = storage.Data();
         if (data != nullptr) {
-            OEFP::PDistInto(
-                pimpl_->batch, pimpl_->metric, data, storage.NumPairs(), kernel_options);
+            pimpl_->holder->PDistInto(pimpl_->metric, data, storage.NumPairs(), kernel_options);
         } else {
             const std::vector<double> values =
-                OEFP::PDist(pimpl_->batch, pimpl_->metric, kernel_options);
+                pimpl_->holder->PDist(pimpl_->metric, kernel_options);
             for (size_t k = 0; k < values.size(); ++k) {
                 size_t i = 0;
                 size_t j = 0;
@@ -241,7 +400,7 @@ bool FingerprintComparison::TryPDist(StorageBackend& storage,
 
 bool FingerprintComparison::TryCDist(size_t n_a, double* output,
                                      const CDistOptions& options) {
-    const size_t n_total = pimpl_->batch.Size();
+    const size_t n_total = pimpl_->holder->Size();
     if (n_a > n_total) {
         throw ComparisonError("FingerprintComparison cdist split index is out of range");
     }
@@ -255,11 +414,7 @@ bool FingerprintComparison::TryCDist(size_t n_a, double* output,
         make_kernel_options(options.num_threads, options.chunk_size);
 
     try {
-        const OEFP::OEFPBatch batch_a = make_batch_slice(pimpl_->fingerprints, 0, n_a);
-        const OEFP::OEFPBatch batch_b =
-            make_batch_slice(pimpl_->fingerprints, n_a, n_total);
-        OEFP::CDistInto(
-            batch_a, batch_b, pimpl_->metric, output, total_pairs, kernel_options);
+        pimpl_->holder->CDistInto(n_a, pimpl_->metric, output, total_pairs, kernel_options);
     } catch (const std::exception& exc) {
         throw ComparisonError("Failed to compute OEFP fingerprint cdist: " +
                               std::string(exc.what()));
@@ -288,7 +443,7 @@ std::unique_ptr<PairwiseComparison> FingerprintComparison::Clone() const {
 }
 
 size_t FingerprintComparison::Size() const {
-    return pimpl_->fingerprints.size();
+    return pimpl_->holder->Size();
 }
 
 std::string FingerprintComparison::ComparisonName() const {
