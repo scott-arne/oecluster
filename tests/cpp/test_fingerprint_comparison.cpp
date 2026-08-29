@@ -463,3 +463,78 @@ TEST_F(FingerprintComparisonTest, LegacyOpenEyeTypesStillNameTheReplacements) {
         }
     }
 }
+
+TEST_F(FingerprintComparisonTest, AlternateFamilySpellingsResolveToTheSameFamily) {
+    // normalize_family accepts more spellings than the four canonical names.
+    // Each alternate must land on the same generator as its canonical form,
+    // not merely construct without throwing.
+    const std::vector<std::pair<std::string, std::string>> aliases{
+        {"atompair", "atom_pair"},
+        {"ATOM_PAIR", "atom_pair"},
+        {"Morgan", "morgan"},
+        {"topological_torsion", "topological_torsions"},
+        {"TOPOLOGICAL_ATOM_PAIR", "atom_pair"},
+    };
+
+    for (const auto& [alternate, canonical] : aliases) {
+        FingerprintOptions alternate_opts;
+        alternate_opts.fp_type = alternate;
+        FingerprintOptions canonical_opts;
+        canonical_opts.fp_type = canonical;
+
+        FingerprintComparison a(mols_, alternate_opts);
+        FingerprintComparison b(mols_, canonical_opts);
+        EXPECT_DOUBLE_EQ(a.Compare(0, 1), b.Compare(0, 1)) << alternate;
+        EXPECT_DOUBLE_EQ(a.Compare(1, 2), b.Compare(1, 2)) << alternate;
+    }
+}
+
+TEST_F(FingerprintComparisonTest, UnknownFamilyErrorNamesTheSupportedTypes) {
+    FingerprintOptions opts;
+    opts.fp_type = "ecfp4";
+    try {
+        FingerprintComparison comparison(mols_, opts);
+        FAIL() << "expected ComparisonError";
+    } catch (const ComparisonError& error) {
+        const std::string message(error.what());
+        // The unrecognized name must be echoed back, or the user cannot tell
+        // which of several options was rejected.
+        EXPECT_NE(message.find("ecfp4"), std::string::npos) << message;
+        for (const char* supported : {"'morgan'", "'atom_pair'",
+                                      "'topological_atom_pair'",
+                                      "'topological_torsions'"}) {
+            EXPECT_NE(message.find(supported), std::string::npos) << message;
+        }
+    }
+}
+
+TEST_F(FingerprintComparisonTest, NumbitsReachesEveryFamilyGenerator) {
+    // The three-molecule fixture is too small to collide at any bit width, so
+    // numbits is unobservable there. These two tripeptides differ enough to
+    // fold differently at 64 bits and identically at neither.
+    std::vector<OEChem::OEGraphMol> peptides(2);
+    OEChem::OESmilesToMol(peptides[0], "CC(C)CC(N)C(=O)NC(Cc1ccccc1)C(=O)NC(CO)C(=O)O");
+    OEChem::OESmilesToMol(peptides[1], "CC(C)CC(N)C(=O)NC(Cc1ccc(O)cc1)C(=O)NC(CS)C(=O)O");
+    std::vector<OEChem::OEMolBase*> pair{&static_cast<OEChem::OEMolBase&>(peptides[0]),
+                                         &static_cast<OEChem::OEMolBase&>(peptides[1])};
+
+    // {family, distance at 64 bits, distance at the 2048-bit default}
+    const std::vector<std::tuple<std::string, double, double>> expected{
+        {"morgan", 0.30769230769230771, 0.34000000000000002},
+        {"atom_pair", 0.0, 0.28614457831325302},
+        {"topological_torsions", 0.096774193548387094, 0.29545454545454547},
+    };
+
+    for (const auto& [family, folded, unfolded] : expected) {
+        FingerprintOptions narrow;
+        narrow.fp_type = family;
+        narrow.numbits = 64;
+        FingerprintComparison narrow_comparison(pair, narrow);
+        EXPECT_DOUBLE_EQ(narrow_comparison.Compare(0, 1), folded) << family << " at 64 bits";
+
+        FingerprintOptions wide;
+        wide.fp_type = family;
+        FingerprintComparison wide_comparison(pair, wide);
+        EXPECT_DOUBLE_EQ(wide_comparison.Compare(0, 1), unfolded) << family << " at 2048 bits";
+    }
+}
