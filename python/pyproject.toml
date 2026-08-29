@@ -7,7 +7,7 @@ name = "oecluster"
 version = "4.2.2"
 description = "High-performance pairwise distance and clustering for OpenEye Toolkits"
 requires-python = ">=3.11"
-dependencies = ["openeye-toolkits>=2026.1", "numpy>=1.20", "oefp>=0.2.4"]
+dependencies = ["openeye-toolkits>=2026.1", "numpy>=1.20", "oefp>=0.3.0"]
 
 [project.scripts]
 oepdist = "_oepdist_main:main"

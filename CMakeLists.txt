@@ -87,7 +87,7 @@ if(NOT TARGET oefp)
         FetchContent_Declare(
             oefp
             GIT_REPOSITORY https://github.com/scott-arne/oefp.git
-            GIT_TAG v0.2.4
+            GIT_TAG v0.3.0
             GIT_SHALLOW TRUE
         )
         FetchContent_MakeAvailable(oefp)

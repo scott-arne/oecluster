@@ -51,7 +51,7 @@ cluster summaries as well as lower-level control over distance computation.
 - **Python** 3.11+ with NumPy 1.20 or later.
 - **OpenEye Toolkits** 2026.1 or later.
 - **A valid OpenEye license** at build time and runtime.
-- **OEFP** 0.2.4 or later for fingerprint generation and comparison.
+- **OEFP** 0.3.0 or later for fingerprint generation and comparison.
 - **C++17**, **CMake** 3.21+, and **SWIG** 4.0+ when building from source.
 
 ---
