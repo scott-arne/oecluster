@@ -425,13 +425,41 @@ TEST_F(FingerprintComparisonTest, TorsionAtomCountChangesTheFingerprint) {
 TEST_F(FingerprintComparisonTest, DistanceAtomPairIsRejectedAsUnimplemented) {
     FingerprintOptions opts;
     opts.fp_type = "distance_atom_pair";
-    EXPECT_THROW(FingerprintComparison(mols_, opts), ComparisonError);
+    try {
+        FingerprintComparison comparison(mols_, opts);
+        FAIL() << "expected ComparisonError";
+    } catch (const ComparisonError& error) {
+        // The dedicated branch exists only for this message. Asserting the
+        // exception type alone cannot tell it from the generic unknown-type
+        // error the name would otherwise fall through to.
+        const std::string message(error.what());
+        EXPECT_NE(message.find("not implemented by OEFP"), std::string::npos)
+            << message;
+        EXPECT_NE(message.find("'atom_pair'"), std::string::npos) << message;
+        EXPECT_EQ(message.find("Unknown OEFP fingerprint type"), std::string::npos)
+            << message;
+    }
 }
 
 TEST_F(FingerprintComparisonTest, LegacyOpenEyeTypesStillNameTheReplacements) {
     for (const char* legacy : {"circular", "tree", "path", "maccs", "lingo"}) {
         FingerprintOptions opts;
         opts.fp_type = legacy;
-        EXPECT_THROW(FingerprintComparison(mols_, opts), ComparisonError) << legacy;
+        try {
+            FingerprintComparison comparison(mols_, opts);
+            FAIL() << "expected ComparisonError for " << legacy;
+        } catch (const ComparisonError& error) {
+            const std::string message(error.what());
+            EXPECT_NE(message.find(legacy), std::string::npos) << message;
+            EXPECT_NE(message.find("no longer supported"), std::string::npos)
+                << message;
+            // The point of the branch: every current family is offered.
+            for (const char* replacement : {"'morgan'", "'atom_pair'",
+                                            "'topological_atom_pair'",
+                                            "'topological_torsions'"}) {
+                EXPECT_NE(message.find(replacement), std::string::npos)
+                    << legacy << ": " << message;
+            }
+        }
     }
 }

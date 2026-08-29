@@ -137,6 +137,8 @@ static std::vector<OEFP::OEFP> make_binary_fingerprints(
             fingerprints.push_back(generator.Fingerprint(*mols[i]));
         }
     } else {
+        // normalize_family returns exactly three values, so this is the
+        // topological torsions case. Any new caller must normalize first.
         OEFP::TopologicalTorsionsOptions generator_opts;
         generator_opts.num_bits = opts.numbits;
         generator_opts.torsion_atom_count = opts.torsion_atom_count;
