@@ -38,9 +38,13 @@ struct RMSDOptions {
  * @brief Coordinate RMSD comparison over molecules that share a topology.
  *
  * Every item must have the same canonical SMILES; the constructor checks this
- * once and directs callers with mixed input to the ROCS comparison. With
- * ``automorph=false`` every item must additionally share one atom ordering
- * (see ``RMSDOptions::automorph``).
+ * once and directs callers with mixed input to the ROCS comparison. Every item
+ * must also carry coordinates of the same dimension, so a 2D depiction is never
+ * measured against a 3D conformer. With ``automorph=false`` every item must
+ * additionally share one atom ordering (see ``RMSDOptions::automorph``), and
+ * with ``heavy_only=false`` every item must share one hydrogen representation,
+ * since otherwise a suppressed-hydrogen molecule would score as identical to an
+ * explicit-hydrogen one whose hydrogens are displaced.
  *
  * Only each molecule's active conformer is measured: a multi-conformer
  * ``OEMol`` yields one number per molecule, not per pose. Callers wanting
@@ -63,8 +67,10 @@ public:
      *     is present (2D or 3D).
      * :param opts: Scoring options.
      * :raises ComparisonError: When a pointer is null, an item carries no
-     *     coordinates, an item's topology differs from the first item's, or
-     *     (with ``automorph=false``) the items do not share one atom ordering.
+     *     coordinates, the items' coordinate dimensions differ, an item's
+     *     topology differs from the first item's, (with ``automorph=false``) the
+     *     items do not share one atom ordering, or (with ``heavy_only=false``)
+     *     the items do not share one hydrogen representation.
      */
     explicit RMSDComparison(const std::vector<std::shared_ptr<OEChem::OEMol>>& mols,
                             const Options& opts = Options());

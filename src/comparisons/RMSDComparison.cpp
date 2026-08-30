@@ -89,8 +89,8 @@ RMSDComparison::RMSDComparison(const std::vector<std::shared_ptr<OEChem::OEMol>>
             }
 
             // With automorph=false, additionally require element-at-index uniformity.
+            // Counts are already known equal, so indexing to reference_count is safe.
             if (!opts.automorph) {
-                const unsigned int reference_count = mols[0]->NumAtoms();
                 for (size_t i = 1; i < mols.size(); ++i) {
                     OESystem::OEIter<OEChem::OEAtomBase> ref_atom = mols[0]->GetAtoms();
                     OESystem::OEIter<OEChem::OEAtomBase> cand_atom = mols[i]->GetAtoms();
@@ -127,10 +127,12 @@ double RMSDComparison::Compare(size_t i, size_t j) {
                               "; at least one of them carries a non-finite coordinate");
     }
     // -1.0 is OERMSD's documented atom-matching failure sentinel. The constructor's
-    // checks are expected to prevent it (the dimension check catches unembedded
-    // molecules, the topology check catches differing chemistry, and with
-    // automorph=false the atom-ordering check catches differing counts and elements),
-    // but this guard is defense-in-depth: a negative distance must never reach storage.
+    // checks are expected to prevent it: the dimension checks catch unembedded and
+    // dimensionally mixed input, the topology check catches differing chemistry, and
+    // the atom-count check catches differing hydrogen representation whenever counts
+    // matter (automorph=false or heavy_only=false), with a per-index element check on
+    // top when atoms are matched positionally. This guard is defense-in-depth: a
+    // negative distance must never reach storage.
     if (value < 0.0) {
         throw ComparisonError("OERMSD could not match atoms between items " + std::to_string(i) +
                               " and " + std::to_string(j) +
