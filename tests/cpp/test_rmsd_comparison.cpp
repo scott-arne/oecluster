@@ -25,6 +25,16 @@ std::shared_ptr<OEChem::OEMol> make_shifted(const char* smiles, double shift) {
     return mol;
 }
 
+/// The atomic numbers of a molecule's atoms in index order, so a test can prove
+/// that a step meant to reorder atoms actually reordered them.
+std::vector<unsigned int> element_sequence(const OEChem::OEMol& mol) {
+    std::vector<unsigned int> elements;
+    for (OESystem::OEIter<OEChem::OEAtomBase> atom = mol.GetAtoms(); atom; ++atom) {
+        elements.push_back(atom->GetAtomicNum());
+    }
+    return elements;
+}
+
 std::vector<float> all_coords(const std::vector<std::shared_ptr<OEChem::OEMol>>& mols) {
     std::vector<float> flat;
     for (const auto& mol : mols) {
@@ -421,23 +431,12 @@ TEST_F(RMSDComparisonTest, TwoDVsThreeDIsRejected) {
     }
 }
 
-TEST_F(RMSDComparisonTest, AtomCountChangeAfterConstructionIsRejected) {
-    // Two suppressed-hydrogen methanols have equal atom counts, so construction
-    // succeeds even with heavy_only=false.
+TEST_F(RMSDComparisonTest, AtomCountChangeAfterConstructionDoesNotChangeTheScore) {
+    // Two methanols with explicit hydrogens, displaced on one side only, so under
+    // heavy_only=false the whole score is carried by the hydrogens.
     auto mol_stable = make_shifted("CO", 0.0);
-    auto mol_mutated = make_shifted("CO", 0.0);
-
-    std::vector<std::shared_ptr<OEChem::OEMol>> mols = {mol_stable, mol_mutated};
-    RMSDOptions opts;
-    opts.automorph = true;
-    opts.heavy_only = false;
-    RMSDComparison comparison(mols, opts);
-    EXPECT_NO_THROW((void)comparison.Compare(0, 1));
-
-    // The caller still owns these pointers. Adding explicit hydrogens and displacing
-    // them reaches a state the constructor would have rejected; without the recorded
-    // shape check, OERMSD scored this pair 0.0 because only one side had hydrogens.
-    OEChem::OEAddExplicitHydrogens(*mol_mutated);
+    OEChem::OEAddExplicitHydrogens(*mol_stable);
+    auto mol_mutated = std::make_shared<OEChem::OEMol>(*mol_stable);
     for (OESystem::OEIter<OEChem::OEAtomBase> atom = mol_mutated->GetAtoms(); atom; ++atom) {
         if (atom->GetAtomicNum() == 1) {
             float coords[3] = {0.0f, 0.0f, 0.0f};
@@ -447,31 +446,39 @@ TEST_F(RMSDComparisonTest, AtomCountChangeAfterConstructionIsRejected) {
         }
     }
 
-    try {
-        comparison.Compare(0, 1);
-        FAIL() << "expected a post-construction atom count change to be rejected";
-    } catch (const ComparisonError& exc) {
-        const std::string message = exc.what();
-        EXPECT_NE(message.find("atom count"), std::string::npos) << message;
-        EXPECT_NE(message.find("modified"), std::string::npos) << message;
-        // The mutated molecule is item 1, so the message must name that index.
-        EXPECT_NE(message.find("item 1"), std::string::npos) << message;
-    }
+    std::vector<std::shared_ptr<OEChem::OEMol>> mols = {mol_stable, mol_mutated};
+    RMSDOptions opts;
+    opts.automorph = true;
+    opts.heavy_only = false;
+    RMSDComparison comparison(mols, opts);
+    const double before = comparison.Compare(0, 1);
+    ASSERT_GT(before, 1.0);
+
+    // The caller still owns these pointers. Suppressing the hydrogens reaches the
+    // mixed-representation state the constructor rejects under heavy_only=false;
+    // scoring the caller's molecules there drives OERMSD into its atom-matching
+    // failure. The comparison holds its own copies, so the answer cannot move.
+    ASSERT_TRUE(OEChem::OESuppressHydrogens(*mol_mutated));
+    ASSERT_LT(mol_mutated->NumAtoms(), mol_stable->NumAtoms());
+
+    EXPECT_DOUBLE_EQ(comparison.Compare(0, 1), before);
 }
 
-TEST_F(RMSDComparisonTest, DimensionChangeAfterConstructionIsRejected) {
+TEST_F(RMSDComparisonTest, DimensionChangeAfterConstructionDoesNotChangeTheScore) {
     auto mol_stable = make_shifted("CCO", 0.0);
     auto mol_mutated = make_shifted("CCO", 1.0);
 
     std::vector<std::shared_ptr<OEChem::OEMol>> mols = {mol_stable, mol_mutated};
     std::vector<std::shared_ptr<OEChem::OEMol>> swapped = {mol_mutated, mol_stable};
     RMSDComparison comparison(mols);
-    // The same molecule at the other index, so both Compare arguments are checked.
+    // The same molecule at the other index, so both Compare arguments are covered.
     RMSDComparison swapped_comparison(swapped);
-    EXPECT_NO_THROW((void)comparison.Compare(0, 1));
+    const double before = comparison.Compare(0, 1);
+    const double before_swapped = swapped_comparison.Compare(0, 1);
+    ASSERT_NEAR(before, 1.0, 1e-4);
 
     // Re-embedding one item out of the plane reaches the 2D-versus-3D state the
-    // constructor rejects, and silently changes the measured distance.
+    // constructor rejects, and would silently change the measured distance.
     for (OESystem::OEIter<OEChem::OEAtomBase> atom = mol_mutated->GetAtoms(); atom; ++atom) {
         float coords[3] = {0.0f, 0.0f, 0.0f};
         mol_mutated->GetCoords(atom, coords);
@@ -479,39 +486,67 @@ TEST_F(RMSDComparisonTest, DimensionChangeAfterConstructionIsRejected) {
         mol_mutated->SetCoords(atom, coords);
     }
     mol_mutated->SetDimension(3);
+    ASSERT_EQ(mol_mutated->GetDimension(), 3u);
 
-    try {
-        comparison.Compare(0, 1);
-        FAIL() << "expected a post-construction dimension change to be rejected";
-    } catch (const ComparisonError& exc) {
-        const std::string message = exc.what();
-        EXPECT_NE(message.find("dimension"), std::string::npos) << message;
-        EXPECT_NE(message.find("modified"), std::string::npos) << message;
-        EXPECT_NE(message.find("item 1"), std::string::npos) << message;
-    }
-
-    try {
-        swapped_comparison.Compare(0, 1);
-        FAIL() << "expected the check to cover the first Compare argument too";
-    } catch (const ComparisonError& exc) {
-        const std::string message = exc.what();
-        EXPECT_NE(message.find("dimension"), std::string::npos) << message;
-        EXPECT_NE(message.find("item 0"), std::string::npos) << message;
-    }
+    EXPECT_DOUBLE_EQ(comparison.Compare(0, 1), before);
+    EXPECT_DOUBLE_EQ(swapped_comparison.Compare(0, 1), before_swapped);
 }
 
-TEST_F(RMSDComparisonTest, UnmutatedInputIsUnaffectedByTheRecordedShapeCheck) {
-    // The recorded-shape check must not fire on a set nobody touched, including on
-    // repeat scoring and on the heavy_only=false path where atom counts matter.
+TEST_F(RMSDComparisonTest, AtomReorderAfterConstructionDoesNotChangeTheScore) {
+    // With automorph=false atoms are matched by index, so reordering the caller's
+    // atoms is the mutation that most directly corrupts the score: it leaves the
+    // atom count, the dimension and the canonical SMILES all untouched.
+    auto mol_stable = make_shifted("C(=O)N", 0.0);
+    auto mol_reordered = make_shifted("C(=O)N", 1.0);
+
+    std::vector<std::shared_ptr<OEChem::OEMol>> mols = {mol_stable, mol_reordered};
+    RMSDOptions opts;
+    opts.automorph = false;
+    RMSDComparison comparison(mols, opts);
+    const double before = comparison.Compare(0, 1);
+    ASSERT_NEAR(before, 1.0, 1e-4);
+
+    const std::vector<unsigned int> elements_before = element_sequence(*mol_reordered);
+    OEChem::OECanonicalOrderAtoms(*mol_reordered);
+    // Guard the fixture: a reordering that did not reorder would prove nothing.
+    ASSERT_NE(element_sequence(*mol_reordered), elements_before);
+    ASSERT_EQ(mol_reordered->NumAtoms(), mol_stable->NumAtoms());
+
+    EXPECT_DOUBLE_EQ(comparison.Compare(0, 1), before);
+}
+
+TEST_F(RMSDComparisonTest, AddingHydrogensAfterConstructionStillScoresOnTheDefaultPath) {
+    // The default path deliberately admits mixed hydrogen representations, because
+    // hydrogens are excluded from the score. A comparison built from this pair must
+    // therefore keep scoring it after one side gains hydrogens, not refuse it.
+    auto mol_stable = make_shifted("CCO", 0.0);
+    auto mol_with_hydrogens = make_shifted("CCO", 0.0);
+
+    std::vector<std::shared_ptr<OEChem::OEMol>> mols = {mol_stable, mol_with_hydrogens};
+    RMSDComparison comparison(mols);
+    ASSERT_NEAR(comparison.Compare(0, 1), 0.0, 1e-6);
+
+    OEChem::OEAddExplicitHydrogens(*mol_with_hydrogens);
+    ASSERT_GT(mol_with_hydrogens->NumAtoms(), mol_stable->NumAtoms());
+
+    double value = -1.0;
+    EXPECT_NO_THROW(value = comparison.Compare(0, 1));
+    EXPECT_NEAR(value, 0.0, 1e-6);
+}
+
+TEST_F(RMSDComparisonTest, RepeatedScoringReturnsTheSameValues) {
+    // Scoring one comparison twice must give identical numbers, including on the
+    // heavy_only=false path where atom counts enter the score.
     RMSDOptions opts;
     opts.heavy_only = false;
     RMSDComparison comparison(mols_, opts);
+    std::vector<double> passes[2];
     for (size_t pass = 0; pass < 2; ++pass) {
         for (size_t i = 0; i < mols_.size(); ++i) {
             for (size_t j = i; j < mols_.size(); ++j) {
-                EXPECT_NO_THROW((void)comparison.Compare(i, j)) << "pass " << pass << " pair " << i
-                                                                << "," << j;
+                passes[pass].push_back(comparison.Compare(i, j));
             }
         }
     }
+    EXPECT_EQ(passes[0], passes[1]);
 }

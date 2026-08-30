@@ -12,20 +12,9 @@
 namespace OECluster {
 
 struct RMSDComparison::SharedData {
-    /**
-     * @brief The structural properties one molecule had when it was validated.
-     *
-     * The constructor's guards are properties of the input set as it stood at
-     * construction. Recording what was seen lets Compare notice that a caller
-     * has since mutated a molecule out of that set.
-     */
-    struct ValidatedShape {
-        unsigned int dimension = 0;
-        unsigned int num_atoms = 0;
-    };
-
-    std::vector<std::shared_ptr<OEChem::OEMol>> mols;
-    std::vector<ValidatedShape> shapes;
+    /// The comparison's own copies of the caller's molecules; see the class
+    /// documentation for why the comparison owns them.
+    std::vector<std::shared_ptr<const OEChem::OEMol>> mols;
 };
 
 RMSDComparison::~RMSDComparison() = default;
@@ -38,7 +27,23 @@ RMSDComparison::RMSDComparison(const std::vector<std::shared_ptr<OEChem::OEMol>>
             throw ComparisonError("RMSDComparison received null molecule pointer at index " +
                                   std::to_string(i));
         }
-        if (mols[i]->GetDimension() == 0) {
+    }
+
+    // Snapshot the input set before validating it, so that every guard below is a
+    // statement about the molecules that will actually be scored. The caller keeps
+    // its own molecules and may reorder, re-embed or protonate them afterwards
+    // without any of it reaching us. The copy is O(n) against the O(n^2) matrix this
+    // class exists to fill, and an OEMol copy is an order of magnitude cheaper than
+    // the single OERMSD call each pair already costs.
+    auto shared = std::make_shared<SharedData>();
+    shared->mols.reserve(mols.size());
+    for (const auto& mol : mols) {
+        shared->mols.push_back(std::make_shared<const OEChem::OEMol>(*mol));
+    }
+    const std::vector<std::shared_ptr<const OEChem::OEMol>>& owned = shared->mols;
+
+    for (size_t i = 0; i < owned.size(); ++i) {
+        if (owned[i]->GetDimension() == 0) {
             throw ComparisonError(
                 "RMSDComparison received molecule at index " + std::to_string(i) +
                 " with no coordinates (GetDimension() == 0); molecules built from " +
@@ -48,14 +53,14 @@ RMSDComparison::RMSDComparison(const std::vector<std::shared_ptr<OEChem::OEMol>>
 
     // Require dimensional uniformity: mixing a 2D depiction with a 3D conformer is
     // not a meaningful comparison.
-    if (!mols.empty()) {
-        const unsigned int reference_dim = mols[0]->GetDimension();
-        for (size_t i = 1; i < mols.size(); ++i) {
-            if (mols[i]->GetDimension() != reference_dim) {
+    if (!owned.empty()) {
+        const unsigned int reference_dim = owned[0]->GetDimension();
+        for (size_t i = 1; i < owned.size(); ++i) {
+            if (owned[i]->GetDimension() != reference_dim) {
                 throw ComparisonError(
                     "RMSDComparison received molecules with differing dimensions: item 0 has " +
                     std::to_string(reference_dim) + "D coordinates while item " +
-                    std::to_string(i) + " has " + std::to_string(mols[i]->GetDimension()) +
+                    std::to_string(i) + " has " + std::to_string(owned[i]->GetDimension()) +
                     "D coordinates; mixing 2D depictions with 3D conformers is not meaningful");
             }
         }
@@ -63,10 +68,10 @@ RMSDComparison::RMSDComparison(const std::vector<std::shared_ptr<OEChem::OEMol>>
 
     // One upfront pass rather than a per-pair check: the matrix is O(n^2) and a
     // mismatch is a property of the input set, not of a pair.
-    if (!mols.empty()) {
-        const std::string reference = OEChem::OEMolToSmiles(*mols[0]);
-        for (size_t i = 1; i < mols.size(); ++i) {
-            const std::string candidate = OEChem::OEMolToSmiles(*mols[i]);
+    if (!owned.empty()) {
+        const std::string reference = OEChem::OEMolToSmiles(*owned[0]);
+        for (size_t i = 1; i < owned.size(); ++i) {
+            const std::string candidate = OEChem::OEMolToSmiles(*owned[i]);
             if (candidate != reference) {
                 throw ComparisonError(
                     "RMSD requires every molecule to share one topology, but item " +
@@ -80,20 +85,20 @@ RMSDComparison::RMSDComparison(const std::vector<std::shared_ptr<OEChem::OEMol>>
         // check has already established equal heavy-atom composition, so equal total
         // counts imply equal hydrogen counts.
         if (!opts.automorph || !opts.heavy_only) {
-            const unsigned int reference_count = mols[0]->NumAtoms();
-            for (size_t i = 1; i < mols.size(); ++i) {
-                if (mols[i]->NumAtoms() != reference_count) {
+            const unsigned int reference_count = owned[0]->NumAtoms();
+            for (size_t i = 1; i < owned.size(); ++i) {
+                if (owned[i]->NumAtoms() != reference_count) {
                     if (!opts.automorph) {
                         throw ComparisonError(
                             "With automorph=false, atoms are matched by index, but item " +
-                            std::to_string(i) + " has " + std::to_string(mols[i]->NumAtoms()) +
+                            std::to_string(i) + " has " + std::to_string(owned[i]->NumAtoms()) +
                             " atoms while item 0 has " + std::to_string(reference_count) +
                             "; the items must share one atom ordering");
                     } else {
                         // The automorph=true, heavy_only=false path.
                         throw ComparisonError(
                             "With heavy_only=false, hydrogens are counted, but item " +
-                            std::to_string(i) + " has " + std::to_string(mols[i]->NumAtoms()) +
+                            std::to_string(i) + " has " + std::to_string(owned[i]->NumAtoms()) +
                             " atoms while item 0 has " + std::to_string(reference_count) +
                             "; every item must use the same hydrogen representation " +
                             "(either OEAddExplicitHydrogens on all, or heavy_only=true)");
@@ -104,9 +109,9 @@ RMSDComparison::RMSDComparison(const std::vector<std::shared_ptr<OEChem::OEMol>>
             // With automorph=false, additionally require element-at-index uniformity.
             // Counts are already known equal, so indexing to reference_count is safe.
             if (!opts.automorph) {
-                for (size_t i = 1; i < mols.size(); ++i) {
-                    OESystem::OEIter<OEChem::OEAtomBase> ref_atom = mols[0]->GetAtoms();
-                    OESystem::OEIter<OEChem::OEAtomBase> cand_atom = mols[i]->GetAtoms();
+                for (size_t i = 1; i < owned.size(); ++i) {
+                    OESystem::OEIter<OEChem::OEAtomBase> ref_atom = owned[0]->GetAtoms();
+                    OESystem::OEIter<OEChem::OEAtomBase> cand_atom = owned[i]->GetAtoms();
                     for (unsigned int idx = 0; idx < reference_count; ++idx, ++ref_atom, ++cand_atom) {
                         if (ref_atom->GetAtomicNum() != cand_atom->GetAtomicNum()) {
                             throw ComparisonError(
@@ -123,58 +128,13 @@ RMSDComparison::RMSDComparison(const std::vector<std::shared_ptr<OEChem::OEMol>>
         }
     }
 
-    auto shared = std::make_shared<SharedData>();
-    shared->mols = mols;
-    shared->shapes.reserve(mols.size());
-    for (const auto& mol : mols) {
-        SharedData::ValidatedShape shape;
-        shape.dimension = mol->GetDimension();
-        shape.num_atoms = mol->NumAtoms();
-        shared->shapes.push_back(shape);
-    }
     shared_ = std::move(shared);
 }
 
 RMSDComparison::RMSDComparison(std::shared_ptr<const SharedData> shared, const Options& opts)
     : shared_(std::move(shared)), opts_(opts) {}
 
-void RMSDComparison::CheckRecordedShape(size_t index) const {
-    const SharedData::ValidatedShape& recorded = shared_->shapes[index];
-    const OEChem::OEMol& mol = *shared_->mols[index];
-
-    const unsigned int dimension = mol.GetDimension();
-    if (dimension != recorded.dimension) {
-        throw ComparisonError(
-            "RMSDComparison item " + std::to_string(index) +
-            " was modified after the comparison was constructed: its coordinate dimension was " +
-            std::to_string(recorded.dimension) + "D when validated and is now " +
-            std::to_string(dimension) +
-            "D, so the comparison's validation no longer holds; rebuild the comparison from the "
-            "molecules in their current state");
-    }
-
-    const unsigned int num_atoms = mol.NumAtoms();
-    if (num_atoms != recorded.num_atoms) {
-        throw ComparisonError(
-            "RMSDComparison item " + std::to_string(index) +
-            " was modified after the comparison was constructed: its atom count was " +
-            std::to_string(recorded.num_atoms) + " when validated and is now " +
-            std::to_string(num_atoms) +
-            ", so the comparison's validation no longer holds; rebuild the comparison from the "
-            "molecules in their current state");
-    }
-}
-
 double RMSDComparison::Compare(size_t i, size_t j) {
-    // The constructor validates the set once, but the caller keeps its own pointers
-    // to these molecules. Re-check the two O(1) properties the guards rested on --
-    // adding hydrogens changes the atom count, re-embedding changes the dimension --
-    // so a mutated set raises rather than scoring a plausible wrong number. Both are
-    // integer accessors, and measured at roughly 6ns per pair against the ~27us an
-    // OERMSD automorphism search costs on benzene, so the per-pair cost is noise.
-    CheckRecordedShape(i);
-    CheckRecordedShape(j);
-
     const double value = OEChem::OERMSD(*shared_->mols[i], *shared_->mols[j],
                                         opts_.automorph, opts_.heavy_only, opts_.overlay);
     if (!std::isfinite(value)) {

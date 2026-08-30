@@ -51,19 +51,18 @@ struct RMSDOptions {
  * per-pose distances should expand conformers into separate items first (the
  * Python layer does this by default with ``expand_conformers=True``).
  *
- * Molecules are held by ``shared_ptr`` to const shared state and are never
- * modified: ``OEChem::OERMSD`` takes both molecules by const reference, so
- * ``overlay`` changes what is measured without writing coordinates back.
+ * Molecules are never modified: ``OEChem::OERMSD`` takes both by const
+ * reference, so ``overlay`` changes what is measured without writing
+ * coordinates back.
  *
- * The constructor validates the whole set once, but the caller keeps its own
- * pointers to the same molecules and can mutate them afterwards. The
- * constructor therefore records each molecule's coordinate dimension and atom
- * count, and ``Compare`` re-checks both before scoring, so a molecule that has
- * been re-embedded or had hydrogens added since construction raises instead of
- * yielding a plausible wrong number. Topology is validated once only:
- * re-deriving canonical SMILES per pair would cost O(n^2) SMILES generations.
- * Moving atoms without changing the count or dimension is a legitimate input
- * that legitimately changes the answer, and is deliberately not detected.
+ * The constructor copies every input molecule and measures those copies, so
+ * nothing the caller does to its own molecules afterwards can change a score.
+ * That makes repeated scoring of one comparison reproducible, and it removes
+ * the race in which a caller mutates a molecule while a ``pdist`` reads it --
+ * it is not a general thread-safety claim, only the removal of that one race.
+ * A caller who wants to score modified molecules constructs a new comparison.
+ * The cost is one copy of the input set: O(n) molecules against the O(n^2)
+ * distance matrix this class exists to produce.
  */
 class RMSDComparison : public PairwiseComparison {
 public:
@@ -72,9 +71,9 @@ public:
     /**
      * @brief Construct an RMSDComparison from molecules that carry coordinates.
      *
-     * :param mols: Shared pointers to molecules; only each molecule's active
-     *     conformer is measured. The comparison measures whatever coordinate set
-     *     is present (2D or 3D).
+     * :param mols: Shared pointers to molecules; each is copied into the
+     *     comparison, and only each molecule's active conformer is measured. The
+     *     comparison measures whatever coordinate set is present (2D or 3D).
      * :param opts: Scoring options.
      * :raises ComparisonError: When a pointer is null, an item carries no
      *     coordinates, the items' coordinate dimensions differ, an item's
@@ -93,10 +92,8 @@ public:
      * :param i: Index of the first item.
      * :param j: Index of the second item.
      * :returns: The RMSD in the coordinate units of the input.
-     * :raises ComparisonError: When either item's coordinate dimension or atom
-     *     count differs from the value recorded at construction, or when
-     *     ``OEChem::OERMSD`` reports a non-finite value or an atom-matching
-     *     failure.
+     * :raises ComparisonError: When ``OEChem::OERMSD`` reports a non-finite
+     *     value or an atom-matching failure.
      */
     double Compare(size_t i, size_t j) override;
     std::unique_ptr<PairwiseComparison> Clone() const override;
@@ -111,15 +108,6 @@ private:
 
     /// Private clone constructor -- shares the immutable molecule list.
     RMSDComparison(std::shared_ptr<const SharedData> shared, const Options& opts);
-
-    /**
-     * @brief Confirm one item still matches the shape recorded at construction.
-     *
-     * :param index: Index of the item to check.
-     * :raises ComparisonError: When the item's coordinate dimension or atom
-     *     count has changed since the constructor validated the set.
-     */
-    void CheckRecordedShape(size_t index) const;
 };
 
 }  // namespace OECluster
