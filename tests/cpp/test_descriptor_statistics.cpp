@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cmath>
+#include <string>
 #include <gtest/gtest.h>
 #include <oechem.h>
 #include "oecluster/DescriptorStatistics.h"
@@ -136,4 +137,35 @@ TEST_F(DescriptorStatisticsTest, UnknownGroupIsRejected) {
     DescriptorStatisticsOptions options;
     options.groups = {"rdkit:NoSuchGroup"};
     EXPECT_THROW(descriptor_statistics(mols_, options), ComparisonError);
+}
+
+TEST_F(DescriptorStatisticsTest, TooFewMoleculesIsRejectedByCount) {
+    // The pre-guard behavior was to report every column as zero-variance, which
+    // is a different and false claim. Match on the count so a regression back to
+    // that message fails here rather than passing on the exception type alone.
+    for (size_t n : {size_t{0}, size_t{1}}) {
+        const std::vector<OEChem::OEMolBase*> few(mols_.begin(), mols_.begin() + n);
+        DescriptorStatisticsOptions options;
+        try {
+            descriptor_statistics(few, options);
+            ADD_FAILURE() << "expected a throw for " << n << " molecules";
+        } catch (const ComparisonError& err) {
+            EXPECT_NE(std::string(err.what()).find("at least two molecules"),
+                      std::string::npos)
+                << n << ": " << err.what();
+            EXPECT_NE(std::string(err.what()).find("got " + std::to_string(n)),
+                      std::string::npos)
+                << n << ": " << err.what();
+        }
+    }
+}
+
+TEST_F(DescriptorStatisticsTest, TwoMoleculesAreEnoughToFit) {
+    // The floor is exactly two, not "several". Without this, raising the guard
+    // to three would go unnoticed.
+    const std::vector<OEChem::OEMolBase*> pair(mols_.begin(), mols_.begin() + 2);
+    DescriptorStatisticsOptions options;
+    const DescriptorStatisticsResult stats = descriptor_statistics(pair, options);
+    EXPECT_EQ(stats.num_rows, 2u);
+    EXPECT_FALSE(stats.columns.empty());
 }

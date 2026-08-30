@@ -36,6 +36,9 @@ std::shared_ptr<const OEFP::DescriptorCalculator> make_descriptor_calculator(
  * so a column named both directly and through its group appears once. An empty
  * ``columns`` and empty ``groups`` selects every column in the schema.
  *
+ * Column and group names are matched exactly, unlike the source names
+ * ``make_descriptor_calculator`` accepts, which are case-insensitive.
+ *
  * :param schema: The calculator's merged schema.
  * :param columns: Explicit column names.
  * :param groups: Group names.

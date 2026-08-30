@@ -18,6 +18,15 @@ namespace OECluster {
 
 DescriptorStatisticsResult descriptor_statistics(const std::vector<OEChem::OEMolBase*>& mols,
                                                  const DescriptorStatisticsOptions& options) {
+    // Variance needs two observations, so a shorter input cannot produce a
+    // single surviving column and would otherwise fail below as though every
+    // descriptor were constant.
+    if (mols.size() < 2) {
+        throw ComparisonError(
+            "descriptor_statistics requires at least two molecules to fit variances, got " +
+            std::to_string(mols.size()));
+    }
+
     std::vector<const OEChem::OEMolBase*> inputs;
     inputs.reserve(mols.size());
     for (size_t i = 0; i < mols.size(); ++i) {
@@ -68,10 +77,11 @@ DescriptorStatisticsResult descriptor_statistics(const std::vector<OEChem::OEMol
         }
     }();
 
-    // The survival loop below indexes raw's vectors by position within numeric,
-    // which holds only while OEFP returns one entry per selected column in the
-    // order selected. Pin the count rather than reading past the end if it ever
-    // stops holding.
+    // The survival loop below indexes raw's vectors by position within numeric.
+    // That is safe because OEFP assigns names, mean, variance, minimum, maximum
+    // and present_count to one common length in a single block, so checking one
+    // of them checks all six. Pin the count rather than reading past the end if
+    // that ever stops holding.
     if (raw.names.size() != numeric.size()) {
         throw ComparisonError("OEFP returned statistics for " +
                               std::to_string(raw.names.size()) + " columns, expected " +
