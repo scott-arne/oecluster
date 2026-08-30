@@ -247,7 +247,9 @@ TEST_F(RMSDComparisonTest, EmbeddedMixedWithUnembeddedIsRejected) {
     } catch (const ComparisonError& exc) {
         const std::string message = exc.what();
         EXPECT_NE(message.find("no coordinates"), std::string::npos) << message;
-        EXPECT_NE(message.find('1'), std::string::npos) << message;
+        // The unembedded molecule is item 1, so the message must name that index
+        // rather than blaming the embedded item 0.
+        EXPECT_NE(message.find("index 1"), std::string::npos) << message;
     }
 }
 
@@ -263,9 +265,12 @@ TEST_F(RMSDComparisonTest, DifferentAtomOrderingRejectedWithAutomorphOff) {
     mol_a->NewBond(c1_a, c2_a, 1);
     mol_a->NewBond(c2_a, o_a, 1);
     // Manually set coordinates: C at (0,0,0), C at (1,0,0), O at (2,0,0)
-    mol_a->SetCoords(c1_a, (float[]){0.0f, 0.0f, 0.0f});
-    mol_a->SetCoords(c2_a, (float[]){1.0f, 0.0f, 0.0f});
-    mol_a->SetCoords(o_a, (float[]){2.0f, 0.0f, 0.0f});
+    float origin[3] = {0.0f, 0.0f, 0.0f};
+    float middle[3] = {1.0f, 0.0f, 0.0f};
+    float far_end[3] = {2.0f, 0.0f, 0.0f};
+    mol_a->SetCoords(c1_a, origin);
+    mol_a->SetCoords(c2_a, middle);
+    mol_a->SetCoords(o_a, far_end);
     mol_a->SetDimension(2);
 
     // mol_b: NewAtom order O, C, C -> [8, 6, 6]
@@ -275,9 +280,9 @@ TEST_F(RMSDComparisonTest, DifferentAtomOrderingRejectedWithAutomorphOff) {
     mol_b->NewBond(c1_b, c2_b, 1);
     mol_b->NewBond(c2_b, o_b, 1);
     // Set the same geometry: O at (2,0,0), C at (0,0,0), C at (1,0,0)
-    mol_b->SetCoords(o_b, (float[]){2.0f, 0.0f, 0.0f});
-    mol_b->SetCoords(c1_b, (float[]){0.0f, 0.0f, 0.0f});
-    mol_b->SetCoords(c2_b, (float[]){1.0f, 0.0f, 0.0f});
+    mol_b->SetCoords(o_b, far_end);
+    mol_b->SetCoords(c1_b, origin);
+    mol_b->SetCoords(c2_b, middle);
     mol_b->SetDimension(2);
 
     std::vector<std::shared_ptr<OEChem::OEMol>> different_order = {mol_a, mol_b};
