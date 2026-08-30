@@ -32,6 +32,7 @@ class DistanceMatrix;
 #include "oecluster/PDist.h"
 #include "oecluster/CDist.h"
 #include "oecluster/DistanceMatrix.h"
+#include "oecluster/DescriptorStatistics.h"
 
 #include "oecluster/comparisons/FingerprintComparison.h"
 #include "oecluster/comparisons/ROCSComparison.h"

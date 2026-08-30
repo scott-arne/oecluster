@@ -47,9 +47,12 @@ DescriptorStatisticsResult descriptor_statistics(const std::vector<OEChem::OEMol
     // Non-numeric columns cannot be summarized, so they are dropped before OEFP
     // is asked for statistics rather than causing it to throw. No source OEFP
     // 0.3.0 ships can reach this branch -- openeye, rdkit and mordred emit only
-    // float, int and bool, all of which is_numeric_kind accepts -- but
-    // DescriptorValueKind also spans strings, vectors, matrices and the
-    // fingerprint kinds, so the guard stands against a source that emits one.
+    // float, int and bool. A future string-valued column is handled here as
+    // written: OEFP counts String as scalar, so the batch builds and the filter
+    // drops it. A vector, matrix or fingerprint column is NOT handled here --
+    // CalculateBatch builds a batch over the whole merged schema and rejects
+    // any non-scalar column before this filter can matter, so such a source
+    // would need the calculator narrowed to the numeric columns first.
     DescriptorStatisticsResult result;
     std::vector<size_t> numeric;
     for (size_t index : requested) {
@@ -65,7 +68,13 @@ DescriptorStatisticsResult descriptor_statistics(const std::vector<OEChem::OEMol
         throw ComparisonError("Descriptor selection resolved to zero numeric columns");
     }
 
-    OEFP::DescriptorBatch batch = calculator->CalculateBatch(inputs);
+    const OEFP::DescriptorBatch batch = [&]() {
+        try {
+            return calculator->CalculateBatch(inputs);
+        } catch (const std::exception& exc) {
+            throw ComparisonError("Failed to compute descriptors: " + std::string(exc.what()));
+        }
+    }();
     result.num_rows = inputs.size();
 
     const OEFP::DescriptorColumnStatistics raw = [&]() {
@@ -117,6 +126,7 @@ DescriptorStatisticsResult descriptor_statistics(const std::vector<OEChem::OEMol
                 batch, OEFP::DescriptorSelection::Indices(surviving));
             result.inverse_covariance = inverse.matrix;
             result.inverse_covariance_rank = inverse.rank;
+            result.inverse_covariance_rows = static_cast<size_t>(inverse.row_count);
         } catch (const std::exception& exc) {
             throw ComparisonError("Failed to compute descriptor inverse covariance: " +
                                   std::string(exc.what()));

@@ -169,3 +169,63 @@ TEST_F(DescriptorStatisticsTest, TwoMoleculesAreEnoughToFit) {
     EXPECT_EQ(stats.num_rows, 2u);
     EXPECT_FALSE(stats.columns.empty());
 }
+
+TEST_F(DescriptorStatisticsTest, StatisticPayloadMatchesKnownValues) {
+    // Shape assertions cannot catch a transposition among the six parallel
+    // vectors. HeavyAtomCount's four statistics are mutually distinct
+    // (6, 13, 8.5, 29/3), so any pair of them swapped fails here.
+    DescriptorStatisticsOptions options;
+    options.columns = {"HeavyAtomCount", "TotalAtomCount", "LipinskiHBD"};
+    const DescriptorStatisticsResult stats = descriptor_statistics(mols_, options);
+
+    ASSERT_EQ(stats.columns.size(), 3u);
+    EXPECT_EQ(stats.columns[0], "HeavyAtomCount");
+    EXPECT_EQ(stats.columns[1], "TotalAtomCount");
+    EXPECT_EQ(stats.columns[2], "LipinskiHBD");
+
+    EXPECT_NEAR(stats.mean[0], 8.5, 1e-9);
+    EXPECT_NEAR(stats.variance[0], 29.0 / 3.0, 1e-9);
+    EXPECT_NEAR(stats.minimum[0], 6.0, 1e-9);
+    EXPECT_NEAR(stats.maximum[0], 13.0, 1e-9);
+
+    EXPECT_NEAR(stats.mean[1], 18.0, 1e-9);
+    EXPECT_NEAR(stats.variance[1], 134.0 / 3.0, 1e-9);
+    EXPECT_NEAR(stats.minimum[1], 12.0, 1e-9);
+    EXPECT_NEAR(stats.maximum[1], 26.0, 1e-9);
+
+    EXPECT_NEAR(stats.mean[2], 0.5, 1e-9);
+    EXPECT_NEAR(stats.variance[2], 1.0 / 3.0, 1e-9);
+    EXPECT_NEAR(stats.minimum[2], 0.0, 1e-9);
+    EXPECT_NEAR(stats.maximum[2], 1.0, 1e-9);
+
+    for (size_t k = 0; k < stats.columns.size(); ++k) {
+        EXPECT_EQ(stats.present_count[k], 4u) << stats.columns[k];
+    }
+}
+
+TEST_F(DescriptorStatisticsTest, ResultsComeBackInSchemaOrderNotRequestOrder) {
+    // TotalAtomCount is schema index 3 and HeavyAtomCount is index 2, so
+    // requesting them in this order proves the result is re-sorted rather than
+    // echoing the request, and that the statistics follow the returned names.
+    DescriptorStatisticsOptions options;
+    options.columns = {"TotalAtomCount", "HeavyAtomCount"};
+    const DescriptorStatisticsResult stats = descriptor_statistics(mols_, options);
+
+    ASSERT_EQ(stats.columns.size(), 2u);
+    EXPECT_EQ(stats.columns[0], "HeavyAtomCount");
+    EXPECT_EQ(stats.columns[1], "TotalAtomCount");
+    EXPECT_NEAR(stats.mean[0], 8.5, 1e-9);
+    EXPECT_NEAR(stats.mean[1], 18.0, 1e-9);
+}
+
+TEST_F(DescriptorStatisticsTest, InverseCovarianceReportsItsRowCount) {
+    DescriptorStatisticsOptions options;
+    options.inverse_covariance = true;
+    const DescriptorStatisticsResult stats = descriptor_statistics(mols_, options);
+    EXPECT_EQ(stats.inverse_covariance_rows, 4u);
+    EXPECT_EQ(stats.num_rows, 4u);
+
+    DescriptorStatisticsOptions without;
+    const DescriptorStatisticsResult skipped = descriptor_statistics(mols_, without);
+    EXPECT_EQ(skipped.inverse_covariance_rows, 0u);
+}

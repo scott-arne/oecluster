@@ -29,9 +29,17 @@ struct DescriptorStatisticsOptions {
 /**
  * @brief Fitted statistics and the columns that were discarded.
  *
- * The five per-column vectors describe only the surviving columns, in the order
- * given by ``columns``. ``dropped_columns`` and ``dropped_reasons`` are parallel
- * and describe what was removed and why.
+ * The five per-column vectors are parallel to ``columns`` -- the result's own
+ * ``columns`` field, which is schema order. Request order is not preserved:
+ * the selection is sorted and deduplicated, so pair statistics with the
+ * returned names rather than with the names you asked for.
+ * ``dropped_columns`` and ``dropped_reasons`` are parallel and describe what
+ * was removed and why.
+ *
+ * ``num_rows`` is the number of molecules fitted. ``inverse_covariance_rows``
+ * may be smaller: covariance uses listwise deletion, so a molecule missing any
+ * selected descriptor contributes to the per-column statistics but not to the
+ * inverse covariance.
  */
 struct DescriptorStatisticsResult {
     std::vector<std::string> columns;         ///< Surviving column names, schema order.
@@ -42,6 +50,7 @@ struct DescriptorStatisticsResult {
     std::vector<size_t> present_count;        ///< Present values per column.
     std::vector<double> inverse_covariance;   ///< Row-major k x k; empty unless requested.
     size_t inverse_covariance_rank = 0;       ///< Retained eigenvalues; 0 unless requested.
+    size_t inverse_covariance_rows = 0;       ///< Complete rows the covariance used; 0 unless requested.
     std::vector<std::string> dropped_columns; ///< Discarded column names.
     std::vector<std::string> dropped_reasons; ///< "zero-variance" or "non-numeric".
     size_t num_rows = 0;                      ///< Molecules the fit ran over.
