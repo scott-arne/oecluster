@@ -221,6 +221,33 @@ def test_normalize_items_runs_a_registered_normalizer():
     assert seen["mode"] == "loud"
 
 
+def test_rocs_builder_rejects_unknown_kwargs():
+    with pytest.raises(TypeError, match="Unknown kwargs for rocs"):
+        _comparisons.build_comparison(
+            ["item"], "rocs", False, {"bogus": 1}, symmetric=True)
+
+
+def test_superpose_builder_rejects_unknown_kwargs():
+    with pytest.raises(TypeError, match="Unknown kwargs for superpose"):
+        _comparisons.build_comparison(
+            ["item"], "superpose", False, {"bogus": 1}, symmetric=True)
+
+
+def test_backstop_catches_a_broken_builder_that_leaks_kwargs():
+    """A builder that forgets to drain kwargs hits the backstop."""
+    def broken_builder(items, similarity, kwargs, symmetric):
+        # Deliberately does not pop or check kwargs
+        return object(), "broken"
+
+    _comparisons.register_comparison("broken", broken_builder)
+    try:
+        with pytest.raises(RuntimeError, match="builder returned without consuming"):
+            _comparisons.build_comparison(
+                ["item"], "broken", False, {"leftover": 42}, symmetric=True)
+    finally:
+        _comparisons._BUILDERS.pop("broken", None)
+
+
 def test_pdist_still_works_through_the_registry():
     mols = _mols(["CCO", "CCC", "CCCC"])
     dist = oecluster.pdist(mols, "fingerprint")

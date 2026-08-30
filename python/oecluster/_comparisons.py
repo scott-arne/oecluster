@@ -138,6 +138,13 @@ def build_comparison(items, comparison, similarity, kwargs, *, symmetric):
     params = {'comparison_type': name, 'similarity': similarity}
     comparison_obj, comparison_name = _BUILDERS[name](
         items, similarity, kwargs, symmetric)
+    # A correct builder pops all consumed options and raises TypeError for the
+    # rest. If kwargs is non-empty here, the builder has a bug.
+    if kwargs:
+        raise RuntimeError(
+            f"the {name!r} builder returned without consuming {list(kwargs)}. "
+            f"A builder must pop every option it uses and raise TypeError for "
+            f"the rest; reaching here is a bug in the builder, not bad input.")
     return comparison_obj, comparison_name, params
 
 
