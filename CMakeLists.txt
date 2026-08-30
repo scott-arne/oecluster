@@ -139,6 +139,8 @@ set(OECLUSTER_SOURCES
     src/clustering/BitBirchKernels.cpp
     src/clustering/BitBirchTree.cpp
     src/clustering/BitBirch.cpp
+    src/DescriptorBuild.cpp
+    src/DescriptorStatistics.cpp
 )
 
 add_library(oecluster ${OECLUSTER_SOURCES})
