@@ -29,9 +29,10 @@ struct RMSDOptions {
      * Symmetry-aware atom matching. With it off, atoms are matched by index,
      * so every item must additionally share one atom ordering -- a shared
      * canonical SMILES does not imply that. "One atom ordering" means the same
-     * element and the same bonds at each index: agreeing on the elements alone
-     * still allows explicit hydrogens to hang off different heavy atoms, which
-     * would have index-matched RMSD measuring unrelated pairs of atoms.
+     * element at each index and the same bonds between the same indices, though
+     * not the same bond orders: agreeing on the elements alone still allows
+     * explicit hydrogens to hang off different heavy atoms, which would have
+     * index-matched RMSD measuring unrelated pairs of atoms.
      */
     bool automorph = true;
     bool heavy_only = true;  ///< Skip hydrogens.

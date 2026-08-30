@@ -715,10 +715,13 @@ TEST_F(RMSDComparisonTest, ReversedHydrogenOrderAcceptedWithAutomorphOn) {
     EXPECT_NEAR(comparison.Compare(0, 1), 0.0, 1e-6);
 }
 
-TEST_F(RMSDComparisonTest, BondOrderMismatchRejectedWithAutomorphOff) {
+TEST_F(RMSDComparisonTest, BondOrderMismatchAcceptedWithAutomorphOff) {
     // Two Kekule forms of one aromatic ring: the copy keeps every atom, every
     // coordinate and every bond endpoint, and only the single/double alternation
-    // moves. Nothing but the order component of the bond comparison sees it.
+    // moves. That is one atom ordering written two ways -- two writers can produce
+    // it from one molecule -- so the bond comparison must ignore bond order and
+    // accept the pair. Chemistry that a moved bond order really does change would
+    // have changed the canonical SMILES and been rejected by that guard instead.
     auto mol_a = make_shifted("c1ccccc1", 0.0);
     auto mol_b = std::make_shared<OEChem::OEMol>(*mol_a);
     for (OESystem::OEIter<OEChem::OEBondBase> bond = mol_b->GetBonds(); bond; ++bond) {
@@ -733,15 +736,8 @@ TEST_F(RMSDComparisonTest, BondOrderMismatchRejectedWithAutomorphOff) {
     std::vector<std::shared_ptr<OEChem::OEMol>> kekule_pair = {mol_a, mol_b};
     RMSDOptions opts;
     opts.automorph = false;
-    try {
-        RMSDComparison comparison(kekule_pair, opts);
-        FAIL() << "expected a bond-order mismatch to be rejected with automorph=false";
-    } catch (const ComparisonError& exc) {
-        const std::string message = exc.what();
-        EXPECT_NE(message.find("automorph=false"), std::string::npos) << message;
-        EXPECT_NE(message.find("item 1"), std::string::npos) << message;
-        EXPECT_NE(message.find("bond"), std::string::npos) << message;
-    }
+    RMSDComparison comparison(kekule_pair, opts);
+    EXPECT_NEAR(comparison.Compare(0, 1), 0.0, 1e-6);
 }
 
 TEST_F(RMSDComparisonTest, ReversedBondDirectionAcceptedWithAutomorphOff) {

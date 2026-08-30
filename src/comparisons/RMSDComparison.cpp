@@ -8,7 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
-#include <tuple>
+#include <utility>
 #include <oechem.h>
 #include "oecluster/Error.h"
 
@@ -17,11 +17,12 @@ namespace OECluster {
 namespace {
 
 /// A bond written in terms of atom iteration positions:
-/// ``(lower position, higher position, bond order)``. Endpoints are normalized
-/// low-to-high so that the two directions of one bond compare equal.
-using IndexedBond = std::tuple<unsigned int, unsigned int, unsigned int>;
+/// ``(lower position, higher position)``. Endpoints are normalized low-to-high
+/// so that the two directions of one bond compare equal. The bond's order is
+/// deliberately not part of this; see the guard that consumes it.
+using IndexedBond = std::pair<unsigned int, unsigned int>;
 
-/// The molecule's bonds as a sorted set of index-wise triples, which two
+/// The molecule's bonds as a sorted set of index-wise endpoint pairs, which two
 /// molecules can be compared on exactly.
 ///
 /// Positions come from walking ``GetAtoms()`` rather than from
@@ -45,8 +46,7 @@ std::vector<IndexedBond> indexed_bonds(const OEChem::OEMol& mol) {
         // position 0 would make this correctness guard quietly wrong.
         const unsigned int begin = positions.at(bond->GetBgn());
         const unsigned int end = positions.at(bond->GetEnd());
-        bonds.push_back(IndexedBond(std::min(begin, end), std::max(begin, end),
-                                    bond->GetOrder()));
+        bonds.push_back(IndexedBond(std::min(begin, end), std::max(begin, end)));
     }
     std::sort(bonds.begin(), bonds.end());
     return bonds;
@@ -175,6 +175,16 @@ RMSDComparison::RMSDComparison(const std::vector<std::shared_ptr<OEChem::OEMol>>
                 // and index-matched RMSD measuring unrelated pairs of atoms. Comparing
                 // the bonds by index closes that gap. It costs O(atoms + bonds log
                 // bonds) once per item, against an O(n^2) matrix of OERMSD calls.
+                //
+                // Bond *order* is deliberately excluded, and must stay excluded. The
+                // question here is only whether index i names the same atom in every
+                // item, and coordinate RMSD never reads a bond order. Chemistry is the
+                // canonical-SMILES check's job, and it has already run: any order
+                // difference that changes the molecule changes the SMILES and is
+                // rejected there, so the only differences that survive to this point
+                // are kekulizations of one aromatic system. Two kekulizations of one
+                // ligand are one atom ordering, and refusing them would be a false
+                // refusal on input two writers can easily produce from one molecule.
                 const std::vector<IndexedBond> reference_bonds = indexed_bonds(*owned[0]);
                 for (size_t i = 1; i < owned.size(); ++i) {
                     const std::vector<IndexedBond> candidate_bonds = indexed_bonds(*owned[i]);
@@ -191,12 +201,11 @@ RMSDComparison::RMSDComparison(const std::vector<std::shared_ptr<OEChem::OEMol>>
                         throw ComparisonError(
                             "With automorph=false, atoms are matched by index, but item " +
                             std::to_string(i) +
-                            " bonds different pairs of indices than item 0, or bonds them "
-                            "with different orders; matching elements at each index is not "
-                            "enough, because two files whose atom columns agree can still "
-                            "attach their hydrogens to different heavy atoms, so the items "
-                            "do not share one atom ordering. Use automorph=true for "
-                            "symmetry-aware matching");
+                            " bonds different pairs of indices than item 0; matching "
+                            "elements at each index is not enough, because two files whose "
+                            "atom columns agree can still attach their hydrogens to "
+                            "different heavy atoms, so the items do not share one atom "
+                            "ordering. Use automorph=true for symmetry-aware matching");
                     }
                 }
             }
