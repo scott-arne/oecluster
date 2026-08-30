@@ -163,9 +163,8 @@ DescriptorComparison::DescriptorComparison(const std::vector<OEChem::OEMolBase*>
     std::vector<size_t> selection =
         numeric_selection(schema, opts, impl->dropped_columns, impl->dropped_reasons);
 
-    OEFP::DescriptorBatch batch = calculator->CalculateBatch(inputs);
-
     try {
+        OEFP::DescriptorBatch batch = calculator->CalculateBatch(inputs);
         // The matrix is materialized over the selection as requested and
         // complete_case is enforced against it here, before any column is
         // dropped below. A column whose gaps are present-and-NaN rather than
@@ -446,9 +445,15 @@ GateFacts DescriptorComparison::Facts() const {
         pimpl_->metric.HasZeroSelfDistance() ? Capability::Yes : Capability::No;
     facts.triangle =
         pimpl_->metric.SatisfiesTriangleInequality() ? Capability::Yes : Capability::No;
-    if (pimpl_->missing == OEFP::DescriptorMissingPolicy::Ignore) {
+    // Observed NaN outranks the policy declaration. `ignore` skips a cell only
+    // when its validity bit is clear, so a present-and-NaN value still reaches
+    // the matrix under that policy; stamping SubsetScored there would downgrade
+    // a hard refusal into a tier-2 one that allow_nonmetric can override.
+    if (pimpl_->non_finite_seen->load()) {
+        facts.data_integrity = DataIntegrity::NaNPresent;
+    } else if (pimpl_->missing == OEFP::DescriptorMissingPolicy::Ignore) {
         facts.data_integrity = DataIntegrity::SubsetScored;
-    } else if (!pimpl_->complete_case || pimpl_->non_finite_seen->load()) {
+    } else if (!pimpl_->complete_case) {
         facts.data_integrity = DataIntegrity::NaNPresent;
     } else {
         facts.data_integrity = DataIntegrity::Complete;

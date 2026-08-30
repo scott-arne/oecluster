@@ -23,7 +23,10 @@ enum class Capability { Unknown, No, Yes };
  * This is a conservative declaration of what the configured policy admits,
  * not a measurement of the data. ``Complete`` means every requested pair
  * was scored on the full data. ``NaNPresent`` is reported when the policy
- * permits non-finite distances, even if this particular input produced none.
+ * permits non-finite distances, even if this particular input produced none;
+ * it also escalates to ``NaNPresent`` whenever a non-finite distance is
+ * actually produced, whatever the policy -- including under ``ignore``, where
+ * the declared stamp would otherwise be the weaker ``SubsetScored``.
  * ``SubsetScored`` means values were computed from a per-pair subset of the
  * available dimensions, which makes them mutually incomparable.
  */

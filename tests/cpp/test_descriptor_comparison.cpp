@@ -464,6 +464,36 @@ TEST_F(DescriptorMissingnessTest, IgnoreScoresEveryPairAndStampsSubsetScored) {
     EXPECT_EQ(comparison.Facts().data_integrity, DataIntegrity::SubsetScored);
 }
 
+TEST_F(DescriptorMissingnessTest, IgnoreEscalatesToNaNPresentWhenNaNActuallyReaches) {
+    // ignore is a tier-2 stamp only while it stays NaN-free. Over the full
+    // default selection it does not: FractionCsp3 is present-and-NaN for the
+    // untyped species, and OEFP never drops a present value, so NaN reaches the
+    // matrix. Stamping SubsetScored here would let allow_nonmetric=True admit a
+    // matrix with NaN in it.
+    DescriptorOptions opts;
+    opts.metric = "euclidean";
+    opts.missing = "ignore";
+    DescriptorComparison comparison(mols_, opts);
+
+    // Before scoring, the declared stamp stands.
+    EXPECT_EQ(comparison.Facts().data_integrity, DataIntegrity::SubsetScored);
+
+    DenseStorage storage(mols_.size());
+    ASSERT_TRUE(comparison.TryPDist(storage, PDistOptions()));
+    size_t nan_count = 0;
+    for (size_t i = 0; i < mols_.size(); ++i) {
+        for (size_t j = i + 1; j < mols_.size(); ++j) {
+            if (!std::isfinite(storage.Get(i, j))) {
+                ++nan_count;
+            }
+        }
+    }
+    ASSERT_GT(nan_count, 0u) << "fixture no longer produces NaN under ignore; "
+                                "the escalation is untested";
+
+    EXPECT_EQ(comparison.Facts().data_integrity, DataIntegrity::NaNPresent);
+}
+
 // A gap that is present-and-NaN rather than absent, on the direct constructor
 // path that bypasses the Python normalizer. This is the case the validation
 // ordering exists for, and no test above reaches it: every gap in the fixture

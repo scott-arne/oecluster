@@ -51,6 +51,10 @@ struct DescriptorOptions {
  * rather than absent has a non-finite variance and would be dropped by the fit,
  * so validating afterwards would let the constructor silently score molecules
  * that ``descriptor_excluded_indices`` excludes. The two must not disagree.
+ *
+ * The integrity stamp escalates to ``NaNPresent`` whenever a non-finite
+ * distance is actually produced, whatever the policy -- including under
+ * ``ignore``, where the declared stamp would otherwise be ``SubsetScored``.
  */
 class DescriptorComparison : public PairwiseComparison {
 public:
