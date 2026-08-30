@@ -56,13 +56,15 @@ public:
     using Options = RMSDOptions;
 
     /**
-     * @brief Construct an RMSDComparison from molecules with 3D coordinates.
+     * @brief Construct an RMSDComparison from molecules that carry coordinates.
      *
      * :param mols: Shared pointers to molecules; only each molecule's active
-     *     conformer is measured.
+     *     conformer is measured. The comparison measures whatever coordinate set
+     *     is present (2D or 3D).
      * :param opts: Scoring options.
-     * :raises ComparisonError: When a pointer is null or an item's topology
-     *     differs from the first item's.
+     * :raises ComparisonError: When a pointer is null, an item carries no
+     *     coordinates, an item's topology differs from the first item's, or
+     *     (with ``automorph=false``) the items do not share one atom ordering.
      */
     explicit RMSDComparison(const std::vector<std::shared_ptr<OEChem::OEMol>>& mols,
                             const Options& opts = Options());

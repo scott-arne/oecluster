@@ -43,6 +43,7 @@ std::vector<double> run_pdist(RMSDComparison& comparison, size_t num_threads) {
     DenseStorage storage(comparison.Size());
     PDistOptions options;
     options.num_threads = num_threads;
+    options.chunk_size = 1;  // Force multiple chunks to exercise concurrency.
     pdist(comparison, storage, options);
     std::vector<double> values;
     for (size_t i = 0; i < comparison.Size(); ++i) {
@@ -214,4 +215,124 @@ TEST_F(RMSDComparisonTest, HeavyOnlySkipsHydrogens) {
     RMSDComparison comparison_all(mols, opts_all);
     const double rmsd_all = comparison_all.Compare(0, 1);
     EXPECT_GT(rmsd_all, 0.0);
+}
+
+TEST_F(RMSDComparisonTest, UnembeddedMoleculesAreRejected) {
+    // Build molecules from SMILES without embedding.
+    auto mol_a = std::make_shared<OEChem::OEMol>();
+    OEChem::OESmilesToMol(*mol_a, "CC");
+    auto mol_b = std::make_shared<OEChem::OEMol>();
+    OEChem::OESmilesToMol(*mol_b, "CC");
+
+    std::vector<std::shared_ptr<OEChem::OEMol>> unembedded = {mol_a, mol_b};
+    try {
+        RMSDComparison comparison(unembedded);
+        FAIL() << "expected unembedded molecules to be rejected";
+    } catch (const ComparisonError& exc) {
+        const std::string message = exc.what();
+        EXPECT_NE(message.find("no coordinates"), std::string::npos) << message;
+        EXPECT_NE(message.find("GetDimension"), std::string::npos) << message;
+    }
+}
+
+TEST_F(RMSDComparisonTest, EmbeddedMixedWithUnembeddedIsRejected) {
+    auto embedded = make_shifted("c1ccccc1", 0.0);
+    auto unembedded = std::make_shared<OEChem::OEMol>();
+    OEChem::OESmilesToMol(*unembedded, "c1ccccc1");
+
+    std::vector<std::shared_ptr<OEChem::OEMol>> mixed = {embedded, unembedded};
+    try {
+        RMSDComparison comparison(mixed);
+        FAIL() << "expected mixed embedded/unembedded to be rejected";
+    } catch (const ComparisonError& exc) {
+        const std::string message = exc.what();
+        EXPECT_NE(message.find("no coordinates"), std::string::npos) << message;
+        EXPECT_NE(message.find('1'), std::string::npos) << message;
+    }
+}
+
+TEST_F(RMSDComparisonTest, DifferentAtomOrderingRejectedWithAutomorphOff) {
+    // Build two ethanols with identical geometry per element but different atom ordering.
+    auto mol_a = std::make_shared<OEChem::OEMol>();
+    auto mol_b = std::make_shared<OEChem::OEMol>();
+
+    // mol_a: NewAtom order C, C, O -> [6, 6, 8]
+    auto c1_a = mol_a->NewAtom(6);
+    auto c2_a = mol_a->NewAtom(6);
+    auto o_a = mol_a->NewAtom(8);
+    mol_a->NewBond(c1_a, c2_a, 1);
+    mol_a->NewBond(c2_a, o_a, 1);
+    // Manually set coordinates: C at (0,0,0), C at (1,0,0), O at (2,0,0)
+    mol_a->SetCoords(c1_a, (float[]){0.0f, 0.0f, 0.0f});
+    mol_a->SetCoords(c2_a, (float[]){1.0f, 0.0f, 0.0f});
+    mol_a->SetCoords(o_a, (float[]){2.0f, 0.0f, 0.0f});
+    mol_a->SetDimension(2);
+
+    // mol_b: NewAtom order O, C, C -> [8, 6, 6]
+    auto o_b = mol_b->NewAtom(8);
+    auto c1_b = mol_b->NewAtom(6);
+    auto c2_b = mol_b->NewAtom(6);
+    mol_b->NewBond(c1_b, c2_b, 1);
+    mol_b->NewBond(c2_b, o_b, 1);
+    // Set the same geometry: O at (2,0,0), C at (0,0,0), C at (1,0,0)
+    mol_b->SetCoords(o_b, (float[]){2.0f, 0.0f, 0.0f});
+    mol_b->SetCoords(c1_b, (float[]){0.0f, 0.0f, 0.0f});
+    mol_b->SetCoords(c2_b, (float[]){1.0f, 0.0f, 0.0f});
+    mol_b->SetDimension(2);
+
+    std::vector<std::shared_ptr<OEChem::OEMol>> different_order = {mol_a, mol_b};
+
+    // With automorph=false, the different atom ordering is rejected at construction.
+    RMSDOptions opts_no_auto;
+    opts_no_auto.automorph = false;
+    try {
+        RMSDComparison comparison(different_order, opts_no_auto);
+        FAIL() << "expected different atom ordering to be rejected with automorph=false";
+    } catch (const ComparisonError& exc) {
+        const std::string message = exc.what();
+        EXPECT_NE(message.find("automorph=false"), std::string::npos) << message;
+        EXPECT_NE(message.find("index"), std::string::npos) << message;
+    }
+
+    // With automorph=true, the pair is accepted and scores correctly.
+    RMSDOptions opts_auto;
+    opts_auto.automorph = true;
+    RMSDComparison comparison_auto(different_order, opts_auto);
+    EXPECT_NEAR(comparison_auto.Compare(0, 1), 0.0, 1e-6);
+}
+
+TEST_F(RMSDComparisonTest, OverlayAutomorphCombinationUnderThreads) {
+    // Exercise the most expensive and stateful option combination under concurrency.
+    RMSDOptions opts;
+    opts.overlay = true;
+    opts.automorph = true;
+    RMSDComparison comparison(mols_, opts);
+    EXPECT_EQ(run_pdist(comparison, 1), run_pdist(comparison, 8));
+}
+
+TEST_F(RMSDComparisonTest, ExplicitVsSuppressedHydrogensRejectedWithAutomorphOff) {
+    // Build methanol with hydrogens suppressed.
+    auto mol_suppressed = std::make_shared<OEChem::OEMol>();
+    OEChem::OESmilesToMol(*mol_suppressed, "CO");
+    OEChem::OEGenerate2DCoordinates(*mol_suppressed);
+
+    // Build methanol with explicit hydrogens.
+    auto mol_explicit = std::make_shared<OEChem::OEMol>();
+    OEChem::OESmilesToMol(*mol_explicit, "CO");
+    OEChem::OEGenerate2DCoordinates(*mol_explicit);
+    OEChem::OEAddExplicitHydrogens(*mol_explicit);
+
+    std::vector<std::shared_ptr<OEChem::OEMol>> mixed_h = {mol_suppressed, mol_explicit};
+
+    // With automorph=false, the different atom counts are rejected at construction.
+    RMSDOptions opts;
+    opts.automorph = false;
+    try {
+        RMSDComparison comparison(mixed_h, opts);
+        FAIL() << "expected differing hydrogen treatment to be rejected with automorph=false";
+    } catch (const ComparisonError& exc) {
+        const std::string message = exc.what();
+        EXPECT_NE(message.find("automorph=false"), std::string::npos) << message;
+        EXPECT_NE(message.find("atoms"), std::string::npos) << message;
+    }
 }
