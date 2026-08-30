@@ -241,7 +241,7 @@ def test_backstop_catches_a_broken_builder_that_leaks_kwargs():
 
     _comparisons.register_comparison("broken", broken_builder)
     try:
-        with pytest.raises(RuntimeError, match="builder returned without consuming"):
+        with pytest.raises(RuntimeError, match=r"'broken' builder.*\['leftover'\]"):
             _comparisons.build_comparison(
                 ["item"], "broken", False, {"leftover": 42}, symmetric=True)
     finally:
