@@ -248,6 +248,47 @@ def test_backstop_catches_a_broken_builder_that_leaks_kwargs():
         _comparisons._BUILDERS.pop("broken", None)
 
 
+def test_family_aliases_get_the_same_explicitness_rules():
+    """An alias spelling must not be a way around the family rules.
+
+    The C++ constructor folds several spellings onto each generator
+    (normalize_family, FingerprintComparison.cpp:124). A rule keyed on the
+    raw spelling would apply to the canonical name and skip the aliases.
+    """
+    mols = _mols(["CCO", "CCC"])
+    atom_pair_spellings = ("atom_pair", "atompair", "topological_atom_pair")
+    torsion_spellings = ("topological_torsions", "topological_torsion")
+
+    for family in atom_pair_spellings:
+        with pytest.raises(TypeError, match="radius does not apply"):
+            _comparisons.build_comparison(
+                mols, "fingerprint", False,
+                {"fp_type": family, "radius": 3}, symmetric=True)
+        obj, _, _ = _comparisons.build_comparison(
+            mols, "fingerprint", False,
+            {"fp_type": family, "min_distance": 1, "max_distance": 5},
+            symmetric=True)
+        assert obj.Size() == 2
+
+    for family in torsion_spellings:
+        with pytest.raises(TypeError, match="max_distance does not apply"):
+            _comparisons.build_comparison(
+                mols, "fingerprint", False,
+                {"fp_type": family, "max_distance": 4}, symmetric=True)
+        obj, _, _ = _comparisons.build_comparison(
+            mols, "fingerprint", False,
+            {"fp_type": family, "torsion_atom_count": 4}, symmetric=True)
+        assert obj.Size() == 2
+
+
+def test_the_rejection_message_echoes_the_spelling_the_caller_used():
+    mols = _mols(["CCO", "CCC"])
+    with pytest.raises(TypeError, match=r"fp_type='atompair'"):
+        _comparisons.build_comparison(
+            mols, "fingerprint", False,
+            {"fp_type": "atompair", "radius": 3}, symmetric=True)
+
+
 def test_pdist_still_works_through_the_registry():
     mols = _mols(["CCO", "CCC", "CCCC"])
     dist = oecluster.pdist(mols, "fingerprint")

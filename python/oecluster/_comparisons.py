@@ -166,20 +166,30 @@ _FINGERPRINT_KEYS = (
 
 _SPARSE_STORAGES = ('sparse', 'sparse_count')
 
+# Mirrors normalize_family in src/comparisons/FingerprintComparison.cpp:124.
+# The C++ constructor folds these spellings onto three generators; a rule
+# keyed on the raw spelling would let an alias skip the family checks.
+_FAMILY_ALIASES = {
+    'morgan': 'morgan',
+    'atom_pair': 'atom_pair',
+    'atompair': 'atom_pair',
+    'topological_atom_pair': 'atom_pair',
+    'topological_torsions': 'topological_torsions',
+    'topological_torsion': 'topological_torsions',
+}
+
 # Which families read each per-family option, and which option replaces it for
-# a family that does not. Keyed on every family so an unrecognized fp_type
-# falls through to the C++ constructor's own error instead of being blamed here.
+# a family that does not. Keyed on canonical families only.
 _FAMILY_ONLY_KEYS = {
     'radius': ('morgan',),
-    'min_distance': ('atom_pair', 'topological_atom_pair'),
-    'max_distance': ('atom_pair', 'topological_atom_pair'),
+    'min_distance': ('atom_pair',),
+    'max_distance': ('atom_pair',),
     'torsion_atom_count': ('topological_torsions',),
 }
 
 _FAMILY_REPLACEMENT = {
     'morgan': 'radius',
     'atom_pair': 'min_distance/max_distance',
-    'topological_atom_pair': 'min_distance/max_distance',
     'topological_torsions': 'torsion_atom_count',
 }
 
@@ -209,7 +219,8 @@ def reject_inapplicable_fingerprint_kwargs(named, *, fp_type, storage, metric):
     :raises TypeError: If a named option does not apply to this configuration.
     """
     named = set(named)
-    family = (fp_type or 'morgan').lower()
+    spelling = (fp_type or 'morgan').lower()
+    family = _FAMILY_ALIASES.get(spelling)
     store = (storage or 'binary').lower()
     metric_name = (metric or 'tanimoto').lower()
 
@@ -220,11 +231,11 @@ def reject_inapplicable_fingerprint_kwargs(named, *, fp_type, storage, metric):
             f"a chosen width. Drop numbits, or use storage='binary' or "
             f"storage='count'.")
 
-    if family in _FAMILY_REPLACEMENT:
+    if family is not None:
         for key, families in _FAMILY_ONLY_KEYS.items():
             if key in named and family not in families:
                 raise TypeError(
-                    f"{key} does not apply to fp_type={family!r}; it belongs "
+                    f"{key} does not apply to fp_type={spelling!r}; it belongs "
                     f"to {' and '.join(repr(f) for f in families)}. Use "
                     f"{_FAMILY_REPLACEMENT[family]} instead, or select one of "
                     f"those families.")
