@@ -341,3 +341,82 @@ TEST_F(RMSDComparisonTest, ExplicitVsSuppressedHydrogensRejectedWithAutomorphOff
         EXPECT_NE(message.find("atoms"), std::string::npos) << message;
     }
 }
+
+TEST_F(RMSDComparisonTest, MixedHydrogenRepresentationRejectedWhenHeavyOnlyIsFalse) {
+    // Build methanol with hydrogens suppressed.
+    auto mol_suppressed = std::make_shared<OEChem::OEMol>();
+    OEChem::OESmilesToMol(*mol_suppressed, "CO");
+    OEChem::OEGenerate2DCoordinates(*mol_suppressed);
+
+    // Build methanol with explicit hydrogens, displaced so a non-zero distance is expected.
+    auto mol_explicit = std::make_shared<OEChem::OEMol>();
+    OEChem::OESmilesToMol(*mol_explicit, "CO");
+    OEChem::OEGenerate2DCoordinates(*mol_explicit);
+    OEChem::OEAddExplicitHydrogens(*mol_explicit);
+    // Displace only the hydrogens.
+    for (OESystem::OEIter<OEChem::OEAtomBase> atom = mol_explicit->GetAtoms(); atom; ++atom) {
+        if (atom->GetAtomicNum() == 1) {
+            float coords[3] = {0.0f, 0.0f, 0.0f};
+            mol_explicit->GetCoords(atom, coords);
+            coords[0] += 3.0f;
+            mol_explicit->SetCoords(atom, coords);
+        }
+    }
+
+    std::vector<std::shared_ptr<OEChem::OEMol>> mixed_h = {mol_suppressed, mol_explicit};
+
+    // With automorph=true and heavy_only=false, the different hydrogen representations
+    // are rejected because hydrogens are counted.
+    RMSDOptions opts_reject;
+    opts_reject.automorph = true;
+    opts_reject.heavy_only = false;
+    try {
+        RMSDComparison comparison(mixed_h, opts_reject);
+        FAIL() << "expected mixed hydrogen representation to be rejected with heavy_only=false";
+    } catch (const ComparisonError& exc) {
+        const std::string message = exc.what();
+        EXPECT_NE(message.find("heavy_only=false"), std::string::npos) << message;
+        EXPECT_NE(message.find("hydrogen"), std::string::npos) << message;
+    }
+
+    // With automorph=true and heavy_only=true, the pair is ACCEPTED (hydrogens are
+    // excluded by request) and scores 0.0 because the heavy atoms coincide.
+    RMSDOptions opts_accept;
+    opts_accept.automorph = true;
+    opts_accept.heavy_only = true;
+    RMSDComparison comparison_accept(mixed_h, opts_accept);
+    EXPECT_NEAR(comparison_accept.Compare(0, 1), 0.0, 1e-6);
+}
+
+TEST_F(RMSDComparisonTest, TwoDVsThreeDIsRejected) {
+    // Build a 2D-embedded molecule.
+    auto mol_2d = std::make_shared<OEChem::OEMol>();
+    OEChem::OESmilesToMol(*mol_2d, "CCO");
+    OEChem::OEGenerate2DCoordinates(*mol_2d);
+
+    // Build a 3D molecule manually (avoid pulling in Omega).
+    auto mol_3d = std::make_shared<OEChem::OEMol>();
+    auto c1 = mol_3d->NewAtom(6);
+    auto c2 = mol_3d->NewAtom(6);
+    auto o = mol_3d->NewAtom(8);
+    mol_3d->NewBond(c1, c2, 1);
+    mol_3d->NewBond(c2, o, 1);
+    float coords_c1[3] = {0.0f, 0.0f, 0.0f};
+    float coords_c2[3] = {1.0f, 0.5f, 0.2f};
+    float coords_o[3] = {2.0f, 0.3f, 0.7f};
+    mol_3d->SetCoords(c1, coords_c1);
+    mol_3d->SetCoords(c2, coords_c2);
+    mol_3d->SetCoords(o, coords_o);
+    mol_3d->SetDimension(3);
+
+    std::vector<std::shared_ptr<OEChem::OEMol>> mixed_dim = {mol_2d, mol_3d};
+
+    try {
+        RMSDComparison comparison(mixed_dim);
+        FAIL() << "expected 2D vs 3D to be rejected";
+    } catch (const ComparisonError& exc) {
+        const std::string message = exc.what();
+        EXPECT_NE(message.find("2D"), std::string::npos) << message;
+        EXPECT_NE(message.find("3D"), std::string::npos) << message;
+    }
+}

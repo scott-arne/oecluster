@@ -33,6 +33,21 @@ RMSDComparison::RMSDComparison(const std::vector<std::shared_ptr<OEChem::OEMol>>
         }
     }
 
+    // Require dimensional uniformity: mixing a 2D depiction with a 3D conformer is
+    // not a meaningful comparison.
+    if (!mols.empty()) {
+        const unsigned int reference_dim = mols[0]->GetDimension();
+        for (size_t i = 1; i < mols.size(); ++i) {
+            if (mols[i]->GetDimension() != reference_dim) {
+                throw ComparisonError(
+                    "RMSDComparison received molecules with differing dimensions: item 0 has " +
+                    std::to_string(reference_dim) + "D coordinates while item " +
+                    std::to_string(i) + " has " + std::to_string(mols[i]->GetDimension()) +
+                    "D coordinates; mixing 2D depictions with 3D conformers is not meaningful");
+            }
+        }
+    }
+
     // One upfront pass rather than a per-pair check: the matrix is O(n^2) and a
     // mismatch is a property of the input set, not of a pair.
     if (!mols.empty()) {
@@ -47,30 +62,48 @@ RMSDComparison::RMSDComparison(const std::vector<std::shared_ptr<OEChem::OEMol>>
             }
         }
 
-        // With automorph off, atoms are matched positionally, so the items must share
-        // both atom count and element at each index. Check this once upfront.
-        if (!opts.automorph) {
+        // Atom-count uniformity is required both with automorph=false (atoms matched
+        // positionally) and with heavy_only=false (hydrogens counted). The topology
+        // check has already established equal heavy-atom composition, so equal total
+        // counts imply equal hydrogen counts.
+        if (!opts.automorph || !opts.heavy_only) {
             const unsigned int reference_count = mols[0]->NumAtoms();
             for (size_t i = 1; i < mols.size(); ++i) {
                 if (mols[i]->NumAtoms() != reference_count) {
-                    throw ComparisonError(
-                        "With automorph=false, atoms are matched by index, but item " +
-                        std::to_string(i) + " has " + std::to_string(mols[i]->NumAtoms()) +
-                        " atoms while item 0 has " + std::to_string(reference_count) +
-                        "; the items must share one atom ordering");
-                }
-                // Check element at each index.
-                OESystem::OEIter<OEChem::OEAtomBase> ref_atom = mols[0]->GetAtoms();
-                OESystem::OEIter<OEChem::OEAtomBase> cand_atom = mols[i]->GetAtoms();
-                for (unsigned int idx = 0; idx < reference_count; ++idx, ++ref_atom, ++cand_atom) {
-                    if (ref_atom->GetAtomicNum() != cand_atom->GetAtomicNum()) {
+                    if (!opts.automorph) {
                         throw ComparisonError(
                             "With automorph=false, atoms are matched by index, but item " +
-                            std::to_string(i) + " has atomic number " +
-                            std::to_string(cand_atom->GetAtomicNum()) + " at index " +
-                            std::to_string(idx) + " while item 0 has " +
-                            std::to_string(ref_atom->GetAtomicNum()) +
+                            std::to_string(i) + " has " + std::to_string(mols[i]->NumAtoms()) +
+                            " atoms while item 0 has " + std::to_string(reference_count) +
                             "; the items must share one atom ordering");
+                    } else {
+                        // The automorph=true, heavy_only=false path.
+                        throw ComparisonError(
+                            "With heavy_only=false, hydrogens are counted, but item " +
+                            std::to_string(i) + " has " + std::to_string(mols[i]->NumAtoms()) +
+                            " atoms while item 0 has " + std::to_string(reference_count) +
+                            "; every item must use the same hydrogen representation " +
+                            "(either OEAddExplicitHydrogens on all, or heavy_only=true)");
+                    }
+                }
+            }
+
+            // With automorph=false, additionally require element-at-index uniformity.
+            if (!opts.automorph) {
+                const unsigned int reference_count = mols[0]->NumAtoms();
+                for (size_t i = 1; i < mols.size(); ++i) {
+                    OESystem::OEIter<OEChem::OEAtomBase> ref_atom = mols[0]->GetAtoms();
+                    OESystem::OEIter<OEChem::OEAtomBase> cand_atom = mols[i]->GetAtoms();
+                    for (unsigned int idx = 0; idx < reference_count; ++idx, ++ref_atom, ++cand_atom) {
+                        if (ref_atom->GetAtomicNum() != cand_atom->GetAtomicNum()) {
+                            throw ComparisonError(
+                                "With automorph=false, atoms are matched by index, but item " +
+                                std::to_string(i) + " has atomic number " +
+                                std::to_string(cand_atom->GetAtomicNum()) + " at index " +
+                                std::to_string(idx) + " while item 0 has " +
+                                std::to_string(ref_atom->GetAtomicNum()) +
+                                "; the items must share one atom ordering");
+                        }
                     }
                 }
             }
