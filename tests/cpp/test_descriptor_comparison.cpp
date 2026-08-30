@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iterator>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
@@ -99,6 +100,29 @@ TEST_F(DescriptorComparisonTest, OverflowingDistancesDowngradeTheIntegrityStamp)
     EXPECT_EQ(comparison.Facts().data_integrity, DataIntegrity::NaNPresent);
 }
 
+TEST_F(DescriptorComparisonTest, CompareFeedsTheIntegrityStamp) {
+    // TryPDist and TryCDist both record a non-finite result; the per-pair path
+    // must too, or a caller that only ever calls Compare reads a clean stamp
+    // off a matrix that overflowed.
+    DescriptorOptions opts;
+    opts.metric = "minkowski";
+    opts.p = 400.0;
+    DescriptorComparison comparison(mols_, opts);
+    ASSERT_EQ(comparison.Facts().data_integrity, DataIntegrity::Complete);
+
+    bool saw_non_finite = false;
+    for (size_t i = 0; i < comparison.Size() && !saw_non_finite; ++i) {
+        for (size_t j = i + 1; j < comparison.Size(); ++j) {
+            if (!std::isfinite(comparison.Compare(i, j))) {
+                saw_non_finite = true;
+                break;
+            }
+        }
+    }
+    ASSERT_TRUE(saw_non_finite) << "fixture no longer overflows; pick a larger p";
+    EXPECT_EQ(comparison.Facts().data_integrity, DataIntegrity::NaNPresent);
+}
+
 TEST_F(DescriptorComparisonTest, PropagateStampsNaNPresent) {
     DescriptorOptions opts;
     opts.metric = "euclidean";
@@ -163,6 +187,38 @@ TEST_F(DescriptorComparisonTest, OverrideLengthMismatchIsRejected) {
     EXPECT_THROW(DescriptorComparison(mols_, opts), ComparisonError);
 }
 
+TEST_F(DescriptorComparisonTest, ZeroVarianceInOverrideIsRejected) {
+    DescriptorComparison fitted(mols_);
+    DescriptorOptions opts;
+    opts.columns = fitted.Columns();
+    opts.variances = fitted.Variances();
+    opts.variances[0] = 0.0;
+    try {
+        DescriptorComparison comparison(mols_, opts);
+        FAIL() << "expected ComparisonError for zero variance";
+    } catch (const ComparisonError& exc) {
+        const std::string message(exc.what());
+        EXPECT_NE(message.find("variances[0]"), std::string::npos) << message;
+        EXPECT_NE(message.find(fitted.Columns()[0]), std::string::npos) << message;
+    }
+}
+
+TEST_F(DescriptorComparisonTest, NaNInInverseCovarianceIsRejected) {
+    DescriptorComparison fitted(mols_);
+    DescriptorOptions opts;
+    opts.metric = "mahalanobis";
+    opts.columns = fitted.Columns();
+    opts.inverse_covariance = std::vector<double>(fitted.Columns().size() * fitted.Columns().size(), 0.0);
+    opts.inverse_covariance[0] = std::numeric_limits<double>::quiet_NaN();
+    try {
+        DescriptorComparison comparison(mols_, opts);
+        FAIL() << "expected ComparisonError for NaN in inverse_covariance";
+    } catch (const ComparisonError& exc) {
+        const std::string message(exc.what());
+        EXPECT_NE(message.find("inverse_covariance[0]"), std::string::npos) << message;
+    }
+}
+
 TEST_F(DescriptorComparisonTest, OverridePathDropsNothingAndReproducesTheFit) {
     DescriptorComparison fitted(mols_);
     DescriptorOptions opts;
@@ -178,6 +234,33 @@ TEST_F(DescriptorComparisonTest, OverridePathDropsNothingAndReproducesTheFit) {
 TEST_F(DescriptorComparisonTest, DropReportIsParallel) {
     DescriptorComparison comparison(mols_);
     EXPECT_EQ(comparison.DroppedColumns().size(), comparison.DroppedReasons().size());
+}
+
+TEST_F(DescriptorComparisonTest, DescendingColumnsWithAVarianceOverrideAreRefused) {
+    // The two orderings have the same length, so only an order check catches
+    // this. Scoring it would standardize XLogP by MolecularWeight's variance.
+    DescriptorOptions opts;
+    opts.metric = "standardized_euclidean";
+    opts.columns = {"XLogP", "MolecularWeight"};
+    opts.variances = {1.5, 2.5};
+    try {
+        DescriptorComparison comparison(mols_, opts);
+        FAIL() << "expected ComparisonError for a descending column order";
+    } catch (const ComparisonError& exc) {
+        const std::string message(exc.what());
+        EXPECT_NE(message.find("ascending schema order"), std::string::npos) << message;
+        EXPECT_NE(message.find("MolecularWeight, XLogP"), std::string::npos) << message;
+    }
+}
+
+TEST_F(DescriptorComparisonTest, AscendingColumnsWithAVarianceOverrideAreAccepted) {
+    DescriptorOptions opts;
+    opts.metric = "standardized_euclidean";
+    opts.columns = {"MolecularWeight", "XLogP"};
+    opts.variances = {2.5, 1.5};
+    DescriptorComparison comparison(mols_, opts);
+    EXPECT_EQ(comparison.Columns().size(), 2u);
+    EXPECT_TRUE(std::isfinite(comparison.Compare(0, 1)));
 }
 
 TEST_F(DescriptorComparisonTest, CloneScoresIdentically) {
@@ -196,6 +279,33 @@ TEST_F(DescriptorComparisonTest, NullMoleculeIsRejected) {
     std::vector<OEChem::OEMolBase*> with_null = mols_;
     with_null[1] = nullptr;
     EXPECT_THROW(DescriptorComparison(with_null, DescriptorOptions()), ComparisonError);
+}
+
+TEST(DescriptorComparisonMinimumInputTest, AFittedMetricNeedsTwoMolecules) {
+    std::vector<OEChem::OEGraphMol> graph_mols(1);
+    OEChem::OESmilesToMol(graph_mols[0], "c1ccccc1");
+    std::vector<OEChem::OEMolBase*> mols{&static_cast<OEChem::OEMolBase&>(graph_mols[0])};
+
+    try {
+        DescriptorComparison comparison(mols, DescriptorOptions());
+        FAIL() << "expected ComparisonError naming the input size";
+    } catch (const ComparisonError& exc) {
+        const std::string message(exc.what());
+        EXPECT_NE(message.find("at least two molecules"), std::string::npos) << message;
+        EXPECT_EQ(message.find("zero variance"), std::string::npos)
+            << "the error must not blame the descriptors: " << message;
+    }
+}
+
+TEST(DescriptorComparisonMinimumInputTest, AnUnfittedMetricAcceptsOneMolecule) {
+    std::vector<OEChem::OEGraphMol> graph_mols(1);
+    OEChem::OESmilesToMol(graph_mols[0], "c1ccccc1");
+    std::vector<OEChem::OEMolBase*> mols{&static_cast<OEChem::OEMolBase&>(graph_mols[0])};
+
+    DescriptorOptions opts;
+    opts.metric = "euclidean";
+    DescriptorComparison comparison(mols, opts);
+    EXPECT_EQ(comparison.Size(), 1u);
 }
 
 // Spec section 2.4's measured missingness set: 19 molecules, of which OpenEye

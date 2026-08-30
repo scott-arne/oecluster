@@ -20,10 +20,12 @@ enum class Capability { Unknown, No, Yes };
 /**
  * @brief How completely the scored values cover the requested pairs.
  *
- * ``Complete`` means every requested pair was scored on the full data.
- * ``NaNPresent`` means at least one value is not a number. ``SubsetScored``
- * means values were computed from a per-pair subset of the available
- * dimensions, which makes them mutually incomparable.
+ * This is a conservative declaration of what the configured policy admits,
+ * not a measurement of the data. ``Complete`` means every requested pair
+ * was scored on the full data. ``NaNPresent`` is reported when the policy
+ * permits non-finite distances, even if this particular input produced none.
+ * ``SubsetScored`` means values were computed from a per-pair subset of the
+ * available dimensions, which makes them mutually incomparable.
  */
 enum class DataIntegrity { Complete, NaNPresent, SubsetScored };
 

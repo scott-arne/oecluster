@@ -8,11 +8,10 @@
 #include <algorithm>
 #include <cctype>
 #include <exception>
+#include <oechem.h>
 #include "oecluster/Error.h"
 
 namespace OECluster {
-
-namespace {
 
 std::string to_lower(const std::string& value) {
     std::string result = value;
@@ -20,6 +19,23 @@ std::string to_lower(const std::string& value) {
                    [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     return result;
 }
+
+std::vector<const OEChem::OEMolBase*> checked_inputs(
+        const std::vector<OEChem::OEMolBase*>& mols, const char* caller) {
+    std::vector<const OEChem::OEMolBase*> inputs;
+    inputs.reserve(mols.size());
+    for (size_t i = 0; i < mols.size(); ++i) {
+        if (mols[i] == nullptr) {
+            throw ComparisonError(std::string(caller) +
+                                  " received null molecule pointer at index " +
+                                  std::to_string(i));
+        }
+        inputs.push_back(mols[i]);
+    }
+    return inputs;
+}
+
+namespace {
 
 std::shared_ptr<const OEFP::DescriptorSource> make_source(const std::string& name) {
     const std::string key = to_lower(name);

@@ -16,6 +16,8 @@
 #include <string>
 #include <vector>
 
+namespace OEChem { class OEMolBase; }
+
 namespace OECluster {
 
 /**
@@ -56,6 +58,25 @@ std::vector<size_t> resolve_column_indices(const OEFP::DescriptorSchema& schema,
  * :returns: ``true`` for Bool, Int, and Float.
  */
 bool is_numeric_kind(OEFP::DescriptorValueKind kind);
+
+/**
+ * @brief Convert a string to lowercase for case-insensitive matching.
+ *
+ * :param value: Input string.
+ * :returns: Lowercase copy of the input.
+ */
+std::string to_lower(const std::string& value);
+
+/**
+ * @brief Validate molecule pointers and convert to const pointers.
+ *
+ * :param mols: Input molecule pointers.
+ * :param caller: Caller name for error messages.
+ * :returns: Const-qualified molecule pointers.
+ * :raises ComparisonError: When a null pointer is found.
+ */
+std::vector<const OEChem::OEMolBase*> checked_inputs(
+    const std::vector<OEChem::OEMolBase*>& mols, const char* caller);
 
 }  // namespace OECluster
 

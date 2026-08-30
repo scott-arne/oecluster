@@ -45,6 +45,12 @@ struct DescriptorOptions {
  * pass only the retained molecules. Filtering deliberately lives outside the
  * comparison so that ``Size()`` always equals the input count, which is what the
  * cdist split index is measured against.
+ *
+ * Rows are checked against the full requested selection *before* any
+ * zero-variance column is dropped. A column whose gaps are present-and-NaN
+ * rather than absent has a non-finite variance and would be dropped by the fit,
+ * so validating afterwards would let the constructor silently score molecules
+ * that ``descriptor_excluded_indices`` excludes. The two must not disagree.
  */
 class DescriptorComparison : public PairwiseComparison {
 public:
@@ -71,7 +77,9 @@ public:
     std::string ComparisonName() const override;
     GateFacts Facts() const override;
 
-    /// Surviving column names, in selection order.
+    /// Surviving column names, in ascending schema order regardless of the
+    /// order they were requested in. Values supplied through ``variances`` or
+    /// ``inverse_covariance`` are matched to these by position.
     const std::vector<std::string>& Columns() const;
     /// Columns removed before scoring.
     const std::vector<std::string>& DroppedColumns() const;

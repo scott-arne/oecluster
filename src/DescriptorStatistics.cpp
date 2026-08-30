@@ -27,15 +27,8 @@ DescriptorStatisticsResult descriptor_statistics(const std::vector<OEChem::OEMol
             std::to_string(mols.size()));
     }
 
-    std::vector<const OEChem::OEMolBase*> inputs;
-    inputs.reserve(mols.size());
-    for (size_t i = 0; i < mols.size(); ++i) {
-        if (mols[i] == nullptr) {
-            throw ComparisonError("descriptor_statistics received null molecule pointer at index " +
-                                  std::to_string(i));
-        }
-        inputs.push_back(mols[i]);
-    }
+    const std::vector<const OEChem::OEMolBase*> inputs =
+        checked_inputs(mols, "descriptor_statistics");
 
     const std::shared_ptr<const OEFP::DescriptorCalculator> calculator =
         make_descriptor_calculator(options.sources);

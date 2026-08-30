@@ -25,13 +25,6 @@ namespace OECluster {
 
 namespace {
 
-std::string to_lower(const std::string& value) {
-    std::string result = value;
-    std::transform(result.begin(), result.end(), result.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return result;
-}
-
 /// Resolve the missing-value policy, reporting complete_case separately because
 /// it uses OEFP's Propagate kernel over an input the constructor has verified.
 OEFP::DescriptorMissingPolicy normalize_missing(const std::string& missing,
@@ -80,21 +73,6 @@ std::vector<size_t> numeric_selection(const OEFP::DescriptorSchema& schema,
     return numeric;
 }
 
-std::vector<const OEChem::OEMolBase*> checked_inputs(
-        const std::vector<OEChem::OEMolBase*>& mols, const char* caller) {
-    std::vector<const OEChem::OEMolBase*> inputs;
-    inputs.reserve(mols.size());
-    for (size_t i = 0; i < mols.size(); ++i) {
-        if (mols[i] == nullptr) {
-            throw ComparisonError(std::string(caller) +
-                                  " received null molecule pointer at index " +
-                                  std::to_string(i));
-        }
-        inputs.push_back(mols[i]);
-    }
-    return inputs;
-}
-
 /// Reject any row with an absent or non-finite value under missing='complete_case'.
 void require_complete_rows(const OEFP::DescriptorNumericMatrix& matrix) {
     for (size_t row = 0; row < matrix.rows; ++row) {
@@ -124,8 +102,10 @@ struct DescriptorComparison::Impl {
     bool complete_case = true;
     OEFP::Metric metric = OEFP::Metric::Euclidean();
 
-    /// Set when a produced distance is not finite; shared across clones so the
-    /// complete_case stamp cannot outlive the evidence against it.
+    /// Set when a produced distance is not finite. Shared across clones through
+    /// pimpl_ so the complete_case stamp cannot outlive the evidence against it,
+    /// and wrapped in shared_ptr to supply mutability through the
+    /// shared_ptr<const Impl> that every access path holds.
     std::shared_ptr<std::atomic<bool>> non_finite_seen =
         std::make_shared<std::atomic<bool>>(false);
 };
@@ -138,10 +118,13 @@ DescriptorComparison::DescriptorComparison(const std::vector<OEChem::OEMolBase*>
     auto impl = std::make_shared<Impl>();
     const std::string metric_name = to_lower(opts.metric);
 
-    if (!opts.variances.empty() && !opts.inverse_covariance.empty()) {
-        throw ComparisonError(
-            "variances and inverse_covariance are mutually exclusive; supply the one "
-            "belonging to the requested metric");
+    const bool has_override = !opts.variances.empty() || !opts.inverse_covariance.empty();
+    if (has_override) {
+        if (!opts.variances.empty() && !opts.inverse_covariance.empty()) {
+            throw ComparisonError(
+                "variances and inverse_covariance are mutually exclusive; supply the one "
+                "belonging to the requested metric");
+        }
     }
     const bool is_seuclidean =
         metric_name == "standardized_euclidean" || metric_name == "seuclidean";
@@ -162,6 +145,18 @@ DescriptorComparison::DescriptorComparison(const std::vector<OEChem::OEMolBase*>
             "incoherent. Use missing='complete_case' or an unfitted metric such as 'euclidean'");
     }
 
+    // A variance needs two observations. Without this the fit leaves every
+    // variance NaN, every column is dropped, and the constructor blames the
+    // descriptors for what is an input-size problem. descriptor_statistics
+    // guards the same failure the same way.
+    if (is_fitted_metric(metric_name) && !has_override && mols.size() < 2) {
+        throw ComparisonError(
+            "metric='" + metric_name + "' fits variances from the input and needs at least two "
+            "molecules, got " + std::to_string(mols.size()) +
+            "; pass variances= from descriptor_statistics, or use an unfitted metric such as "
+            "'euclidean'");
+    }
+
     const std::shared_ptr<const OEFP::DescriptorCalculator> calculator =
         make_descriptor_calculator(opts.sources);
     const OEFP::DescriptorSchema& schema = calculator->Schema();
@@ -169,7 +164,6 @@ DescriptorComparison::DescriptorComparison(const std::vector<OEChem::OEMolBase*>
         numeric_selection(schema, opts, impl->dropped_columns, impl->dropped_reasons);
 
     OEFP::DescriptorBatch batch = calculator->CalculateBatch(inputs);
-    const bool has_override = !opts.variances.empty() || !opts.inverse_covariance.empty();
 
     try {
         // The matrix is materialized over the selection as requested and
@@ -188,6 +182,34 @@ DescriptorComparison::DescriptorComparison(const std::vector<OEChem::OEMolBase*>
         }
 
         if (has_override) {
+            // resolve_column_indices sorts into ascending schema order, but the
+            // override arrives in the caller's order and is consumed
+            // positionally below. Equal lengths would then pair each column
+            // with the wrong number and score silently wrong distances, so
+            // require the caller's own ordering to already agree.
+            if (!opts.columns.empty()) {
+                std::vector<size_t> requested;
+                requested.reserve(opts.columns.size());
+                for (const std::string& name : opts.columns) {
+                    requested.push_back(schema.IndexOf(name));
+                }
+                if (!std::is_sorted(requested.begin(), requested.end())) {
+                    std::string expected;
+                    for (const size_t index : selection) {
+                        if (!expected.empty()) {
+                            expected += ", ";
+                        }
+                        expected += schema.Definition(index).name;
+                    }
+                    throw ComparisonError(
+                        "columns must be in ascending schema order when variances or "
+                        "inverse_covariance is supplied, because those values are matched to "
+                        "columns by position; got the requested names in a different order. "
+                        "Use columns={" + expected + "}, or pass columns=stats.columns from "
+                        "descriptor_statistics, which is already in this order");
+                }
+            }
+
             // An override is scoped to the columns it was fitted over, so nothing
             // is dropped here: a second drop would silently desync the selection
             // from the supplied numbers.
@@ -207,6 +229,24 @@ DescriptorComparison::DescriptorComparison(const std::vector<OEChem::OEMolBase*>
                     std::to_string(selection.size()) + "x" + std::to_string(selection.size()) +
                     " matrix; pass columns=stats.columns alongside "
                     "inverse_covariance=stats.inverse_covariance");
+            }
+            // OEFP rejects these on the first scoring call. Checking here
+            // reports the mistake where it was made, with the column named.
+            for (size_t k = 0; k < opts.variances.size(); ++k) {
+                if (!std::isfinite(opts.variances[k]) || opts.variances[k] <= 0.0) {
+                    throw ComparisonError(
+                        "variances[" + std::to_string(k) + "] for column '" +
+                        schema.Definition(selection[k]).name +
+                        "' must be finite and strictly positive, got " +
+                        std::to_string(opts.variances[k]));
+                }
+            }
+            for (size_t k = 0; k < opts.inverse_covariance.size(); ++k) {
+                if (!std::isfinite(opts.inverse_covariance[k])) {
+                    throw ComparisonError("inverse_covariance[" + std::to_string(k) +
+                                          "] must be finite, got " +
+                                          std::to_string(opts.inverse_covariance[k]));
+                }
             }
             impl->variances = opts.variances;
             impl->inverse_covariance = opts.inverse_covariance;
@@ -294,7 +334,9 @@ double DescriptorComparison::Compare(size_t i, size_t j) {
     try {
         const std::vector<double> result = OEFP::PDistNumeric(
             values.data(), validity.data(), 2, columns, pimpl_->metric, pimpl_->missing);
-        return result.empty() ? 0.0 : result[0];
+        const double value = result.empty() ? 0.0 : result[0];
+        note_non_finite(&value, 1, *pimpl_->non_finite_seen);
+        return value;
     } catch (const std::exception& exc) {
         throw ComparisonError("Failed to compare descriptors: " + std::string(exc.what()));
     }
