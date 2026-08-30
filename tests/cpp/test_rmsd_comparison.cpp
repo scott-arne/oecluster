@@ -420,3 +420,98 @@ TEST_F(RMSDComparisonTest, TwoDVsThreeDIsRejected) {
         EXPECT_NE(message.find("3D"), std::string::npos) << message;
     }
 }
+
+TEST_F(RMSDComparisonTest, AtomCountChangeAfterConstructionIsRejected) {
+    // Two suppressed-hydrogen methanols have equal atom counts, so construction
+    // succeeds even with heavy_only=false.
+    auto mol_stable = make_shifted("CO", 0.0);
+    auto mol_mutated = make_shifted("CO", 0.0);
+
+    std::vector<std::shared_ptr<OEChem::OEMol>> mols = {mol_stable, mol_mutated};
+    RMSDOptions opts;
+    opts.automorph = true;
+    opts.heavy_only = false;
+    RMSDComparison comparison(mols, opts);
+    EXPECT_NO_THROW((void)comparison.Compare(0, 1));
+
+    // The caller still owns these pointers. Adding explicit hydrogens and displacing
+    // them reaches a state the constructor would have rejected; without the recorded
+    // shape check, OERMSD scored this pair 0.0 because only one side had hydrogens.
+    OEChem::OEAddExplicitHydrogens(*mol_mutated);
+    for (OESystem::OEIter<OEChem::OEAtomBase> atom = mol_mutated->GetAtoms(); atom; ++atom) {
+        if (atom->GetAtomicNum() == 1) {
+            float coords[3] = {0.0f, 0.0f, 0.0f};
+            mol_mutated->GetCoords(atom, coords);
+            coords[0] += 3.0f;
+            mol_mutated->SetCoords(atom, coords);
+        }
+    }
+
+    try {
+        comparison.Compare(0, 1);
+        FAIL() << "expected a post-construction atom count change to be rejected";
+    } catch (const ComparisonError& exc) {
+        const std::string message = exc.what();
+        EXPECT_NE(message.find("atom count"), std::string::npos) << message;
+        EXPECT_NE(message.find("modified"), std::string::npos) << message;
+        // The mutated molecule is item 1, so the message must name that index.
+        EXPECT_NE(message.find("item 1"), std::string::npos) << message;
+    }
+}
+
+TEST_F(RMSDComparisonTest, DimensionChangeAfterConstructionIsRejected) {
+    auto mol_stable = make_shifted("CCO", 0.0);
+    auto mol_mutated = make_shifted("CCO", 1.0);
+
+    std::vector<std::shared_ptr<OEChem::OEMol>> mols = {mol_stable, mol_mutated};
+    std::vector<std::shared_ptr<OEChem::OEMol>> swapped = {mol_mutated, mol_stable};
+    RMSDComparison comparison(mols);
+    // The same molecule at the other index, so both Compare arguments are checked.
+    RMSDComparison swapped_comparison(swapped);
+    EXPECT_NO_THROW((void)comparison.Compare(0, 1));
+
+    // Re-embedding one item out of the plane reaches the 2D-versus-3D state the
+    // constructor rejects, and silently changes the measured distance.
+    for (OESystem::OEIter<OEChem::OEAtomBase> atom = mol_mutated->GetAtoms(); atom; ++atom) {
+        float coords[3] = {0.0f, 0.0f, 0.0f};
+        mol_mutated->GetCoords(atom, coords);
+        coords[2] += 2.0f;
+        mol_mutated->SetCoords(atom, coords);
+    }
+    mol_mutated->SetDimension(3);
+
+    try {
+        comparison.Compare(0, 1);
+        FAIL() << "expected a post-construction dimension change to be rejected";
+    } catch (const ComparisonError& exc) {
+        const std::string message = exc.what();
+        EXPECT_NE(message.find("dimension"), std::string::npos) << message;
+        EXPECT_NE(message.find("modified"), std::string::npos) << message;
+        EXPECT_NE(message.find("item 1"), std::string::npos) << message;
+    }
+
+    try {
+        swapped_comparison.Compare(0, 1);
+        FAIL() << "expected the check to cover the first Compare argument too";
+    } catch (const ComparisonError& exc) {
+        const std::string message = exc.what();
+        EXPECT_NE(message.find("dimension"), std::string::npos) << message;
+        EXPECT_NE(message.find("item 0"), std::string::npos) << message;
+    }
+}
+
+TEST_F(RMSDComparisonTest, UnmutatedInputIsUnaffectedByTheRecordedShapeCheck) {
+    // The recorded-shape check must not fire on a set nobody touched, including on
+    // repeat scoring and on the heavy_only=false path where atom counts matter.
+    RMSDOptions opts;
+    opts.heavy_only = false;
+    RMSDComparison comparison(mols_, opts);
+    for (size_t pass = 0; pass < 2; ++pass) {
+        for (size_t i = 0; i < mols_.size(); ++i) {
+            for (size_t j = i; j < mols_.size(); ++j) {
+                EXPECT_NO_THROW((void)comparison.Compare(i, j)) << "pass " << pass << " pair " << i
+                                                                << "," << j;
+            }
+        }
+    }
+}

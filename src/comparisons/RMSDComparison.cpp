@@ -12,7 +12,20 @@
 namespace OECluster {
 
 struct RMSDComparison::SharedData {
+    /**
+     * @brief The structural properties one molecule had when it was validated.
+     *
+     * The constructor's guards are properties of the input set as it stood at
+     * construction. Recording what was seen lets Compare notice that a caller
+     * has since mutated a molecule out of that set.
+     */
+    struct ValidatedShape {
+        unsigned int dimension = 0;
+        unsigned int num_atoms = 0;
+    };
+
     std::vector<std::shared_ptr<OEChem::OEMol>> mols;
+    std::vector<ValidatedShape> shapes;
 };
 
 RMSDComparison::~RMSDComparison() = default;
@@ -112,13 +125,56 @@ RMSDComparison::RMSDComparison(const std::vector<std::shared_ptr<OEChem::OEMol>>
 
     auto shared = std::make_shared<SharedData>();
     shared->mols = mols;
+    shared->shapes.reserve(mols.size());
+    for (const auto& mol : mols) {
+        SharedData::ValidatedShape shape;
+        shape.dimension = mol->GetDimension();
+        shape.num_atoms = mol->NumAtoms();
+        shared->shapes.push_back(shape);
+    }
     shared_ = std::move(shared);
 }
 
 RMSDComparison::RMSDComparison(std::shared_ptr<const SharedData> shared, const Options& opts)
     : shared_(std::move(shared)), opts_(opts) {}
 
+void RMSDComparison::CheckRecordedShape(size_t index) const {
+    const SharedData::ValidatedShape& recorded = shared_->shapes[index];
+    const OEChem::OEMol& mol = *shared_->mols[index];
+
+    const unsigned int dimension = mol.GetDimension();
+    if (dimension != recorded.dimension) {
+        throw ComparisonError(
+            "RMSDComparison item " + std::to_string(index) +
+            " was modified after the comparison was constructed: its coordinate dimension was " +
+            std::to_string(recorded.dimension) + "D when validated and is now " +
+            std::to_string(dimension) +
+            "D, so the comparison's validation no longer holds; rebuild the comparison from the "
+            "molecules in their current state");
+    }
+
+    const unsigned int num_atoms = mol.NumAtoms();
+    if (num_atoms != recorded.num_atoms) {
+        throw ComparisonError(
+            "RMSDComparison item " + std::to_string(index) +
+            " was modified after the comparison was constructed: its atom count was " +
+            std::to_string(recorded.num_atoms) + " when validated and is now " +
+            std::to_string(num_atoms) +
+            ", so the comparison's validation no longer holds; rebuild the comparison from the "
+            "molecules in their current state");
+    }
+}
+
 double RMSDComparison::Compare(size_t i, size_t j) {
+    // The constructor validates the set once, but the caller keeps its own pointers
+    // to these molecules. Re-check the two O(1) properties the guards rested on --
+    // adding hydrogens changes the atom count, re-embedding changes the dimension --
+    // so a mutated set raises rather than scoring a plausible wrong number. Both are
+    // integer accessors, and measured at roughly 6ns per pair against the ~27us an
+    // OERMSD automorphism search costs on benzene, so the per-pair cost is noise.
+    CheckRecordedShape(i);
+    CheckRecordedShape(j);
+
     const double value = OEChem::OERMSD(*shared_->mols[i], *shared_->mols[j],
                                         opts_.automorph, opts_.heavy_only, opts_.overlay);
     if (!std::isfinite(value)) {

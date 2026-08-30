@@ -54,6 +54,16 @@ struct RMSDOptions {
  * Molecules are held by ``shared_ptr`` to const shared state and are never
  * modified: ``OEChem::OERMSD`` takes both molecules by const reference, so
  * ``overlay`` changes what is measured without writing coordinates back.
+ *
+ * The constructor validates the whole set once, but the caller keeps its own
+ * pointers to the same molecules and can mutate them afterwards. The
+ * constructor therefore records each molecule's coordinate dimension and atom
+ * count, and ``Compare`` re-checks both before scoring, so a molecule that has
+ * been re-embedded or had hydrogens added since construction raises instead of
+ * yielding a plausible wrong number. Topology is validated once only:
+ * re-deriving canonical SMILES per pair would cost O(n^2) SMILES generations.
+ * Moving atoms without changing the count or dimension is a legitimate input
+ * that legitimately changes the answer, and is deliberately not detected.
  */
 class RMSDComparison : public PairwiseComparison {
 public:
@@ -77,6 +87,17 @@ public:
 
     ~RMSDComparison() override;
 
+    /**
+     * @brief Measure the RMSD between items i and j.
+     *
+     * :param i: Index of the first item.
+     * :param j: Index of the second item.
+     * :returns: The RMSD in the coordinate units of the input.
+     * :raises ComparisonError: When either item's coordinate dimension or atom
+     *     count differs from the value recorded at construction, or when
+     *     ``OEChem::OERMSD`` reports a non-finite value or an atom-matching
+     *     failure.
+     */
     double Compare(size_t i, size_t j) override;
     std::unique_ptr<PairwiseComparison> Clone() const override;
     size_t Size() const override;
@@ -90,6 +111,15 @@ private:
 
     /// Private clone constructor -- shares the immutable molecule list.
     RMSDComparison(std::shared_ptr<const SharedData> shared, const Options& opts);
+
+    /**
+     * @brief Confirm one item still matches the shape recorded at construction.
+     *
+     * :param index: Index of the item to check.
+     * :raises ComparisonError: When the item's coordinate dimension or atom
+     *     count has changed since the constructor validated the set.
+     */
+    void CheckRecordedShape(size_t index) const;
 };
 
 }  // namespace OECluster
