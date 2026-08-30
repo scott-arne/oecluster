@@ -172,14 +172,25 @@ DescriptorComparison::DescriptorComparison(const std::vector<OEChem::OEMolBase*>
     const bool has_override = !opts.variances.empty() || !opts.inverse_covariance.empty();
 
     try {
+        // The matrix is materialized over the selection as requested and
+        // complete_case is enforced against it here, before any column is
+        // dropped below. A column whose gaps are present-and-NaN rather than
+        // absent has a non-finite variance -- FractionCsp3 over a set that
+        // includes water, or RDKit's BCUT2D_* over a bare ion -- so the
+        // zero-variance filter would remove that column and leave the offending
+        // rows to pass an after-the-fact row check unchallenged. The
+        // constructor would then silently score molecules that
+        // descriptor_excluded_indices excludes, and the filtered and unfiltered
+        // paths would disagree. Validating first is what keeps them in step.
+        impl->matrix = batch.ToNumericMatrix(OEFP::DescriptorSelection::Indices(selection));
+        if (impl->complete_case) {
+            require_complete_rows(impl->matrix);
+        }
+
         if (has_override) {
             // An override is scoped to the columns it was fitted over, so nothing
             // is dropped here: a second drop would silently desync the selection
-            // from the supplied numbers. Materialize and validate before using.
-            impl->matrix = batch.ToNumericMatrix(OEFP::DescriptorSelection::Indices(selection));
-            if (impl->complete_case) {
-                require_complete_rows(impl->matrix);
-            }
+            // from the supplied numbers.
             if (is_seuclidean && opts.variances.size() != selection.size()) {
                 throw ComparisonError(
                     "variances has " + std::to_string(opts.variances.size()) + " entries but " +
@@ -200,13 +211,6 @@ DescriptorComparison::DescriptorComparison(const std::vector<OEChem::OEMolBase*>
             impl->variances = opts.variances;
             impl->inverse_covariance = opts.inverse_covariance;
         } else if (is_fitted_metric(metric_name)) {
-            // For fitted metrics, identify zero-variance columns first so we can
-            // validate only the surviving columns. A column whose gaps are
-            // present-and-NaN rather than absent has a non-finite variance --
-            // FractionCsp3 over a set that includes water, or RDKit's BCUT2D_*
-            // over a bare ion -- and will be dropped here. Validating before the
-            // drop would reject molecules that should pass, since the offending
-            // column is discarded before scoring.
             const OEFP::DescriptorColumnStatistics stats =
                 OEFP::ColumnStatistics(batch, OEFP::DescriptorSelection::Indices(selection));
             std::vector<size_t> surviving;
@@ -226,11 +230,13 @@ DescriptorComparison::DescriptorComparison(const std::vector<OEChem::OEMolBase*>
                     "Every selected descriptor column has zero variance over these molecules; "
                     "there is no distance to compute");
             }
-            selection = surviving;
-            impl->matrix =
-                batch.ToNumericMatrix(OEFP::DescriptorSelection::Indices(selection));
-            if (impl->complete_case) {
-                require_complete_rows(impl->matrix);
+            if (surviving.size() != selection.size()) {
+                // Only rematerialize when the selection actually narrowed. The
+                // rows were already validated above, so this second pass costs
+                // a copy and changes no verdict.
+                selection = surviving;
+                impl->matrix =
+                    batch.ToNumericMatrix(OEFP::DescriptorSelection::Indices(selection));
             }
             if (is_seuclidean) {
                 impl->variances = variances;
@@ -238,12 +244,6 @@ DescriptorComparison::DescriptorComparison(const std::vector<OEChem::OEMolBase*>
                 const OEFP::DescriptorInverseCovariance inverse = OEFP::InverseCovarianceMatrix(
                     batch, OEFP::DescriptorSelection::Indices(selection));
                 impl->inverse_covariance = inverse.matrix;
-            }
-        } else {
-            // Unfitted metric: no columns are dropped, so materialize and validate.
-            impl->matrix = batch.ToNumericMatrix(OEFP::DescriptorSelection::Indices(selection));
-            if (impl->complete_case) {
-                require_complete_rows(impl->matrix);
             }
         }
     } catch (const ComparisonError&) {

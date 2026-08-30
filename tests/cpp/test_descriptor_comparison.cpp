@@ -326,12 +326,22 @@ TEST_F(DescriptorMissingnessTest, PropagateReproducesTheMeasuredNaNCount) {
 }
 
 TEST_F(DescriptorMissingnessTest, IgnoreScoresEveryPairAndStampsSubsetScored) {
-    // The trap: section 2.4 measured 0 NaN and 372 triangle violations under
-    // this policy. Nothing in the values themselves is detectable, which is
-    // why the gate reads the integrity stamp instead.
+    // The trap: ignore returns a finite, plausible number for every pair while
+    // scoring different pairs over different dimension subsets. Nothing in the
+    // values reveals it, which is why the gate reads the integrity stamp.
+    //
+    // The selection is deliberate. OEFP treats missingness as a property of
+    // the validity mask and never of the value, so ignore can only skip a cell
+    // whose validity bit is clear. Over this fixture the six untyped species
+    // have exactly two gaps each: XLogP is absent, and FractionCsp3 is present
+    // and NaN. Including FractionCsp3 would make every pair touching an
+    // untyped species NaN under ignore -- the same 93 pairs propagate produces
+    // -- and would test nothing about subset scoring. XLogP is the column that
+    // makes the policy observable.
     DescriptorOptions opts;
     opts.metric = "euclidean";
     opts.missing = "ignore";
+    opts.columns = {"MolecularWeight", "TopologicalPSA", "XLogP"};
     DescriptorComparison comparison(mols_, opts);
     DenseStorage storage(mols_.size());
     ASSERT_TRUE(comparison.TryPDist(storage, PDistOptions()));
@@ -404,10 +414,16 @@ TEST_F(DescriptorPresentNaNTest, TheRetainedFiveKeepEveryColumn) {
 
 TEST(DescriptorComparisonNonFiniteTest, NonFiniteVarianceColumnsAreDropped) {
     // OEFP's RDKit source emits a *present* NaN for BCUT2D and partial-charge
-    // descriptors on elements with no Gasteiger parameters. A present NaN
-    // yields a NaN column variance while still counting as present, which is
-    // the only route to the !isfinite half of the drop condition -- zero
-    // variance alone would never distinguish the two branches.
+    // descriptors on elements with no Gasteiger parameters, which makes those
+    // columns' variances NaN while they still count as present. That is the
+    // only route to the !isfinite half of the drop condition; a zero variance
+    // alone would not distinguish the two branches.
+    //
+    // missing='propagate' is what makes the branch reachable at all. Under
+    // the default complete_case the row check runs first and refuses this
+    // input outright -- see
+    // DescriptorPresentNaNTest.TheConstructorRefusesItBeforeFittingDropsTheColumn,
+    // which pins that ordering.
     std::vector<OEChem::OEGraphMol> graph_mols(2);
     OEChem::OESmilesToMol(graph_mols[0], "c1ccccc1");
     OEChem::OESmilesToMol(graph_mols[1], "[Na+]");
@@ -419,6 +435,7 @@ TEST(DescriptorComparisonNonFiniteTest, NonFiniteVarianceColumnsAreDropped) {
     DescriptorOptions opts;
     opts.sources = {"rdkit"};
     opts.columns = {"BCUT2D_MWHI", "BCUT2D_LOGPLOW", "MaxPartialCharge"};
+    opts.missing = "propagate";
     DescriptorComparison comparison(mols, opts);
 
     ASSERT_EQ(comparison.Columns().size(), 1u);
