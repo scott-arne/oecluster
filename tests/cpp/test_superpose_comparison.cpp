@@ -197,37 +197,79 @@ TEST_F(SuperposeComparisonDUTest, EmptyStructureListThrows) {
     EXPECT_THROW({ SuperposeComparison m(empty_dus); }, ComparisonError);
 }
 
-TEST_F(SuperposeComparisonDUTest, FactsFollowTheResolvedScoreType) {
-    struct Row {
-        SuperposeMethod method;
-        Capability distance_zero_self;
-        Capability similarity_zero_self;
-    };
-    // The four RMSD-resolving methods ignore the similarity flag, so both
-    // columns are Yes for them.
-    const std::vector<Row> rows{
-        {SuperposeMethod::GlobalCarbonAlpha, Capability::Yes, Capability::Yes},
-        {SuperposeMethod::Global, Capability::Yes, Capability::Yes},
-        {SuperposeMethod::DDM, Capability::Yes, Capability::Yes},
-        {SuperposeMethod::Weighted, Capability::Yes, Capability::Yes},
-        {SuperposeMethod::SSE, Capability::Yes, Capability::No},
-        {SuperposeMethod::SiteHopper, Capability::Yes, Capability::No},
-    };
-    ASSERT_EQ(rows.size(), 6u);
+// Compile-time tripwire for the hand-written method list below. An exhaustive
+// switch with no default case makes the compiler diagnose a SuperposeMethod
+// that has gained an enumerator, which an assertion on the list's own size
+// cannot do.
+static Capability expected_similarity_zero_self(SuperposeMethod method) {
+    switch (method) {
+        // These four resolve to RMSD, where the similarity flag is a
+        // documented no-op, so both directions are Yes.
+        case SuperposeMethod::GlobalCarbonAlpha:
+        case SuperposeMethod::Global:
+        case SuperposeMethod::DDM:
+        case SuperposeMethod::Weighted:
+            return Capability::Yes;
+        case SuperposeMethod::SSE:
+        case SuperposeMethod::SiteHopper:
+            return Capability::No;
+    }
+    return Capability::Unknown;  // unreachable; silences a missing-return warning
+}
 
-    for (const Row& row : rows) {
+TEST_F(SuperposeComparisonDUTest, FactsFollowTheResolvedScoreType) {
+    const std::vector<SuperposeMethod> methods{
+        SuperposeMethod::GlobalCarbonAlpha,
+        SuperposeMethod::Global,
+        SuperposeMethod::DDM,
+        SuperposeMethod::Weighted,
+        SuperposeMethod::SSE,
+        SuperposeMethod::SiteHopper,
+    };
+
+    for (SuperposeMethod method : methods) {
         SuperposeOptions distance_opts;
-        distance_opts.method = row.method;
+        distance_opts.method = method;
         distance_opts.similarity = false;
         SuperposeComparison distance_comparison(dus_, distance_opts);
-        EXPECT_EQ(distance_comparison.Facts().zero_self, row.distance_zero_self)
-            << static_cast<int>(row.method);
-        EXPECT_EQ(distance_comparison.Facts().triangle, Capability::Unknown);
+        const GateFacts distance_facts = distance_comparison.Facts();
+        EXPECT_EQ(distance_facts.zero_self, Capability::Yes)
+            << static_cast<int>(method);
+        EXPECT_EQ(distance_facts.triangle, Capability::Unknown)
+            << static_cast<int>(method);
+        EXPECT_EQ(distance_facts.data_integrity, DataIntegrity::Complete)
+            << static_cast<int>(method);
 
         SuperposeOptions similarity_opts = distance_opts;
         similarity_opts.similarity = true;
         SuperposeComparison similarity_comparison(dus_, similarity_opts);
-        EXPECT_EQ(similarity_comparison.Facts().zero_self, row.similarity_zero_self)
-            << static_cast<int>(row.method);
+        const GateFacts similarity_facts = similarity_comparison.Facts();
+        EXPECT_EQ(similarity_facts.zero_self,
+                  expected_similarity_zero_self(method))
+            << static_cast<int>(method);
+        EXPECT_EQ(similarity_facts.data_integrity, DataIntegrity::Complete)
+            << static_cast<int>(method);
     }
+}
+
+TEST_F(SuperposeComparisonDUTest, AsymmetricSelectionsDoNotBreakTheDiagonal) {
+    // Facts() stamps zero_self = Yes without reading the selection strings.
+    // That is only sound because superposing a structure onto itself yields
+    // the identity transform whatever atoms each side selects: a nested pair
+    // still scores 0.0, and a pair too disjoint to align raises rather than
+    // returning a nonzero diagonal.
+    SuperposeOptions nested_opts;
+    nested_opts.method = SuperposeMethod::GlobalCarbonAlpha;
+    nested_opts.ref_predicate = "protein";
+    nested_opts.fit_predicate = "backbone";
+    SuperposeComparison nested(dus_, nested_opts);
+    EXPECT_EQ(nested.Facts().zero_self, Capability::Yes);
+    EXPECT_DOUBLE_EQ(nested.Compare(0, 0), 0.0);
+
+    SuperposeOptions disjoint_opts;
+    disjoint_opts.method = SuperposeMethod::GlobalCarbonAlpha;
+    disjoint_opts.ref_predicate = "protein";
+    disjoint_opts.fit_predicate = "ligand";
+    SuperposeComparison disjoint(dus_, disjoint_opts);
+    EXPECT_THROW(disjoint.Compare(0, 0), ComparisonError);
 }

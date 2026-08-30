@@ -103,10 +103,15 @@ std::string ROCSComparison::ComparisonName() const {
 
 GateFacts ROCSComparison::Facts() const {
     GateFacts facts;
-    // Shape overlap is a similarity: a molecule's self-overlap is its maximum,
-    // not zero. The distance forms are max - score, which do vanish on the
-    // diagonal. No triangle inequality is provable either way.
-    facts.zero_self = opts_.similarity ? Capability::No : Capability::Yes;
+    // ROCS distance forms vanish on the diagonal only when every term they
+    // sum reaches its maximum for a molecule against itself. The color term
+    // never does: nothing prepares color atoms, so GetColorTanimoto() is
+    // identically 0 and self-distance is 0.5 for ComboNorm, 1.0 for Combo
+    // and Color. Only Shape is a true zero-self distance today.
+    facts.zero_self =
+        (!opts_.similarity && opts_.score_type == ROCSScoreType::Shape)
+            ? Capability::Yes
+            : Capability::No;
     facts.triangle = Capability::Unknown;
     facts.data_integrity = DataIntegrity::Complete;
     return facts;

@@ -127,16 +127,40 @@ TEST_F(ROCSComparisonTest, ColorForceFieldConfiguration) {
     EXPECT_LE(d, 1.0);
 }
 
-TEST_F(ROCSComparisonTest, FactsFollowTheSimilarityFlag) {
-    ROCSOptions distance_opts;
-    distance_opts.similarity = false;
-    ROCSComparison distance_comparison(mols_, distance_opts);
-    EXPECT_EQ(distance_comparison.Facts().zero_self, Capability::Yes);
-    EXPECT_EQ(distance_comparison.Facts().triangle, Capability::Unknown);
-    EXPECT_EQ(distance_comparison.Facts().data_integrity, DataIntegrity::Complete);
+TEST_F(ROCSComparisonTest, FactsFollowTheScoreType) {
+    // Only the Shape distance vanishes on the diagonal. ComboNorm, Combo and
+    // Color all carry the color term, which is identically zero even for a
+    // molecule overlaid on itself, so their self-distances are 0.5, 1.0 and
+    // 1.0 respectively. Every similarity form scores self at its maximum,
+    // which is never zero.
+    struct Row {
+        ROCSScoreType score_type;
+        Capability distance_zero_self;
+    };
+    const std::vector<Row> rows{
+        {ROCSScoreType::Shape, Capability::Yes},
+        {ROCSScoreType::ComboNorm, Capability::No},
+        {ROCSScoreType::Combo, Capability::No},
+        {ROCSScoreType::Color, Capability::No},
+    };
 
-    ROCSOptions similarity_opts;
-    similarity_opts.similarity = true;
-    ROCSComparison similarity_comparison(mols_, similarity_opts);
-    EXPECT_EQ(similarity_comparison.Facts().zero_self, Capability::No);
+    for (const Row& row : rows) {
+        ROCSOptions distance_opts;
+        distance_opts.score_type = row.score_type;
+        distance_opts.similarity = false;
+        ROCSComparison distance_comparison(mols_, distance_opts);
+        const GateFacts distance_facts = distance_comparison.Facts();
+        EXPECT_EQ(distance_facts.zero_self, row.distance_zero_self)
+            << static_cast<int>(row.score_type);
+        EXPECT_EQ(distance_facts.triangle, Capability::Unknown)
+            << static_cast<int>(row.score_type);
+        EXPECT_EQ(distance_facts.data_integrity, DataIntegrity::Complete)
+            << static_cast<int>(row.score_type);
+
+        ROCSOptions similarity_opts = distance_opts;
+        similarity_opts.similarity = true;
+        ROCSComparison similarity_comparison(mols_, similarity_opts);
+        EXPECT_EQ(similarity_comparison.Facts().zero_self, Capability::No)
+            << static_cast<int>(row.score_type);
+    }
 }
