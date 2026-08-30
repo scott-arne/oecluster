@@ -523,6 +523,8 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, _oecluster_is_oereceptor, "
         if (!ptr) {
             SWIG_exception_fail(SWIG_TypeError, "List item is not an OEMolBase object");
         }
+        // Same offset-0 base-cast assumption as the shared_ptr<OEMol> typemap
+        // below; see the comment there.
         temp.push_back(reinterpret_cast<OEChem::OEMolBase*>(ptr));
     }
     $1 = &temp;
@@ -561,6 +563,15 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, _oecluster_is_oereceptor, "
         // the wrapper's first member as if it were that owned pointer and
         // segfaults. OEMol(const OEMCMolBase&) is the documented converting
         // constructor for exactly this, and it preserves conformers.
+        //
+        // The cast is a base-class cast through a type-erased void*, so it is
+        // correct only while the OEMCMolBase subobject sits at offset 0 in
+        // OEMolWrapper. That holds today -- OEMCMolBase -> OEMolBase ->
+        // OESystem::OEBase is single, non-virtual inheritance throughout -- but
+        // multiple or virtual bases would shift the subobject, and this cast
+        // would then read the wrong bytes without crashing. SWIG's own base
+        // conversion cannot be used instead: the pointer comes from another
+        // extension module's type registry, which this module cannot query.
         auto* mcmol = reinterpret_cast<OEChem::OEMCMolBase*>(ptr);
         temp.push_back(std::make_shared<OEChem::OEMol>(*mcmol));
     }

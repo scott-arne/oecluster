@@ -165,3 +165,44 @@ def test_rocs_shape_self_distance_is_zero(native):
     options.score_type = native.ROCSScoreType_Shape
     comparison = native.ROCSComparison(_conformer_series(), options)
     assert comparison.Compare(0, 0) == pytest.approx(0.0, abs=1e-5)
+
+
+def test_typemap_preserves_conformers(native):
+    """The shared_ptr typemap's copy must keep every conformer, not just one.
+
+    ``ROCSComparison::Compare`` overlays the fit molecule with
+    ``OEOverlay::BestOverlay``, which searches all of its conformers. A
+    reference taken from a later conformer therefore scores a perfect overlay
+    only if the copy kept them; against a single-conformer fit the same
+    reference scores measurably worse. The second loop asserts that gap, so a
+    fixture that stopped discriminating would fail rather than pass vacuously.
+    """
+    pytest.importorskip("openeye.oeomega")
+    from openeye import oechem, oeomega
+
+    omega = oeomega.OEOmega()
+    omega.SetMaxConfs(3)
+    omega.SetStrictStereo(False)
+    multi = oechem.OEMol()
+    oechem.OESmilesToMol(multi, "c1ccccc1CCCCc1ccccc1")
+    assert omega(multi)
+    assert multi.NumConfs() > 1
+
+    def conformer_as_mol(conf):
+        return oechem.OEMol(multi.GetConf(oechem.OEHasConfIdx(conf.GetIdx())))
+
+    options = native.ROCSOptions()
+    options.score_type = native.ROCSScoreType_Shape
+    references = [conformer_as_mol(conf) for conf in multi.GetConfs()]
+
+    for index, reference in enumerate(references):
+        comparison = native.ROCSComparison([reference, multi], options)
+        assert comparison.Compare(0, 1) == pytest.approx(0.0, abs=1e-3), (
+            f"conformer {index} was not reachable in the copied molecule")
+
+    single = references[0]
+    gaps = [native.ROCSComparison([reference, single], options).Compare(0, 1)
+            for reference in references[1:]]
+    assert max(gaps) > 0.1, (
+        "the conformers generated here are too similar for this test to "
+        f"distinguish a dropped conformer from a kept one: gaps={gaps}")
