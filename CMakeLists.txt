@@ -125,6 +125,7 @@ set(OECLUSTER_SOURCES
     src/comparisons/FingerprintComparison.cpp
     src/comparisons/ROCSComparison.cpp
     src/comparisons/SuperposeComparison.cpp
+    src/comparisons/DescriptorComparison.cpp
     src/clustering/ClusterTypes.cpp
     src/clustering/ThresholdGraph.cpp
     src/clustering/Butina.cpp

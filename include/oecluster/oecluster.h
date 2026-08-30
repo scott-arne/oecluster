@@ -34,6 +34,7 @@ class DistanceMatrix;
 #include "oecluster/DistanceMatrix.h"
 #include "oecluster/DescriptorStatistics.h"
 
+#include "oecluster/comparisons/DescriptorComparison.h"
 #include "oecluster/comparisons/FingerprintComparison.h"
 #include "oecluster/comparisons/ROCSComparison.h"
 #include "oecluster/comparisons/SuperposeComparison.h"

@@ -17,3 +17,14 @@ TEST(UmbrellaHeaderTest, ReachesDescriptorStatistics) {
     EXPECT_EQ(result.num_rows, 0u);
     EXPECT_TRUE(result.columns.empty());
 }
+
+TEST(UmbrellaHeaderTest, ReachesDescriptorComparison) {
+    const OECluster::DescriptorOptions options;
+    EXPECT_TRUE(options.sources.empty());
+    EXPECT_EQ(options.metric, "standardized_euclidean");
+    EXPECT_EQ(options.missing, "complete_case");
+
+    // The type name is the assertion; cannot construct without molecules.
+    const OECluster::DescriptorComparison* ptr = nullptr;
+    EXPECT_EQ(ptr, nullptr);
+}

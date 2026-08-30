@@ -15,6 +15,7 @@
 #include "oecluster/Error.h"
 #include "oecluster/PDist.h"
 #include "oecluster/StorageBackend.h"
+#include "KernelOptions.h"
 #include "MetricTable.h"
 
 namespace OECluster {
@@ -35,14 +36,6 @@ static OEFP::Metric make_metric(const FingerprintOptions& opts) {
     params.tversky_alpha = opts.tversky_alpha;
     params.tversky_beta = opts.tversky_beta;
     return resolve_metric(opts.metric, opts.similarity, params, MetricSurface::Fingerprint);
-}
-
-static OEFP::BatchKernelOptions make_kernel_options(size_t num_threads,
-                                                    size_t chunk_size) {
-    OEFP::BatchKernelOptions options;
-    options.num_threads = num_threads;
-    options.chunk_size = chunk_size > 0 ? chunk_size : 256;
-    return options;
 }
 
 /**

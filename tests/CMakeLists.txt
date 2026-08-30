@@ -28,6 +28,7 @@ add_executable(oecluster_tests
     cpp/test_rocs_comparison.cpp
     cpp/test_superpose_comparison.cpp
     cpp/test_descriptor_statistics.cpp
+    cpp/test_descriptor_comparison.cpp
     cpp/test_umbrella_header.cpp
 )
 

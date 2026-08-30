@@ -52,7 +52,8 @@ struct DescriptorStatisticsResult {
     size_t inverse_covariance_rank = 0;       ///< Retained eigenvalues; 0 unless requested.
     size_t inverse_covariance_rows = 0;       ///< Complete rows the covariance used; 0 unless requested.
     std::vector<std::string> dropped_columns; ///< Discarded column names.
-    std::vector<std::string> dropped_reasons; ///< "zero-variance" or "non-numeric".
+    /// "zero-variance" (zero, negative, or non-finite) or "non-numeric".
+    std::vector<std::string> dropped_reasons;
     size_t num_rows = 0;                      ///< Molecules the fit ran over.
 };
 

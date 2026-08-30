@@ -229,3 +229,29 @@ TEST_F(DescriptorStatisticsTest, InverseCovarianceReportsItsRowCount) {
     const DescriptorStatisticsResult skipped = descriptor_statistics(mols_, without);
     EXPECT_EQ(skipped.inverse_covariance_rows, 0u);
 }
+
+TEST(DescriptorStatisticsNonFiniteTest, NonFiniteVarianceColumnsAreDropped) {
+    // Same present-NaN route as the comparison test: this pins the
+    // !isfinite(variance) half of the drop condition on the statistics
+    // surface, which until now was only covered for variance == 0.
+    std::vector<OEChem::OEGraphMol> graph_mols(2);
+    OEChem::OESmilesToMol(graph_mols[0], "c1ccccc1");
+    OEChem::OESmilesToMol(graph_mols[1], "[Na+]");
+    std::vector<OEChem::OEMolBase*> mols;
+    for (auto& gm : graph_mols) {
+        mols.push_back(&static_cast<OEChem::OEMolBase&>(gm));
+    }
+
+    DescriptorStatisticsOptions opts;
+    opts.sources = {"rdkit"};
+    opts.columns = {"BCUT2D_MWHI", "BCUT2D_LOGPLOW", "MaxPartialCharge"};
+    const DescriptorStatisticsResult result = descriptor_statistics(mols, opts);
+
+    ASSERT_EQ(result.columns.size(), 1u);
+    EXPECT_EQ(result.columns[0], "MaxPartialCharge");
+    EXPECT_TRUE(std::isfinite(result.variance[0]));
+    EXPECT_EQ(result.dropped_columns.size(), 2u);
+    for (const std::string& reason : result.dropped_reasons) {
+        EXPECT_EQ(reason, "zero-variance") << reason;
+    }
+}
