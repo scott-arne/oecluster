@@ -552,9 +552,17 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, _oecluster_is_oereceptor, "
         if (!ptr) {
             SWIG_exception_fail(SWIG_TypeError, "List item is not an OEMol object");
         }
-        // Make a COPY wrapped in shared_ptr (we do not own the Python object)
-        auto* mol = reinterpret_cast<OEChem::OEMol*>(ptr);
-        temp.push_back(std::make_shared<OEChem::OEMol>(*mol));
+        // Make a COPY wrapped in shared_ptr (we do not own the Python object).
+        //
+        // The cast target is OEMCMolBase, not OEMol. OpenEye's Python bindings
+        // hand out an OEMolWrapper*, which derives from OEMCMolBase but is not
+        // an OEChem::OEMol -- that type is a bare handle holding an
+        // OEOwnedPtr<OEMCMolBase>. Casting to OEMol and copy-constructing reads
+        // the wrapper's first member as if it were that owned pointer and
+        // segfaults. OEMol(const OEMCMolBase&) is the documented converting
+        // constructor for exactly this, and it preserves conformers.
+        auto* mcmol = reinterpret_cast<OEChem::OEMCMolBase*>(ptr);
+        temp.push_back(std::make_shared<OEChem::OEMol>(*mcmol));
     }
     $1 = &temp;
 }

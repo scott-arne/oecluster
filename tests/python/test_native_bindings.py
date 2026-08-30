@@ -3,13 +3,9 @@
 These assertions are deliberately about names and shapes rather than behavior:
 they fail loudly when an interface-file edit silently drops a symbol, which is
 otherwise only visible as an AttributeError deep inside a builder.
-
-Note: RMSDComparison and ROCSComparison molecule-driven tests are skipped due to
-a segfault in the std::vector<std::shared_ptr<OEChem::OEMol>> typemap at
-swig/oecluster.i:536. The typemap copy-constructs OEMol across two statically
-linked OEChem runtimes and crashes. Coverage of the RMSD and ROCS Python paths
-from molecules is absent until that typemap is fixed.
 """
+
+import math
 
 import pytest
 
@@ -109,12 +105,6 @@ def test_rmsd_options_are_exposed(native):
     assert options.heavy_only is False
 
 
-@pytest.mark.skip(
-    reason="std::vector<std::shared_ptr<OEChem::OEMol>> typemap at "
-    "swig/oecluster.i:536 copy-constructs OEMol across two statically "
-    "linked OEChem runtimes and segfaults; ROCSComparison is affected "
-    "identically; tracked for a dedicated fix"
-)
 def test_rmsd_comparison_from_molecules(native):
     from openeye import oechem
 
@@ -133,3 +123,45 @@ def test_rmsd_comparison_from_molecules(native):
     assert comparison.Size() == 3
     assert comparison.Compare(0, 0) == pytest.approx(0.0, abs=1e-6)
     assert comparison.Facts().zero_self == native.Capability_Yes
+
+
+def _conformer_series():
+    """Three benzenes with 3D coordinates, rigidly translated apart."""
+    pytest.importorskip("openeye.oeomega")
+    from openeye import oechem, oeomega
+
+    omega = oeomega.OEOmega()
+    omega.SetMaxConfs(1)
+    omega.SetStrictStereo(False)
+
+    mols = []
+    for shift in range(3):
+        mol = oechem.OEMol()
+        oechem.OESmilesToMol(mol, "c1ccccc1")
+        assert omega(mol)
+        for atom in mol.GetAtoms():
+            x, y, z = mol.GetCoords(atom)
+            mol.SetCoords(atom, (x + shift, y, z))
+        mols.append(mol)
+    return mols
+
+
+def test_rocs_comparison_accepts_molecules(native):
+    """The typemap's other consumer. This path segfaulted before Task 19."""
+    mols = _conformer_series()
+    comparison = native.ROCSComparison(mols, native.ROCSOptions())
+    assert comparison.ComparisonName() == "rocs"
+    assert comparison.Size() == 3
+    # Only that a finite score comes back. The combo self-score is wrong until
+    # Task 20 repairs the color term; asserting its value here would pin the bug.
+    value = comparison.Compare(0, 1)
+    assert math.isfinite(value)
+    assert 0.0 <= value <= 2.0
+
+
+def test_rocs_shape_self_distance_is_zero(native):
+    """Shape-only distance has a real zero diagonal; combo does not yet."""
+    options = native.ROCSOptions()
+    options.score_type = native.ROCSScoreType_Shape
+    comparison = native.ROCSComparison(_conformer_series(), options)
+    assert comparison.Compare(0, 0) == pytest.approx(0.0, abs=1e-5)
