@@ -314,3 +314,51 @@ def test_symmetric_distance_matrix_hierarchy():
     # The abstract base must not be directly constructible as a symmetric matrix.
     with pytest.raises(TypeError):
         DistanceMatrix("test", {}).num_samples  # type: ignore[call-arg]
+
+
+def test_pdist_rocs_end_to_end():
+    """The public rocs route, which segfaulted from Python before Task 19.
+
+    ``test_native_bindings.py`` covers the typemap in isolation. This covers
+    what a caller actually invokes: option mapping, label extraction, storage
+    allocation and the condensed result.
+    """
+    pytest.importorskip("openeye.oeomega")
+    import oecluster
+    from openeye import oechem, oeomega
+
+    omega = oeomega.OEOmega()
+    omega.SetMaxConfs(1)
+    omega.SetStrictStereo(False)
+    mols = []
+    for idx, smi in enumerate(["c1ccccc1", "c1ccc(O)cc1", "CCCCCCCC"]):
+        mol = oechem.OEMol()
+        oechem.OESmilesToMol(mol, smi)
+        assert omega(mol)
+        mol.SetTitle(f"m{idx}")
+        mols.append(mol)
+
+    dist = oecluster.pdist(mols, "rocs", score_type="shape")
+    assert dist.comparison_name == "rocs"
+    assert dist.num_samples == 3
+    assert dist.labels == ["m0", "m1", "m2"]
+    assert dist.params["comparison_type"] == "rocs"
+
+    condensed = np.asarray(dist)
+    assert condensed.shape == (3,)
+    assert np.all(np.isfinite(condensed))
+    assert np.all((condensed >= 0.0) & (condensed <= 1.0))
+
+    # Shape distance has to order these three the way chemistry does: benzene
+    # overlays phenol far better than either overlays octane. Asserting the
+    # ordering keeps the test meaningful without pinning overlay output to four
+    # decimals, which would make it a change detector.
+    benzene_phenol, benzene_octane, phenol_octane = condensed
+    assert benzene_phenol < 0.1
+    assert benzene_octane > 0.4
+    assert phenol_octane > 0.4
+
+    # Not the diagonal: squareform() zeroes it structurally, so asserting it
+    # would pass regardless of what ROCS computed.
+    square = np.asarray(dist.squareform())
+    assert np.allclose(square, square.T)

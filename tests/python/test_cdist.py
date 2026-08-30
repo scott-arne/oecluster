@@ -220,3 +220,36 @@ def test_cross_matrix_rejected_by_clustering():
     result = oecluster.butina(sym, 0.6)
     with pytest.raises(TypeError):
         oecluster.cluster_report(result, cross)
+
+
+def test_cdist_rocs_end_to_end():
+    """The rectangular rocs route through the same molecule typemap."""
+    pytest.importorskip("openeye.oeomega")
+    import oecluster
+    from openeye import oechem, oeomega
+
+    omega = oeomega.OEOmega()
+    omega.SetMaxConfs(1)
+    omega.SetStrictStereo(False)
+
+    def conformer(smiles, title):
+        mol = oechem.OEMol()
+        oechem.OESmilesToMol(mol, smiles)
+        assert omega(mol)
+        mol.SetTitle(title)
+        return mol
+
+    a = [conformer("c1ccccc1", "benzene")]
+    b = [conformer("c1ccc(O)cc1", "phenol"), conformer("CCCCCCCC", "octane")]
+
+    cross = oecluster.cdist(a, b, "rocs", score_type="shape")
+    assert cross.comparison_name == "rocs"
+    assert cross.shape == (1, 2)
+    assert cross.labels_a == ["benzene"]
+    assert cross.labels_b == ["phenol", "octane"]
+
+    values = np.asarray(cross)
+    assert np.all(np.isfinite(values))
+    # Same ordering as the pdist test, reached through the rectangular path.
+    assert values[0][0] < 0.1
+    assert values[0][1] > 0.4
