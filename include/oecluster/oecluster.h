@@ -26,7 +26,9 @@ class DistanceMatrix;
 }  // namespace OECluster
 
 #include "oecluster/Error.h"
+#include "oecluster/GateFacts.h"
 #include "oecluster/PairwiseComparison.h"
+#include "oecluster/CondensedIndex.h"
 #include "oecluster/StorageBackend.h"
 #include "oecluster/ThreadPool.h"
 #include "oecluster/PDist.h"

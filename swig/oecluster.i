@@ -10,6 +10,8 @@
 #include "oecluster/oecluster.h"
 #include "oecluster/Error.h"
 #include "oecluster/PairwiseComparison.h"
+#include "oecluster/GateFacts.h"
+#include "oecluster/DescriptorStatistics.h"
 #include "oecluster/StorageBackend.h"
 #include "oecluster/ThreadPool.h"
 #include "oecluster/PDist.h"
@@ -18,6 +20,8 @@
 #include "oecluster/comparisons/FingerprintComparison.h"
 #include "oecluster/comparisons/ROCSComparison.h"
 #include "oecluster/comparisons/SuperposeComparison.h"
+#include "oecluster/comparisons/DescriptorComparison.h"
+#include "oecluster/comparisons/RMSDComparison.h"
 #include "oecluster/clustering/DBSCAN.h"
 #include "oecluster/clustering/HDBSCAN.h"
 #include "oecluster/clustering/Agglomerative.h"
@@ -936,6 +940,13 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, _oecluster_is_oereceptor, "
 
 %ignore OECluster::ROCSComparison::ROCSComparison(std::shared_ptr<const SharedData>, const Options&);
 %ignore OECluster::SuperposeComparison::SuperposeComparison(std::shared_ptr<const SharedData>, const Options&);
+
+%ignore OECluster::DescriptorComparison::DescriptorComparison(std::shared_ptr<const Impl>);
+%ignore OECluster::DescriptorComparison::TryPDist;
+%ignore OECluster::DescriptorComparison::TryCDist;
+
+%ignore OECluster::RMSDComparison::RMSDComparison(std::shared_ptr<const SharedData>, const Options&);
+
 // Ignore SparseStorage internals that use unordered_map/shared_mutex/thread
 %ignore OECluster::SparseStorage::Entries;
 
@@ -1041,6 +1052,11 @@ public:
 %include "oecluster/Error.h"
 
 // ============================================================================
+// Capability facts (must precede PairwiseComparison, which returns GateFacts)
+// ============================================================================
+%include "oecluster/GateFacts.h"
+
+// ============================================================================
 // PairwiseComparison base class
 // ============================================================================
 %include "oecluster/PairwiseComparison.h"
@@ -1129,6 +1145,13 @@ public:
 %include "oecluster/comparisons/FingerprintComparison.h"
 %include "oecluster/comparisons/ROCSComparison.h"
 %include "oecluster/comparisons/SuperposeComparison.h"
+%include "oecluster/comparisons/DescriptorComparison.h"
+%include "oecluster/comparisons/RMSDComparison.h"
+
+// ============================================================================
+// Descriptor statistics
+// ============================================================================
+%include "oecluster/DescriptorStatistics.h"
 
 // ============================================================================
 // Clustering algorithms

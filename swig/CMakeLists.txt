@@ -13,15 +13,19 @@ set(_OECLUSTER_EXPECTED_LIB_VARS
 set(_OECLUSTER_SWIG_DEPENDS
     ${CMAKE_SOURCE_DIR}/include/oecluster/oecluster.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/Error.h
+    ${CMAKE_SOURCE_DIR}/include/oecluster/GateFacts.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/PairwiseComparison.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/StorageBackend.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/ThreadPool.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/PDist.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/CDist.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/DistanceMatrix.h
+    ${CMAKE_SOURCE_DIR}/include/oecluster/DescriptorStatistics.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/comparisons/FingerprintComparison.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/comparisons/ROCSComparison.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/comparisons/SuperposeComparison.h
+    ${CMAKE_SOURCE_DIR}/include/oecluster/comparisons/DescriptorComparison.h
+    ${CMAKE_SOURCE_DIR}/include/oecluster/comparisons/RMSDComparison.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/clustering/ClusterTypes.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/clustering/Butina.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/clustering/Representative.h
