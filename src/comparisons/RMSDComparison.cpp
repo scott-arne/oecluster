@@ -25,13 +25,24 @@ using IndexedBond = std::pair<unsigned int, unsigned int>;
 /// The molecule's bonds as a sorted set of index-wise endpoint pairs, which two
 /// molecules can be compared on exactly.
 ///
+/// ``heavy_only`` mirrors ``RMSDOptions::heavy_only`` and keeps only bonds whose
+/// two endpoints are both heavy. The signature must cover the atoms OERMSD will
+/// score and no more: on the heavy-only path a hydrogen's attachment cannot move
+/// the number, so rejecting a pair over it refuses input the comparison would
+/// have scored correctly.
+///
 /// Positions come from walking ``GetAtoms()`` rather than from
 /// ``OEAtomBase::GetIdx()``: index values can carry gaps once atoms have been
 /// deleted, and this guard exists to protect exactly that kind of edited
 /// molecule. Walking the iterator also keeps the numbering identical to the one
 /// the element-at-index check uses, so the two guards speak about the same
-/// positions.
-std::vector<IndexedBond> indexed_bonds(const OEChem::OEMol& mol) {
+/// positions. Note that the positions stay all-atom even under ``heavy_only``,
+/// rather than being renumbered to a heavy-only ordinal: the element-at-index
+/// check has already passed by the time this runs, so both items carry the same
+/// element at every position and their heavy atoms therefore occupy the same
+/// all-atom positions. Renumbering would buy nothing and would put the two
+/// guards on different coordinate systems.
+std::vector<IndexedBond> indexed_bonds(const OEChem::OEMol& mol, bool heavy_only) {
     std::map<const OEChem::OEAtomBase*, unsigned int> positions;
     unsigned int position = 0;
     for (OESystem::OEIter<OEChem::OEAtomBase> atom = mol.GetAtoms(); atom; ++atom, ++position) {
@@ -41,6 +52,10 @@ std::vector<IndexedBond> indexed_bonds(const OEChem::OEMol& mol) {
     std::vector<IndexedBond> bonds;
     bonds.reserve(mol.NumBonds());
     for (OESystem::OEIter<OEChem::OEBondBase> bond = mol.GetBonds(); bond; ++bond) {
+        if (heavy_only &&
+            (bond->GetBgn()->GetAtomicNum() == 1 || bond->GetEnd()->GetAtomicNum() == 1)) {
+            continue;
+        }
         // at() rather than operator[]: an endpoint outside the molecule's own atom
         // list would be a toolkit invariant violation, and silently folding it into
         // position 0 would make this correctness guard quietly wrong.
@@ -168,13 +183,30 @@ RMSDComparison::RMSDComparison(const std::vector<std::shared_ptr<OEChem::OEMol>>
                     }
                 }
 
-                // Matching elements at every index still does not establish a shared
-                // atom ordering: explicit hydrogens can be distributed identically as
-                // elements while attaching to different heavy atoms, which leaves the
-                // atom count, the canonical SMILES and the element sequence all equal
-                // and index-matched RMSD measuring unrelated pairs of atoms. Comparing
-                // the bonds by index closes that gap. It costs O(atoms + bonds log
-                // bonds) once per item, against an O(n^2) matrix of OERMSD calls.
+                // Matching elements at every index is not enough on its own: explicit
+                // hydrogens can be distributed identically as elements while attaching
+                // to different heavy atoms, which leaves the atom count, the canonical
+                // SMILES and the element sequence all equal and index-matched RMSD
+                // measuring unrelated pairs of atoms. Comparing the bonds by index
+                // closes that gap. It costs O(atoms + bonds log bonds) once per item,
+                // against an O(n^2) matrix of OERMSD calls.
+                //
+                // What the two checks together establish is that the index
+                // correspondence is structurally admissible -- same element at each
+                // index, same bonds between the same indices, among the atoms being
+                // scored. They do not establish that it is the correspondence the
+                // caller meant, and no structural check can: atoms that are
+                // symmetry-equivalent (a methyl's three hydrogens, a carboxylate's two
+                // oxygens) can be permuted between two files with no structural trace
+                // at all, and index matching will then report a real nonzero
+                // displacement between what are two poses of one molecule. Supplying
+                // that missing intent is what automorph=false is for, so it stays the
+                // caller's assertion; automorph=true is the answer for callers who
+                // cannot guarantee their atom order.
+                //
+                // The signature is scoped to opts.heavy_only for the reason
+                // indexed_bonds records: guarding atoms that are not scored would
+                // refuse pairs that would have scored correctly.
                 //
                 // Bond *order* is deliberately excluded, and must stay excluded. The
                 // question here is only whether index i names the same atom in every
@@ -185,9 +217,11 @@ RMSDComparison::RMSDComparison(const std::vector<std::shared_ptr<OEChem::OEMol>>
                 // are kekulizations of one aromatic system. Two kekulizations of one
                 // ligand are one atom ordering, and refusing them would be a false
                 // refusal on input two writers can easily produce from one molecule.
-                const std::vector<IndexedBond> reference_bonds = indexed_bonds(*owned[0]);
+                const std::vector<IndexedBond> reference_bonds =
+                    indexed_bonds(*owned[0], opts.heavy_only);
                 for (size_t i = 1; i < owned.size(); ++i) {
-                    const std::vector<IndexedBond> candidate_bonds = indexed_bonds(*owned[i]);
+                    const std::vector<IndexedBond> candidate_bonds =
+                        indexed_bonds(*owned[i], opts.heavy_only);
                     if (candidate_bonds.size() != reference_bonds.size()) {
                         throw ComparisonError(
                             "With automorph=false, atoms are matched by index, but item " +
@@ -203,9 +237,10 @@ RMSDComparison::RMSDComparison(const std::vector<std::shared_ptr<OEChem::OEMol>>
                             std::to_string(i) +
                             " bonds different pairs of indices than item 0; matching "
                             "elements at each index is not enough, because two files whose "
-                            "atom columns agree can still attach their hydrogens to "
-                            "different heavy atoms, so the items do not share one atom "
-                            "ordering. Use automorph=true for symmetry-aware matching");
+                            "atom columns agree can still bond different pairs of those "
+                            "atoms -- attaching their hydrogens to different heavy atoms, "
+                            "for instance -- so the items do not share one atom ordering. "
+                            "Use automorph=true for symmetry-aware matching");
                     }
                 }
             }

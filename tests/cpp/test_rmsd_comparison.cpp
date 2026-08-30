@@ -68,11 +68,19 @@ std::vector<size_t> hydrogen_parent_sequence(const OEChem::OEMol& mol) {
 }
 
 /// Every bond as (lower atom position, higher atom position), sorted, so a test
-/// can prove that two molecules bond the same index pairs.
-std::vector<std::pair<size_t, size_t>> bond_endpoints(const OEChem::OEMol& mol) {
+/// can prove that two molecules bond the same index pairs. With ``heavy_only``
+/// the set is narrowed to bonds between two heavy atoms, mirroring the subset
+/// the comparison scores, so a test can show a pair differing on one of the two
+/// sets while agreeing on the other.
+std::vector<std::pair<size_t, size_t>> bond_endpoints(const OEChem::OEMol& mol,
+                                                      bool heavy_only = false) {
     const std::map<const OEChem::OEAtomBase*, size_t> positions = atom_positions(mol);
     std::vector<std::pair<size_t, size_t>> endpoints;
     for (OESystem::OEIter<OEChem::OEBondBase> bond = mol.GetBonds(); bond; ++bond) {
+        if (heavy_only &&
+            (bond->GetBgn()->GetAtomicNum() == 1 || bond->GetEnd()->GetAtomicNum() == 1)) {
+            continue;
+        }
         const size_t begin = positions.at(bond->GetBgn());
         const size_t end = positions.at(bond->GetEnd());
         endpoints.push_back(std::make_pair(std::min(begin, end), std::max(begin, end)));
@@ -713,6 +721,100 @@ TEST_F(RMSDComparisonTest, ReversedHydrogenOrderAcceptedWithAutomorphOn) {
     opts.heavy_only = false;
     RMSDComparison comparison(pair, opts);
     EXPECT_NEAR(comparison.Compare(0, 1), 0.0, 1e-6);
+}
+
+TEST_F(RMSDComparisonTest, ReversedHydrogenOrderAcceptedWhenHeavyOnly) {
+    // The same pair the automorph=false rejection above is built on, scored on the
+    // default heavy_only=true path. Here the hydrogens are not measured at all, so
+    // the ordering they disagree about cannot reach the number, and the heavy atoms
+    // they do agree on give the correct 0.0. Refusing this pair would be a false
+    // refusal on the more commonly reached of the two hydrogen paths.
+    const std::vector<std::shared_ptr<OEChem::OEMol>> pair = make_reversed_hydrogen_ethanols();
+
+    // Prove the fixture is the hard case: the pair really does disagree on the
+    // all-atom bond graph, so an unscoped guard has something to reject it on, and
+    // really does agree on the heavy-heavy bonds that are all this path scores.
+    ASSERT_NE(bond_endpoints(*pair[0]), bond_endpoints(*pair[1]));
+    ASSERT_EQ(bond_endpoints(*pair[0], true), bond_endpoints(*pair[1], true));
+
+    RMSDOptions opts;
+    opts.automorph = false;
+    // heavy_only stays at its default true.
+    RMSDComparison comparison(pair, opts);
+    EXPECT_NEAR(comparison.Compare(0, 1), 0.0, 1e-6);
+}
+
+TEST_F(RMSDComparisonTest, HeavyBondGraphMismatchRejectedWhenHeavyOnly) {
+    // Scoping the bond signature to the scored atoms must narrow the guard, not
+    // retire it: a disagreement among the heavy bonds is a disagreement about the
+    // atoms heavy_only=true actually measures. Two n-propanols, four heavy atoms
+    // each, carbon-carbon-carbon-oxygen at the same indices in both, but chained
+    // 0-1-2-3 in one and 1-0-2-3 in the other. They are the same molecule in the
+    // same place under two numberings, so index matching would report a confident
+    // 0.707 where the truth is 0.0.
+    auto mol_a = std::make_shared<OEChem::OEMol>();
+    auto mol_b = std::make_shared<OEChem::OEMol>();
+    float x0[3] = {0.0f, 0.0f, 0.0f};
+    float x1[3] = {1.0f, 0.0f, 0.0f};
+    float x2[3] = {2.0f, 0.0f, 0.0f};
+    float x3[3] = {3.0f, 0.0f, 0.0f};
+
+    std::vector<OEChem::OEAtomBase*> a;
+    for (int i = 0; i < 3; ++i) {
+        a.push_back(mol_a->NewAtom(6));
+    }
+    a.push_back(mol_a->NewAtom(8));
+    mol_a->NewBond(a[0], a[1], 1);
+    mol_a->NewBond(a[1], a[2], 1);
+    mol_a->NewBond(a[2], a[3], 1);
+    mol_a->SetCoords(a[0], x0);
+    mol_a->SetCoords(a[1], x1);
+    mol_a->SetCoords(a[2], x2);
+    mol_a->SetCoords(a[3], x3);
+    mol_a->SetDimension(2);
+    // Hand-built atoms carry no implicit hydrogens, which would leave the canonical
+    // SMILES as [C][C][C][O] rather than the propanol the fixture is meant to be.
+    OEChem::OEAssignImplicitHydrogens(*mol_a);
+
+    std::vector<OEChem::OEAtomBase*> b;
+    for (int i = 0; i < 3; ++i) {
+        b.push_back(mol_b->NewAtom(6));
+    }
+    b.push_back(mol_b->NewAtom(8));
+    mol_b->NewBond(b[1], b[0], 1);
+    mol_b->NewBond(b[0], b[2], 1);
+    mol_b->NewBond(b[2], b[3], 1);
+    // The chain runs 1-0-2-3, so the same four points carry the same molecule with
+    // indices 0 and 1 exchanged.
+    mol_b->SetCoords(b[1], x0);
+    mol_b->SetCoords(b[0], x1);
+    mol_b->SetCoords(b[2], x2);
+    mol_b->SetCoords(b[3], x3);
+    mol_b->SetDimension(2);
+    OEChem::OEAssignImplicitHydrogens(*mol_b);
+
+    // Prove the fixture is the hard case: every guard that runs before the bond
+    // comparison passes on this pair, and no hydrogen is involved, so the rejection
+    // below can only come from the heavy-heavy bonds.
+    ASSERT_EQ(mol_a->NumAtoms(), mol_b->NumAtoms());
+    ASSERT_EQ(OEChem::OEMolToSmiles(*mol_a), OEChem::OEMolToSmiles(*mol_b));
+    ASSERT_EQ(OEChem::OEMolToSmiles(*mol_a), std::string("CCCO"));
+    ASSERT_EQ(element_sequence(*mol_a), element_sequence(*mol_b));
+    ASSERT_NE(bond_endpoints(*mol_a, true), bond_endpoints(*mol_b, true));
+
+    std::vector<std::shared_ptr<OEChem::OEMol>> rewired = {mol_a, mol_b};
+    RMSDOptions opts;
+    opts.automorph = false;
+    // heavy_only stays at its default true.
+    try {
+        RMSDComparison comparison(rewired, opts);
+        FAIL() << "expected a heavy-atom bond graph mismatch to be rejected";
+    } catch (const ComparisonError& exc) {
+        const std::string message = exc.what();
+        EXPECT_NE(message.find("automorph=false"), std::string::npos) << message;
+        EXPECT_NE(message.find("item 1"), std::string::npos) << message;
+        EXPECT_NE(message.find("bond"), std::string::npos) << message;
+    }
 }
 
 TEST_F(RMSDComparisonTest, BondOrderMismatchAcceptedWithAutomorphOff) {

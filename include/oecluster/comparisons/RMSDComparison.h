@@ -27,12 +27,21 @@ struct RMSDOptions {
     bool overlay = false;  ///< Superpose before measuring.
     /**
      * Symmetry-aware atom matching. With it off, atoms are matched by index,
-     * so every item must additionally share one atom ordering -- a shared
-     * canonical SMILES does not imply that. "One atom ordering" means the same
-     * element at each index and the same bonds between the same indices, though
-     * not the same bond orders: agreeing on the elements alone still allows
-     * explicit hydrogens to hang off different heavy atoms, which would have
-     * index-matched RMSD measuring unrelated pairs of atoms.
+     * and the caller is asserting that index i names the same atom in every
+     * item -- a shared canonical SMILES does not imply that. The constructor
+     * verifies only that the assertion is *structurally admissible*: the same
+     * element at each index, and the same bonds between the same indices among
+     * the atoms being scored (``heavy_only`` decides which those are), though
+     * not the same bond orders.
+     *
+     * That check cannot confirm the correspondence is the one intended, because
+     * some wrong correspondences leave no structural trace. Atoms that are
+     * symmetry-equivalent -- the three hydrogens of a methyl, the two oxygens
+     * of a carboxylate -- can be permuted between two files with every element,
+     * bond and canonical SMILES still agreeing, and index matching will then
+     * report a real nonzero displacement between what are in fact two poses of
+     * one molecule. Callers who cannot guarantee their atom order should leave
+     * this true.
      */
     bool automorph = true;
     bool heavy_only = true;  ///< Skip hydrogens.
