@@ -3,6 +3,7 @@
 #include "oecluster/comparisons/ROCSComparison.h"
 #include <oechem.h>
 #include <oeshape.h>
+#include <string>
 
 using namespace OECluster;
 
@@ -127,40 +128,41 @@ TEST_F(ROCSComparisonTest, ColorForceFieldConfiguration) {
     EXPECT_LE(d, 1.0);
 }
 
-TEST_F(ROCSComparisonTest, FactsFollowTheScoreType) {
-    // Only the Shape distance vanishes on the diagonal. ComboNorm, Combo and
-    // Color all carry the color term, which is identically zero even for a
-    // molecule overlaid on itself, so their self-distances are 0.5, 1.0 and
-    // 1.0 respectively. Every similarity form scores self at its maximum,
-    // which is never zero.
+TEST_F(ROCSComparisonTest, FactsCoverEveryScoreTypeAndDirection) {
+    // Self-comparison values on valid 3D conformers: shape Tanimoto is 1.0 and
+    // color Tanimoto is 0.0, because nothing prepares color atoms. Exactly two
+    // of the eight configurations therefore vanish on the diagonal -- the Shape
+    // distance and, as an artifact of that same broken color term, the Color
+    // similarity. is_distance follows the flag alone; zero_self does not.
     struct Row {
         ROCSScoreType score_type;
-        Capability distance_zero_self;
+        bool similarity;
+        Capability is_distance;
+        Capability zero_self;
     };
     const std::vector<Row> rows{
-        {ROCSScoreType::Shape, Capability::Yes},
-        {ROCSScoreType::ComboNorm, Capability::No},
-        {ROCSScoreType::Combo, Capability::No},
-        {ROCSScoreType::Color, Capability::No},
+        {ROCSScoreType::ComboNorm, false, Capability::Yes, Capability::No},
+        {ROCSScoreType::Combo, false, Capability::Yes, Capability::No},
+        {ROCSScoreType::Shape, false, Capability::Yes, Capability::Yes},
+        {ROCSScoreType::Color, false, Capability::Yes, Capability::No},
+        {ROCSScoreType::ComboNorm, true, Capability::No, Capability::No},
+        {ROCSScoreType::Combo, true, Capability::No, Capability::No},
+        {ROCSScoreType::Shape, true, Capability::No, Capability::No},
+        {ROCSScoreType::Color, true, Capability::No, Capability::Yes},
     };
 
     for (const Row& row : rows) {
-        ROCSOptions distance_opts;
-        distance_opts.score_type = row.score_type;
-        distance_opts.similarity = false;
-        ROCSComparison distance_comparison(mols_, distance_opts);
-        const GateFacts distance_facts = distance_comparison.Facts();
-        EXPECT_EQ(distance_facts.zero_self, row.distance_zero_self)
-            << static_cast<int>(row.score_type);
-        EXPECT_EQ(distance_facts.triangle, Capability::Unknown)
-            << static_cast<int>(row.score_type);
-        EXPECT_EQ(distance_facts.data_integrity, DataIntegrity::Complete)
-            << static_cast<int>(row.score_type);
-
-        ROCSOptions similarity_opts = distance_opts;
-        similarity_opts.similarity = true;
-        ROCSComparison similarity_comparison(mols_, similarity_opts);
-        EXPECT_EQ(similarity_comparison.Facts().zero_self, Capability::No)
-            << static_cast<int>(row.score_type);
+        ROCSOptions opts;
+        opts.score_type = row.score_type;
+        opts.similarity = row.similarity;
+        ROCSComparison comparison(mols_, opts);
+        const GateFacts facts = comparison.Facts();
+        const std::string label =
+            std::to_string(static_cast<int>(row.score_type)) +
+            (row.similarity ? " similarity" : " distance");
+        EXPECT_EQ(facts.is_distance, row.is_distance) << label;
+        EXPECT_EQ(facts.zero_self, row.zero_self) << label;
+        EXPECT_EQ(facts.triangle, Capability::Unknown) << label;
+        EXPECT_EQ(facts.data_integrity, DataIntegrity::Complete) << label;
     }
 }

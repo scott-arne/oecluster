@@ -184,6 +184,7 @@ TEST_F(FingerprintComparisonTest, DefaultOptionsMatchTheSpecifiedDefaults) {
 TEST_F(FingerprintComparisonTest, DefaultFactsPassBothGateTiers) {
     FingerprintComparison comparison(mols_);
     const GateFacts facts = comparison.Facts();
+    EXPECT_EQ(facts.is_distance, Capability::Yes);
     EXPECT_EQ(facts.zero_self, Capability::Yes);
     EXPECT_EQ(facts.triangle, Capability::Yes);
     EXPECT_EQ(facts.data_integrity, DataIntegrity::Complete);
@@ -193,7 +194,9 @@ TEST_F(FingerprintComparisonTest, SimilarityFactsFailTierOne) {
     FingerprintOptions opts;
     opts.similarity = true;
     FingerprintComparison comparison(mols_, opts);
-    EXPECT_EQ(comparison.Facts().zero_self, Capability::No);
+    const GateFacts facts = comparison.Facts();
+    EXPECT_EQ(facts.is_distance, Capability::No);
+    EXPECT_EQ(facts.zero_self, Capability::No);
 }
 
 TEST_F(FingerprintComparisonTest, DiceFactsFailTierTwoOnly) {
@@ -201,8 +204,26 @@ TEST_F(FingerprintComparisonTest, DiceFactsFailTierTwoOnly) {
     opts.metric = "dice";
     FingerprintComparison comparison(mols_, opts);
     const GateFacts facts = comparison.Facts();
+    EXPECT_EQ(facts.is_distance, Capability::Yes);
     EXPECT_EQ(facts.zero_self, Capability::Yes);
     EXPECT_EQ(facts.triangle, Capability::No);
+}
+
+TEST_F(FingerprintComparisonTest, TverskyIsStampedASimilarityInBothDirections) {
+    // The metric table builds OEFP's Tversky for tversky whatever the
+    // similarity flag says (src/comparisons/MetricTable.cpp), because Tversky
+    // has no distance form. The flag is therefore ignored here, and both
+    // directions must report the same orientation rather than one of them
+    // quietly claiming to be a distance.
+    for (bool similarity : {false, true}) {
+        FingerprintOptions opts;
+        opts.metric = "tversky";
+        opts.similarity = similarity;
+        FingerprintComparison comparison(mols_, opts);
+        const GateFacts facts = comparison.Facts();
+        EXPECT_EQ(facts.is_distance, Capability::No) << similarity;
+        EXPECT_EQ(facts.zero_self, Capability::No) << similarity;
+    }
 }
 
 TEST_F(FingerprintComparisonTest, MorganRadiusIsSeparateFromAtomPairWindow) {

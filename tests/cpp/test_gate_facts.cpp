@@ -20,6 +20,7 @@ class StampedComparison : public SilentComparison {
 public:
     GateFacts Facts() const override {
         GateFacts facts;
+        facts.is_distance = Capability::No;
         facts.zero_self = Capability::Yes;
         facts.triangle = Capability::No;
         facts.data_integrity = DataIntegrity::SubsetScored;
@@ -29,6 +30,7 @@ public:
 
 TEST(GateFactsTest, DefaultsAreUnknownAndComplete) {
     GateFacts facts;
+    EXPECT_EQ(facts.is_distance, Capability::Unknown);
     EXPECT_EQ(facts.zero_self, Capability::Unknown);
     EXPECT_EQ(facts.triangle, Capability::Unknown);
     EXPECT_EQ(facts.data_integrity, DataIntegrity::Complete);
@@ -37,6 +39,7 @@ TEST(GateFactsTest, DefaultsAreUnknownAndComplete) {
 TEST(GateFactsTest, BaseComparisonReportsUnknown) {
     SilentComparison comparison;
     const GateFacts facts = comparison.Facts();
+    EXPECT_EQ(facts.is_distance, Capability::Unknown);
     EXPECT_EQ(facts.zero_self, Capability::Unknown);
     EXPECT_EQ(facts.triangle, Capability::Unknown);
     EXPECT_EQ(facts.data_integrity, DataIntegrity::Complete);
@@ -46,6 +49,7 @@ TEST(GateFactsTest, OverrideIsVisibleThroughBasePointer) {
     StampedComparison stamped;
     PairwiseComparison* base = &stamped;
     const GateFacts facts = base->Facts();
+    EXPECT_EQ(facts.is_distance, Capability::No);
     EXPECT_EQ(facts.zero_self, Capability::Yes);
     EXPECT_EQ(facts.triangle, Capability::No);
     EXPECT_EQ(facts.data_integrity, DataIntegrity::SubsetScored);

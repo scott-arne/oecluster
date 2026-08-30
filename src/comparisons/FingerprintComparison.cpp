@@ -450,6 +450,9 @@ std::string FingerprintComparison::ComparisonName() const {
 
 GateFacts FingerprintComparison::Facts() const {
     GateFacts facts;
+    facts.is_distance = pimpl_->metric.Type() == OEFP::MetricType::Distance
+                            ? Capability::Yes
+                            : Capability::No;
     facts.zero_self =
         pimpl_->metric.HasZeroSelfDistance() ? Capability::Yes : Capability::No;
     facts.triangle =

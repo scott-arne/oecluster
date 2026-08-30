@@ -217,6 +217,24 @@ static Capability expected_similarity_zero_self(SuperposeMethod method) {
     return Capability::Unknown;  // unreachable; silences a missing-return warning
 }
 
+// Second tripwire, same reasoning as the one above: an exhaustive switch with
+// no default case makes a new SuperposeMethod a compile error rather than a
+// silently wrong orientation.
+static Capability expected_similarity_is_distance(SuperposeMethod method) {
+    switch (method) {
+        // RMSD ignores the similarity flag, so these stay distances.
+        case SuperposeMethod::GlobalCarbonAlpha:
+        case SuperposeMethod::Global:
+        case SuperposeMethod::DDM:
+        case SuperposeMethod::Weighted:
+            return Capability::Yes;
+        case SuperposeMethod::SSE:
+        case SuperposeMethod::SiteHopper:
+            return Capability::No;
+    }
+    return Capability::Unknown;  // unreachable; silences a missing-return warning
+}
+
 TEST_F(SuperposeComparisonDUTest, FactsFollowTheResolvedScoreType) {
     const std::vector<SuperposeMethod> methods{
         SuperposeMethod::GlobalCarbonAlpha,
@@ -233,6 +251,8 @@ TEST_F(SuperposeComparisonDUTest, FactsFollowTheResolvedScoreType) {
         distance_opts.similarity = false;
         SuperposeComparison distance_comparison(dus_, distance_opts);
         const GateFacts distance_facts = distance_comparison.Facts();
+        EXPECT_EQ(distance_facts.is_distance, Capability::Yes)
+            << static_cast<int>(method);
         EXPECT_EQ(distance_facts.zero_self, Capability::Yes)
             << static_cast<int>(method);
         EXPECT_EQ(distance_facts.triangle, Capability::Unknown)
@@ -244,6 +264,9 @@ TEST_F(SuperposeComparisonDUTest, FactsFollowTheResolvedScoreType) {
         similarity_opts.similarity = true;
         SuperposeComparison similarity_comparison(dus_, similarity_opts);
         const GateFacts similarity_facts = similarity_comparison.Facts();
+        EXPECT_EQ(similarity_facts.is_distance,
+                  expected_similarity_is_distance(method))
+            << static_cast<int>(method);
         EXPECT_EQ(similarity_facts.zero_self,
                   expected_similarity_zero_self(method))
             << static_cast<int>(method);
@@ -263,6 +286,7 @@ TEST_F(SuperposeComparisonDUTest, AsymmetricSelectionsDoNotBreakTheDiagonal) {
     nested_opts.ref_predicate = "protein";
     nested_opts.fit_predicate = "backbone";
     SuperposeComparison nested(dus_, nested_opts);
+    EXPECT_EQ(nested.Facts().is_distance, Capability::Yes);
     EXPECT_EQ(nested.Facts().zero_self, Capability::Yes);
     EXPECT_DOUBLE_EQ(nested.Compare(0, 0), 0.0);
 

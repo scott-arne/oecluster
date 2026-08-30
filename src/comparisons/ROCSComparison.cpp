@@ -103,15 +103,22 @@ std::string ROCSComparison::ComparisonName() const {
 
 GateFacts ROCSComparison::Facts() const {
     GateFacts facts;
-    // ROCS distance forms vanish on the diagonal only when every term they
-    // sum reaches its maximum for a molecule against itself. The color term
-    // never does: nothing prepares color atoms, so GetColorTanimoto() is
-    // identically 0 and self-distance is 0.5 for ComboNorm, 1.0 for Combo
-    // and Color. Only Shape is a true zero-self distance today.
+    facts.is_distance = opts_.similarity ? Capability::No : Capability::Yes;
+
+    // The diagonal is separate from the orientation, because the color term is
+    // identically zero: nothing prepares color atoms, so GetColorTanimoto()
+    // returns 0.0 even for a molecule overlaid on itself. That makes exactly
+    // two of the eight configurations vanish on the diagonal -- the Shape
+    // distance, which is the intended one, and the Color similarity, which is
+    // an accident of the broken color term rather than a property worth
+    // relying on. Repairing the color term flips both of those cells.
+    const bool shape_distance =
+        !opts_.similarity && opts_.score_type == ROCSScoreType::Shape;
+    const bool color_similarity =
+        opts_.similarity && opts_.score_type == ROCSScoreType::Color;
     facts.zero_self =
-        (!opts_.similarity && opts_.score_type == ROCSScoreType::Shape)
-            ? Capability::Yes
-            : Capability::No;
+        (shape_distance || color_similarity) ? Capability::Yes : Capability::No;
+
     facts.triangle = Capability::Unknown;
     facts.data_integrity = DataIntegrity::Complete;
     return facts;

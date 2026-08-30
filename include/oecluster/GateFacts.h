@@ -28,15 +28,23 @@ enum class Capability { Unknown, No, Yes };
 enum class DataIntegrity { Complete, NaNPresent, SubsetScored };
 
 /**
- * @brief The three facts the capability gate reads off a comparison.
+ * @brief The four facts the capability gate reads off a comparison.
  *
  * Defaults are deliberately permissive: a comparison that does not override
  * ``PairwiseComparison::Facts`` reports ``Unknown`` capabilities and
  * ``Complete`` integrity, so the gate lets its results through.
+ *
+ * ``is_distance`` and ``zero_self`` answer different questions and must not be
+ * conflated. ``is_distance`` is about orientation -- whether a small value
+ * means "close" -- and it is what the gate refuses a similarity matrix on.
+ * ``zero_self`` is about the number the comparison actually returns on the
+ * diagonal. A comparison can be a similarity whose self-value happens to be
+ * zero, and reporting that honestly is the point of keeping the two apart.
  */
 struct GateFacts {
-    Capability zero_self = Capability::Unknown;  ///< Is d(x, x) == 0?
-    Capability triangle = Capability::Unknown;   ///< Does d obey the triangle inequality?
+    Capability is_distance = Capability::Unknown;  ///< Do small values mean "close"?
+    Capability zero_self = Capability::Unknown;    ///< Is d(x, x) == 0?
+    Capability triangle = Capability::Unknown;     ///< Does d obey the triangle inequality?
     DataIntegrity data_integrity = DataIntegrity::Complete;  ///< Coverage of the scored values.
 };
 

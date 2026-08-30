@@ -336,10 +336,15 @@ GateFacts SuperposeComparison::Facts() const {
     GateFacts facts;
     const SuperposeScoreType resolved = resolve_score_type(opts_.method, opts_.score_type);
     if (resolved == SuperposeScoreType::RMSD) {
-        // The similarity flag is a documented no-op on this branch, so reading
-        // it here would refuse the four methods that resolve to RMSD.
+        // The similarity flag is a documented no-op on this branch (`:293`), so
+        // reading it here would mislabel the four methods that resolve to RMSD:
+        // they return a distance whatever the flag says, and it is zero on the
+        // diagonal.
+        facts.is_distance = Capability::Yes;
         facts.zero_self = Capability::Yes;
     } else {
+        // Tanimoto and PatchScore both invert on the flag (`:302`, `:311`).
+        facts.is_distance = opts_.similarity ? Capability::No : Capability::Yes;
         facts.zero_self = opts_.similarity ? Capability::No : Capability::Yes;
     }
     facts.triangle = Capability::Unknown;
