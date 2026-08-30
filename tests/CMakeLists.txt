@@ -26,6 +26,7 @@ add_executable(oecluster_tests
     cpp/test_fingerprint_comparison.cpp
     cpp/test_gate_facts.cpp
     cpp/test_rocs_comparison.cpp
+    cpp/test_rmsd_comparison.cpp
     cpp/test_superpose_comparison.cpp
     cpp/test_descriptor_statistics.cpp
     cpp/test_descriptor_comparison.cpp

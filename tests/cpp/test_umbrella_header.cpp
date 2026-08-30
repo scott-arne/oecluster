@@ -28,3 +28,14 @@ TEST(UmbrellaHeaderTest, ReachesDescriptorComparison) {
     const OECluster::DescriptorComparison* ptr = nullptr;
     EXPECT_EQ(ptr, nullptr);
 }
+
+TEST(UmbrellaHeaderTest, ReachesRMSDComparison) {
+    const OECluster::RMSDOptions options;
+    EXPECT_FALSE(options.overlay);
+    EXPECT_TRUE(options.automorph);
+    EXPECT_TRUE(options.heavy_only);
+
+    // The type name is the assertion; cannot construct without molecules.
+    const OECluster::RMSDComparison* ptr = nullptr;
+    EXPECT_EQ(ptr, nullptr);
+}

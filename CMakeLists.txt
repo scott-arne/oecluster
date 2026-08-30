@@ -124,6 +124,7 @@ set(OECLUSTER_SOURCES
     src/comparisons/MetricTable.cpp
     src/comparisons/FingerprintComparison.cpp
     src/comparisons/ROCSComparison.cpp
+    src/comparisons/RMSDComparison.cpp
     src/comparisons/SuperposeComparison.cpp
     src/comparisons/DescriptorComparison.cpp
     src/clustering/ClusterTypes.cpp
