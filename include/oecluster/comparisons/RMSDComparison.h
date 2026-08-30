@@ -24,8 +24,13 @@ namespace OECluster {
  * share a receptor frame. Conformer work sets ``overlay``.
  */
 struct RMSDOptions {
-    bool overlay = false;    ///< Superpose before measuring.
-    bool automorph = true;   ///< Symmetry-aware atom matching.
+    bool overlay = false;  ///< Superpose before measuring.
+    /**
+     * Symmetry-aware atom matching. With it off, atoms are matched by index,
+     * so every item must additionally share one atom ordering -- a shared
+     * canonical SMILES does not imply that.
+     */
+    bool automorph = true;
     bool heavy_only = true;  ///< Skip hydrogens.
 };
 
@@ -33,9 +38,14 @@ struct RMSDOptions {
  * @brief Coordinate RMSD comparison over molecules that share a topology.
  *
  * Every item must have the same canonical SMILES; the constructor checks this
- * once and directs callers with mixed input to the ROCS comparison. Multi-
- * conformer input is expanded to one item per conformer by the Python layer
- * before the comparison is built.
+ * once and directs callers with mixed input to the ROCS comparison. With
+ * ``automorph=false`` every item must additionally share one atom ordering
+ * (see ``RMSDOptions::automorph``).
+ *
+ * Only each molecule's active conformer is measured: a multi-conformer
+ * ``OEMol`` yields one number per molecule, not per pose. Callers wanting
+ * per-pose distances should expand conformers into separate items first (the
+ * Python layer does this by default with ``expand_conformers=True``).
  *
  * Molecules are held by ``shared_ptr`` to const shared state and are never
  * modified: ``OEChem::OERMSD`` takes both molecules by const reference, so
@@ -46,9 +56,10 @@ public:
     using Options = RMSDOptions;
 
     /**
-     * @brief Construct an RMSDComparison from a set of single-conformer molecules.
+     * @brief Construct an RMSDComparison from molecules with 3D coordinates.
      *
-     * :param mols: Shared pointers to molecules with 3D coordinates.
+     * :param mols: Shared pointers to molecules; only each molecule's active
+     *     conformer is measured.
      * :param opts: Scoring options.
      * :raises ComparisonError: When a pointer is null or an item's topology
      *     differs from the first item's.

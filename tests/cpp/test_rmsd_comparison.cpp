@@ -162,3 +162,56 @@ TEST_F(RMSDComparisonTest, CloneScoresIdentically) {
     EXPECT_NEAR(clone->Compare(0, 2), comparison.Compare(0, 2), 1e-9);
     EXPECT_EQ(clone->ComparisonName(), "rmsd");
 }
+
+TEST_F(RMSDComparisonTest, NonFiniteCoordinateIsRejected) {
+    auto mol_with_nan = make_shifted("c1ccccc1", 0.0);
+    // Set a NaN coordinate on the first atom.
+    OESystem::OEIter<OEChem::OEAtomBase> atom = mol_with_nan->GetAtoms();
+    float coords[3] = {std::nanf(""), 0.0f, 0.0f};
+    mol_with_nan->SetCoords(atom, coords);
+
+    std::vector<std::shared_ptr<OEChem::OEMol>> with_nan = {mol_with_nan, mols_[0]};
+    RMSDComparison comparison(with_nan);
+    try {
+        comparison.Compare(0, 1);
+        FAIL() << "expected a non-finite coordinate to be rejected";
+    } catch (const ComparisonError& exc) {
+        const std::string message = exc.what();
+        EXPECT_NE(message.find("non-finite"), std::string::npos) << message;
+        EXPECT_NE(message.find("coordinate"), std::string::npos) << message;
+    }
+}
+
+TEST_F(RMSDComparisonTest, HeavyOnlySkipsHydrogens) {
+    // Build a methanol molecule with explicit hydrogens.
+    auto mol_original = std::make_shared<OEChem::OEMol>();
+    OEChem::OESmilesToMol(*mol_original, "CO");
+    OEChem::OEGenerate2DCoordinates(*mol_original);
+    OEChem::OEAddExplicitHydrogens(*mol_original);
+
+    // Clone it and displace only the hydrogens.
+    auto mol_displaced_h = std::make_shared<OEChem::OEMol>(*mol_original);
+    for (OESystem::OEIter<OEChem::OEAtomBase> atom = mol_displaced_h->GetAtoms(); atom; ++atom) {
+        if (atom->GetAtomicNum() == 1) {  // hydrogen
+            float coords[3] = {0.0f, 0.0f, 0.0f};
+            mol_displaced_h->GetCoords(atom, coords);
+            coords[0] += 3.0f;
+            mol_displaced_h->SetCoords(atom, coords);
+        }
+    }
+
+    std::vector<std::shared_ptr<OEChem::OEMol>> mols = {mol_original, mol_displaced_h};
+
+    // With heavy_only=true, hydrogens are skipped and RMSD is zero.
+    RMSDOptions opts_heavy;
+    opts_heavy.heavy_only = true;
+    RMSDComparison comparison_heavy(mols, opts_heavy);
+    EXPECT_NEAR(comparison_heavy.Compare(0, 1), 0.0, 1e-6);
+
+    // With heavy_only=false, the displaced hydrogens contribute and RMSD is nonzero.
+    RMSDOptions opts_all;
+    opts_all.heavy_only = false;
+    RMSDComparison comparison_all(mols, opts_all);
+    const double rmsd_all = comparison_all.Compare(0, 1);
+    EXPECT_GT(rmsd_all, 0.0);
+}

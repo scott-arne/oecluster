@@ -5,6 +5,7 @@
 
 #include "oecluster/comparisons/RMSDComparison.h"
 
+#include <cmath>
 #include <oechem.h>
 #include "oecluster/Error.h"
 
@@ -52,13 +53,21 @@ RMSDComparison::RMSDComparison(std::shared_ptr<const SharedData> shared, const O
 double RMSDComparison::Compare(size_t i, size_t j) {
     const double value = OEChem::OERMSD(*shared_->mols[i], *shared_->mols[j],
                                         opts_.automorph, opts_.heavy_only, opts_.overlay);
-    // -1.0 is OERMSD's atom-matching failure sentinel. The upfront topology
-    // check should make it unreachable, but matching can fail independently of
-    // SMILES equality and a negative distance must never reach storage.
+    if (!std::isfinite(value)) {
+        throw ComparisonError("OERMSD returned a non-finite value for items " +
+                              std::to_string(i) + " and " + std::to_string(j) +
+                              "; at least one of them carries a non-finite coordinate");
+    }
+    // -1.0 is OERMSD's atom-matching failure sentinel. This guard is load-bearing:
+    // molecules with the same canonical SMILES can differ in atom count (explicit
+    // vs. suppressed hydrogens), and with automorph=false they can differ in atom
+    // ordering. Both reach here and both return -1.0. A negative distance must never
+    // reach storage.
     if (value < 0.0) {
         throw ComparisonError("OERMSD could not match atoms between items " + std::to_string(i) +
                               " and " + std::to_string(j) +
-                              "; the molecules share a SMILES but not a usable atom mapping");
+                              "; the molecules share a SMILES but not a usable atom mapping " +
+                              "(check for differing hydrogen treatment or atom ordering)");
     }
     return value;
 }
@@ -82,7 +91,7 @@ GateFacts RMSDComparison::Facts() const {
     facts.is_distance = Capability::Yes;
     // Zero self-distance is structural: a molecule against itself has zero
     // displacement under every combination of the options.
-    //
+    facts.zero_self = Capability::Yes;
     // The triangle inequality is deliberately Unknown rather than Yes. In a
     // fixed frame RMSD is a Euclidean distance scaled by 1/sqrt(N), and a
     // minimum taken over a group acting by isometries -- the automorphism group
@@ -91,7 +100,6 @@ GateFacts RMSDComparison::Facts() const {
     // automorphism search is not stated to be exhaustive, and an approximate
     // minimum breaks the quotient argument. Unknown is permissive at the gate,
     // so this costs no caller anything and claims only what is proven.
-    facts.zero_self = Capability::Yes;
     facts.triangle = Capability::Unknown;
     facts.data_integrity = DataIntegrity::Complete;
     return facts;
