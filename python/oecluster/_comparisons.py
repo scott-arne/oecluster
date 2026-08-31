@@ -212,6 +212,10 @@ def reject_inapplicable_fingerprint_kwargs(named, *, fp_type, storage, metric):
 
     ``use_chirality`` applies to all four families and is never rejected.
 
+    An ``fp_type`` spelling this module does not recognize is left entirely to
+    the C++ constructor: no rule here fires, so the caller sees the
+    authoritative family error instead of advice about an unrelated option.
+
     :param named: Option names the caller passed explicitly.
     :param fp_type: Selected fingerprint family.
     :param storage: Selected storage.
@@ -221,6 +225,12 @@ def reject_inapplicable_fingerprint_kwargs(named, *, fp_type, storage, metric):
     named = set(named)
     spelling = (fp_type or 'morgan').lower()
     family = _FAMILY_ALIASES.get(spelling)
+    if family is None:
+        # An unrecognized spelling is the C++ constructor's error to report.
+        # Any rule fired here would name a remedy -- another metric, another
+        # storage -- that cannot make the call valid, and would hide the one
+        # thing the caller has to change.
+        return
     store = (storage or 'binary').lower()
     metric_name = (metric or 'tanimoto').lower()
 
@@ -231,14 +241,13 @@ def reject_inapplicable_fingerprint_kwargs(named, *, fp_type, storage, metric):
             f"a chosen width. Drop numbits, or use storage='binary' or "
             f"storage='count'.")
 
-    if family is not None:
-        for key, families in _FAMILY_ONLY_KEYS.items():
-            if key in named and family not in families:
-                raise TypeError(
-                    f"{key} does not apply to fp_type={spelling!r}; it belongs "
-                    f"to {' and '.join(repr(f) for f in families)}. Use "
-                    f"{_FAMILY_REPLACEMENT[family]} instead, or select one of "
-                    f"those families.")
+    for key, families in _FAMILY_ONLY_KEYS.items():
+        if key in named and family not in families:
+            raise TypeError(
+                f"{key} does not apply to fp_type={spelling!r}; it belongs "
+                f"to {' and '.join(repr(f) for f in families)}. Use "
+                f"{_FAMILY_REPLACEMENT[family]} instead, or select one of "
+                f"those families.")
 
     for key, owner in _METRIC_ONLY_KEYS.items():
         if key in named and metric_name != owner:

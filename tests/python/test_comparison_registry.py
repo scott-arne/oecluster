@@ -185,6 +185,41 @@ def test_an_unknown_family_falls_through_to_the_cpp_error():
             symmetric=True)
 
 
+def test_an_unknown_family_outranks_the_metric_and_storage_rules():
+    """The family error outranks every option rule, not just the family ones.
+
+    ``p``, ``tversky_alpha`` and the sparse ``numbits`` rule are keyed on
+    metric and storage rather than on family, so they used to fire before the
+    C++ constructor ever saw an unsupported ``fp_type``. Each told the caller
+    to pick a different metric or storage -- advice that cannot make such a
+    call valid, and that hides the one thing they have to change.
+    """
+    mols = _mols(["CCO", "CCC"])
+    unsupported = (
+        {"fp_type": "nonsense", "p": 3.0},
+        {"fp_type": "nonsense", "tversky_alpha": 0.5},
+        {"fp_type": "maccs", "storage": "sparse", "numbits": 4096},
+        {"fp_type": "distance_atom_pair", "p": 3.0},
+    )
+    for kwargs in unsupported:
+        with pytest.raises(RuntimeError):
+            _comparisons.build_comparison(
+                mols, "fingerprint", False, dict(kwargs), symmetric=True)
+
+
+def test_an_unknown_family_does_not_swallow_an_unknown_kwarg():
+    """Falling through on the family must not fall through on a typo.
+
+    The unknown-kwarg check lives in the builder rather than in the
+    explicitness rules, so it still fires for a family the rules skip.
+    """
+    mols = _mols(["CCO", "CCC"])
+    with pytest.raises(TypeError, match=r"\['bogus_kwarg'\]"):
+        _comparisons.build_comparison(
+            mols, "fingerprint", False,
+            {"fp_type": "nonsense", "bogus_kwarg": 1}, symmetric=True)
+
+
 def test_normalize_items_defaults_to_passthrough():
     mols = _mols(["CCO", "CCC"])
     kept, excluded = _comparisons.normalize_items("fingerprint", mols, {})
