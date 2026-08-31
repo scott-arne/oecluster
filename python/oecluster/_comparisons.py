@@ -86,6 +86,18 @@ def _set_if_given(opts, key, value):
         setattr(opts, key, value)
 
 
+def _default_selector(value, default):
+    """Fold a selector to lowercase, defaulting only when it is ``None``.
+
+    ``None`` means unspecified and takes the default. Every other value -- an
+    empty string included -- is something the caller chose, and folding it to
+    the default would let this module give advice about a selection that was
+    never made. See ``_set_if_given``: the real value reaches C++ either way,
+    so the two have to agree on what "unspecified" means.
+    """
+    return default if value is None else value.lower()
+
+
 def extract_labels(items):
     """
     Extract labels from molecular items.
@@ -214,6 +226,22 @@ _METRIC_ONLY_KEYS = {
     'tversky_beta': 'tversky',
 }
 
+# Mirrors the on_fingerprint rows of METRIC_TABLE
+# (src/comparisons/MetricTable.cpp:35). The descriptor-only rows --
+# standardized_euclidean, seuclidean, mahalanobis -- are deliberately absent:
+# C++ rejects them on this surface, so this module must treat them as
+# unrecognized and stand aside.
+_FINGERPRINT_METRICS = frozenset({
+    'jaccard', 'tanimoto', 'dice', 'sokal_sneath', 'matching',
+    'rogers_tanimoto', 'russell_rao', 'kulsinski', 'sokal_michener',
+    'euclidean', 'manhattan', 'chebyshev', 'hamming', 'canberra',
+    'bray_curtis', 'minkowski', 'tversky',
+})
+
+# Mirrors normalize_storage (src/comparisons/FingerprintComparison.cpp:153),
+# which takes no aliases.
+_FINGERPRINT_STORAGES = frozenset({'binary', 'count', 'sparse', 'sparse_count'})
+
 
 def canonical_fingerprint_family(fp_type):
     """Return the canonical family for a spelling, or ``None`` if unrecognized.
@@ -224,7 +252,41 @@ def canonical_fingerprint_family(fp_type):
     to stand aside so the caller sees it rather than advice about an unrelated
     option.
     """
-    return _FAMILY_ALIASES.get((fp_type or 'morgan').lower())
+    return _FAMILY_ALIASES.get(_default_selector(fp_type, 'morgan'))
+
+
+def unrecognized_fingerprint_selector(fp_type, storage, metric):
+    """Name the first selector the C++ constructor will reject, else ``None``.
+
+    ``fp_type``, ``storage`` and ``metric`` are the three *authoritative*
+    selectors: C++ owns whether each value exists, and this module only mirrors
+    those tables. When any one of them is unrecognized, every advisory rule in
+    this module has to stand aside, because the remedy an advisory message names
+    -- a different metric, a different storage -- cannot make the call valid, and
+    printing it hides the one thing the caller has to change.
+
+    Standing aside on *any* unrecognized selector, rather than only on the axis
+    a given rule reads, is deliberate. Two authoritative errors have no ordering
+    between them, so the rule that is always right is to defer to C++ whenever
+    C++ is going to speak.
+
+    A stale mirror fails in the benign direction: a value C++ has added but this
+    module has not mirrored loses its advisory rules, which costs advice and
+    never produces a wrong error.
+
+    :param fp_type: Selected fingerprint family, or ``None`` for the default.
+    :param storage: Selected storage, or ``None`` for the default.
+    :param metric: Selected metric name, or ``None`` for the default.
+    :returns: ``'fp_type'``, ``'storage'`` or ``'metric'`` for the first
+        unrecognized selector, or ``None`` when all three are recognized.
+    """
+    if canonical_fingerprint_family(fp_type) is None:
+        return 'fp_type'
+    if _default_selector(storage, 'binary') not in _FINGERPRINT_STORAGES:
+        return 'storage'
+    if _default_selector(metric, 'tanimoto') not in _FINGERPRINT_METRICS:
+        return 'metric'
+    return None
 
 
 def reject_inapplicable_fingerprint_kwargs(named, *, fp_type, storage, metric):
@@ -239,9 +301,10 @@ def reject_inapplicable_fingerprint_kwargs(named, *, fp_type, storage, metric):
 
     ``use_chirality`` applies to all four families and is never rejected.
 
-    An ``fp_type`` spelling this module does not recognize is left entirely to
-    the C++ constructor: no rule here fires, so the caller sees the
-    authoritative family error instead of advice about an unrelated option.
+    A value in any of ``fp_type``, ``storage`` or ``metric`` that this module
+    does not recognize is left entirely to the C++ constructor: no rule here
+    fires, so the caller sees the authoritative error instead of advice about an
+    unrelated option. See ``unrecognized_fingerprint_selector``.
 
     :param named: Option names the caller passed explicitly.
     :param fp_type: Selected fingerprint family.
@@ -250,16 +313,13 @@ def reject_inapplicable_fingerprint_kwargs(named, *, fp_type, storage, metric):
     :raises TypeError: If a named option does not apply to this configuration.
     """
     named = set(named)
-    spelling = (fp_type or 'morgan').lower()
-    family = canonical_fingerprint_family(spelling)
-    if family is None:
-        # An unrecognized spelling is the C++ constructor's error to report.
-        # Any rule fired here would name a remedy -- another metric, another
-        # storage -- that cannot make the call valid, and would hide the one
-        # thing the caller has to change.
+    if unrecognized_fingerprint_selector(fp_type, storage, metric) is not None:
+        # An unrecognized selector is the C++ constructor's error to report.
         return
-    store = (storage or 'binary').lower()
-    metric_name = (metric or 'tanimoto').lower()
+    spelling = _default_selector(fp_type, 'morgan')
+    family = canonical_fingerprint_family(fp_type)
+    store = _default_selector(storage, 'binary')
+    metric_name = _default_selector(metric, 'tanimoto')
 
     if 'numbits' in named and store in _SPARSE_STORAGES:
         raise TypeError(
@@ -300,16 +360,20 @@ def _build_fingerprint(items, similarity, kwargs, symmetric):
         raise TypeError(
             f"Unknown kwargs for fingerprint comparison: {list(kwargs)}")
 
-    family = canonical_fingerprint_family(opts.fp_type)
+    unrecognized = unrecognized_fingerprint_selector(
+        opts.fp_type, opts.storage, opts.metric)
     reject_inapplicable_fingerprint_kwargs(
         named, fp_type=opts.fp_type, storage=opts.storage, metric=opts.metric)
 
     # Tversky is symmetric only when alpha == beta, which the condensed pdist
     # form requires. Rejecting here names both parameters; the C++
-    # ValidateForPDist message can only report the metric. Skipped for a family
-    # the constructor below is about to reject outright: equal weights or cdist
-    # cannot make an unsupported fp_type valid, so that error goes first.
-    if (family is not None and symmetric
+    # ValidateForPDist message can only report the metric. Skipped whenever any
+    # selector is unrecognized: equal weights or cdist cannot make an
+    # unsupported fp_type, storage or metric valid, so that error goes first.
+    # This guard runs after the rejector and needs its own precondition -- a
+    # check that covers only the rejector leaves this path open, which is
+    # exactly how the previous two rounds each missed half the defect.
+    if (unrecognized is None and symmetric
             and opts.metric.lower() == 'tversky'
             and opts.tversky_alpha != opts.tversky_beta):
         raise ValueError(
@@ -348,7 +412,17 @@ def _build_superpose(items, similarity, kwargs, symmetric, *, default_method):
     """Build a :class:`SuperposeComparison` from keyword options."""
     opts = SuperposeOptions()
     opts.similarity = similarity
-    method = kwargs.pop('method', None) or default_method
+    method = kwargs.pop('method', None)
+    if method is None:
+        method = default_method
+    elif not method and default_method is not None:
+        # The sitehopper alias implies its own method, so an unusable value
+        # falls back to the one the alias is named for -- the base chain's
+        # behavior, preserved deliberately. On plain superpose there is no
+        # implied method, so default_method is None and an unusable value
+        # falls through to the ValueError below rather than being replaced by
+        # a C++ default the caller never asked for.
+        method = default_method
     if method is not None:
         method_map = {
             'global_carbon_alpha': _oecluster.SuperposeMethod_GlobalCarbonAlpha,

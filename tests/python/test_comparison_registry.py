@@ -428,3 +428,85 @@ def test_cdist_still_works_through_the_registry():
     b = _mols(["CCCC", "CCCCC", "c1ccccc1"])
     cross = oecluster.cdist(a, b, "fingerprint")
     assert cross.shape == (2, 3)
+
+
+def test_an_explicit_empty_method_is_rejected_not_defaulted():
+    """An explicit value is used or rejected by name, never discarded."""
+    mols = _multiconf_mols(["CCO", "CCC"])
+    with pytest.raises(ValueError, match="Unknown superpose method"):
+        oecluster.pdist(mols, "superpose", method="")
+
+
+def test_the_sitehopper_alias_keeps_its_method_fallback():
+    """The alias implies its own method, so an unusable value falls back to it.
+
+    This is the base chain's behavior and is deliberately preserved: unlike
+    plain superpose, naming the sitehopper comparison names the method.
+    """
+    mols = _multiconf_mols(["CCO", "CCC"])
+    with pytest.raises(Exception) as excinfo:
+        oecluster.pdist(mols, "sitehopper", method="")
+    # Superposition of two small organics fails downstream; what matters is
+    # that it got past method resolution rather than raising Unknown method.
+    assert "Unknown superpose method" not in str(excinfo.value)
+
+
+def test_an_empty_fp_type_does_not_masquerade_as_morgan():
+    mols = _mols(["CCO", "CCC", "c1ccccc1"])
+    with pytest.raises(RuntimeError, match="Unknown OEFP fingerprint type"):
+        oecluster.pdist(mols, "fingerprint", fp_type="", min_distance=1)
+
+
+def test_an_empty_metric_does_not_masquerade_as_tanimoto():
+    mols = _mols(["CCO", "CCC", "c1ccccc1"])
+    with pytest.raises(RuntimeError, match="Unknown metric"):
+        oecluster.pdist(mols, "fingerprint", metric="", p=3.0)
+
+
+def test_an_unknown_metric_outranks_the_metric_only_rules():
+    """A typo'd metric is C++'s error, not an occasion to advise about p."""
+    mols = _mols(["CCO", "CCC", "c1ccccc1"])
+    with pytest.raises(RuntimeError, match="Unknown metric"):
+        oecluster.pdist(mols, "fingerprint", metric="tanimotoo", p=3.0)
+    with pytest.raises(RuntimeError, match="Unknown metric"):
+        oecluster.pdist(
+            mols, "fingerprint", metric="nonsense", tversky_alpha=0.9)
+
+
+def test_a_recognized_metric_still_gets_the_metric_only_rules():
+    """The control: deferring to C++ must not cost real advice."""
+    mols = _mols(["CCO", "CCC", "c1ccccc1"])
+    with pytest.raises(TypeError, match="p does not apply to metric='tanimoto'"):
+        oecluster.pdist(mols, "fingerprint", metric="tanimoto", p=3.0)
+
+
+def test_an_unknown_storage_outranks_the_pdist_tversky_guard():
+    """The Tversky guard runs after the rejector and needs its own guard."""
+    mols = _mols(["CCO", "CCC", "c1ccccc1"])
+    with pytest.raises(RuntimeError, match="Unknown fingerprint storage"):
+        oecluster.pdist(
+            mols, "fingerprint", storage="nonsense", metric="tversky",
+            tversky_alpha=0.9, tversky_beta=0.1)
+
+
+def test_a_recognized_storage_still_gets_the_pdist_tversky_guard():
+    """The control for the test above."""
+    mols = _mols(["CCO", "CCC", "c1ccccc1"])
+    with pytest.raises(ValueError, match="pdist requires a symmetric metric"):
+        oecluster.pdist(
+            mols, "fingerprint", storage="binary", metric="tversky",
+            tversky_alpha=0.9, tversky_beta=0.1)
+
+
+def test_a_descriptor_only_metric_is_unrecognized_on_the_fingerprint_surface():
+    """seuclidean exists in C++ but not on this surface, so Python defers.
+
+    The authoritative message is the surface rejection rather than ``Unknown
+    metric``: ``resolve_metric`` finds the row and then rejects it for the
+    fingerprint surface (``MetricTable.cpp:154``). Either way it is C++'s to
+    report, and the point of the test is that no advice about ``p`` pre-empts
+    it.
+    """
+    mols = _mols(["CCO", "CCC", "c1ccccc1"])
+    with pytest.raises(RuntimeError, match="descriptor-space metric"):
+        oecluster.pdist(mols, "fingerprint", metric="seuclidean", p=3.0)
