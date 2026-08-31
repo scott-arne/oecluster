@@ -226,71 +226,18 @@ _METRIC_ONLY_KEYS = {
     'tversky_beta': 'tversky',
 }
 
-# Mirrors the on_fingerprint rows of METRIC_TABLE
-# (src/comparisons/MetricTable.cpp:35). The descriptor-only rows --
-# standardized_euclidean, seuclidean, mahalanobis -- are deliberately absent:
-# C++ rejects them on this surface, so this module must treat them as
-# unrecognized and stand aside.
-_FINGERPRINT_METRICS = frozenset({
-    'jaccard', 'tanimoto', 'dice', 'sokal_sneath', 'matching',
-    'rogers_tanimoto', 'russell_rao', 'kulsinski', 'sokal_michener',
-    'euclidean', 'manhattan', 'chebyshev', 'hamming', 'canberra',
-    'bray_curtis', 'minkowski', 'tversky',
-})
-
-# Mirrors normalize_storage (src/comparisons/FingerprintComparison.cpp:153),
-# which takes no aliases.
-_FINGERPRINT_STORAGES = frozenset({'binary', 'count', 'sparse', 'sparse_count'})
-
 
 def canonical_fingerprint_family(fp_type):
     """Return the canonical family for a spelling, or ``None`` if unrecognized.
 
     Mirrors ``normalize_family``
-    (``src/comparisons/FingerprintComparison.cpp:124``). ``None`` means the C++
-    constructor owns the error, and every Python rule keyed on the family has
-    to stand aside so the caller sees it rather than advice about an unrelated
-    option.
+    (``src/comparisons/FingerprintComparison.cpp:124``). Callers reach this only
+    after the C++ constructor has accepted ``fp_type``, so ``None`` means the
+    alias table above is behind C++ rather than that the spelling is invalid.
+    The family-keyed rules stand aside in that case: a family this module cannot
+    name has no advisory rules to apply.
     """
     return _FAMILY_ALIASES.get(_default_selector(fp_type, 'morgan'))
-
-
-def unrecognized_fingerprint_selector(fp_type, storage, metric):
-    """Name the first selector the C++ constructor will reject, else ``None``.
-
-    ``fp_type``, ``storage`` and ``metric`` are the three *authoritative*
-    selectors: C++ owns whether each value exists, and this module only mirrors
-    those tables. When any one of them is unrecognized, every advisory rule in
-    this module has to stand aside, because the remedy an advisory message names
-    -- a different metric, a different storage -- cannot make the call valid, and
-    printing it hides the one thing the caller has to change.
-
-    Standing aside on *any* unrecognized selector, rather than only on the axis
-    a given rule reads, is deliberate. Two authoritative errors have no ordering
-    between them, so the rule that is always right is to defer to C++ whenever
-    C++ is going to speak.
-
-    Mirror staleness is benign in one direction only. A value C++ has added but
-    this module has not mirrored merely loses its advisory rules. A value C++
-    has *removed* that this module still lists is not benign: it makes this
-    function answer ``None`` for something C++ will reject, so an advisory rule
-    fires ahead of the authoritative error -- the defect the mirrors exist to
-    prevent. The mirror-drift tests in ``test_comparison_registry.py`` cover
-    that direction.
-
-    :param fp_type: Selected fingerprint family, or ``None`` for the default.
-    :param storage: Selected storage, or ``None`` for the default.
-    :param metric: Selected metric name, or ``None`` for the default.
-    :returns: ``'fp_type'``, ``'storage'`` or ``'metric'`` for the first
-        unrecognized selector, or ``None`` when all three are recognized.
-    """
-    if canonical_fingerprint_family(fp_type) is None:
-        return 'fp_type'
-    if _default_selector(storage, 'binary') not in _FINGERPRINT_STORAGES:
-        return 'storage'
-    if _default_selector(metric, 'tanimoto') not in _FINGERPRINT_METRICS:
-        return 'metric'
-    return None
 
 
 def reject_inapplicable_fingerprint_kwargs(named, *, fp_type, storage, metric):
@@ -305,10 +252,10 @@ def reject_inapplicable_fingerprint_kwargs(named, *, fp_type, storage, metric):
 
     ``use_chirality`` applies to all four families and is never rejected.
 
-    A value in any of ``fp_type``, ``storage`` or ``metric`` that this module
-    does not recognize is left entirely to the C++ constructor: no rule here
-    fires, so the caller sees the authoritative error instead of advice about an
-    unrelated option. See ``unrecognized_fingerprint_selector``.
+    Every rule here is advisory: it reports an option C++ accepts and silently
+    ignores. Callers reach this function only after the C++ constructor has
+    accepted the configuration, which is what keeps an advisory message from
+    pre-empting an authoritative one. See ``_build_fingerprint``.
 
     :param named: Option names the caller passed explicitly.
     :param fp_type: Selected fingerprint family.
@@ -317,9 +264,6 @@ def reject_inapplicable_fingerprint_kwargs(named, *, fp_type, storage, metric):
     :raises TypeError: If a named option does not apply to this configuration.
     """
     named = set(named)
-    if unrecognized_fingerprint_selector(fp_type, storage, metric) is not None:
-        # An unrecognized selector is the C++ constructor's error to report.
-        return
     spelling = _default_selector(fp_type, 'morgan')
     family = canonical_fingerprint_family(fp_type)
     store = _default_selector(storage, 'binary')
@@ -332,7 +276,11 @@ def reject_inapplicable_fingerprint_kwargs(named, *, fp_type, storage, metric):
             f"a chosen width. Drop numbits, or use storage='binary' or "
             f"storage='count'.")
 
-    for key, families in _FAMILY_ONLY_KEYS.items():
+    # A family C++ accepted but this module does not know yields family=None.
+    # Standing aside then makes the alias table's staleness benign in both
+    # directions: an unknown family loses its advisory rules and nothing else.
+    # Firing instead would reject a key against a family we cannot name.
+    for key, families in (() if family is None else _FAMILY_ONLY_KEYS.items()):
         if key in named and family not in families:
             raise TypeError(
                 f"{key} does not apply to fp_type={spelling!r}; it belongs "
@@ -364,31 +312,26 @@ def _build_fingerprint(items, similarity, kwargs, symmetric):
         raise TypeError(
             f"Unknown kwargs for fingerprint comparison: {list(kwargs)}")
 
-    unrecognized = unrecognized_fingerprint_selector(
-        opts.fp_type, opts.storage, opts.metric)
+    # C++ speaks first, and that ordering is the whole design. The constructor
+    # validates every selector and every metric parameter it owns; anything it
+    # rejects raises here, so no advisory rule below can pre-empt an
+    # authoritative error by naming a remedy that cannot make the call valid.
+    # Seven fix rounds tried to get this right by having Python predict the
+    # verdict, and each one missed a case the next one found. Construction is
+    # validation rather than work -- about 2.8 us per molecule, with the
+    # fingerprints computed later at pdist time -- so building it early costs
+    # nothing on the success path and one discarded object on the error path.
+    comparison = _FingerprintComparison(items, opts)
+
     reject_inapplicable_fingerprint_kwargs(
         named, fp_type=opts.fp_type, storage=opts.storage, metric=opts.metric)
 
     # Tversky is symmetric only when alpha == beta, which the condensed pdist
     # form requires. Rejecting here names both parameters; the C++
-    # ValidateForPDist message can only report the metric. Skipped whenever any
-    # selector is unrecognized: equal weights or cdist cannot make an
-    # unsupported fp_type, storage or metric valid, so that error goes first.
-    # This guard runs after the rejector and needs its own precondition -- a
-    # check that covers only the rejector leaves this path open, which is
-    # exactly how the previous two rounds each missed half the defect.
-    #
-    # Weights outside [0, 1] are skipped for the same reason, and it is the
-    # sharpest case: both remedies this message names -- equal weights, or
-    # cdist -- still fail the range bound in validate_params
-    # (src/comparisons/MetricTable.cpp:100), so firing here would name two
-    # remedies that cannot work and bury the one that can. Written as a
-    # positive range test so a NaN weight, which compares false against
-    # everything, also falls through to C++.
-    if (unrecognized is None and symmetric
-            and opts.metric.lower() == 'tversky'
-            and 0.0 <= opts.tversky_alpha <= 1.0
-            and 0.0 <= opts.tversky_beta <= 1.0
+    # ValidateForPDist message can only report the metric. No precondition is
+    # needed any more: an unrecognized metric or an out-of-range weight has
+    # already raised at construction above.
+    if (symmetric and opts.metric.lower() == 'tversky'
             and opts.tversky_alpha != opts.tversky_beta):
         raise ValueError(
             "pdist requires a symmetric metric, but tversky with "
@@ -396,7 +339,7 @@ def _build_fingerprint(items, similarity, kwargs, symmetric):
             f"tversky_beta={opts.tversky_beta} is asymmetric. Use equal "
             "alpha and beta, or compute a rectangular result with cdist.")
 
-    return _FingerprintComparison(items, opts), "fingerprint"
+    return comparison, "fingerprint"
 
 
 def _build_rocs(items, similarity, kwargs, symmetric):
