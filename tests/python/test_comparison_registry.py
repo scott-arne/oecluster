@@ -617,3 +617,99 @@ def test_the_advisory_rules_still_fire_when_cpp_accepts():
     with pytest.raises(TypeError, match="tversky_alpha does not apply"):
         oecluster.pdist(mols, "fingerprint", metric="tanimoto",
                         tversky_alpha=0.3)
+
+
+def test_a_sparse_numbits_of_zero_reports_the_inapplicable_kwarg():
+    """Morgan's sparse generator must not judge a numbits it never reads.
+
+    Its own message names the only remedy that fails: a positive numbits is
+    rejected here, and dropping numbits is what actually works.
+    """
+    mols = _mols(["CCO", "CCC", "c1ccccc1"])
+    with pytest.raises(TypeError, match=r"numbits does not apply to storage"):
+        oecluster.pdist(mols, "fingerprint", storage="sparse", numbits=0)
+
+
+def test_a_sparse_count_numbits_of_zero_reports_the_inapplicable_kwarg():
+    """The same hole exists under sparse_count storage."""
+    mols = _mols(["CCO", "CCC", "c1ccccc1"])
+    with pytest.raises(TypeError, match=r"numbits does not apply to storage"):
+        oecluster.pdist(
+            mols, "fingerprint", storage="sparse_count",
+            metric="bray_curtis", numbits=0)
+
+
+def test_cdist_reports_the_sparse_numbits_kwarg_the_same_way():
+    """Both public surfaces build through the same registry."""
+    mols = _mols(["CCO", "CCC", "c1ccccc1"])
+    with pytest.raises(TypeError, match=r"numbits does not apply to storage"):
+        oecluster.cdist(mols, mols, "fingerprint", storage="sparse", numbits=0)
+
+
+def test_a_binary_numbits_of_zero_still_reports_the_cpp_bound():
+    """The control: where numbits IS read, the C++ bound is authoritative.
+
+    Resetting the field must be confined to the storages that ignore it.
+    """
+    mols = _mols(["CCO", "CCC", "c1ccccc1"])
+    with pytest.raises(RuntimeError, match=r"num_bits must be greater than"):
+        oecluster.pdist(mols, "fingerprint", storage="binary", numbits=0)
+
+
+def test_an_unknown_metric_outranks_the_sparse_numbits_rule():
+    """Resetting numbits must not cost the constructor its first word.
+
+    This and the three tests below hold at HEAD already. They exist because the
+    obvious alternative fix -- raising the numbits advisory before construction
+    -- breaks every one of them, and nothing else in the suite would notice.
+    """
+    mols = _mols(["CCO", "CCC", "c1ccccc1"])
+    with pytest.raises(RuntimeError, match=r"Unknown metric"):
+        oecluster.pdist(
+            mols, "fingerprint", storage="sparse", numbits=4096,
+            metric="not_a_real_metric")
+
+
+def test_an_unknown_family_outranks_the_sparse_numbits_rule():
+    mols = _mols(["CCO", "CCC", "c1ccccc1"])
+    with pytest.raises(RuntimeError, match=r"Unknown OEFP fingerprint type"):
+        oecluster.pdist(
+            mols, "fingerprint", storage="sparse", numbits=4096,
+            fp_type="not_a_real_family")
+
+
+def test_an_unknown_storage_outranks_the_sparse_numbits_rule():
+    mols = _mols(["CCO", "CCC", "c1ccccc1"])
+    with pytest.raises(RuntimeError, match=r"Unknown fingerprint storage"):
+        oecluster.pdist(
+            mols, "fingerprint", storage="not_a_real_storage", numbits=4096)
+
+
+def test_an_invalid_minkowski_p_outranks_the_sparse_numbits_rule():
+    mols = _mols(["CCO", "CCC", "c1ccccc1"])
+    with pytest.raises(RuntimeError, match=r"Minkowski exponent p must be"):
+        oecluster.pdist(
+            mols, "fingerprint", storage="sparse", numbits=4096,
+            metric="minkowski", p=0.0)
+
+
+def test_a_reset_numbits_never_reaches_a_successful_call():
+    """Invariant 2, asserted behaviorally rather than by reading the code.
+
+    ``numbits_is_inapplicable`` guards both the reset and the rejection, so no
+    value it discards can survive into a call that succeeds. If those two sites
+    ever drift apart, some named numbits below will silently succeed.
+    """
+    mols = _mols(["CCO", "CCC", "c1ccccc1"])
+    # sparse_count rejects the default bit-set metric whatever numbits holds,
+    # which is an unrelated rule. bray_curtis satisfies both storages and keeps
+    # this test measuring only the numbits invariant.
+    for storage in _comparisons._SPARSE_STORAGES:
+        for numbits in (0, 1, 2048, 4096):
+            with pytest.raises(TypeError, match=r"numbits does not apply"):
+                oecluster.pdist(
+                    mols, "fingerprint", storage=storage, numbits=numbits,
+                    metric="bray_curtis")
+        # Dropping numbits is the remedy the message names, and it must work.
+        oecluster.pdist(
+            mols, "fingerprint", storage=storage, metric="bray_curtis")

@@ -240,6 +240,25 @@ def canonical_fingerprint_family(fp_type):
     return _FAMILY_ALIASES.get(_default_selector(fp_type, 'morgan'))
 
 
+def numbits_is_inapplicable(named, storage):
+    """Report whether an explicitly named ``numbits`` has no meaning here.
+
+    One predicate serves both call sites in ``_build_fingerprint`` -- the
+    pre-construction reset and the post-construction rejection -- and they must
+    agree exactly. If the reset could ever fire where the rejection does not, a
+    caller-supplied ``numbits`` would be silently discarded on a call that
+    succeeds, which is the one outcome the explicitness rules exist to prevent.
+    Sharing the predicate makes that drift impossible rather than merely
+    unlikely.
+
+    :param named: Option names the caller passed explicitly.
+    :param storage: Selected storage, or ``None`` for the default.
+    :returns: ``True`` when ``numbits`` was named and the storage is sparse.
+    """
+    return ('numbits' in named
+            and _default_selector(storage, 'binary') in _SPARSE_STORAGES)
+
+
 def reject_inapplicable_fingerprint_kwargs(named, *, fp_type, storage, metric):
     """
     Reject an explicitly named option the rest of the configuration ignores.
@@ -269,7 +288,7 @@ def reject_inapplicable_fingerprint_kwargs(named, *, fp_type, storage, metric):
     store = _default_selector(storage, 'binary')
     metric_name = _default_selector(metric, 'tanimoto')
 
-    if 'numbits' in named and store in _SPARSE_STORAGES:
+    if numbits_is_inapplicable(named, storage):
         raise TypeError(
             f"numbits does not apply to storage={store!r}: a sparse "
             f"fingerprint keeps its family's own domain rather than folding to "
@@ -312,15 +331,36 @@ def _build_fingerprint(items, similarity, kwargs, symmetric):
         raise TypeError(
             f"Unknown kwargs for fingerprint comparison: {list(kwargs)}")
 
+    # Morgan's sparse generators validate a num_bits they do not read: with
+    # storage='sparse' and numbits=0 the constructor raises "Morgan num_bits
+    # must be greater than zero", which names the one remedy that cannot work
+    # -- a positive numbits is rejected below, and only dropping it succeeds.
+    # atom_pair and topological_torsions accept numbits=0 under sparse storage,
+    # which is what makes this an upstream OEFP inconsistency rather than a
+    # rule to mirror here. Reset the field so C++ never validates a value it
+    # will not read.
+    #
+    # No caller-supplied value is silently discarded: numbits_is_inapplicable
+    # guards both this reset and the rejection below, so every call that
+    # reaches this line goes on to raise by name -- from the constructor if
+    # something else is wrong, from the rejector otherwise.
+    if numbits_is_inapplicable(named, opts.storage):
+        opts.numbits = FingerprintOptions().numbits
+
     # C++ speaks first, and that ordering is the whole design. The constructor
     # validates every selector and every metric parameter it owns; anything it
     # rejects raises here, so no advisory rule below can pre-empt an
     # authoritative error by naming a remedy that cannot make the call valid.
     # Seven fix rounds tried to get this right by having Python predict the
-    # verdict, and each one missed a case the next one found. Construction is
-    # validation rather than work -- about 2.8 us per molecule, with the
-    # fingerprints computed later at pdist time -- so building it early costs
-    # nothing on the success path and one discarded object on the error path.
+    # verdict, and each one missed a case the next one found.
+    #
+    # Construction is not free -- it computes the fingerprints, and the cost
+    # scales with molecule size: roughly 10 ms for 400 molecules of 120 heavy
+    # atoms, which is nearly all of what that pdist costs. Ordering it first is
+    # still free on the success path, because pdist builds this same object
+    # anyway and reuses it. What it costs is one wasted fingerprint pass before
+    # an advisory raise, about 17 ms for 2000 small molecules. That is the
+    # price of an authoritative message, and it is worth paying.
     comparison = _FingerprintComparison(items, opts)
 
     reject_inapplicable_fingerprint_kwargs(
