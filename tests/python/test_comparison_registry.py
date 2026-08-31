@@ -14,6 +14,17 @@ def _mols(smiles_list):
     return mols
 
 
+def _multiconf_mols(smiles_list):
+    """ROCS and superpose need ``OEMol``; their typemaps reject ``OEGraphMol``."""
+    mols = []
+    for idx, smi in enumerate(smiles_list):
+        mol = oechem.OEMol()
+        oechem.OESmilesToMol(mol, smi)
+        mol.SetTitle(f"mol{idx}")
+        mols.append(mol)
+    return mols
+
+
 def test_extract_labels_uses_titles():
     mols = _mols(["CCO", "CCC"])
     assert _comparisons.extract_labels(mols) == ["mol0", "mol1"]
@@ -207,6 +218,33 @@ def test_an_unknown_family_outranks_the_metric_and_storage_rules():
                 mols, "fingerprint", False, dict(kwargs), symmetric=True)
 
 
+def test_an_unknown_family_outranks_the_pdist_tversky_guard():
+    """The last Python guard before construction has to stand aside too.
+
+    The asymmetric-Tversky check lives in the builder rather than in the
+    explicitness rules, so the early return added for the family rules did not
+    cover it. Its advice -- equal weights, or cdist -- cannot make an
+    unsupported family valid.
+    """
+    mols = _mols(["CCO", "CCC"])
+    with pytest.raises(RuntimeError):
+        oecluster.pdist(mols, "fingerprint", fp_type="nonsense",
+                        metric="tversky", tversky_alpha=0.9, tversky_beta=0.1)
+
+
+def test_a_recognized_family_still_gets_the_pdist_tversky_guard():
+    """The control for the test above, through the public entry point.
+
+    ``test_asymmetric_tversky_is_rejected_for_pdist`` asserts this through
+    ``build_comparison``; skipping the guard for unrecognized families must not
+    skip it for real ones.
+    """
+    mols = _mols(["CCO", "CCC"])
+    with pytest.raises(ValueError, match="pdist requires a symmetric metric"):
+        oecluster.pdist(mols, "fingerprint", metric="tversky",
+                        tversky_alpha=0.9, tversky_beta=0.1)
+
+
 def test_an_unknown_family_does_not_swallow_an_unknown_kwarg():
     """Falling through on the family must not fall through on a typo.
 
@@ -322,6 +360,59 @@ def test_the_rejection_message_echoes_the_spelling_the_caller_used():
         _comparisons.build_comparison(
             mols, "fingerprint", False,
             {"fp_type": "atompair", "radius": 3}, symmetric=True)
+
+
+def test_none_means_unspecified_on_the_public_entry_points():
+    """``None`` is the sentinel the public constructors already use.
+
+    ``FingerprintComparison.__new__`` (``__init__.py:2409``) skips the
+    assignment when an option is ``None``. The registry builders have to agree,
+    or a config-driven caller passing ``fp_type=None`` gets a SWIG internals
+    message instead of the default fingerprint.
+    """
+    mols = _mols(["CCO", "CCC", "c1ccccc1"])
+    # Both results are bound to a name rather than read off a temporary:
+    # ``condensed`` is a non-owning view over the storage buffer, so reading it
+    # from a result that has already been collected yields freed memory.
+    baseline_result = oecluster.pdist(mols, "fingerprint")
+    explicit_result = oecluster.pdist(
+        mols, "fingerprint", fp_type=None, storage=None, metric=None,
+        numbits=None, radius=None, use_chirality=None)
+    assert list(explicit_result.condensed) == list(baseline_result.condensed)
+
+
+def test_a_none_valued_option_is_not_a_named_option():
+    """A rule must not fire on an option the caller declined to set.
+
+    ``numbits=None`` means "no numbits", so the sparse-storage rule has nothing
+    to reject, and ``radius=None`` is not a Morgan option intruding on
+    ``atom_pair``.
+    """
+    mols = _mols(["CCO", "CCC"])
+    assert oecluster.pdist(
+        mols, "fingerprint", storage="sparse", numbits=None).num_samples == 2
+    assert oecluster.pdist(
+        mols, "fingerprint", fp_type="atom_pair", radius=None).num_samples == 2
+
+
+def test_none_is_unspecified_for_rocs_and_superpose_too():
+    """The same convention, in the two builders next door."""
+    mols = _multiconf_mols(["CCO", "CCC"])
+    obj, _, _ = _comparisons.build_comparison(
+        mols, "rocs", False, {"score_type": None, "color_ff_type": None},
+        symmetric=True)
+    assert obj.Size() == 2
+    obj, _, _ = _comparisons.build_comparison(
+        mols, "superpose", False, {"score_type": None, "predicate": None},
+        symmetric=True)
+    assert obj.Size() == 2
+
+
+def test_an_unknown_kwarg_is_still_unknown_when_its_value_is_none():
+    """Treating ``None`` as unspecified must not turn a typo into a default."""
+    mols = _mols(["CCO", "CCC"])
+    with pytest.raises(TypeError, match=r"\['bogus'\]"):
+        oecluster.pdist(mols, "fingerprint", bogus=None)
 
 
 def test_pdist_still_works_through_the_registry():

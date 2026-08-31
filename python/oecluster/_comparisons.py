@@ -71,6 +71,21 @@ def _resolve_name(comparison):
     return name
 
 
+def _set_if_given(opts, key, value):
+    """Assign ``value`` to ``opts.key`` unless it is ``None``.
+
+    ``None`` means "not specified". That is already the convention on the
+    public comparison constructors -- ``FingerprintComparison.__new__`` and its
+    siblings in ``__init__.py`` declare every option as ``None`` and skip the
+    assignment rather than pushing ``None`` at a SWIG setter. The registry
+    builders have to agree with them, or a config-driven caller who passes
+    ``fp_type=None`` to mean "use the default" is met with ``invalid null
+    reference in method 'FingerprintOptions_fp_type_set'``.
+    """
+    if value is not None:
+        setattr(opts, key, value)
+
+
 def extract_labels(items):
     """
     Extract labels from molecular items.
@@ -200,6 +215,18 @@ _METRIC_ONLY_KEYS = {
 }
 
 
+def canonical_fingerprint_family(fp_type):
+    """Return the canonical family for a spelling, or ``None`` if unrecognized.
+
+    Mirrors ``normalize_family``
+    (``src/comparisons/FingerprintComparison.cpp:124``). ``None`` means the C++
+    constructor owns the error, and every Python rule keyed on the family has
+    to stand aside so the caller sees it rather than advice about an unrelated
+    option.
+    """
+    return _FAMILY_ALIASES.get((fp_type or 'morgan').lower())
+
+
 def reject_inapplicable_fingerprint_kwargs(named, *, fp_type, storage, metric):
     """
     Reject an explicitly named option the rest of the configuration ignores.
@@ -224,7 +251,7 @@ def reject_inapplicable_fingerprint_kwargs(named, *, fp_type, storage, metric):
     """
     named = set(named)
     spelling = (fp_type or 'morgan').lower()
-    family = _FAMILY_ALIASES.get(spelling)
+    family = canonical_fingerprint_family(spelling)
     if family is None:
         # An unrecognized spelling is the C++ constructor's error to report.
         # Any rule fired here would name a remedy -- another metric, another
@@ -259,25 +286,31 @@ def reject_inapplicable_fingerprint_kwargs(named, *, fp_type, storage, metric):
 def _build_fingerprint(items, similarity, kwargs, symmetric):
     """Build a :class:`FingerprintComparison` from keyword options."""
     # Captured before the pops: the explicitness rules turn on which options
-    # the caller named, which is exactly what the pops destroy.
-    named = set(kwargs)
+    # the caller named, which is exactly what the pops destroy. A ``None``
+    # value is not a named option -- see _set_if_given -- so a rule keyed on an
+    # option the caller declined to set must not fire.
+    named = {key for key, value in kwargs.items() if value is not None}
 
     opts = FingerprintOptions()
     opts.similarity = similarity
     for key in _FINGERPRINT_KEYS:
         if key in kwargs:
-            setattr(opts, key, kwargs.pop(key))
+            _set_if_given(opts, key, kwargs.pop(key))
     if kwargs:
         raise TypeError(
             f"Unknown kwargs for fingerprint comparison: {list(kwargs)}")
 
+    family = canonical_fingerprint_family(opts.fp_type)
     reject_inapplicable_fingerprint_kwargs(
         named, fp_type=opts.fp_type, storage=opts.storage, metric=opts.metric)
 
     # Tversky is symmetric only when alpha == beta, which the condensed pdist
     # form requires. Rejecting here names both parameters; the C++
-    # ValidateForPDist message can only report the metric.
-    if (symmetric and opts.metric.lower() == 'tversky'
+    # ValidateForPDist message can only report the metric. Skipped for a family
+    # the constructor below is about to reject outright: equal weights or cdist
+    # cannot make an unsupported fp_type valid, so that error goes first.
+    if (family is not None and symmetric
+            and opts.metric.lower() == 'tversky'
             and opts.tversky_alpha != opts.tversky_beta):
         raise ValueError(
             "pdist requires a symmetric metric, but tversky with "
@@ -294,17 +327,18 @@ def _build_rocs(items, similarity, kwargs, symmetric):
     opts.similarity = similarity
     if 'score_type' in kwargs:
         st = kwargs.pop('score_type')
-        score_map = {
-            'combo_norm': _oecluster.ROCSScoreType_ComboNorm,
-            'combo': _oecluster.ROCSScoreType_Combo,
-            'shape': _oecluster.ROCSScoreType_Shape,
-            'color': _oecluster.ROCSScoreType_Color,
-        }
-        if st not in score_map:
-            raise ValueError(f"Unknown ROCS score type: {st}")
-        opts.score_type = score_map[st]
+        if st is not None:
+            score_map = {
+                'combo_norm': _oecluster.ROCSScoreType_ComboNorm,
+                'combo': _oecluster.ROCSScoreType_Combo,
+                'shape': _oecluster.ROCSScoreType_Shape,
+                'color': _oecluster.ROCSScoreType_Color,
+            }
+            if st not in score_map:
+                raise ValueError(f"Unknown ROCS score type: {st}")
+            opts.score_type = score_map[st]
     if 'color_ff_type' in kwargs:
-        opts.color_ff_type = kwargs.pop('color_ff_type')
+        _set_if_given(opts, 'color_ff_type', kwargs.pop('color_ff_type'))
     if kwargs:
         raise TypeError(f"Unknown kwargs for rocs comparison: {list(kwargs)}")
     return _ROCSComparison(items, opts), "rocs"
@@ -329,21 +363,22 @@ def _build_superpose(items, similarity, kwargs, symmetric, *, default_method):
         opts.method = method_map[method]
     if 'score_type' in kwargs:
         st = kwargs.pop('score_type')
-        st_map = {
-            'auto': _oecluster.SuperposeScoreType_Auto,
-            'rmsd': _oecluster.SuperposeScoreType_RMSD,
-            'tanimoto': _oecluster.SuperposeScoreType_Tanimoto,
-            'patch_score': _oecluster.SuperposeScoreType_PatchScore,
-        }
-        if st not in st_map:
-            raise ValueError(f"Unknown superpose score type: {st}")
-        opts.score_type = st_map[st]
+        if st is not None:
+            st_map = {
+                'auto': _oecluster.SuperposeScoreType_Auto,
+                'rmsd': _oecluster.SuperposeScoreType_RMSD,
+                'tanimoto': _oecluster.SuperposeScoreType_Tanimoto,
+                'patch_score': _oecluster.SuperposeScoreType_PatchScore,
+            }
+            if st not in st_map:
+                raise ValueError(f"Unknown superpose score type: {st}")
+            opts.score_type = st_map[st]
     if 'predicate' in kwargs:
-        opts.predicate = kwargs.pop('predicate')
+        _set_if_given(opts, 'predicate', kwargs.pop('predicate'))
     if 'ref_predicate' in kwargs:
-        opts.ref_predicate = kwargs.pop('ref_predicate')
+        _set_if_given(opts, 'ref_predicate', kwargs.pop('ref_predicate'))
     if 'fit_predicate' in kwargs:
-        opts.fit_predicate = kwargs.pop('fit_predicate')
+        _set_if_given(opts, 'fit_predicate', kwargs.pop('fit_predicate'))
     if kwargs:
         raise TypeError(
             f"Unknown kwargs for superpose comparison: {list(kwargs)}")
