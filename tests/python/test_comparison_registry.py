@@ -510,3 +510,63 @@ def test_a_descriptor_only_metric_is_unrecognized_on_the_fingerprint_surface():
     mols = _mols(["CCO", "CCC", "c1ccccc1"])
     with pytest.raises(RuntimeError, match="descriptor-space metric"):
         oecluster.pdist(mols, "fingerprint", metric="seuclidean", p=3.0)
+
+
+def test_every_mirrored_family_alias_is_still_accepted_by_cpp():
+    """A family spelling C++ drops must not linger in the Python mirror.
+
+    Only the removal direction is tested; see
+    ``unrecognized_fingerprint_selector`` for why the other direction is benign.
+    """
+    mols = _mols(["CCO", "CCC"])
+    for spelling in sorted(_comparisons._FAMILY_ALIASES):
+        try:
+            oecluster.pdist(mols, "fingerprint", fp_type=spelling)
+        except RuntimeError as exc:
+            assert "Unknown OEFP fingerprint type" not in str(exc), spelling
+
+
+def test_every_mirrored_storage_is_still_accepted_by_cpp():
+    """A storage C++ drops must not linger in the Python mirror."""
+    mols = _mols(["CCO", "CCC"])
+    for storage in sorted(_comparisons._FINGERPRINT_STORAGES):
+        try:
+            oecluster.pdist(mols, "fingerprint", storage=storage)
+        except RuntimeError as exc:
+            # A storage can fail for reasons unrelated to drift -- 'count'
+            # rejects the default bit-set metric. Only recognition is asserted.
+            assert "Unknown fingerprint storage" not in str(exc), storage
+
+
+def test_every_mirrored_metric_is_still_accepted_by_cpp():
+    """A metric C++ drops, or moves off this surface, must not linger.
+
+    Both messages are checked: ``_FINGERPRINT_METRICS`` claims the name exists
+    *and* is available on the fingerprint surface, so a metric moved to
+    descriptor-only would be drift just as much as one deleted outright.
+    """
+    mols = _mols(["CCO", "CCC"])
+    for metric in sorted(_comparisons._FINGERPRINT_METRICS):
+        try:
+            oecluster.pdist(mols, "fingerprint", metric=metric)
+        except RuntimeError as exc:
+            assert "Unknown metric" not in str(exc), metric
+            assert "descriptor-space metric" not in str(exc), metric
+
+
+def test_an_out_of_range_tversky_weight_outranks_the_symmetry_guard():
+    """Both remedies the symmetry message names fail when weights are invalid."""
+    mols = _mols(["CCO", "CCC", "c1ccccc1"])
+    with pytest.raises(RuntimeError, match=r"Tversky alpha and beta must be in"):
+        oecluster.pdist(
+            mols, "fingerprint", metric="tversky",
+            tversky_alpha=5.0, tversky_beta=0.1)
+
+
+def test_an_in_range_asymmetric_tversky_still_hits_the_symmetry_guard():
+    """The control: standing aside on bad weights must not cost real advice."""
+    mols = _mols(["CCO", "CCC", "c1ccccc1"])
+    with pytest.raises(ValueError, match="pdist requires a symmetric metric"):
+        oecluster.pdist(
+            mols, "fingerprint", metric="tversky",
+            tversky_alpha=0.9, tversky_beta=0.1)

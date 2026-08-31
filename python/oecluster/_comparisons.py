@@ -270,9 +270,13 @@ def unrecognized_fingerprint_selector(fp_type, storage, metric):
     between them, so the rule that is always right is to defer to C++ whenever
     C++ is going to speak.
 
-    A stale mirror fails in the benign direction: a value C++ has added but this
-    module has not mirrored loses its advisory rules, which costs advice and
-    never produces a wrong error.
+    Mirror staleness is benign in one direction only. A value C++ has added but
+    this module has not mirrored merely loses its advisory rules. A value C++
+    has *removed* that this module still lists is not benign: it makes this
+    function answer ``None`` for something C++ will reject, so an advisory rule
+    fires ahead of the authoritative error -- the defect the mirrors exist to
+    prevent. The mirror-drift tests in ``test_comparison_registry.py`` cover
+    that direction.
 
     :param fp_type: Selected fingerprint family, or ``None`` for the default.
     :param storage: Selected storage, or ``None`` for the default.
@@ -373,8 +377,18 @@ def _build_fingerprint(items, similarity, kwargs, symmetric):
     # This guard runs after the rejector and needs its own precondition -- a
     # check that covers only the rejector leaves this path open, which is
     # exactly how the previous two rounds each missed half the defect.
+    #
+    # Weights outside [0, 1] are skipped for the same reason, and it is the
+    # sharpest case: both remedies this message names -- equal weights, or
+    # cdist -- still fail the range bound in validate_params
+    # (src/comparisons/MetricTable.cpp:100), so firing here would name two
+    # remedies that cannot work and bury the one that can. Written as a
+    # positive range test so a NaN weight, which compares false against
+    # everything, also falls through to C++.
     if (unrecognized is None and symmetric
             and opts.metric.lower() == 'tversky'
+            and 0.0 <= opts.tversky_alpha <= 1.0
+            and 0.0 <= opts.tversky_beta <= 1.0
             and opts.tversky_alpha != opts.tversky_beta):
         raise ValueError(
             "pdist requires a symmetric metric, but tversky with "
