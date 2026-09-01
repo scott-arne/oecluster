@@ -17,15 +17,14 @@ import re
 import shutil
 import sys
 import warnings
-import ctypes
 from importlib import metadata
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
-__version__ = "4.2.2"
-__version_info__ = (4, 2, 2)
+__version__ = "4.2.3"
+__version_info__ = (4, 2, 3)
 
 
 _OPENEYE_COMPAT_PRELOAD_PATHS: list[str] = []
@@ -667,6 +666,43 @@ from .oecluster import SuperposeOptions
 from . import _comparisons
 
 
+class _StorageView:
+    """Expose a storage backend's buffer to numpy while owning a reference.
+
+    A zero-copy view is only safe if the buffer outlives every array over it.
+    Building the array from a raw pointer does not establish that: the pointer
+    carries no ownership, so the array stays valid only for as long as
+    something else happens to hold the storage. When the array outlives its
+    matrix -- ``arr = pdist(...).condensed`` discards the matrix immediately --
+    the buffer is freed and the array reads whatever the allocator puts there
+    next. That fails silently, returning plausible distances rather than
+    crashing.
+
+    Handing numpy an ``__array_interface__`` on an object that holds the
+    storage makes the array's ``base`` this view, so the storage is reachable
+    for exactly as long as the array is.
+
+    :ivar _storage: The storage backend whose buffer is exposed. Held solely
+        to keep it alive; never read.
+    """
+
+    def __init__(self, storage, ptr, num_pairs):
+        """
+        Wrap a storage buffer for numpy without copying it.
+
+        :param storage: Storage backend owning the buffer.
+        :param ptr: Address of the first ``double`` in the buffer.
+        :param num_pairs: Number of ``double`` values in the buffer.
+        """
+        self._storage = storage
+        self.__array_interface__ = {
+            'data': (int(ptr), False),
+            'shape': (num_pairs,),
+            'typestr': np.dtype(np.float64).str,
+            'version': 3,
+        }
+
+
 class DistanceMatrix(abc.ABC):
     """
     Abstract base for distance matrices computed from a set of items.
@@ -781,15 +817,14 @@ class SymmetricDistanceMatrix(DistanceMatrix):
             self._condensed_cache = condensed
             return condensed
 
-        # Dense or MMap storage: zero-copy access
-        ptr = self._storage._data_ptr()
-        num_pairs = self.num_pairs
-        arr = np.ctypeslib.as_array(
-            ctypes.cast(ptr, ctypes.POINTER(ctypes.c_double)),
-            shape=(num_pairs,)
-        )
+        # Dense or MMap storage: zero-copy access. The view owns a reference to
+        # the storage, so the buffer cannot be freed while this array is alive
+        # -- caching on the matrix is not enough, because the array is routinely
+        # kept after the matrix is dropped.
+        arr = np.asarray(
+            _StorageView(self._storage, self._storage._data_ptr(),
+                         self.num_pairs))
 
-        # Cache to keep storage alive
         self._condensed_cache = arr
         return arr
 

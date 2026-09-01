@@ -362,3 +362,61 @@ def test_pdist_rocs_end_to_end():
     # would pass regardless of what ROCS computed.
     square = np.asarray(dist.squareform())
     assert np.allclose(square, square.T)
+
+
+def test_condensed_survives_the_matrix_that_produced_it():
+    """The zero-copy view must own its buffer rather than borrow it.
+
+    ``arr = pdist(...).condensed`` discards the matrix immediately, which is
+    ordinary usage. While the array only borrowed the pointer, the storage was
+    freed and the array went on reading reallocated memory -- returning
+    plausible distances rather than crashing, so nothing downstream noticed.
+    """
+    import gc
+
+    from oecluster import DenseStorage, SymmetricDistanceMatrix, _StorageView
+
+    expected = [0.5, 0.25, 0.75]
+
+    def build_and_discard():
+        storage = DenseStorage(3)
+        storage.Set(0, 1, expected[0])
+        storage.Set(0, 2, expected[1])
+        storage.Set(1, 2, expected[2])
+        matrix = SymmetricDistanceMatrix(storage, "test", ["a", "b", "c"], {})
+        return matrix.condensed
+
+    arr = build_and_discard()
+    gc.collect()
+
+    # Churn the allocator so a freed buffer would be handed back out.
+    for _ in range(3):
+        ballast = [np.random.rand(4096) for _ in range(200)]
+        del ballast
+        gc.collect()
+
+    # Not merely "base is not None": a borrowed pointer also has a base object,
+    # it just does not own the storage. Name the type that does.
+    assert isinstance(arr.base, _StorageView)
+    assert list(arr) == pytest.approx(expected)
+
+
+def test_condensed_stays_a_zero_copy_view():
+    """Keeping the storage alive must not quietly turn the view into a copy.
+
+    Guards the obvious wrong fix: copying the buffer would satisfy the
+    lifetime test above while changing documented zero-copy behavior.
+    """
+    from oecluster import DenseStorage, SymmetricDistanceMatrix
+
+    storage = DenseStorage(3)
+    storage.Set(0, 1, 0.5)
+    storage.Set(0, 2, 0.25)
+    storage.Set(1, 2, 0.75)
+    matrix = SymmetricDistanceMatrix(storage, "test", ["a", "b", "c"], {})
+
+    arr = matrix.condensed
+    assert not arr.flags.owndata
+
+    arr[0] = 0.125
+    assert storage.Get(0, 1) == pytest.approx(0.125)
