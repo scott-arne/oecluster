@@ -138,8 +138,23 @@ ROCSComparison::ROCSComparison(const std::vector<std::shared_ptr<OEChem::OEMol>>
         OEChem::OESetDimensionFromCoords(*shared->mols[i]);
 
         // ``< 3``, deliberately, and not the ``== 0`` that RMSDComparison uses.
-        // Planar input is as unusable here as absent input: the toolkit finds no
-        // coordinates it can overlay, warns, and returns a Tanimoto of exactly
+        // Planar input is as unusable here as absent input, and it fails in two
+        // different ways depending on the company it keeps.
+        // ``OEShape::OEOverlay::SetupRef`` refuses a degenerate reference: it
+        // warns, returns ``false``, and leaves the previous reference installed.
+        // Compare() reuses one overlay per thread and discards that return
+        // value, so when one molecule is degenerate among sound ones -- the
+        // likelier accident, one failed conformer generation in an otherwise
+        // good set -- BestOverlay goes on to score the stale reference against
+        // the requested fit. Measured on one reused overlay, a refused flat
+        // octane reference followed by phenol returns a shape Tanimoto of
+        // 0.959704, which is exactly the benzene-against-phenol score from the
+        // step before it. That is not a saturation value a reader might
+        // question but a plausible score belonging to a different pair, and
+        // which pair depends on what that thread compared last, so it is not
+        // even reproducible across thread counts. Only when every molecule is
+        // degenerate is there no stale reference to inherit; then the toolkit
+        // finds no coordinates it can overlay and returns a Tanimoto of exactly
         // 0.0, so every pair -- the diagonal included -- comes back at whichever
         // value saturation puts it at for the configured score type. The four
         // distance forms saturate at ComboNorm 1.0, Combo 2.0, Shape 1.0 and
