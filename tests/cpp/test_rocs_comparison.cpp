@@ -59,6 +59,33 @@ protected:
         }
     }
 
+    /// Move one atom of one conformer of ``mol`` to ``offset`` on ``axis``,
+    /// stretching that conformer's bounding box to roughly ``offset``.
+    /// ``stretch_active`` selects between the conformer OEShape reads through
+    /// the OEMolBase view and the first one it does not, which is the
+    /// distinction the extent guard has to be insensitive to.
+    ///
+    /// Axis 0 by default, and deliberately. Measured through oecluster.pdist
+    /// before this guard existed, the same 1e10 displacement crashed on x (exit
+    /// 139) but returned a saturated 1.0 on y and on z. Neither outcome is a
+    /// score, but only the x case proves the guard is what stops the crash.
+    static void StretchOneConformer(OEChem::OEMol& mol, bool stretch_active,
+                                    double offset, unsigned int axis = 0) {
+        const OEChem::OEConfBase* const active = mol.GetActive();
+        for (OESystem::OEIter<OEChem::OEConfBase> conf = mol.GetConfs(); conf; ++conf) {
+            if ((&*conf == active) != stretch_active) {
+                continue;
+            }
+            OESystem::OEIter<OEChem::OEAtomBase> atom = conf->GetAtoms();
+            EXPECT_TRUE(atom);
+            double coords[3];
+            EXPECT_TRUE(conf->GetCoords(&*atom, coords));
+            coords[axis] = offset;
+            EXPECT_TRUE(conf->SetCoords(&*atom, coords));
+            return;
+        }
+    }
+
     void SetUp() override {
         mols_.push_back(MakeConformer("c1ccccc1"));     // benzene
         mols_.push_back(MakeConformer("c1ccc(O)cc1"));  // phenol
@@ -257,9 +284,15 @@ TEST_F(ROCSComparisonTest, CloneInheritsTheMeasuredStamp) {
     EXPECT_EQ(clone->Facts().zero_self, Capability::No);
 }
 
-TEST_F(ROCSComparisonTest, ANonFiniteDiagonalStampsNoAndFlagsNaN) {
-    // std::abs(NaN) > tol is false, so a naive threshold reads a NaN diagonal as
-    // "vanished" and stamps a tier-1 Yes on a matrix that is not a number.
+TEST_F(ROCSComparisonTest, ANonFiniteCoordinateIsRefused) {
+    // Admitted until the coordinate guard existed, and it scored: every pair
+    // including the diagonal came back NaN, stamped honestly as
+    // DataIntegrity::NaNPresent but still handed to the caller as a matrix. The
+    // guard turns that into a refusal at construction. MeasureDiagonal's own
+    // non-finite branch stays as a backstop -- ``std::abs(NaN) > tol`` is false,
+    // so a naive threshold there would stamp a tier-1 Yes on a matrix that is
+    // not a number -- but no input reaching it through this constructor can
+    // carry a NaN coordinate any more.
     auto mol = MakeConformer("c1ccc(O)cc1");
     OESystem::OEIter<OEChem::OEAtomBase> atom = mol->GetAtoms();
     ASSERT_TRUE(atom);
@@ -267,17 +300,14 @@ TEST_F(ROCSComparisonTest, ANonFiniteDiagonalStampsNoAndFlagsNaN) {
     ASSERT_TRUE(mol->GetCoords(&*atom, coords));
     coords[0] = std::numeric_limits<float>::quiet_NaN();
     ASSERT_TRUE(mol->SetCoords(&*atom, coords));
-    ROCSComparison comparison({mol}, ROCSOptions());
-    ASSERT_FALSE(std::isfinite(comparison.Compare(0, 0)));
-    EXPECT_EQ(comparison.Facts().zero_self, Capability::No);
-    EXPECT_EQ(comparison.Facts().data_integrity, DataIntegrity::NaNPresent);
+    EXPECT_THROW(ROCSComparison({mol}, ROCSOptions()), ComparisonError);
 }
 
-TEST_F(ROCSComparisonTest, ANonFiniteDiagonalIsFlaggedAfterANonzeroSelfScore) {
-    // Methane has no color atom, so its ComboNorm self-distance is 0.5 -- a
-    // finite, nonzero diagonal entry ahead of the NaN. Ordering it first is the
-    // whole point: an implementation that stops at the first nonzero entry
-    // reports Complete here and NaNPresent for the reverse order.
+TEST_F(ROCSComparisonTest, ANonFiniteCoordinateRefusalNamesItsMoleculeIndex) {
+    // Methane ahead of the broken phenol so the message has to identify which
+    // molecule to fix rather than reporting the first index it looked at. Sound
+    // input in front of the offender is also what distinguishes a guard that
+    // scans the whole set from one that stops early.
     auto methane = MakeConformer("C");
     auto broken = MakeConformer("c1ccc(O)cc1");
     OESystem::OEIter<OEChem::OEAtomBase> atom = broken->GetAtoms();
@@ -287,15 +317,14 @@ TEST_F(ROCSComparisonTest, ANonFiniteDiagonalIsFlaggedAfterANonzeroSelfScore) {
     coords[0] = std::numeric_limits<float>::quiet_NaN();
     ASSERT_TRUE(broken->SetCoords(&*atom, coords));
 
-    ROCSComparison comparison({methane, broken}, ROCSOptions());
-    // Nonzero, not merely finite. A methane diagonal that drifted to 0.0 -- a
-    // prep change giving it a color atom, a different default score type --
-    // would leave this test passing while it silently degenerated into the
-    // all-zero prefix the buggy implementation also handled.
-    ASSERT_NEAR(comparison.Compare(0, 0), 0.5, 1e-3);
-    ASSERT_FALSE(std::isfinite(comparison.Compare(1, 1)));
-    EXPECT_EQ(comparison.Facts().zero_self, Capability::No);
-    EXPECT_EQ(comparison.Facts().data_integrity, DataIntegrity::NaNPresent);
+    try {
+        ROCSComparison comparison({methane, broken}, ROCSOptions());
+        FAIL() << "expected ComparisonError for a non-finite coordinate";
+    } catch (const ComparisonError& exc) {
+        const std::string message(exc.what());
+        EXPECT_NE(message.find("index 1"), std::string::npos) << message;
+        EXPECT_NE(message.find("non-finite"), std::string::npos) << message;
+    }
 }
 
 TEST_F(ROCSComparisonTest, RealCoordinatesWithAStaleDimensionAreAdmitted) {
@@ -350,6 +379,91 @@ TEST_F(ROCSComparisonTest, OnlyTheActiveConformerDecidesTheDimensionRefusal) {
     auto active_flat = std::make_shared<OEChem::OEMol>(*ensemble);
     FlattenOneConformer(*active_flat, true);
     EXPECT_THROW(ROCSComparison({active_flat}, ROCSOptions()), ComparisonError);
+}
+
+TEST_F(ROCSComparisonTest, AnExtremeCoordinateExtentIsRefused) {
+    // Before the guard this exact input took the process down: driven through
+    // oecluster.pdist it exited 139 (SIGSEGV) rather than raising, so the
+    // refusal is the difference between an error and a crash, not between two
+    // error messages.
+    auto mol = MakeConformer("c1ccc(O)cc1");
+    StretchOneConformer(*mol, true, 1e10);
+    ASSERT_EQ(mol->GetDimension(), 3u) << "the dimension guard must not be what refuses this";
+
+    try {
+        ROCSComparison comparison({mol}, ROCSOptions());
+        FAIL() << "expected ComparisonError for an extreme coordinate extent";
+    } catch (const ComparisonError& exc) {
+        const std::string message(exc.what());
+        EXPECT_NE(message.find("index 0"), std::string::npos) << message;
+        EXPECT_NE(message.find("extent"), std::string::npos) << message;
+    }
+}
+
+TEST_F(ROCSComparisonTest, AStretchedNonActiveConformerIsRefused) {
+    // The counterpart of OnlyTheActiveConformerDecidesTheDimensionRefusal, and
+    // deliberately the opposite verdict. A flat non-active conformer is harmless
+    // because BestOverlay picks a sound one; a stretched non-active conformer is
+    // not, because BestOverlay grids the whole fit ensemble before it chooses.
+    // Driven through oecluster.pdist before the guard existed, this exact damage
+    // exited 138 (SIGBUS) even though the rest of the ensemble was sound and the
+    // dimension guard never looks past the active conformer. That is why the
+    // extent guard scans the whole ensemble where the guard above it does not.
+    auto ensemble = MakeConformer("CCCCCCCC", 6);
+    ASSERT_GE(ensemble->NumConfs(), 2u);
+    StretchOneConformer(*ensemble, false, 1e10);
+    ASSERT_EQ(ensemble->GetDimension(), 3u);
+    EXPECT_THROW(ROCSComparison({ensemble}, ROCSOptions()), ComparisonError);
+}
+
+TEST_F(ROCSComparisonTest, ALargeButPhysicallyRealExtentIsAdmitted) {
+    // 200 angstroms is the span of a large protein: an order of magnitude under
+    // MAX_COORDINATE_EXTENT and well inside what OEShape can grid. Refusing it
+    // would be as much of a defect as admitting the 1e10 case above, so this
+    // asserts more than "did not throw" -- the self-overlay lands exactly on
+    // 0.0, which for ComboNorm means a combo of 2.0, so the molecule is
+    // genuinely overlaid rather than handed the 1.0 an unusable grid returns.
+    //
+    // The cross pair is deliberately not asserted. Measured on this fixture it
+    // is 0.546 on an overlay being used for the first time and exactly 1.0 on
+    // one that has scored anything before it, a split that appears somewhere
+    // between 100 and 200 angstroms. That belongs to OEOverlay reuse rather than
+    // to this guard, so pinning a number here would pin the call order instead.
+    auto stretched = MakeConformer("c1ccc(O)cc1");
+    StretchOneConformer(*stretched, true, 200.0);
+    auto benzene = MakeConformer("c1ccccc1");
+
+    ROCSComparison comparison({stretched, benzene}, ROCSOptions());
+    EXPECT_NEAR(comparison.Compare(0, 0), 0.0, 1e-6);
+    EXPECT_EQ(comparison.Facts().zero_self, Capability::Yes);
+}
+
+TEST_F(ROCSComparisonTest, ARigidlyTranslatedFrameIsAdmitted) {
+    // The case that separates extent from magnitude. Every coordinate here is
+    // around 1e6, six orders of magnitude past anything a guard on
+    // ``abs(coordinate)`` would tolerate, but the bounding box is untouched and
+    // OEShape scores it as though it had never moved. Asserting agreement with
+    // the untranslated pair rather than a hard-coded number keeps the test
+    // pinned to that invariance.
+    auto phenol = MakeConformer("c1ccc(O)cc1");
+    auto benzene = MakeConformer("c1ccccc1");
+    auto translated = std::make_shared<OEChem::OEMol>(*phenol);
+    for (OESystem::OEIter<OEChem::OEConfBase> conf = translated->GetConfs(); conf; ++conf) {
+        for (OESystem::OEIter<OEChem::OEAtomBase> atom = conf->GetAtoms(); atom; ++atom) {
+            double coords[3];
+            ASSERT_TRUE(conf->GetCoords(&*atom, coords));
+            coords[0] += 1e6;
+            ASSERT_TRUE(conf->SetCoords(&*atom, coords));
+        }
+    }
+
+    ROCSComparison reference({phenol, benzene}, ROCSOptions());
+    ROCSComparison moved({translated, benzene}, ROCSOptions());
+    EXPECT_NEAR(moved.Compare(0, 1), reference.Compare(0, 1), 1e-2);
+    // Not vacuous only if the shared value is a real score rather than a
+    // saturation constant both sides could reach by failing identically.
+    EXPECT_GT(reference.Compare(0, 1), 0.0);
+    EXPECT_LT(reference.Compare(0, 1), 1.0);
 }
 
 TEST_F(ROCSComparisonTest, FactsCoverEveryScoreTypeAndDirection) {

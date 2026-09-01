@@ -430,6 +430,24 @@ def test_none_is_unspecified_for_rocs_too():
     assert obj.Size() == 2
 
 
+def test_rocs_refuses_an_extreme_coordinate_extent():
+    """Through the public ``pdist``, because the alternative was a crash.
+
+    Displacing one atom to x = 1e10 leaves the OEChem dimension attribute at 3,
+    so the guard above this one admits it, and the constructor-time self-overlay
+    then took the interpreter down: this exact call exited 139 (SIGSEGV) before
+    the extent guard existed, which is not a failure a caller can catch.
+    """
+    mols = _conformer_mols(["c1ccc(O)cc1", "c1ccccc1"])
+    atom = next(iter(mols[0].GetAtoms()))
+    coords = list(mols[0].GetCoords(atom))
+    coords[0] = 1e10
+    assert mols[0].SetCoords(atom, coords)
+
+    with pytest.raises(RuntimeError, match="extent"):
+        oecluster.pdist(mols, "rocs")
+
+
 def test_none_is_unspecified_for_superpose_too():
     """And in the one next to that, which needs no coordinates to construct."""
     mols = _multiconf_mols(["CCO", "CCC"])

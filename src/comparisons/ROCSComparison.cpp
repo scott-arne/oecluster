@@ -5,6 +5,7 @@
 
 #include "oecluster/comparisons/ROCSComparison.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <oechem.h>
@@ -22,6 +23,25 @@ namespace {
 /// 1e-6 this still sits four orders of magnitude below the smallest genuine
 /// shortfall measured -- 0.0137, for diatomic chlorine.
 constexpr double SELF_SCORE_TOLERANCE = 1e-6;
+
+/// Largest per-axis span, in angstroms, that a conformer may have and still be
+/// overlaid. Chosen inside a measured band rather than at its edge: 3e4 still
+/// self-overlays exactly, 1e5 was the first hard failure seen (std::bad_alloc),
+/// and 1e6 and above come back saturated at ~0.999, which reads like a score.
+/// Real chemistry sits far below -- a large protein spans roughly 200 angstroms
+/// and a virus capsid roughly 1000 -- so 1e4 clears any plausible input by an
+/// order of magnitude and stays an order of magnitude under the first observed
+/// failure. OEShape does not fail at 1e4, and where it does fail is
+/// allocation-dependent and moved between probes; the refusal says no meaningful
+/// score exists that far out, not that the toolkit would crash there.
+///
+/// An upper bound on catastrophe, not a certificate of quality. From somewhere
+/// between 100 and 200 angstroms a stretched phenol already scores 0.546 against
+/// benzene on an overlay being used for the first time and exactly 1.0 on one
+/// that has scored anything before it, so cross-pair values well inside this
+/// limit can still be unreliable. That split is a property of OEOverlay reuse
+/// rather than of the input, and is tracked separately from this guard.
+constexpr double MAX_COORDINATE_EXTENT = 1e4;  // angstroms
 }  // namespace
 
 struct ROCSComparison::SharedData {
@@ -180,6 +200,69 @@ ROCSComparison::ROCSComparison(const std::vector<std::shared_ptr<OEChem::OEMol>>
                 std::to_string(i) + " has dimension " +
                 std::to_string(shared->mols[i]->GetDimension()) +
                 ". Generate conformers first, for example with OEOmega.");
+        }
+
+        // Coordinates the dimension attribute cannot speak for. Finite but
+        // extreme geometry reports dimension 3, reaches the self-overlay in
+        // MeasureDiagonal, and either kills the process or returns a saturated
+        // score; a stretched molecule still seats exactly on itself, so the
+        // diagonal invariant never fires and this has to run first.
+        //
+        // Extent, not magnitude. A frame rigidly translated to 1e6 scores within
+        // 0.002 of where it started, while a stretched one either dies or
+        // saturates, so a guard on ``abs(coordinate)`` would refuse input that
+        // scores perfectly well.
+        //
+        // Every conformer, unlike the dimension refresh above, which reads only
+        // the active one. Both readings are right for their own guard:
+        // BestOverlay can route around a flat non-active conformer, but it grids
+        // a stretched one before it chooses, and a six-conformer octane
+        // stretched to 1e10 on one non-active conformer took the process down
+        // with SIGBUS.
+        //
+        // Finiteness before extent, and not merely for the message: ``max - min``
+        // over a NaN is NaN and ``NaN > MAX_COORDINATE_EXTENT`` is false, the
+        // trap MeasureDiagonal documents below, so an unchecked coordinate would
+        // slip past the very test that exists to refuse it.
+        for (OESystem::OEIter<OEChem::OEConfBase> conf = shared->mols[i]->GetConfs();
+             conf; ++conf) {
+            double lo[3] = {0.0, 0.0, 0.0};
+            double hi[3] = {0.0, 0.0, 0.0};
+            bool have_bounds = false;
+            for (OESystem::OEIter<OEChem::OEAtomBase> atom = conf->GetAtoms(); atom; ++atom) {
+                double xyz[3] = {0.0, 0.0, 0.0};
+                if (!conf->GetCoords(&*atom, xyz)) {
+                    throw ComparisonError(
+                        "ROCSComparison could not read coordinates for molecule at index " +
+                        std::to_string(i) + ".");
+                }
+                for (int axis = 0; axis < 3; ++axis) {
+                    if (!std::isfinite(xyz[axis])) {
+                        throw ComparisonError(
+                            "ROCSComparison requires finite coordinates: molecule at index " +
+                            std::to_string(i) +
+                            " has a non-finite (NaN or infinite) coordinate. Every score "
+                            "involving it, the diagonal included, would be NaN.");
+                    }
+                    lo[axis] = have_bounds ? std::min(lo[axis], xyz[axis]) : xyz[axis];
+                    hi[axis] = have_bounds ? std::max(hi[axis], xyz[axis]) : xyz[axis];
+                }
+                have_bounds = true;
+            }
+            if (!have_bounds) {
+                continue;
+            }
+            for (int axis = 0; axis < 3; ++axis) {
+                const double extent = hi[axis] - lo[axis];
+                if (extent > MAX_COORDINATE_EXTENT) {
+                    throw ComparisonError(
+                        "ROCSComparison requires coordinates of bounded extent: molecule at "
+                        "index " + std::to_string(i) + " has a conformer spanning " +
+                        std::to_string(extent) + " angstroms on one axis, above the limit of " +
+                        std::to_string(MAX_COORDINATE_EXTENT) +
+                        ". No meaningful overlay score exists at that scale.");
+                }
+            }
         }
     }
 
