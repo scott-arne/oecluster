@@ -28,10 +28,10 @@ def _multiconf_mols(smiles_list):
 def _conformer_mols(smiles_list):
     """The same, embedded in 3D, for the builders that require coordinates.
 
-    ``ROCSComparison`` refuses a molecule whose coordinates span fewer than
-    three dimensions: the overlay finds nothing it can use, warns, and returns a
-    Tanimoto of exactly 0.0 for every pair, so every score it could produce
-    would be a saturation value rather than a measurement.
+    ``ROCSComparison`` refuses a molecule whose recomputed OEChem dimension
+    attribute -- an axis count, not a geometric rank -- is below three, and a
+    molecule straight from a SMILES parse carries no coordinates at all, so
+    these fixtures have to come from Omega.
     """
     pytest.importorskip("openeye.oeomega")
     from openeye import oeomega

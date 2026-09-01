@@ -151,15 +151,18 @@ ROCSComparison::ROCSComparison(const std::vector<std::shared_ptr<OEChem::OEMol>>
         // 0.959704, which is exactly the benzene-against-phenol score from the
         // step before it. That is not a saturation value a reader might
         // question but a plausible score belonging to a different pair, and
-        // which pair depends on what that thread compared last, so it is not
-        // even reproducible across thread counts. Only when every molecule is
-        // degenerate is there no stale reference to inherit; then the toolkit
-        // finds no coordinates it can overlay and returns a Tanimoto of exactly
-        // 0.0, so every pair -- the diagonal included -- comes back at whichever
-        // value saturation puts it at for the configured score type. The four
-        // distance forms saturate at ComboNorm 1.0, Combo 2.0, Shape 1.0 and
-        // Color 1.0, which MeasureDiagonal stamps No on. The four similarity
-        // forms saturate at 0.0 and stamp ``zero_self = Yes``, which is a pass
+        // which pair depends on what that thread compared last. Each worker
+        // gets its own clone and its own chunk of the pair list, so the
+        // inherited pair should move with the thread count as well, but that
+        // part is a deduction from the partitioning, not a measurement. Only
+        // when every molecule is degenerate is there no stale reference to
+        // inherit; then the toolkit finds no coordinates it can overlay and
+        // returns a Tanimoto of exactly 0.0, so every pair -- the diagonal
+        // included -- comes back at whichever value saturation puts it at for
+        // the configured score type. The four distance forms saturate at
+        // ComboNorm 1.0, Combo 2.0, Shape 1.0 and Color 1.0, which
+        // MeasureDiagonal stamps No on. The four similarity forms saturate at
+        // 0.0 and stamp ``zero_self = Yes``, which is a pass
         // -- but the gate refuses a similarity on ``is_distance`` before it
         // reads the diagonal at all, so both halves are refused there and the
         // similarity half is refused earlier.
