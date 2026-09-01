@@ -1589,8 +1589,10 @@ def butina(distance_matrix, threshold, *, reordering=False,
     :returns: ButinaResult with per-item labels and grouped clusters. The
         first member of each cluster is the highest-neighborhood representative,
         and each member's label equals its cluster index.
-    :raises TypeError: If distance_matrix is not a SymmetricDistanceMatrix.
-    :raises ValueError: If threshold is negative, or the matrix is not a metric.
+    :raises TypeError: If distance_matrix is not a SymmetricDistanceMatrix, or
+        allow_nonmetric is not a bool.
+    :raises ValueError: If threshold or a size argument is negative, or the
+        matrix is not a metric.
     """
     if threshold < 0.0:
         raise ValueError("Butina threshold must be non-negative")
@@ -1601,6 +1603,13 @@ def butina(distance_matrix, threshold, *, reordering=False,
     # ahead of an advisory refusal that names a remedy which cannot rescue it.
     num_threads_int = int(num_threads)
     chunk_size_int = int(chunk_size)
+
+    # Both reach size_t option fields, where a negative value raises
+    # OverflowError below the gate. Zero stays legal: it means "choose for me".
+    if num_threads_int < 0:
+        raise ValueError("num_threads must be non-negative")
+    if chunk_size_int < 0:
+        raise ValueError("chunk_size must be non-negative")
 
     _gate.require_metric(distance_matrix, "butina",
                          allow_nonmetric=allow_nonmetric)
@@ -1957,9 +1966,10 @@ def dbscan(distance_matrix, eps, *, min_samples=5, num_threads=0,
         satisfy the triangle inequality. Does not override the refusals for
         similarity-valued or non-finite matrices.
     :returns: DBSCANResult with labels, clusters, and core sample indices.
-    :raises TypeError: If distance_matrix is not a SymmetricDistanceMatrix.
-    :raises ValueError: If eps or min_samples are invalid, or the matrix is not
-        a metric.
+    :raises TypeError: If distance_matrix is not a SymmetricDistanceMatrix, or
+        allow_nonmetric is not a bool.
+    :raises ValueError: If eps, min_samples, or a size argument is invalid, or
+        the matrix is not a metric.
     """
     if eps < 0.0:
         raise ValueError("DBSCAN eps must be non-negative")
@@ -1972,6 +1982,13 @@ def dbscan(distance_matrix, eps, *, min_samples=5, num_threads=0,
     # ahead of an advisory refusal that names a remedy which cannot rescue it.
     num_threads_int = int(num_threads)
     chunk_size_int = int(chunk_size)
+
+    # Both reach size_t option fields, where a negative value raises
+    # OverflowError below the gate. Zero stays legal: it means "choose for me".
+    if num_threads_int < 0:
+        raise ValueError("num_threads must be non-negative")
+    if chunk_size_int < 0:
+        raise ValueError("chunk_size must be non-negative")
 
     _gate.require_metric(distance_matrix, "dbscan",
                          allow_nonmetric=allow_nonmetric)
@@ -2013,8 +2030,10 @@ def hdbscan(distance_matrix, *, min_cluster_size=5, min_samples=None,
         satisfy the triangle inequality. Does not override the refusals for
         similarity-valued or non-finite matrices.
     :returns: HDBSCANResult with labels, clusters, and probabilities.
-    :raises TypeError: If distance_matrix is not a SymmetricDistanceMatrix.
-    :raises ValueError: If options are invalid, or the matrix is not a metric.
+    :raises TypeError: If distance_matrix is not a SymmetricDistanceMatrix, or
+        allow_nonmetric is not a bool.
+    :raises ValueError: If options are invalid, the matrix uses sparse storage,
+        or the matrix is not a metric.
     """
     if min_cluster_size < 2:
         raise ValueError("HDBSCAN min_cluster_size must be at least two")
@@ -2044,8 +2063,33 @@ def hdbscan(distance_matrix, *, min_cluster_size=5, min_samples=None,
     num_threads_int = int(num_threads)
     chunk_size_int = int(chunk_size)
 
+    # Both reach size_t option fields, where a negative value raises
+    # OverflowError below the gate. Zero stays legal: it means "choose for me".
+    if num_threads_int < 0:
+        raise ValueError("num_threads must be non-negative")
+    if chunk_size_int < 0:
+        raise ValueError("chunk_size must be non-negative")
+
+    # HDBSCAN bounds the min_samples it actually uses, which is min_cluster_size
+    # when the caller leaves min_samples unset, so the mirror substitutes the
+    # same way the native code does.
+    effective_min_samples = (int(min_cluster_size) if min_samples is None
+                             else int(min_samples))
+    if effective_min_samples > distance_matrix.num_samples:
+        raise ValueError(
+            "HDBSCAN min_samples must be at most "
+            f"the item count ({distance_matrix.num_samples})")
+    # ValueError, not TypeError: the argument's type is right, its storage is not.
+    if isinstance(distance_matrix.storage, SparseStorage):
+        raise ValueError(  # noqa: TRY004
+            "HDBSCAN requires complete pairwise "
+            "distances; SparseStorage is not supported")
+
     # Local argument validation first: allow_nonmetric cannot rescue an unknown
-    # cluster_selection_method, so the gate must not pre-empt that message.
+    # cluster_selection_method, an out-of-range min_samples, or sparse storage,
+    # so the gate must not pre-empt those messages. The bound and the storage
+    # check run in the order hdbscan_cluster() applies them, so the fix-first
+    # reason is the same whichever layer reports it.
     _gate.require_metric(distance_matrix, "hdbscan",
                          allow_nonmetric=allow_nonmetric)
 
@@ -2085,8 +2129,10 @@ def agglomerative(distance_matrix, *, n_clusters=2, distance_threshold=None,
         satisfy the triangle inequality. Does not override the refusals for
         similarity-valued or non-finite matrices.
     :returns: AgglomerativeResult with labels, clusters, children, distances, and cluster sizes.
-    :raises TypeError: If distance_matrix is not a SymmetricDistanceMatrix.
-    :raises ValueError: If options are invalid, or the matrix is not a metric.
+    :raises TypeError: If distance_matrix is not a SymmetricDistanceMatrix, or
+        allow_nonmetric is not a bool.
+    :raises ValueError: If options are invalid, the matrix uses sparse storage,
+        or the matrix is not a metric.
     """
     if not isinstance(distance_matrix, SymmetricDistanceMatrix):
         raise TypeError("agglomerative() expects a SymmetricDistanceMatrix")
@@ -2111,9 +2157,37 @@ def agglomerative(distance_matrix, *, n_clusters=2, distance_threshold=None,
     num_threads_int = int(num_threads)
     chunk_size_int = int(chunk_size)
 
+    # All three reach size_t option fields, where a negative value raises
+    # OverflowError below the gate. n_clusters needs its own check because the
+    # "at least one" guard above only runs when distance_threshold is omitted.
+    # Zero stays legal for the other two: it means "choose for me".
+    if n_clusters_int < 0:
+        raise ValueError("Agglomerative n_clusters must be non-negative")
+    if num_threads_int < 0:
+        raise ValueError("num_threads must be non-negative")
+    if chunk_size_int < 0:
+        raise ValueError("chunk_size must be non-negative")
+
+    # ValueError, not TypeError: the argument's type is right, its storage is not.
+    if isinstance(distance_matrix.storage, SparseStorage):
+        raise ValueError(  # noqa: TRY004
+            "Agglomerative clustering requires complete pairwise "
+            "distances; SparseStorage is not supported")
+
+    # The native bound on n_clusters applies only when no distance_threshold is
+    # given, because a threshold cut ignores n_clusters entirely. Mirroring it
+    # unconditionally would refuse calls that work today.
+    if (distance_threshold is None
+            and n_clusters_int > distance_matrix.num_samples):
+        raise ValueError(
+            "Agglomerative n_clusters must be at most "
+            f"the item count ({distance_matrix.num_samples})")
+
     # Local argument validation first: allow_nonmetric cannot rescue a bad
-    # n_clusters, distance_threshold, or linkage, so the gate must not
-    # pre-empt those messages.
+    # n_clusters, distance_threshold, linkage, or sparse storage, so the gate
+    # must not pre-empt those messages. The checks above run in the order
+    # agglomerative_cluster() applies them, so the fix-first reason is the same
+    # whichever layer reports it.
     _gate.require_metric(distance_matrix, "agglomerative",
                          allow_nonmetric=allow_nonmetric)
 
@@ -2524,9 +2598,10 @@ def cluster_report(result, distance_matrix, *, preset="default",
         satisfy the triangle inequality. Does not override the refusals for
         similarity-valued or non-finite matrices.
     :returns: A ClusterReport.
-    :raises TypeError: If result/distance_matrix have the wrong type.
-    :raises ValueError: If a preset/method/threshold is invalid, or the matrix
-        is not a metric.
+    :raises TypeError: If result/distance_matrix have the wrong type, or
+        allow_nonmetric is not a bool.
+    :raises ValueError: If a preset/method/threshold is invalid, the matrix
+        uses sparse storage, or the matrix is not a metric.
     :raises RuntimeError: If the distance matrix cannot provide complete distances.
     """
     if not isinstance(result, ClusteringResult):
@@ -2563,9 +2638,20 @@ def cluster_report(result, distance_matrix, *, preset="default",
 
     num_threads_int = int(num_threads)
 
+    # num_threads reaches a size_t option field, where a negative value raises
+    # OverflowError below the gate. Zero stays legal: it means "choose for me".
+    if num_threads_int < 0:
+        raise ValueError("num_threads must be non-negative")
+
+    # ValueError, not TypeError: the argument's type is right, its storage is not.
+    if isinstance(distance_matrix.storage, SparseStorage):
+        raise ValueError(  # noqa: TRY004
+            "cluster_report requires complete pairwise "
+            "distances; SparseStorage is not supported")
+
     # Local argument validation first: allow_nonmetric cannot rescue a bad
-    # preset or representative method, so the gate must not pre-empt those
-    # messages.
+    # preset, representative method, or sparse storage, so the gate must not
+    # pre-empt those messages.
     _gate.require_metric(distance_matrix, "cluster_report",
                          allow_nonmetric=allow_nonmetric)
 

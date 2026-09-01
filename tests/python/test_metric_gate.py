@@ -362,3 +362,186 @@ def test_agglomerative_coercion_error_before_gate():
     with pytest.raises(TypeError):
         oecluster.agglomerative(dist, n_clusters=["not_an_int"],
                                 distance_threshold=0.5)
+
+
+def _nonmetric():
+    """A dense six-item matrix whose facts arm the gate's tier-2 advisory."""
+    dist = oecluster.pdist(_mols(), "fingerprint", metric="dice")
+    assert dist.metric_capabilities['triangle'] is False
+    return dist
+
+
+def _nonmetric_sparse():
+    """The same measure stored sparsely, so the gate is armed here too."""
+    sparse = oecluster.pdist(_mols(), "fingerprint", metric="dice",
+                             cutoff=0.2)
+    assert sparse.metric_capabilities['triangle'] is False
+    assert isinstance(sparse.storage, oecluster.SparseStorage)
+    return sparse
+
+
+def test_hdbscan_item_count_bound_before_gate():
+    """An out-of-range min_samples outranks the gate's advisory.
+
+    ``allow_nonmetric=True`` cannot make min_samples fit the item count, so
+    naming it as the remedy sends the caller down a dead end. Matching on
+    "at most the item count" is what distinguishes the authoritative message
+    from the advisory, which shares the ValueError type.
+    """
+    dist = _nonmetric()
+    with pytest.raises(ValueError, match="min_samples must be at most"):
+        oecluster.hdbscan(dist, min_samples=99)
+
+
+def test_hdbscan_item_count_bound_reads_the_effective_min_samples():
+    """The bound applies to the value HDBSCAN actually uses.
+
+    ``HDBSCAN.cpp`` substitutes min_cluster_size when min_samples is unset,
+    then bounds that substituted value. A mirror that inspected only the raw
+    keyword would miss this call, which the native code refuses.
+    """
+    dist = _nonmetric()
+    with pytest.raises(ValueError, match="min_samples must be at most"):
+        oecluster.hdbscan(dist, min_cluster_size=7)
+
+
+def test_agglomerative_item_count_bound_before_gate():
+    dist = _nonmetric()
+    with pytest.raises(ValueError, match="n_clusters must be at most"):
+        oecluster.agglomerative(dist, n_clusters=99)
+
+
+def test_agglomerative_item_count_bound_only_without_a_threshold():
+    """Not an over-refusal: the native bound is conditional.
+
+    ``Agglomerative.cpp`` bounds n_clusters only when distance_threshold is
+    negative, which is how the wrapper encodes "no threshold". With a
+    threshold supplied, n_clusters is ignored, and an out-of-range value must
+    still cluster.
+    """
+    dist = _nonmetric()
+    result = oecluster.agglomerative(dist, n_clusters=99,
+                                     distance_threshold=0.5,
+                                     allow_nonmetric=True)
+    assert len(result.labels) == 6
+
+
+@pytest.mark.parametrize("call", [
+    lambda dm, **kw: oecluster.butina(dm, 0.5, **kw),
+    lambda dm, **kw: oecluster.dbscan(dm, 0.5, **kw),
+    lambda dm, **kw: oecluster.hdbscan(dm, min_cluster_size=2, **kw),
+    lambda dm, **kw: oecluster.agglomerative(dm, **kw),
+])
+def test_negative_num_threads_before_gate(call):
+    """A negative thread count outranks the gate's advisory.
+
+    The native options field is a size_t, so the assignment raises
+    OverflowError once the gate lets the call through -- another failure
+    ``allow_nonmetric=True`` cannot rescue.
+    """
+    dist = _nonmetric()
+    with pytest.raises(ValueError, match="num_threads must be non-negative"):
+        call(dist, num_threads=-1)
+
+
+def test_negative_num_threads_before_gate_in_cluster_report():
+    dist = _nonmetric()
+    result = oecluster.butina(dist, 0.5, allow_nonmetric=True)
+    with pytest.raises(ValueError, match="num_threads must be non-negative"):
+        oecluster.cluster_report(result, dist, num_threads=-1)
+
+
+@pytest.mark.parametrize("call", [
+    lambda dm, **kw: oecluster.butina(dm, 0.5, **kw),
+    lambda dm, **kw: oecluster.dbscan(dm, 0.5, **kw),
+    lambda dm, **kw: oecluster.hdbscan(dm, min_cluster_size=2, **kw),
+    lambda dm, **kw: oecluster.agglomerative(dm, **kw),
+])
+def test_negative_chunk_size_before_gate(call):
+    dist = _nonmetric()
+    with pytest.raises(ValueError, match="chunk_size must be non-negative"):
+        call(dist, chunk_size=-1)
+
+
+def test_negative_n_clusters_before_gate_with_a_threshold():
+    """The n_clusters size_t assignment is unguarded when a threshold is set.
+
+    With distance_threshold supplied the wrapper skips its "at least one"
+    check, so a negative n_clusters reached the size_t setter and raised
+    OverflowError below the gate.
+    """
+    dist = _nonmetric()
+    with pytest.raises(ValueError, match="n_clusters must be non-negative"):
+        oecluster.agglomerative(dist, n_clusters=-1, distance_threshold=0.5)
+
+
+@pytest.mark.parametrize("call", [
+    lambda dm, **kw: oecluster.hdbscan(dm, min_cluster_size=2, **kw),
+    lambda dm, **kw: oecluster.agglomerative(dm, **kw),
+])
+def test_sparse_storage_rejected_before_gate(call):
+    """The algorithms that need every pair say so before the advisory.
+
+    These three are the callers of ``validate_complete_distance_storage``;
+    butina and dbscan are not, and the test below holds them to that.
+    """
+    sparse = _nonmetric_sparse()
+    with pytest.raises(ValueError, match="SparseStorage is not supported"):
+        call(sparse)
+
+
+def test_sparse_storage_rejected_before_gate_in_cluster_report():
+    dist = _nonmetric()
+    sparse = _nonmetric_sparse()
+    result = oecluster.butina(dist, 0.5, allow_nonmetric=True)
+    with pytest.raises(ValueError, match="SparseStorage is not supported"):
+        oecluster.cluster_report(result, sparse)
+
+
+def test_butina_and_dbscan_still_accept_sparse_storage():
+    """Not an over-refusal: both build a threshold graph from sparse entries.
+
+    A mirror stricter than the native rule breaks working code silently,
+    because no native error contradicts it. This is the guard against that.
+    """
+    sparse = _nonmetric_sparse()
+    assert len(oecluster.butina(sparse, 0.1, allow_nonmetric=True).labels) == 6
+    assert len(oecluster.dbscan(sparse, 0.1, allow_nonmetric=True).labels) == 6
+
+
+def test_zero_is_still_a_valid_size_t_argument():
+    """Not an over-refusal: zero means "choose for me", and stays legal."""
+    dist = _nonmetric()
+    result = oecluster.butina(dist, 0.5, num_threads=0, chunk_size=0,
+                              allow_nonmetric=True)
+    assert len(result.labels) == 6
+    assert len(oecluster.hdbscan(dist, min_cluster_size=2, num_threads=0,
+                                 chunk_size=0,
+                                 allow_nonmetric=True).labels) == 6
+    report = oecluster.cluster_report(result, dist, num_threads=0,
+                                      allow_nonmetric=True)
+    assert report.num_samples == 6
+
+
+@pytest.mark.parametrize("call", [
+    lambda dm, **kw: oecluster.butina(dm, 0.5, **kw),
+    lambda dm, **kw: oecluster.dbscan(dm, 0.5, **kw),
+    lambda dm, **kw: oecluster.hdbscan(dm, min_cluster_size=2, **kw),
+    lambda dm, **kw: oecluster.agglomerative(dm, **kw),
+])
+def test_a_non_bool_allow_nonmetric_is_refused(call):
+    """A truthy string silently disabled the gate; now it is a TypeError.
+
+    ``allow_nonmetric="False"`` reads as an override, so the safety check the
+    caller believed they were keeping was switched off without a word.
+    """
+    dist = _nonmetric()
+    with pytest.raises(TypeError, match="allow_nonmetric must be True or False"):
+        call(dist, allow_nonmetric="False")
+
+
+def test_a_non_bool_allow_nonmetric_is_refused_in_cluster_report():
+    dist = _nonmetric()
+    result = oecluster.butina(dist, 0.5, allow_nonmetric=True)
+    with pytest.raises(TypeError, match="allow_nonmetric must be True or False"):
+        oecluster.cluster_report(result, dist, allow_nonmetric="False")

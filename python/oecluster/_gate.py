@@ -79,7 +79,8 @@ def require_metric(distance_matrix, caller, *, allow_nonmetric=False):
     """
     Refuse to run a metric-assuming algorithm on a non-metric matrix.
 
-    Checks run in this order, and the first failure raises:
+    A malformed ``allow_nonmetric`` is rejected before any of the checks
+    below, which then run in this order, the first failure raising:
 
     1. ``is_distance is False`` -- hard refusal.
     2. ``zero_self is False`` -- hard refusal.
@@ -102,8 +103,20 @@ def require_metric(distance_matrix, caller, *, allow_nonmetric=False):
     :param distance_matrix: The matrix about to be clustered.
     :param caller: Name of the calling entry point, used in the messages.
     :param allow_nonmetric: Proceed despite a tier-2 violation.
+    :raises TypeError: If allow_nonmetric is not a bool.
     :raises ValueError: If a check refuses.
     """
+    # A malformed override is a call the caller must fix whatever the matrix
+    # looks like, so it is rejected before any fact is read. Truthiness would
+    # be the wrong rule here: allow_nonmetric="False" reads to a caller as
+    # "off" while switching the tier-2 checks off.
+    if not isinstance(allow_nonmetric, bool):
+        raise TypeError(
+            "allow_nonmetric must be True or False, "
+            f"not {type(allow_nonmetric).__name__} "
+            f"({allow_nonmetric!r}). A truthy value would "
+            "silently disable a safety check.")
+
     facts = distance_matrix.facts
     name = distance_matrix.comparison_name
 
