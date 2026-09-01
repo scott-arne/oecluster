@@ -12,17 +12,19 @@ using namespace OECluster;
 
 class ROCSComparisonTest : public ::testing::Test {
 protected:
-    /// A single Omega conformer for ``smi``. Shared by SetUp and by the tests
-    /// that need molecules outside the standard fixture, so that every molecule
-    /// in this file is built under one Omega configuration.
+    /// An Omega ensemble of up to ``max_confs`` conformers for ``smi``, one by
+    /// default. Shared by SetUp and by the tests that need molecules outside the
+    /// standard fixture, so that every molecule in this file is built under one
+    /// Omega configuration.
     ///
     /// Omega, not OEGenerate2DCoordinates: the overlay finds no coordinates it
     /// can use on planar input, warns, and returns a Tanimoto of exactly 0.0 for
     /// every pair, so the whole suite would measure saturation values rather
     /// than shape.
-    static std::shared_ptr<OEChem::OEMol> MakeConformer(const char* smi) {
+    static std::shared_ptr<OEChem::OEMol> MakeConformer(const char* smi,
+                                                        unsigned int max_confs = 1) {
         OEConfGen::OEOmega omega;
-        omega.SetMaxConfs(1);
+        omega.SetMaxConfs(max_confs);
         omega.SetStrictStereo(false);
         auto mol = std::make_shared<OEChem::OEMol>();
         OEChem::OESmilesToMol(*mol, smi);
@@ -31,6 +33,30 @@ protected:
         // build leaves the molecule empty, which surfaces loudly downstream.
         EXPECT_TRUE(omega(*mol)) << smi;
         return mol;
+    }
+
+    /// Collapse one conformer of ``mol`` onto z = 0. ``flatten_active`` selects
+    /// between the conformer OEShape actually reads and the first one it does
+    /// not, which is the distinction the dimension guard turns on.
+    static void FlattenOneConformer(OEChem::OEMol& mol, bool flatten_active) {
+        const OEChem::OEConfBase* const active = mol.GetActive();
+        for (OESystem::OEIter<OEChem::OEConfBase> conf = mol.GetConfs(); conf; ++conf) {
+            if ((&*conf == active) != flatten_active) {
+                continue;
+            }
+            for (OESystem::OEIter<OEChem::OEAtomBase> atom = conf->GetAtoms(); atom; ++atom) {
+                float coords[3];
+                EXPECT_TRUE(conf->GetCoords(&*atom, coords));
+                coords[2] = 0.0f;
+                EXPECT_TRUE(conf->SetCoords(&*atom, coords));
+            }
+            // One non-active conformer is the whole point of that case; leave
+            // the rest of the ensemble sound so the molecule still has a
+            // conformer worth overlaying.
+            if (!flatten_active) {
+                return;
+            }
+        }
     }
 
     void SetUp() override {
@@ -262,7 +288,11 @@ TEST_F(ROCSComparisonTest, ANonFiniteDiagonalIsFlaggedAfterANonzeroSelfScore) {
     ASSERT_TRUE(broken->SetCoords(&*atom, coords));
 
     ROCSComparison comparison({methane, broken}, ROCSOptions());
-    ASSERT_TRUE(std::isfinite(comparison.Compare(0, 0)));
+    // Nonzero, not merely finite. A methane diagonal that drifted to 0.0 -- a
+    // prep change giving it a color atom, a different default score type --
+    // would leave this test passing while it silently degenerated into the
+    // all-zero prefix the buggy implementation also handled.
+    ASSERT_NEAR(comparison.Compare(0, 0), 0.5, 1e-3);
     ASSERT_FALSE(std::isfinite(comparison.Compare(1, 1)));
     EXPECT_EQ(comparison.Facts().zero_self, Capability::No);
     EXPECT_EQ(comparison.Facts().data_integrity, DataIntegrity::NaNPresent);
@@ -294,6 +324,32 @@ TEST_F(ROCSComparisonTest, ZeroCoordinatesAreRefusedDespiteAThreeDimensionAttrib
     }
     ASSERT_TRUE(mol->SetDimension(3));
     EXPECT_THROW(ROCSComparison({mol}, ROCSOptions()), ComparisonError);
+}
+
+TEST_F(ROCSComparisonTest, OnlyTheActiveConformerDecidesTheDimensionRefusal) {
+    // OESetDimensionFromCoords takes an OEMolBase&, and the OEMolBase view of a
+    // multiconformer OEMol is its active conformer, so the refresh never sees
+    // the rest of the ensemble. Both halves matter and neither is obvious, so
+    // they are pinned together: the guard is permissive about the conformers
+    // OEShape will not read, and unconditional about the one it will.
+    auto ensemble = MakeConformer("CCCCCCCC", 6);
+    ASSERT_GE(ensemble->NumConfs(), 2u);
+
+    // A degenerate non-active conformer is admitted, and scores as though it
+    // were not there: BestOverlay picks a sound conformer and seats octane
+    // exactly on itself.
+    auto non_active_flat = std::make_shared<OEChem::OEMol>(*ensemble);
+    FlattenOneConformer(*non_active_flat, false);
+    ROCSComparison admitted({non_active_flat}, ROCSOptions());
+    EXPECT_NEAR(admitted.Compare(0, 0), 0.0, 1e-6);
+    EXPECT_EQ(admitted.Facts().zero_self, Capability::Yes);
+
+    // A degenerate active conformer is refused, and the five sound conformers
+    // behind it do not rescue the molecule: OEShape scores it 0.0 against
+    // everything, as reference and as fit alike.
+    auto active_flat = std::make_shared<OEChem::OEMol>(*ensemble);
+    FlattenOneConformer(*active_flat, true);
+    EXPECT_THROW(ROCSComparison({active_flat}, ROCSOptions()), ComparisonError);
 }
 
 TEST_F(ROCSComparisonTest, FactsCoverEveryScoreTypeAndDirection) {

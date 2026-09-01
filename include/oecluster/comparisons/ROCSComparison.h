@@ -68,8 +68,15 @@ public:
      * reason this is the right guard rather than a rank test: across every input
      * class measured, the recomputed attribute coincides exactly with whether
      * OEShape can find coordinates to overlay at all. Genuinely linear molecules
-     * such as N#N, O=C=O and C#N overlay perfectly and are legitimate input; a
-     * rank test would refuse them.
+     * such as N#N, O=C=O and C#N overlay well -- self shape distances of 0.0,
+     * 0.0132 and 0.0128, the latter two no further off than the diatomic
+     * chlorine that ROCSComparison.cpp already documents as not seating exactly
+     * -- and a rank test would refuse all three. They are legitimate input in
+     * the narrow sense that matters here, which is that this constructor should
+     * admit them. It is not a claim about what happens afterwards: under the
+     * default ComboNorm distance their diagonals are 0.500, 0.507 and 0.0067,
+     * all nonzero, so all three stamp ``zero_self = No`` and the capability gate
+     * refuses them with no override available.
      *
      * Construction also measures the diagonal once -- one self-overlay per
      * molecule, O(n) against the O(n^2) matrix this class exists to fill -- so

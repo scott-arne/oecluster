@@ -123,12 +123,18 @@ ROCSComparison::ROCSComparison(const std::vector<std::shared_ptr<OEChem::OEMol>>
         // makes the check test what the overlay will actually see. It mutates the
         // molecule, hence the snapshot above rather than the caller's copy.
         //
-        // The refresh considers every conformer and takes the worst, so a
-        // multiconformer molecule carrying one exactly planar conformer drops to
-        // 2 and is refused even though BestOverlay would never have selected that
-        // conformer. This cannot bite real input -- an embedded conformer always
-        // carries some out-of-plane component, benzene measuring 3.4e-4 Angstrom
-        // -- and it errs toward refusing rather than scoring garbage.
+        // The refresh reads the active conformer and nothing else:
+        // OESetDimensionFromCoords takes an OEMolBase&, and the OEMolBase view
+        // of a multiconformer OEMol is its active conformer. So the guard is
+        // permissive about the rest of the ensemble. On a six-conformer Omega
+        // octane, flattening any of the five non-active conformers still
+        // measures 3 and is admitted, which is right: BestOverlay picks a sound
+        // conformer and the molecule still seats exactly on itself. Flattening
+        // the active conformer measures 2 and is refused, which is also right,
+        // but not conformer by conformer -- OEShape scores that molecule 0.0
+        // against everything, as reference and as fit, with the five sound
+        // conformers no help at all. A degenerate active conformer poisons the
+        // whole molecule.
         OEChem::OESetDimensionFromCoords(*shared->mols[i]);
 
         // ``< 3``, deliberately, and not the ``== 0`` that RMSDComparison uses.
@@ -136,12 +142,20 @@ ROCSComparison::ROCSComparison(const std::vector<std::shared_ptr<OEChem::OEMol>>
         // coordinates it can overlay, warns, and returns a Tanimoto of exactly
         // 0.0, so every pair -- the diagonal included -- comes back at whichever
         // value saturation puts it at for the configured score type. The four
-        // distance forms would at least be caught downstream, since a saturated
-        // diagonal of 1.0 or 2.0 is exactly what MeasureDiagonal stamps No on.
-        // The four similarity forms are the reason this has to be refused here:
-        // their self-similarity saturates at 0.0, which is indistinguishable from
-        // a correctly vanishing diagonal, so the measurement would stamp a tier-1
-        // hard ``zero_self = Yes`` over a matrix that is entirely saturation.
+        // distance forms saturate at ComboNorm 1.0, Combo 2.0, Shape 1.0 and
+        // Color 1.0, which MeasureDiagonal stamps No on. The four similarity
+        // forms saturate at 0.0 and stamp ``zero_self = Yes``, which is a pass
+        // -- but the gate refuses a similarity on ``is_distance`` before it
+        // reads the diagonal at all, so both halves are refused there and the
+        // similarity half is refused earlier.
+        //
+        // Refusing at construction is still the only way to catch this. The
+        // facts a saturated similarity reports -- ``is_distance = No,
+        // zero_self = Yes, triangle = Unknown, data_integrity = Complete`` --
+        // are a clean bill of health with nothing in them marking the matrix as
+        // pure saturation. The gated entry points refuse it for being a
+        // similarity, not for being empty, and every other reader of Facts() is
+        // told the numbers mean something.
         if (shared->mols[i]->GetDimension() < 3) {
             throw ComparisonError(
                 "ROCSComparison requires 3D coordinates: molecule at index " +
@@ -174,7 +188,11 @@ void ROCSComparison::MeasureDiagonal(SharedData& target) {
            "MeasureDiagonal must stamp the SharedData that shared_ views");
 
     bool diagonal_vanishes = true;
-    for (size_t i = 0; i < target.mols.size(); ++i) {
+    // Bounded by the container Compare() indexes, not by ``target``. The assert
+    // above is what documents that the two are the same object; bounding on
+    // ``target`` instead would turn a divergence from a wrong stamp into an
+    // out-of-range read, and the assert is compiled out in a release build.
+    for (size_t i = 0; i < shared_->mols.size(); ++i) {
         const double self_score = Compare(i, i);
         if (!std::isfinite(self_score)) {
             // Tested explicitly, and before the threshold, because
