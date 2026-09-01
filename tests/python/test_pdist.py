@@ -364,6 +364,27 @@ def test_pdist_rocs_end_to_end():
     assert np.allclose(square, square.T)
 
 
+def test_pdist_rocs_refuses_molecules_without_coordinates():
+    """The refusal has to reach the caller through the public surface.
+
+    ``pdist`` builds the comparison through the registry rather than by naming
+    the class, which is a route a grep for constructor call sites does not find,
+    so the C++ precondition is asserted here from the outside as well. Needs no
+    Omega: molecules with no coordinates at all are the input under test.
+    """
+    import oecluster
+    from openeye import oechem
+
+    mols = []
+    for smi in ["c1ccccc1", "CCCCCCCC"]:
+        mol = oechem.OEMol()
+        oechem.OESmilesToMol(mol, smi)
+        mols.append(mol)
+
+    with pytest.raises(RuntimeError, match="requires 3D coordinates"):
+        oecluster.pdist(mols, "rocs")
+
+
 def test_condensed_survives_the_matrix_that_produced_it():
     """The zero-copy view must own its buffer rather than borrow it.
 

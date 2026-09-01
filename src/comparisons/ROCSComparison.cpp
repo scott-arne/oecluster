@@ -18,7 +18,7 @@ namespace {
 /// because OEBestOverlayScore returns float and nothing in the API promises
 /// that exactness; float epsilon near 1.0 is about 1.2e-7. Flipping a hard gate
 /// fact on a one-ULP drift would be a worse failure than tolerating one, and at
-/// 1e-6 this still sits three orders of magnitude below the smallest genuine
+/// 1e-6 this still sits four orders of magnitude below the smallest genuine
 /// shortfall measured -- 0.0137, for diatomic chlorine.
 constexpr double SELF_SCORE_TOLERANCE = 1e-6;
 }  // namespace
@@ -29,13 +29,14 @@ struct ROCSComparison::SharedData {
     /// the caller still holds; see the constructor for the full argument.
     std::vector<std::shared_ptr<OEChem::OEMol>> mols;
 
-    /// The measured diagonal, cached because clones must not repeat the O(n)
-    /// measurement. This value depends on the options it was measured under.
-    /// That is sound only because Clone() is the sole caller of the constructor
-    /// that accepts an existing SharedData, and it always passes the same
-    /// options. If SharedData is ever shared across differing options, this
-    /// field has to move onto the object.
+    /// The two stamps taken from the measured diagonal, cached because clones
+    /// must not repeat the O(n) measurement. Both values depend on the options
+    /// they were measured under. That is sound only because Clone() is the sole
+    /// caller of the constructor that accepts an existing SharedData, and it
+    /// always passes the same options. If SharedData is ever shared across
+    /// differing options, these fields have to move onto the object.
     Capability zero_self = Capability::Unknown;
+    DataIntegrity data_integrity = DataIntegrity::Complete;
 };
 
 struct ROCSComparison::ThreadLocalData {
@@ -93,22 +94,12 @@ void ROCSComparison::InitOverlay(SharedData* prep_target) {
 ROCSComparison::ROCSComparison(const std::vector<std::shared_ptr<OEChem::OEMol>>& mols,
                        const Options& opts)
     : opts_(opts) {
+    // The null check has to come first: the snapshot below cannot copy through a
+    // null pointer.
     for (size_t i = 0; i < mols.size(); ++i) {
         if (!mols[i]) {
             throw ComparisonError("ROCSComparison received null molecule pointer at index " +
                                   std::to_string(i));
-        }
-        // ``< 3``, deliberately, and not the ``== 0`` that RMSDComparison uses:
-        // OEGenerate2DCoordinates leaves the dimension at 2, and a planar molecule
-        // has no shape volume, so every Tanimoto degenerates to 0/0 and every score
-        // -- including a self-comparison -- comes back 1.0. Aligning this with the
-        // sibling check would let that through silently.
-        if (mols[i]->GetDimension() < 3) {
-            throw ComparisonError(
-                "ROCSComparison requires 3D coordinates: molecule at index " +
-                std::to_string(i) + " has dimension " +
-                std::to_string(mols[i]->GetDimension()) +
-                ". Generate conformers first, for example with OEOmega.");
         }
     }
 
@@ -123,12 +114,36 @@ ROCSComparison::ROCSComparison(const std::vector<std::shared_ptr<OEChem::OEMol>>
         shared->mols.push_back(std::make_shared<OEChem::OEMol>(*mol));
     }
 
+    for (size_t i = 0; i < shared->mols.size(); ++i) {
+        // GetDimension() on its own reports a metadata attribute that OEShape
+        // never reads, and the two disagree in both directions: SetCoords leaves
+        // the attribute stale, so a sound conformer can report 0, while an SDF of
+        // all-zero coordinates round-trips to 3. Recomputing from the coordinates
+        // makes the check test what the overlay will actually see. It mutates the
+        // molecule, hence the snapshot above rather than the caller's copy.
+        OEChem::OESetDimensionFromCoords(*shared->mols[i]);
+
+        // ``< 3``, deliberately, and not the ``== 0`` that RMSDComparison uses.
+        // Planar input is as unusable here as absent input: the toolkit finds no
+        // coordinates it can overlay, warns, and returns a Tanimoto of exactly
+        // 0.0, so every pair -- the diagonal included -- comes back at whichever
+        // value saturation puts it at for the configured score type. Nothing about
+        // that is detectable downstream, so it has to be refused here.
+        if (shared->mols[i]->GetDimension() < 3) {
+            throw ComparisonError(
+                "ROCSComparison requires 3D coordinates: molecule at index " +
+                std::to_string(i) + " has dimension " +
+                std::to_string(shared->mols[i]->GetDimension()) +
+                ". Generate conformers first, for example with OEOmega.");
+        }
+    }
+
     InitOverlay(shared.get());
     shared_ = shared;  // Copy, not move: the measurement below writes through
                        // the mutable handle, and shared_ is a view onto const.
     // Writing through ``shared`` is safe because the object is not yet published:
     // construction is single-threaded and no clone can exist.
-    shared->zero_self = MeasureZeroSelf();
+    MeasureDiagonal(*shared);
 }
 
 ROCSComparison::ROCSComparison(std::shared_ptr<const SharedData> shared,
@@ -138,15 +153,28 @@ ROCSComparison::ROCSComparison(std::shared_ptr<const SharedData> shared,
     InitOverlay(nullptr);
 }
 
-Capability ROCSComparison::MeasureZeroSelf() {
+void ROCSComparison::MeasureDiagonal(SharedData& target) {
     for (size_t i = 0; i < shared_->mols.size(); ++i) {
-        if (std::abs(Compare(i, i)) > SELF_SCORE_TOLERANCE) {
-            return Capability::No;
+        const double self_score = Compare(i, i);
+        if (!std::isfinite(self_score)) {
+            // Tested explicitly, and before the threshold, because
+            // ``std::abs(NaN) > tol`` is false: a naive threshold reads a NaN
+            // diagonal as vanished and stamps a tier-1 Yes on a matrix that is
+            // not a number. d(x, x) == 0 is definitively false when d(x, x) is
+            // not a number, so No is provable here rather than merely cautious.
+            // Nothing later in the loop can weaken either stamp, so stop.
+            target.zero_self = Capability::No;
+            target.data_integrity = DataIntegrity::NaNPresent;
+            return;
+        }
+        if (std::abs(self_score) > SELF_SCORE_TOLERANCE) {
+            target.zero_self = Capability::No;
+            return;
         }
     }
     // An empty molecule set stamps Yes vacuously, which is correct: there is no
     // diagonal to violate.
-    return Capability::Yes;
+    target.zero_self = Capability::Yes;
 }
 
 double ROCSComparison::Compare(size_t i, size_t j) {
@@ -203,14 +231,20 @@ GateFacts ROCSComparison::Facts() const {
     // flag. No general claim about the diagonal would be true: the color force
     // field gives a small molecule such as methane no color atom at all, so its
     // color self-Tanimoto is 0.0 and its ComboNorm diagonal sits at 0.5, and the
-    // overlay optimizer cannot seat a near-spherical diatomic exactly on itself,
-    // so chlorine falls 0.0137 short on shape. Both stamp No, and correctly so.
-    // Measuring also means the stamp tracks the prep and the toolkit rather than
-    // having to be re-derived whenever either moves.
+    // overlay optimizer does not always seat a molecule exactly on itself --
+    // chlorine falls 0.0137 short on shape and bromine 0.0150. All stamp No, and
+    // correctly so. Measuring also means the stamp tracks the prep and the
+    // toolkit rather than having to be re-derived whenever either moves.
     facts.zero_self = shared_->zero_self;
 
     facts.triangle = Capability::Unknown;
-    facts.data_integrity = DataIntegrity::Complete;
+
+    // Escalated to NaNPresent only when the diagonal measurement actually
+    // produced a non-finite score, which GateFacts requires of any comparison
+    // that produces one. The measurement sees the diagonal and nothing else, so
+    // Complete here means no NaN was observed among the n self-scores, not that
+    // the O(n^2) off-diagonal pairs are proven finite.
+    facts.data_integrity = shared_->data_integrity;
     return facts;
 }
 

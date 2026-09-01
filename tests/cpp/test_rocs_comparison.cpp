@@ -4,6 +4,8 @@
 #include <oechem.h>
 #include <oeomega2.h>
 #include <oeshape.h>
+#include <cmath>
+#include <limits>
 #include <string>
 
 using namespace OECluster;
@@ -14,9 +16,10 @@ protected:
     /// that need molecules outside the standard fixture, so that every molecule
     /// in this file is built under one Omega configuration.
     ///
-    /// Omega, not OEGenerate2DCoordinates: a planar molecule has zero shape
-    /// volume, so every ROCS Tanimoto degenerates to 0/0 and the whole suite
-    /// measures nothing.
+    /// Omega, not OEGenerate2DCoordinates: the overlay finds no coordinates it
+    /// can use on planar input, warns, and returns a Tanimoto of exactly 0.0 for
+    /// every pair, so the whole suite would measure saturation values rather
+    /// than shape.
     static std::shared_ptr<OEChem::OEMol> MakeConformer(const char* smi) {
         OEConfGen::OEOmega omega;
         omega.SetMaxConfs(1);
@@ -200,7 +203,11 @@ TEST_F(ROCSComparisonTest, ZeroSelfFollowsTheMeasurementNotTheSimilarityFlag) {
     opts.score_type = ROCSScoreType::Color;
     opts.similarity = true;
     ROCSComparison comparison({methane}, opts);
-    EXPECT_NEAR(comparison.Compare(0, 0), 0.0, 1e-3);
+    // 1e-6, matching SELF_SCORE_TOLERANCE: at a looser tolerance a value in
+    // (1e-6, 1e-3] would satisfy this assertion while the stamp below read No,
+    // and the two assertions would contradict each other. Color Tanimoto with no
+    // color atoms is structurally exact, so the tighter bound costs nothing.
+    EXPECT_NEAR(comparison.Compare(0, 0), 0.0, 1e-6);
     EXPECT_EQ(comparison.Facts().zero_self, Capability::Yes);
 }
 
@@ -215,12 +222,53 @@ TEST_F(ROCSComparisonTest, TwoDimensionalInputIsRefused) {
 
 TEST_F(ROCSComparisonTest, CloneInheritsTheMeasuredStamp) {
     // The measurement is cached in SharedData precisely so clones do not repeat
-    // it. If that cache is ever dropped, a clone would re-measure or report
-    // Unknown; either way this catches it.
+    // it. This catches a clone that inherits no stamp and reports Unknown. It
+    // cannot catch a clone that re-measures, which would score methane again and
+    // reach the same No by the expensive route.
     auto methane = MakeConformer("C");
     ROCSComparison comparison({methane}, ROCSOptions());
     auto clone = comparison.Clone();
     EXPECT_EQ(clone->Facts().zero_self, Capability::No);
+}
+
+TEST_F(ROCSComparisonTest, ANonFiniteDiagonalStampsNoAndFlagsNaN) {
+    // std::abs(NaN) > tol is false, so a naive threshold reads a NaN diagonal as
+    // "vanished" and stamps a tier-1 Yes on a matrix that is not a number.
+    auto mol = MakeConformer("c1ccc(O)cc1");
+    OESystem::OEIter<OEChem::OEAtomBase> atom = mol->GetAtoms();
+    ASSERT_TRUE(atom);
+    float coords[3];
+    ASSERT_TRUE(mol->GetCoords(&*atom, coords));
+    coords[0] = std::numeric_limits<float>::quiet_NaN();
+    ASSERT_TRUE(mol->SetCoords(&*atom, coords));
+    ROCSComparison comparison({mol}, ROCSOptions());
+    ASSERT_FALSE(std::isfinite(comparison.Compare(0, 0)));
+    EXPECT_EQ(comparison.Facts().zero_self, Capability::No);
+    EXPECT_EQ(comparison.Facts().data_integrity, DataIntegrity::NaNPresent);
+}
+
+TEST_F(ROCSComparisonTest, RealCoordinatesWithAStaleDimensionAreAdmitted) {
+    // SetCoords does not refresh the dimension attribute, so a molecule with a
+    // perfectly good conformer can report 0. Refusing it would reject input that
+    // scores exactly right, and would advise a remedy the caller does not need.
+    auto mol = MakeConformer("c1ccc(O)cc1");
+    ASSERT_TRUE(mol->SetDimension(0));
+    ROCSComparison comparison({mol}, ROCSOptions());
+    EXPECT_NEAR(comparison.Compare(0, 0), 0.0, 1e-6);
+    EXPECT_EQ(comparison.Facts().zero_self, Capability::Yes);
+}
+
+TEST_F(ROCSComparisonTest, ZeroCoordinatesAreRefusedDespiteAThreeDimensionAttribute) {
+    // An SDF written with all-zero coordinates round-trips to dimension 3 and
+    // scores 1.0 for every pair including the diagonal. The attribute alone
+    // cannot catch it; recomputing from the coordinates can.
+    auto mol = MakeConformer("c1ccc(O)cc1");
+    const float origin[3] = {0.0f, 0.0f, 0.0f};
+    for (OESystem::OEIter<OEChem::OEAtomBase> atom = mol->GetAtoms(); atom; ++atom) {
+        ASSERT_TRUE(mol->SetCoords(&*atom, origin));
+    }
+    ASSERT_TRUE(mol->SetDimension(3));
+    EXPECT_THROW(ROCSComparison({mol}, ROCSOptions()), ComparisonError);
 }
 
 TEST_F(ROCSComparisonTest, FactsCoverEveryScoreTypeAndDirection) {

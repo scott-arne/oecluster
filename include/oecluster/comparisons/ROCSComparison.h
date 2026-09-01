@@ -59,7 +59,11 @@ public:
      *
      * Each molecule is copied, and the copies are shared across clones; the
      * caller's molecules are left untouched. Every molecule must carry 3D
-     * coordinates, and the constructor refuses the set otherwise.
+     * coordinates, and the constructor refuses the set otherwise. The test is
+     * made against the coordinates themselves: the dimension attribute is
+     * recomputed on the comparison's own copy before it is read, so a molecule
+     * whose coordinates are sound but whose attribute is stale -- ``SetCoords``
+     * does not refresh it -- is admitted rather than refused.
      *
      * Construction also measures the diagonal once -- one self-overlay per
      * molecule, O(n) against the O(n^2) matrix this class exists to fill -- so
@@ -68,7 +72,7 @@ public:
      * :param mols: Shared pointers to molecules.
      * :param opts: Scoring options.
      * :raises ComparisonError: If any molecule pointer is null, or if any
-     *     molecule reports fewer than three dimensions.
+     *     molecule's coordinates span fewer than three dimensions.
      */
     explicit ROCSComparison(const std::vector<std::shared_ptr<OEChem::OEMol>>& mols,
                         const Options& opts = Options());
@@ -99,11 +103,13 @@ private:
     /// snapshot passes a target; clones inherit an already-prepared set.
     void InitOverlay(SharedData* prep_target);
 
-    /// Measure the diagonal by scoring every molecule against itself. Runs once,
-    /// at construction, and the result is cached in ``SharedData`` so that clones
-    /// inherit it: Facts() is const and called freely, so measuring there would
-    /// put n overlays behind an accessor and repeat them for every clone.
-    Capability MeasureZeroSelf();
+    /// Measure the diagonal by scoring every molecule against itself, writing
+    /// both the ``zero_self`` and the ``data_integrity`` stamps into ``target``.
+    /// Runs once, at construction, and the result is cached in ``SharedData`` so
+    /// that clones inherit it: Facts() is const and called freely, so measuring
+    /// there would put n overlays behind an accessor and repeat them for every
+    /// clone.
+    void MeasureDiagonal(SharedData& target);
 };
 
 }  // namespace OECluster

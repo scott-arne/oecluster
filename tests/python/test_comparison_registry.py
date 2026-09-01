@@ -28,9 +28,10 @@ def _multiconf_mols(smiles_list):
 def _conformer_mols(smiles_list):
     """The same, embedded in 3D, for the builders that require coordinates.
 
-    ``ROCSComparison`` refuses a molecule with fewer than three dimensions,
-    because a flat or coordinate-less molecule has no shape volume and every
-    overlay score it could produce would be meaningless.
+    ``ROCSComparison`` refuses a molecule whose coordinates span fewer than
+    three dimensions: the overlay finds nothing it can use, warns, and returns a
+    Tanimoto of exactly 0.0 for every pair, so every score it could produce
+    would be a saturation value rather than a measurement.
     """
     pytest.importorskip("openeye.oeomega")
     from openeye import oeomega
@@ -415,16 +416,23 @@ def test_a_none_valued_option_is_not_a_named_option():
         mols, "fingerprint", fp_type="atom_pair", radius=None).num_samples == 2
 
 
-def test_none_is_unspecified_for_rocs_and_superpose_too():
-    """The same convention, in the two builders next door."""
+def test_none_is_unspecified_for_rocs_too():
+    """The same convention, in the builder next door."""
     # Embedded, because ROCS refuses input without 3D coordinates. This test is
     # about kwarg plumbing and never reads a score, but it still has to hand the
-    # builder molecules the builder will accept.
+    # builder molecules the builder will accept. Kept separate from the superpose
+    # case below so that the Omega dependency this brings in cannot skip a test
+    # that does not need it.
     mols = _conformer_mols(["CCO", "CCC"])
     obj, _, _ = _comparisons.build_comparison(
         mols, "rocs", False, {"score_type": None, "color_ff_type": None},
         symmetric=True)
     assert obj.Size() == 2
+
+
+def test_none_is_unspecified_for_superpose_too():
+    """And in the one next to that, which needs no coordinates to construct."""
+    mols = _multiconf_mols(["CCO", "CCC"])
     obj, _, _ = _comparisons.build_comparison(
         mols, "superpose", False, {"score_type": None, "predicate": None},
         symmetric=True)
