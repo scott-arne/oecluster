@@ -1,0 +1,293 @@
+import json
+
+import numpy as np
+import oecluster
+import pytest
+from oecluster import _gate
+from openeye import oechem
+
+SMILES = ["CCO", "CCC", "CCCC", "c1ccccc1", "CCN", "CCOC"]
+
+
+def _mols(smiles_list=None):
+    mols = []
+    for idx, smi in enumerate(smiles_list or SMILES):
+        mol = oechem.OEGraphMol()
+        oechem.OESmilesToMol(mol, smi)
+        mol.SetTitle(f"mol{idx}")
+        mols.append(mol)
+    return mols
+
+
+def _conformer_mols(smiles_list=None):
+    """Molecules embedded in 3D, so ROCS has something real to overlay.
+
+    ``ROCSComparison`` refuses a molecule whose recomputed OEChem dimension
+    attribute -- an axis count, not a geometric rank -- is below three, and a
+    molecule straight from a SMILES parse carries no coordinates at all, so
+    these fixtures have to come from Omega. The typemap needs ``OEMol``: an
+    ``OEGraphMol`` fails earlier and differently, with a SWIG ``TypeError``
+    rather than the dimension refusal.
+    """
+    pytest.importorskip("openeye.oeomega")
+    from openeye import oeomega
+
+    omega = oeomega.OEOmega()
+    omega.SetMaxConfs(1)
+    omega.SetStrictStereo(False)
+
+    mols = []
+    for idx, smi in enumerate(smiles_list or SMILES):
+        mol = oechem.OEMol()
+        oechem.OESmilesToMol(mol, smi)
+        mol.SetTitle(f"mol{idx}")
+        assert omega(mol)
+        mols.append(mol)
+    return mols
+
+
+def test_default_fingerprint_path_is_stamped_metric():
+    dist = oecluster.pdist(_mols(), "fingerprint")
+    assert dist.metric_capabilities == {'zero_self': True, 'triangle': True}
+    assert dist.data_integrity == "complete"
+    assert dist.metric_probe == "not_run"
+
+
+def test_default_fingerprint_path_clusters_without_an_override():
+    dist = oecluster.pdist(_mols(), "fingerprint")
+    result = oecluster.butina(dist, 0.5)
+    assert len(result.labels) == 6
+
+
+def test_similarity_matrix_is_refused_by_butina():
+    dist = oecluster.pdist(_mols(), "fingerprint", similarity=True)
+    assert dist.metric_capabilities['zero_self'] is False
+    with pytest.raises(ValueError, match="similarity=False"):
+        oecluster.butina(dist, 0.5)
+
+
+def test_the_similarity_refusal_cannot_be_overridden():
+    dist = oecluster.pdist(_mols(), "fingerprint", similarity=True)
+    with pytest.raises(ValueError, match="cannot be overridden"):
+        oecluster.butina(dist, 0.5, allow_nonmetric=True)
+
+
+def test_dice_is_refused_for_violating_the_triangle_inequality():
+    dist = oecluster.pdist(_mols(), "fingerprint", metric="dice")
+    assert dist.metric_capabilities == {'zero_self': True, 'triangle': False}
+    with pytest.raises(ValueError, match="triangle inequality"):
+        oecluster.butina(dist, 0.5)
+
+
+def test_dice_is_allowed_with_allow_nonmetric():
+    dist = oecluster.pdist(_mols(), "fingerprint", metric="dice")
+    result = oecluster.butina(dist, 0.5, allow_nonmetric=True)
+    assert len(result.labels) == 6
+
+
+@pytest.mark.parametrize("call", [
+    lambda dm, **kw: oecluster.butina(dm, 0.5, **kw),
+    lambda dm, **kw: oecluster.dbscan(dm, 0.5, **kw),
+    lambda dm, **kw: oecluster.hdbscan(dm, min_cluster_size=2, **kw),
+    lambda dm, **kw: oecluster.agglomerative(dm, n_clusters=2, **kw),
+])
+def test_every_clustering_entry_point_refuses_and_overrides(call):
+    dist = oecluster.pdist(_mols(), "fingerprint", metric="dice")
+    with pytest.raises(ValueError, match="triangle inequality"):
+        call(dist)
+    call(dist, allow_nonmetric=True)
+
+
+def test_cluster_report_refuses_and_overrides():
+    dist = oecluster.pdist(_mols(), "fingerprint", metric="dice")
+    result = oecluster.butina(dist, 0.5, allow_nonmetric=True)
+    with pytest.raises(ValueError, match="triangle inequality"):
+        oecluster.cluster_report(result, dist)
+    oecluster.cluster_report(result, dist, allow_nonmetric=True)
+
+
+def test_a_prebuilt_comparison_object_is_still_stamped():
+    opts = oecluster.FingerprintOptions()
+    opts.metric = "dice"
+    comparison = oecluster.oecluster.FingerprintComparison(_mols(), opts)
+    dist = oecluster.pdist(_mols(), comparison)
+    assert dist.metric_capabilities['triangle'] is False
+    with pytest.raises(ValueError, match="triangle inequality"):
+        oecluster.butina(dist, 0.5)
+
+
+def test_rocs_similarity_is_refused_though_no_metric_is_involved():
+    """The gate reads facts off the comparison, not off a metric name.
+
+    ROCS never consults the metric table, so a metric-name-only gate would let
+    this similarity matrix through. This is the hole ``GateFacts`` closes.
+
+    ``is_distance`` is what makes this a similarity, and it is the fact the
+    gate refuses on. ``zero_self`` reports the diagonal, which for these six
+    molecules is 1.0 -- so here the two facts happen to agree. The test below
+    is the one where they come apart.
+    """
+    dist = oecluster.pdist(_conformer_mols(), "rocs", similarity=True)
+    assert dist.is_distance is False
+    assert dist.metric_capabilities['zero_self'] is False
+    with pytest.raises(ValueError, match="similarity=False"):
+        oecluster.butina(dist, 0.5)
+    with pytest.raises(ValueError, match="cannot be overridden"):
+        oecluster.butina(dist, 0.5, allow_nonmetric=True)
+
+
+def test_a_similarity_that_self_scores_zero_is_still_refused():
+    """Why ``is_distance`` and ``zero_self`` have to be separate facts.
+
+    ``GateFacts.h`` keeps them apart on the grounds that "a comparison can be
+    a similarity whose self-value happens to be zero." Methane is that case:
+    it carries no colour features, so its colour self-similarity is 0.0, and a
+    set containing only methane stamps ``zero_self`` True on a *similarity*.
+    A gate reading ``zero_self`` would admit this matrix and cluster a
+    similarity as if it were a distance. Reading ``is_distance`` refuses it.
+
+    This is the test that makes the two-fact split non-vacuous. If it is ever
+    deleted, nothing else in the suite distinguishes the two facts.
+    """
+    dist = oecluster.pdist(_conformer_mols(["C", "C"]), "rocs",
+                           score_type="color", similarity=True)
+    assert dist.metric_capabilities['zero_self'] is True
+    assert dist.is_distance is False
+    with pytest.raises(ValueError, match="similarity=False"):
+        oecluster.butina(dist, 0.5)
+    with pytest.raises(ValueError, match="cannot be overridden"):
+        oecluster.butina(dist, 0.5, allow_nonmetric=True)
+
+
+def test_rocs_shape_distance_is_admitted_with_no_override():
+    """The counterpart: a ROCS configuration that is a true distance.
+
+    All four score types are true distances now that colour atoms are
+    prepared, ``combo_norm`` included -- see the test below. ``shape`` is
+    tested here because it is the one that never depended on the colour
+    repair.
+    """
+    dist = oecluster.pdist(_conformer_mols(), "rocs", score_type="shape")
+    assert dist.is_distance is True
+    assert dist.metric_capabilities == {'zero_self': True,
+                                        'triangle': "unknown"}
+    assert dist.data_integrity == "complete"
+    result = oecluster.butina(dist, 0.5)
+    assert len(result.labels) == 6
+
+
+def test_rocs_combo_norm_is_admitted_now_that_colour_is_prepared():
+    """The default ROCS distance does vanish on the diagonal.
+
+    This test used to be a refusal. Nothing in the repository prepared colour
+    atoms, so ``GetColorTanimoto()`` returned 0.0 for every pair including
+    self-pairs, and ``combo_norm``'s self-distance was 0.5. The stamp reported
+    what the scorer did, and the earlier version of this test recorded that
+    honestly while saying it should flip to an admission once the colour term
+    was repaired. It has been repaired, so this is that flip.
+
+    Keep it. It is the regression test for the colour preparation: if
+    ``InitOverlay`` stops assigning colour atoms, the diagonal returns to 0.5
+    and this admission fails.
+    """
+    dist = oecluster.pdist(_conformer_mols(), "rocs")
+    assert dist.is_distance is True
+    assert dist.metric_capabilities['zero_self'] is True
+    result = oecluster.butina(dist, 0.5)
+    assert len(result.labels) == 6
+
+
+def test_a_prebuilt_rocs_object_is_stamped_too():
+    """The prebuilt-object branch skips the builder; the facts still apply."""
+    mols = _conformer_mols()
+    comparison = oecluster.ROCSComparison(mols, similarity=True)
+    dist = oecluster.pdist(mols, comparison)
+    assert dist.is_distance is False
+    with pytest.raises(ValueError, match="similarity=False"):
+        oecluster.butina(dist, 0.5)
+
+
+def test_cdist_stamps_facts_too():
+    cross = oecluster.cdist(_mols()[:2], _mols()[2:], "fingerprint",
+                            metric="dice")
+    assert cross.metric_capabilities['triangle'] is False
+
+
+def test_facts_round_trip_through_to_file(tmp_path):
+    path = tmp_path / "dice.npz"
+    oecluster.pdist(_mols(), "fingerprint", metric="dice").to_file(str(path))
+    loaded = oecluster.load_distance_matrix(str(path))
+    assert loaded.metric_capabilities == {'zero_self': True, 'triangle': False}
+    assert loaded.data_integrity == "complete"
+
+
+def test_cross_facts_round_trip_through_to_file(tmp_path):
+    path = tmp_path / "cross.npz"
+    oecluster.cdist(_mols()[:2], _mols()[2:], "fingerprint",
+                    metric="dice").to_file(str(path))
+    loaded = oecluster.load_distance_matrix(str(path))
+    assert loaded.metric_capabilities == {'zero_self': True, 'triangle': False}
+
+
+def test_a_file_without_facts_loads_as_unknown(tmp_path):
+    """A matrix written before 5.0.0 must not be credited with a claim."""
+    path = tmp_path / "legacy.npz"
+    np.savez_compressed(
+        str(path),
+        condensed=np.zeros(3, dtype=np.float64),
+        comparison_name=np.array("fingerprint"),
+        params_json=np.array(json.dumps({})),
+        labels=np.array(["a", "b", "c"]),
+        num_samples=np.array(3),
+    )
+    loaded = oecluster.load_distance_matrix(str(path))
+    assert loaded.metric_capabilities == {
+        'zero_self': "unknown", 'triangle': "unknown"}
+    assert loaded.data_integrity == "unknown"
+
+
+def test_unknown_facts_never_refuse(tmp_path):
+    path = tmp_path / "legacy.npz"
+    np.savez_compressed(
+        str(path),
+        condensed=np.array([0.1, 0.2, 0.3], dtype=np.float64),
+        comparison_name=np.array("fingerprint"),
+        params_json=np.array(json.dumps({})),
+        labels=np.array(["a", "b", "c"]),
+        num_samples=np.array(3),
+    )
+    loaded = oecluster.load_distance_matrix(str(path))
+    assert len(oecluster.butina(loaded, 0.5).labels) == 3
+
+
+def test_require_metric_reports_probe_violations():
+    dist = oecluster.pdist(_mols(), "fingerprint")
+    dist._facts.update(metric_probe="violations_found",
+                       probe_violations=668, probe_sampled=99926)
+    with pytest.raises(ValueError) as excinfo:
+        _gate.require_metric(dist, "butina")
+    message = str(excinfo.value)
+    assert "668 of 99926 sampled triples" in message
+    assert "allow_nonmetric=True" in message
+
+
+def test_require_metric_accepts_probe_violations_with_the_override():
+    dist = oecluster.pdist(_mols(), "fingerprint")
+    dist._facts.update(metric_probe="violations_found",
+                       probe_violations=1, probe_sampled=10)
+    _gate.require_metric(dist, "butina", allow_nonmetric=True)
+
+
+def test_require_metric_refuses_nan_present_without_override():
+    dist = oecluster.pdist(_mols(), "fingerprint")
+    dist._facts['data_integrity'] = "nan_present"
+    with pytest.raises(ValueError, match="cannot be overridden"):
+        _gate.require_metric(dist, "butina", allow_nonmetric=True)
+
+
+def test_require_metric_refuses_subset_scored_but_allows_the_override():
+    dist = oecluster.pdist(_mols(), "fingerprint")
+    dist._facts['data_integrity'] = "subset_scored"
+    with pytest.raises(ValueError, match="subset"):
+        _gate.require_metric(dist, "butina")
+    _gate.require_metric(dist, "butina", allow_nonmetric=True)

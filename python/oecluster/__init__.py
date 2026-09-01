@@ -664,6 +664,7 @@ from .oecluster import SuperposeComparison as _SuperposeComparison
 from .oecluster import SuperposeOptions
 
 from . import _comparisons
+from . import _gate
 
 
 class _StorageView:
@@ -713,15 +714,21 @@ class DistanceMatrix(abc.ABC):
     :func:`cdist`. The base holds only the shared comparison metadata.
     """
 
-    def __init__(self, comparison_name, params=None):
+    def __init__(self, comparison_name, params=None, facts=None):
         """
         Initialize shared distance-matrix metadata.
 
         :param comparison_name: Name of the comparison method used.
         :param params: Optional dictionary of comparison parameters.
+        :param facts: Optional capability facts recorded by the comparison.
+            Anything omitted stays at its "unknown" default, which the
+            clustering gate never refuses.
         """
         self._comparison_name = comparison_name
         self._params = params if params is not None else {}
+        self._facts = _gate.default_facts()
+        if facts:
+            self._facts.update(facts)
 
     @property
     def comparison_name(self):
@@ -732,6 +739,63 @@ class DistanceMatrix(abc.ABC):
     def params(self):
         """Get the comparison parameters dictionary."""
         return self._params
+
+    @property
+    def facts(self):
+        """
+        Get a copy of the capability facts recorded for this matrix.
+
+        :returns: Dict with ``is_distance``, ``zero_self``, ``triangle``,
+                  ``data_integrity``, ``metric_probe``, ``probe_violations``,
+                  ``probe_sampled``.
+        """
+        return dict(self._facts)
+
+    @property
+    def is_distance(self):
+        """
+        Get whether a larger entry means "further apart".
+
+        This is the matrix's orientation, and it is independent of the two
+        metric axioms: a similarity is not a distance however its diagonal
+        behaves.
+
+        :returns: True, False, or the string ``"unknown"``.
+        """
+        return self._facts['is_distance']
+
+    @property
+    def metric_capabilities(self):
+        """
+        Get the two metric axioms the clustering gate checks.
+
+        Orientation is not one of them -- read :attr:`is_distance` for that.
+
+        :returns: Dict with ``zero_self`` and ``triangle``, each True, False,
+                  or the string ``"unknown"``.
+        """
+        return {'zero_self': self._facts['zero_self'],
+                'triangle': self._facts['triangle']}
+
+    @property
+    def data_integrity(self):
+        """Get "complete", "nan_present", "subset_scored", or "unknown"."""
+        return self._facts['data_integrity']
+
+    @property
+    def metric_probe(self):
+        """Get "not_run", "no_violations_found", or "violations_found"."""
+        return self._facts['metric_probe']
+
+    @property
+    def probe_violations(self):
+        """Get the number of triple violations the probe found."""
+        return self._facts['probe_violations']
+
+    @property
+    def probe_sampled(self):
+        """Get the number of triples the probe sampled."""
+        return self._facts['probe_sampled']
 
     @abc.abstractmethod
     def to_file(self, path):
@@ -747,7 +811,8 @@ class SymmetricDistanceMatrix(DistanceMatrix):
     conversion to scipy sparse matrices, and serialization support.
     """
 
-    def __init__(self, storage, comparison_name, labels=None, params=None):
+    def __init__(self, storage, comparison_name, labels=None, params=None,
+                 facts=None):
         """
         Construct a SymmetricDistanceMatrix wrapper.
 
@@ -755,8 +820,9 @@ class SymmetricDistanceMatrix(DistanceMatrix):
         :param comparison_name: Name of the comparison method used.
         :param labels: Optional list of labels for items.
         :param params: Optional dictionary of comparison parameters.
+        :param facts: Optional capability facts recorded by the comparison.
         """
-        super().__init__(comparison_name, params)
+        super().__init__(comparison_name, params, facts)
         self._storage = storage
         self._labels = labels if labels is not None else []
         self._condensed_cache = None
@@ -924,6 +990,7 @@ class SymmetricDistanceMatrix(DistanceMatrix):
             condensed=self.condensed,
             comparison_name=np.array(self._comparison_name),
             params_json=np.array(json.dumps(self._params)),
+            facts_json=np.array(json.dumps(self._facts)),
             labels=np.array(self._labels),
             num_samples=np.array(self.num_samples),
         )
@@ -961,6 +1028,11 @@ class SymmetricDistanceMatrix(DistanceMatrix):
         except (KeyError, json.JSONDecodeError):
             params = {}
 
+        try:
+            facts = json.loads(str(data['facts_json']))
+        except (KeyError, json.JSONDecodeError):
+            facts = None
+
         # Accept the legacy ``num_items`` key so distance matrices saved before
         # the rename to ``num_samples`` still load.
         if 'num_samples' in data:
@@ -981,7 +1053,7 @@ class SymmetricDistanceMatrix(DistanceMatrix):
                 storage.Set(i, j, float(condensed[idx]))
                 idx += 1
 
-        return cls(storage, comparison_name, labels, params)
+        return cls(storage, comparison_name, labels, params, facts)
 
     def __array__(self):
         """Support numpy array interface."""
@@ -1007,7 +1079,7 @@ class CrossDistanceMatrix(DistanceMatrix):
     """
 
     def __init__(self, matrix, comparison_name, labels_a=None, labels_b=None,
-                 params=None):
+                 params=None, facts=None):
         """
         Construct a CrossDistanceMatrix wrapper.
 
@@ -1016,8 +1088,9 @@ class CrossDistanceMatrix(DistanceMatrix):
         :param labels_a: Optional labels for set A (the rows / reference side).
         :param labels_b: Optional labels for set B (the columns / fit side).
         :param params: Optional dictionary of comparison parameters.
+        :param facts: Optional capability facts recorded by the comparison.
         """
-        super().__init__(comparison_name, params)
+        super().__init__(comparison_name, params, facts)
         self._matrix = matrix
         self._labels_a = labels_a if labels_a is not None else []
         self._labels_b = labels_b if labels_b is not None else []
@@ -1059,6 +1132,7 @@ class CrossDistanceMatrix(DistanceMatrix):
             labels_b=np.array(self._labels_b),
             comparison_name=np.array(self._comparison_name),
             params_json=np.array(json.dumps(self._params)),
+            facts_json=np.array(json.dumps(self._facts)),
         )
 
     @classmethod
@@ -1098,7 +1172,12 @@ class CrossDistanceMatrix(DistanceMatrix):
             params = json.loads(str(data['params_json']))
         except (KeyError, json.JSONDecodeError):
             params = {}
-        return cls(matrix, str(data['comparison_name']), labels_a, labels_b, params)
+        try:
+            facts = json.loads(str(data['facts_json']))
+        except (KeyError, json.JSONDecodeError):
+            facts = None
+        return cls(matrix, str(data['comparison_name']), labels_a, labels_b,
+                   params, facts)
 
     def __array__(self):
         """Support numpy array interface."""
@@ -1396,7 +1475,12 @@ def pdist(items,
         options.progress = progress
 
     _cpp_pdist(comparison_obj, storage, options)
-    return SymmetricDistanceMatrix(storage, comparison_name, labels, params)
+    # After the computation, never before it: a comparison can only discover a
+    # non-finite distance while it scores pairs, so an earlier read would stamp
+    # ``complete`` on a matrix that turned out to contain NaN.
+    facts = _gate.facts_from_comparison(comparison_obj)
+    return SymmetricDistanceMatrix(storage, comparison_name, labels, params,
+                                   facts)
 
 
 def cdist(items_a, items_b, comparison, *,
@@ -1481,15 +1565,16 @@ def cdist(items_a, items_b, comparison, *,
         options.progress = progress
 
     _cpp_cdist_into_address(comparison_obj, n_a, output.ctypes.data, options)
+    facts = _gate.facts_from_comparison(comparison_obj)
 
     return CrossDistanceMatrix(
         output, comparison_name,
         labels_a=_comparisons.extract_labels(a),
-        labels_b=_comparisons.extract_labels(b), params=params)
+        labels_b=_comparisons.extract_labels(b), params=params, facts=facts)
 
 
 def butina(distance_matrix, threshold, *, reordering=False,
-           num_threads=0, chunk_size=4096):
+           num_threads=0, chunk_size=4096, allow_nonmetric=False):
     """
     Cluster a precomputed distance matrix using the Butina algorithm.
 
@@ -1498,16 +1583,21 @@ def butina(distance_matrix, threshold, *, reordering=False,
     :param reordering: Recompute candidate neighbor counts after each cluster.
     :param num_threads: Thread count for threshold graph construction.
     :param chunk_size: Condensed-distance pairs per work unit.
+    :param allow_nonmetric: Cluster anyway when the distances are known not to
+        satisfy the triangle inequality. Does not override the refusals for
+        similarity-valued or non-finite matrices.
     :returns: ButinaResult with per-item labels and grouped clusters. The
         first member of each cluster is the highest-neighborhood representative,
         and each member's label equals its cluster index.
     :raises TypeError: If distance_matrix is not a SymmetricDistanceMatrix.
-    :raises ValueError: If threshold is negative.
+    :raises ValueError: If threshold is negative, or the matrix is not a metric.
     """
     if threshold < 0.0:
         raise ValueError("Butina threshold must be non-negative")
     if not isinstance(distance_matrix, SymmetricDistanceMatrix):
         raise TypeError("butina() expects a SymmetricDistanceMatrix")
+    _gate.require_metric(distance_matrix, "butina",
+                         allow_nonmetric=allow_nonmetric)
 
     options = ButinaOptions()
     options.distance_threshold = float(threshold)
@@ -1847,7 +1937,8 @@ def select_representatives(cluster, distance_matrix, *, k, method="medoid",
         ))
 
 
-def dbscan(distance_matrix, eps, *, min_samples=5, num_threads=0, chunk_size=4096):
+def dbscan(distance_matrix, eps, *, min_samples=5, num_threads=0,
+           chunk_size=4096, allow_nonmetric=False):
     """
     Cluster a precomputed distance matrix using DBSCAN.
 
@@ -1856,9 +1947,13 @@ def dbscan(distance_matrix, eps, *, min_samples=5, num_threads=0, chunk_size=409
     :param min_samples: Minimum self-inclusive neighbor count for a core sample.
     :param num_threads: Thread count for threshold graph construction.
     :param chunk_size: Condensed-distance pairs per work unit.
+    :param allow_nonmetric: Cluster anyway when the distances are known not to
+        satisfy the triangle inequality. Does not override the refusals for
+        similarity-valued or non-finite matrices.
     :returns: DBSCANResult with labels, clusters, and core sample indices.
     :raises TypeError: If distance_matrix is not a SymmetricDistanceMatrix.
-    :raises ValueError: If eps or min_samples are invalid.
+    :raises ValueError: If eps or min_samples are invalid, or the matrix is not
+        a metric.
     """
     if eps < 0.0:
         raise ValueError("DBSCAN eps must be non-negative")
@@ -1866,6 +1961,8 @@ def dbscan(distance_matrix, eps, *, min_samples=5, num_threads=0, chunk_size=409
         raise ValueError("DBSCAN min_samples must be at least one")
     if not isinstance(distance_matrix, SymmetricDistanceMatrix):
         raise TypeError("dbscan() expects a SymmetricDistanceMatrix")
+    _gate.require_metric(distance_matrix, "dbscan",
+                         allow_nonmetric=allow_nonmetric)
 
     options = DBSCANOptions()
     options.eps = float(eps)
@@ -1884,7 +1981,7 @@ def dbscan(distance_matrix, eps, *, min_samples=5, num_threads=0, chunk_size=409
 def hdbscan(distance_matrix, *, min_cluster_size=5, min_samples=None,
             cluster_selection_epsilon=0.0, max_cluster_size=None, alpha=1.0,
             cluster_selection_method="eom", allow_single_cluster=False,
-            num_threads=0, chunk_size=4096):
+            num_threads=0, chunk_size=4096, allow_nonmetric=False):
     """
     Cluster a precomputed distance matrix using HDBSCAN.
 
@@ -1900,9 +1997,12 @@ def hdbscan(distance_matrix, *, min_cluster_size=5, min_samples=None,
     :param allow_single_cluster: Whether the root cluster may be selected.
     :param num_threads: Thread count for core-distance computation.
     :param chunk_size: Reserved for parity with other clustering wrappers.
+    :param allow_nonmetric: Cluster anyway when the distances are known not to
+        satisfy the triangle inequality. Does not override the refusals for
+        similarity-valued or non-finite matrices.
     :returns: HDBSCANResult with labels, clusters, and probabilities.
     :raises TypeError: If distance_matrix is not a SymmetricDistanceMatrix.
-    :raises ValueError: If options are invalid.
+    :raises ValueError: If options are invalid, or the matrix is not a metric.
     """
     if min_cluster_size < 2:
         raise ValueError("HDBSCAN min_cluster_size must be at least two")
@@ -1916,6 +2016,8 @@ def hdbscan(distance_matrix, *, min_cluster_size=5, min_samples=None,
         raise ValueError("HDBSCAN alpha must be positive")
     if not isinstance(distance_matrix, SymmetricDistanceMatrix):
         raise TypeError("hdbscan() expects a SymmetricDistanceMatrix")
+    _gate.require_metric(distance_matrix, "hdbscan",
+                         allow_nonmetric=allow_nonmetric)
 
     method_map = {
         "eom": _oecluster.HDBSCANClusterSelectionMethod_EOM,
@@ -1948,7 +2050,7 @@ def hdbscan(distance_matrix, *, min_cluster_size=5, min_samples=None,
 
 def agglomerative(distance_matrix, *, n_clusters=2, distance_threshold=None,
                   linkage="average", compute_full_tree=True,
-                  num_threads=0, chunk_size=4096):
+                  num_threads=0, chunk_size=4096, allow_nonmetric=False):
     """
     Cluster a precomputed distance matrix using hierarchical agglomerative clustering.
 
@@ -1959,12 +2061,17 @@ def agglomerative(distance_matrix, *, n_clusters=2, distance_threshold=None,
     :param compute_full_tree: Whether to request full-tree computation.
     :param num_threads: Thread count for initial distance materialization.
     :param chunk_size: Rows per work unit during distance materialization.
+    :param allow_nonmetric: Cluster anyway when the distances are known not to
+        satisfy the triangle inequality. Does not override the refusals for
+        similarity-valued or non-finite matrices.
     :returns: AgglomerativeResult with labels, clusters, children, distances, and cluster sizes.
     :raises TypeError: If distance_matrix is not a SymmetricDistanceMatrix.
-    :raises ValueError: If options are invalid.
+    :raises ValueError: If options are invalid, or the matrix is not a metric.
     """
     if not isinstance(distance_matrix, SymmetricDistanceMatrix):
         raise TypeError("agglomerative() expects a SymmetricDistanceMatrix")
+    _gate.require_metric(distance_matrix, "agglomerative",
+                         allow_nonmetric=allow_nonmetric)
     if distance_threshold is None and n_clusters < 1:
         raise ValueError("Agglomerative n_clusters must be at least one")
     if distance_threshold is not None and distance_threshold < 0.0:
@@ -2368,7 +2475,8 @@ def _cluster_threshold(preset):
 def cluster_report(result, distance_matrix, *, preset="default",
                    coverage_thresholds=None, boundary_threshold=None,
                    representative_method="medoid",
-                   treat_noise_as_singletons=True, num_threads=0):
+                   treat_noise_as_singletons=True, num_threads=0,
+                   allow_nonmetric=False):
     """
     Compute a method-agnostic clustering-quality report.
 
@@ -2382,15 +2490,21 @@ def cluster_report(result, distance_matrix, *, preset="default",
         "highest_neighborhood" method is not supported.
     :param treat_noise_as_singletons: Fold noise into singleton accounting.
     :param num_threads: Reserved for parallel-safe computation.
+    :param allow_nonmetric: Score anyway when the distances are known not to
+        satisfy the triangle inequality. Does not override the refusals for
+        similarity-valued or non-finite matrices.
     :returns: A ClusterReport.
     :raises TypeError: If result/distance_matrix have the wrong type.
-    :raises ValueError: If a preset/method/threshold is invalid.
+    :raises ValueError: If a preset/method/threshold is invalid, or the matrix
+        is not a metric.
     :raises RuntimeError: If the distance matrix cannot provide complete distances.
     """
     if not isinstance(result, ClusteringResult):
         raise TypeError("cluster_report() expects a ClusteringResult")
     if not isinstance(distance_matrix, SymmetricDistanceMatrix):
         raise TypeError("cluster_report() expects a SymmetricDistanceMatrix")
+    _gate.require_metric(distance_matrix, "cluster_report",
+                         allow_nonmetric=allow_nonmetric)
 
     options = _oecluster.ClusterReportOptions(_cluster_threshold(preset))
     if coverage_thresholds is not None:
