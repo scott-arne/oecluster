@@ -330,3 +330,35 @@ def test_require_metric_refuses_subset_scored_but_allows_the_override():
     with pytest.raises(ValueError, match="subset"):
         _gate.require_metric(dist, "butina")
     _gate.require_metric(dist, "butina", allow_nonmetric=True)
+
+
+def test_butina_coercion_error_before_gate():
+    """Caller argument coercion errors come before the gate's advisory refusal.
+
+    Discriminator: passing a list to int() raises TypeError, while the gate
+    raises ValueError. If the gate ran first, the caller would see ValueError
+    with the "allow_nonmetric=True" advisory -- a remedy that cannot rescue
+    the invalid type.
+    """
+    dist = oecluster.pdist(_mols(), "fingerprint", metric="dice")
+    assert dist.metric_capabilities['triangle'] is False
+    with pytest.raises(TypeError):
+        oecluster.butina(dist, 0.5, num_threads=["not_an_int"])
+
+
+def test_agglomerative_coercion_error_before_gate():
+    """Caller argument coercion errors come before the gate's advisory refusal.
+
+    This covers the n_clusters coercion, which is only guarded when
+    distance_threshold is None. When distance_threshold is provided,
+    n_clusters validation is skipped above the gate, so the coercion must
+    be hoisted to avoid the gate pre-empting the type error.
+
+    Discriminator: passing a list to int() raises TypeError, while the gate
+    raises ValueError.
+    """
+    dist = oecluster.pdist(_mols(), "fingerprint", metric="dice")
+    assert dist.metric_capabilities['triangle'] is False
+    with pytest.raises(TypeError):
+        oecluster.agglomerative(dist, n_clusters=["not_an_int"],
+                                distance_threshold=0.5)

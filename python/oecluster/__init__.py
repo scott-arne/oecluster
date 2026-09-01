@@ -1596,14 +1596,20 @@ def butina(distance_matrix, threshold, *, reordering=False,
         raise ValueError("Butina threshold must be non-negative")
     if not isinstance(distance_matrix, SymmetricDistanceMatrix):
         raise TypeError("butina() expects a SymmetricDistanceMatrix")
+
+    # Coerce caller arguments before the gate so that an invalid type is reported
+    # ahead of an advisory refusal that names a remedy which cannot rescue it.
+    num_threads_int = int(num_threads)
+    chunk_size_int = int(chunk_size)
+
     _gate.require_metric(distance_matrix, "butina",
                          allow_nonmetric=allow_nonmetric)
 
     options = ButinaOptions()
     options.distance_threshold = float(threshold)
     options.reordering = bool(reordering)
-    options.num_threads = int(num_threads)
-    options.chunk_size = int(chunk_size)
+    options.num_threads = num_threads_int
+    options.chunk_size = chunk_size_int
 
     result = _butina_cluster(distance_matrix.storage, options)
     return ButinaResult(result.Labels(), result.Members())
@@ -1961,14 +1967,20 @@ def dbscan(distance_matrix, eps, *, min_samples=5, num_threads=0,
         raise ValueError("DBSCAN min_samples must be at least one")
     if not isinstance(distance_matrix, SymmetricDistanceMatrix):
         raise TypeError("dbscan() expects a SymmetricDistanceMatrix")
+
+    # Coerce caller arguments before the gate so that an invalid type is reported
+    # ahead of an advisory refusal that names a remedy which cannot rescue it.
+    num_threads_int = int(num_threads)
+    chunk_size_int = int(chunk_size)
+
     _gate.require_metric(distance_matrix, "dbscan",
                          allow_nonmetric=allow_nonmetric)
 
     options = DBSCANOptions()
     options.eps = float(eps)
     options.min_samples = int(min_samples)
-    options.num_threads = int(num_threads)
-    options.chunk_size = int(chunk_size)
+    options.num_threads = num_threads_int
+    options.chunk_size = chunk_size_int
 
     result = _dbscan_cluster(distance_matrix.storage, options)
     return DBSCANResult(
@@ -2027,6 +2039,11 @@ def hdbscan(distance_matrix, *, min_cluster_size=5, min_samples=None,
             f"Unknown HDBSCAN cluster_selection_method: {cluster_selection_method!r}"
         )
 
+    # Coerce caller arguments before the gate so that an invalid type is reported
+    # ahead of an advisory refusal that names a remedy which cannot rescue it.
+    num_threads_int = int(num_threads)
+    chunk_size_int = int(chunk_size)
+
     # Local argument validation first: allow_nonmetric cannot rescue an unknown
     # cluster_selection_method, so the gate must not pre-empt that message.
     _gate.require_metric(distance_matrix, "hdbscan",
@@ -2040,8 +2057,8 @@ def hdbscan(distance_matrix, *, min_cluster_size=5, min_samples=None,
     options.alpha = float(alpha)
     options.cluster_selection_method = method_map[method_key]
     options.allow_single_cluster = bool(allow_single_cluster)
-    options.num_threads = int(num_threads)
-    options.chunk_size = int(chunk_size)
+    options.num_threads = num_threads_int
+    options.chunk_size = chunk_size_int
 
     result = _hdbscan_cluster(distance_matrix.storage, options)
     return HDBSCANResult(
@@ -2088,6 +2105,12 @@ def agglomerative(distance_matrix, *, n_clusters=2, distance_threshold=None,
     if linkage_key not in linkage_map:
         raise ValueError(f"Unknown agglomerative linkage: {linkage!r}")
 
+    # Coerce caller arguments before the gate so that an invalid type is reported
+    # ahead of an advisory refusal that names a remedy which cannot rescue it.
+    n_clusters_int = int(n_clusters)
+    num_threads_int = int(num_threads)
+    chunk_size_int = int(chunk_size)
+
     # Local argument validation first: allow_nonmetric cannot rescue a bad
     # n_clusters, distance_threshold, or linkage, so the gate must not
     # pre-empt those messages.
@@ -2095,14 +2118,14 @@ def agglomerative(distance_matrix, *, n_clusters=2, distance_threshold=None,
                          allow_nonmetric=allow_nonmetric)
 
     options = AgglomerativeOptions()
-    options.n_clusters = int(n_clusters)
+    options.n_clusters = n_clusters_int
     options.distance_threshold = (
         -1.0 if distance_threshold is None else float(distance_threshold)
     )
     options.linkage = linkage_map[linkage_key]
     options.compute_full_tree = bool(compute_full_tree)
-    options.num_threads = int(num_threads)
-    options.chunk_size = int(chunk_size)
+    options.num_threads = num_threads_int
+    options.chunk_size = chunk_size_int
 
     result = _agglomerative_cluster(distance_matrix.storage, options)
     children = zip(result.ChildrenLeft(), result.ChildrenRight())
@@ -2538,6 +2561,8 @@ def cluster_report(result, distance_matrix, *, preset="default",
             "cluster_report does not support the 'highest_neighborhood' "
             "representative method; use 'medoid', 'minimax', or 'weighted_medoid'")
 
+    num_threads_int = int(num_threads)
+
     # Local argument validation first: allow_nonmetric cannot rescue a bad
     # preset or representative method, so the gate must not pre-empt those
     # messages.
@@ -2551,7 +2576,7 @@ def cluster_report(result, distance_matrix, *, preset="default",
         options.boundary_threshold = bt
     options.representative_method = native_method
     options.treat_noise_as_singletons = bool(treat_noise_as_singletons)
-    options.num_threads = int(num_threads)
+    options.num_threads = num_threads_int
 
     native = _cluster_report(
         _native_clustering_result(result), distance_matrix.storage, options)
