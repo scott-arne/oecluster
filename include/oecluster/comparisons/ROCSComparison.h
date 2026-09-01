@@ -37,8 +37,11 @@ struct ROCSOptions {
 /**
  * @brief ROCS-style shape/color pairwise comparison using OEShape.
  *
- * Stores shared references to molecules and uses ``OEOverlay`` to compute
- * pairwise overlay scores. Comparison output depends on score_type and mode:
+ * Copies the molecules it is given and uses ``OEOverlay`` to compute pairwise
+ * overlay scores. The copy is not incidental: preparing the color atoms the
+ * color term needs modifies the molecule, so the comparison must not work on
+ * objects the caller still owns. Comparison output depends on score_type and
+ * mode:
  *   - ComboNorm: ``1.0 - TanimotoCombo/2.0`` (range [0,1])
  *   - Combo: ``2.0 - TanimotoCombo`` (range [0,2])
  *   - Shape: ``1.0 - ShapeTanimoto`` (range [0,1])
@@ -54,11 +57,13 @@ public:
     /**
      * @brief Construct a ROCSComparison from a set of molecules.
      *
-     * Molecules are stored by shared_ptr and shared across clones.
-     * Each molecule should have 3D coordinates for meaningful results.
+     * Each molecule is copied, and the copies are shared across clones; the
+     * caller's molecules are left untouched. Each molecule should have 3D
+     * coordinates for meaningful results.
      *
      * :param mols: Shared pointers to molecules.
      * :param opts: Scoring options.
+     * :raises ComparisonError: If any molecule pointer is null.
      */
     explicit ROCSComparison(const std::vector<std::shared_ptr<OEChem::OEMol>>& mols,
                         const Options& opts = Options());
@@ -82,8 +87,11 @@ private:
     ROCSComparison(std::shared_ptr<const SharedData> shared,
                const Options& opts);
 
-    /// Initialize OEOverlay with configured options.
-    void InitOverlay();
+    /// Initialize OEOverlay with configured options, and, when ``prep_target`` is
+    /// non-null, assign color atoms to the molecules it holds. Only the
+    /// constructor that owns the snapshot passes a target; clones inherit an
+    /// already-prepared set.
+    void InitOverlay(SharedData* prep_target);
 };
 
 }  // namespace OECluster

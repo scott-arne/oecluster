@@ -2,6 +2,7 @@
 #include "oecluster/oecluster.h"
 #include "oecluster/comparisons/ROCSComparison.h"
 #include <oechem.h>
+#include <oeomega2.h>
 #include <oeshape.h>
 #include <string>
 
@@ -10,11 +11,19 @@ using namespace OECluster;
 class ROCSComparisonTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        auto make_mol = [](const char* smi) -> std::shared_ptr<OEChem::OEMol> {
+        // Omega, not OEGenerate2DCoordinates: a planar molecule has zero shape
+        // volume, so every ROCS Tanimoto degenerates to 0/0 and the whole suite
+        // measures nothing.
+        OEConfGen::OEOmega omega;
+        omega.SetMaxConfs(1);
+        omega.SetStrictStereo(false);
+        auto make_mol = [&omega](const char* smi) -> std::shared_ptr<OEChem::OEMol> {
             auto mol = std::make_shared<OEChem::OEMol>();
             OEChem::OESmilesToMol(*mol, smi);
-            OEChem::OEAddExplicitHydrogens(*mol);
-            OEChem::OEGenerate2DCoordinates(*mol);
+            // EXPECT_TRUE rather than ASSERT_TRUE: ASSERT_* expands to a bare
+            // return, which cannot compile in a value-returning lambda. A failed
+            // build leaves the molecule empty, which surfaces loudly downstream.
+            EXPECT_TRUE(omega(*mol)) << smi;
             return mol;
         };
         mols_.push_back(make_mol("c1ccccc1"));      // benzene
@@ -128,12 +137,49 @@ TEST_F(ROCSComparisonTest, ColorForceFieldConfiguration) {
     EXPECT_LE(d, 1.0);
 }
 
+// Index 1 is the phenol: its hydroxyl carries donor and acceptor color atoms,
+// where benzene has almost none, so the color term is genuinely exercised.
+// The tolerance is 1e-3 rather than something tighter because BestOverlay
+// optimizes from several starting poses rather than being handed the identity,
+// so the diagonal is a converged result and not an exact one by construction.
+
+TEST_F(ROCSComparisonTest, ColorSelfSimilarityIsOne) {
+    ROCSOptions opts;
+    opts.score_type = ROCSScoreType::Color;
+    opts.similarity = true;
+    ROCSComparison comparison(mols_, opts);
+    EXPECT_NEAR(comparison.Compare(1, 1), 1.0, 1e-3);
+}
+
+TEST_F(ROCSComparisonTest, ComboSelfSimilarityIsTwo) {
+    ROCSOptions opts;
+    opts.score_type = ROCSScoreType::Combo;
+    opts.similarity = true;
+    ROCSComparison comparison(mols_, opts);
+    EXPECT_NEAR(comparison.Compare(1, 1), 2.0, 1e-3);
+}
+
+TEST_F(ROCSComparisonTest, ComboSelfScoreIsZeroDistance) {
+    ROCSOptions opts;
+    opts.score_type = ROCSScoreType::Combo;
+    ROCSComparison comparison(mols_, opts);
+    EXPECT_NEAR(comparison.Compare(1, 1), 0.0, 1e-3);
+}
+
+TEST_F(ROCSComparisonTest, InputMoleculesAreNotMutated) {
+    const unsigned int before = mols_[1]->NumAtoms();
+    ROCSComparison comparison(mols_, ROCSOptions());
+    comparison.Compare(0, 1);
+    EXPECT_EQ(mols_[1]->NumAtoms(), before);
+}
+
 TEST_F(ROCSComparisonTest, FactsCoverEveryScoreTypeAndDirection) {
-    // Self-comparison values on valid 3D conformers: shape Tanimoto is 1.0 and
-    // color Tanimoto is 0.0, because nothing prepares color atoms. Exactly two
-    // of the eight configurations therefore vanish on the diagonal -- the Shape
-    // distance and, as an artifact of that same broken color term, the Color
-    // similarity. is_distance follows the flag alone; zero_self does not.
+    // Self-comparison values on valid 3D conformers: shape and color Tanimoto
+    // both reach 1.0 now that color atoms are prepared, so combo reaches 2.0.
+    // Every distance form subtracts its own saturation value and vanishes on the
+    // diagonal; every similarity form returns that value instead. The Color
+    // similarity cell used to read Yes, as an artifact of a color term that was
+    // identically zero, and correctly reads No now that it is not.
     struct Row {
         ROCSScoreType score_type;
         bool similarity;
@@ -141,14 +187,14 @@ TEST_F(ROCSComparisonTest, FactsCoverEveryScoreTypeAndDirection) {
         Capability zero_self;
     };
     const std::vector<Row> rows{
-        {ROCSScoreType::ComboNorm, false, Capability::Yes, Capability::No},
-        {ROCSScoreType::Combo, false, Capability::Yes, Capability::No},
+        {ROCSScoreType::ComboNorm, false, Capability::Yes, Capability::Yes},
+        {ROCSScoreType::Combo, false, Capability::Yes, Capability::Yes},
         {ROCSScoreType::Shape, false, Capability::Yes, Capability::Yes},
-        {ROCSScoreType::Color, false, Capability::Yes, Capability::No},
+        {ROCSScoreType::Color, false, Capability::Yes, Capability::Yes},
         {ROCSScoreType::ComboNorm, true, Capability::No, Capability::No},
         {ROCSScoreType::Combo, true, Capability::No, Capability::No},
         {ROCSScoreType::Shape, true, Capability::No, Capability::No},
-        {ROCSScoreType::Color, true, Capability::No, Capability::Yes},
+        {ROCSScoreType::Color, true, Capability::No, Capability::No},
     };
 
     for (const Row& row : rows) {
