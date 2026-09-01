@@ -58,12 +58,17 @@ public:
      * @brief Construct a ROCSComparison from a set of molecules.
      *
      * Each molecule is copied, and the copies are shared across clones; the
-     * caller's molecules are left untouched. Each molecule should have 3D
-     * coordinates for meaningful results.
+     * caller's molecules are left untouched. Every molecule must carry 3D
+     * coordinates, and the constructor refuses the set otherwise.
+     *
+     * Construction also measures the diagonal once -- one self-overlay per
+     * molecule, O(n) against the O(n^2) matrix this class exists to fill -- so
+     * that Facts() can report ``zero_self`` from evidence.
      *
      * :param mols: Shared pointers to molecules.
      * :param opts: Scoring options.
-     * :raises ComparisonError: If any molecule pointer is null.
+     * :raises ComparisonError: If any molecule pointer is null, or if any
+     *     molecule reports fewer than three dimensions.
      */
     explicit ROCSComparison(const std::vector<std::shared_ptr<OEChem::OEMol>>& mols,
                         const Options& opts = Options());
@@ -87,11 +92,18 @@ private:
     ROCSComparison(std::shared_ptr<const SharedData> shared,
                const Options& opts);
 
-    /// Initialize OEOverlay with configured options, and, when ``prep_target`` is
-    /// non-null, assign color atoms to the molecules it holds. Only the
-    /// constructor that owns the snapshot passes a target; clones inherit an
-    /// already-prepared set.
+    /// Initialize OEOverlay with configured options. On the three color-bearing
+    /// score types, a non-null ``prep_target`` additionally has color atoms
+    /// assigned to the molecules it holds; on ``Shape``, which never reads the
+    /// color term, the target is ignored. Only the constructor that owns the
+    /// snapshot passes a target; clones inherit an already-prepared set.
     void InitOverlay(SharedData* prep_target);
+
+    /// Measure the diagonal by scoring every molecule against itself. Runs once,
+    /// at construction, and the result is cached in ``SharedData`` so that clones
+    /// inherit it: Facts() is const and called freely, so measuring there would
+    /// put n overlays behind an accessor and repeat them for every clone.
+    Capability MeasureZeroSelf();
 };
 
 }  // namespace OECluster

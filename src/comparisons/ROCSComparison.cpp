@@ -5,17 +5,37 @@
 
 #include "oecluster/comparisons/ROCSComparison.h"
 
+#include <cmath>
 #include <oechem.h>
 #include <oeshape.h>
 #include "oecluster/Error.h"
 
 namespace OECluster {
 
+namespace {
+/// A recovered self-overlay currently lands on its saturation value exactly, so
+/// this tolerance is not load-bearing on any input measured so far. It exists
+/// because OEBestOverlayScore returns float and nothing in the API promises
+/// that exactness; float epsilon near 1.0 is about 1.2e-7. Flipping a hard gate
+/// fact on a one-ULP drift would be a worse failure than tolerating one, and at
+/// 1e-6 this still sits three orders of magnitude below the smallest genuine
+/// shortfall measured -- 0.0137, for diatomic chlorine.
+constexpr double SELF_SCORE_TOLERANCE = 1e-6;
+}  // namespace
+
 struct ROCSComparison::SharedData {
     /// The comparison's own copies of the caller's molecules. Color preparation
     /// adds color atoms to a molecule, so the comparison cannot work on pointers
     /// the caller still holds; see the constructor for the full argument.
     std::vector<std::shared_ptr<OEChem::OEMol>> mols;
+
+    /// The measured diagonal, cached because clones must not repeat the O(n)
+    /// measurement. This value depends on the options it was measured under.
+    /// That is sound only because Clone() is the sole caller of the constructor
+    /// that accepts an existing SharedData, and it always passes the same
+    /// options. If SharedData is ever shared across differing options, this
+    /// field has to move onto the object.
+    Capability zero_self = Capability::Unknown;
 };
 
 struct ROCSComparison::ThreadLocalData {
@@ -78,6 +98,18 @@ ROCSComparison::ROCSComparison(const std::vector<std::shared_ptr<OEChem::OEMol>>
             throw ComparisonError("ROCSComparison received null molecule pointer at index " +
                                   std::to_string(i));
         }
+        // ``< 3``, deliberately, and not the ``== 0`` that RMSDComparison uses:
+        // OEGenerate2DCoordinates leaves the dimension at 2, and a planar molecule
+        // has no shape volume, so every Tanimoto degenerates to 0/0 and every score
+        // -- including a self-comparison -- comes back 1.0. Aligning this with the
+        // sibling check would let that through silently.
+        if (mols[i]->GetDimension() < 3) {
+            throw ComparisonError(
+                "ROCSComparison requires 3D coordinates: molecule at index " +
+                std::to_string(i) + " has dimension " +
+                std::to_string(mols[i]->GetDimension()) +
+                ". Generate conformers first, for example with OEOmega.");
+        }
     }
 
     // Snapshot the input set rather than aliasing the caller's shared_ptrs. Color
@@ -92,7 +124,11 @@ ROCSComparison::ROCSComparison(const std::vector<std::shared_ptr<OEChem::OEMol>>
     }
 
     InitOverlay(shared.get());
-    shared_ = std::move(shared);
+    shared_ = shared;  // Copy, not move: the measurement below writes through
+                       // the mutable handle, and shared_ is a view onto const.
+    // Writing through ``shared`` is safe because the object is not yet published:
+    // construction is single-threaded and no clone can exist.
+    shared->zero_self = MeasureZeroSelf();
 }
 
 ROCSComparison::ROCSComparison(std::shared_ptr<const SharedData> shared,
@@ -100,6 +136,17 @@ ROCSComparison::ROCSComparison(std::shared_ptr<const SharedData> shared,
     : shared_(std::move(shared)),
       opts_(opts) {
     InitOverlay(nullptr);
+}
+
+Capability ROCSComparison::MeasureZeroSelf() {
+    for (size_t i = 0; i < shared_->mols.size(); ++i) {
+        if (std::abs(Compare(i, i)) > SELF_SCORE_TOLERANCE) {
+            return Capability::No;
+        }
+    }
+    // An empty molecule set stamps Yes vacuously, which is correct: there is no
+    // diagonal to violate.
+    return Capability::Yes;
 }
 
 double ROCSComparison::Compare(size_t i, size_t j) {
@@ -151,20 +198,16 @@ GateFacts ROCSComparison::Facts() const {
     GateFacts facts;
     facts.is_distance = opts_.similarity ? Capability::No : Capability::Yes;
 
-    // Every score type now saturates on the diagonal -- shape and color Tanimoto
-    // both reach 1.0 for a molecule against itself, so combo reaches 2.0 -- and
-    // each distance form subtracts exactly that saturation value. The diagonal is
-    // therefore zero in the distance direction for all four score types, and is
-    // the saturation value rather than zero in the similarity direction.
-    //
-    // This rests on the prep InitOverlay applies, not on a mathematical guarantee.
-    // BestOverlay optimizes from inertial-frame starting poses and returns the
-    // best it finds; it is not obliged to find the identity transform even when a
-    // molecule is overlaid on itself. Under the current prep it does recover it,
-    // which is what makes the diagonal exact -- with hydrogens stripped it
-    // measurably does not, and phenol self-scores 0.98975 on shape. Change the
-    // prep and this stamp has to be re-measured.
-    facts.zero_self = opts_.similarity ? Capability::No : Capability::Yes;
+    // Reported from the measurement the constructor took on this molecule set
+    // under these options, not asserted from the score type or the direction
+    // flag. No general claim about the diagonal would be true: the color force
+    // field gives a small molecule such as methane no color atom at all, so its
+    // color self-Tanimoto is 0.0 and its ComboNorm diagonal sits at 0.5, and the
+    // overlay optimizer cannot seat a near-spherical diatomic exactly on itself,
+    // so chlorine falls 0.0137 short on shape. Both stamp No, and correctly so.
+    // Measuring also means the stamp tracks the prep and the toolkit rather than
+    // having to be re-derived whenever either moves.
+    facts.zero_self = shared_->zero_self;
 
     facts.triangle = Capability::Unknown;
     facts.data_integrity = DataIntegrity::Complete;

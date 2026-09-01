@@ -10,25 +10,30 @@ using namespace OECluster;
 
 class ROCSComparisonTest : public ::testing::Test {
 protected:
-    void SetUp() override {
-        // Omega, not OEGenerate2DCoordinates: a planar molecule has zero shape
-        // volume, so every ROCS Tanimoto degenerates to 0/0 and the whole suite
-        // measures nothing.
+    /// A single Omega conformer for ``smi``. Shared by SetUp and by the tests
+    /// that need molecules outside the standard fixture, so that every molecule
+    /// in this file is built under one Omega configuration.
+    ///
+    /// Omega, not OEGenerate2DCoordinates: a planar molecule has zero shape
+    /// volume, so every ROCS Tanimoto degenerates to 0/0 and the whole suite
+    /// measures nothing.
+    static std::shared_ptr<OEChem::OEMol> MakeConformer(const char* smi) {
         OEConfGen::OEOmega omega;
         omega.SetMaxConfs(1);
         omega.SetStrictStereo(false);
-        auto make_mol = [&omega](const char* smi) -> std::shared_ptr<OEChem::OEMol> {
-            auto mol = std::make_shared<OEChem::OEMol>();
-            OEChem::OESmilesToMol(*mol, smi);
-            // EXPECT_TRUE rather than ASSERT_TRUE: ASSERT_* expands to a bare
-            // return, which cannot compile in a value-returning lambda. A failed
-            // build leaves the molecule empty, which surfaces loudly downstream.
-            EXPECT_TRUE(omega(*mol)) << smi;
-            return mol;
-        };
-        mols_.push_back(make_mol("c1ccccc1"));      // benzene
-        mols_.push_back(make_mol("c1ccc(O)cc1"));    // phenol
-        mols_.push_back(make_mol("CCCCCCCC"));        // octane
+        auto mol = std::make_shared<OEChem::OEMol>();
+        OEChem::OESmilesToMol(*mol, smi);
+        // EXPECT_TRUE rather than ASSERT_TRUE: ASSERT_* expands to a bare
+        // return, which cannot compile in a value-returning function. A failed
+        // build leaves the molecule empty, which surfaces loudly downstream.
+        EXPECT_TRUE(omega(*mol)) << smi;
+        return mol;
+    }
+
+    void SetUp() override {
+        mols_.push_back(MakeConformer("c1ccccc1"));     // benzene
+        mols_.push_back(MakeConformer("c1ccc(O)cc1"));  // phenol
+        mols_.push_back(MakeConformer("CCCCCCCC"));     // octane
     }
 
     std::vector<std::shared_ptr<OEChem::OEMol>> mols_;
@@ -173,13 +178,60 @@ TEST_F(ROCSComparisonTest, InputMoleculesAreNotMutated) {
     EXPECT_EQ(mols_[1]->NumAtoms(), before);
 }
 
+TEST_F(ROCSComparisonTest, ZeroSelfIsNoWhenAMoleculeHasNoColorAtoms) {
+    // ImplicitMillsDean gives methane no color atom at all, so its color
+    // self-Tanimoto is 0.0 however well the prep runs, and ComboNorm's diagonal
+    // sits at 0.5. Asserting the distance as well as the stamp keeps this test
+    // pinned to the reason rather than to the verdict.
+    auto methane = MakeConformer("C");
+    ROCSComparison comparison({methane}, ROCSOptions());
+    EXPECT_NEAR(comparison.Compare(0, 0), 0.5, 1e-3);
+    EXPECT_EQ(comparison.Facts().zero_self, Capability::No);
+}
+
+TEST_F(ROCSComparisonTest, ZeroSelfFollowsTheMeasurementNotTheSimilarityFlag) {
+    // The stamp is a measurement, and this is the case that proves it: methane
+    // has no color atoms, so its color *similarity* to itself is genuinely 0.0
+    // and Yes is the honest stamp -- the opposite of what every other
+    // similarity configuration gets. A rule keyed on opts_.similarity would
+    // return No here and would be wrong.
+    auto methane = MakeConformer("C");
+    ROCSOptions opts;
+    opts.score_type = ROCSScoreType::Color;
+    opts.similarity = true;
+    ROCSComparison comparison({methane}, opts);
+    EXPECT_NEAR(comparison.Compare(0, 0), 0.0, 1e-3);
+    EXPECT_EQ(comparison.Facts().zero_self, Capability::Yes);
+}
+
+TEST_F(ROCSComparisonTest, TwoDimensionalInputIsRefused) {
+    auto flat = std::make_shared<OEChem::OEMol>();
+    OEChem::OESmilesToMol(*flat, "c1ccc(O)cc1");
+    OEChem::OEAddExplicitHydrogens(*flat);
+    OEChem::OEGenerate2DCoordinates(*flat);
+    ASSERT_EQ(flat->GetDimension(), 2u);
+    EXPECT_THROW(ROCSComparison({flat}, ROCSOptions()), ComparisonError);
+}
+
+TEST_F(ROCSComparisonTest, CloneInheritsTheMeasuredStamp) {
+    // The measurement is cached in SharedData precisely so clones do not repeat
+    // it. If that cache is ever dropped, a clone would re-measure or report
+    // Unknown; either way this catches it.
+    auto methane = MakeConformer("C");
+    ROCSComparison comparison({methane}, ROCSOptions());
+    auto clone = comparison.Clone();
+    EXPECT_EQ(clone->Facts().zero_self, Capability::No);
+}
+
 TEST_F(ROCSComparisonTest, FactsCoverEveryScoreTypeAndDirection) {
-    // Self-comparison values on valid 3D conformers: shape and color Tanimoto
-    // both reach 1.0 now that color atoms are prepared, so combo reaches 2.0.
-    // Every distance form subtracts its own saturation value and vanishes on the
-    // diagonal; every similarity form returns that value instead. The Color
-    // similarity cell used to read Yes, as an artifact of a color term that was
-    // identically zero, and correctly reads No now that it is not.
+    // zero_self is measured on this fixture at construction rather than derived
+    // from the direction flag, so these rows record what benzene, phenol and
+    // octane actually do: every distance form vanishes on the diagonal and every
+    // similarity form saturates instead. The stamps are a property of these three
+    // molecules, not of the score types -- methane stamps differently, which the
+    // tests above pin down. The Color similarity cell used to read Yes, as an
+    // artifact of a color term that was identically zero, and correctly reads No
+    // now that it is not.
     struct Row {
         ROCSScoreType score_type;
         bool similarity;

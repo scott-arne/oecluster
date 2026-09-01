@@ -152,15 +152,22 @@ def test_rocs_comparison_accepts_molecules(native):
     comparison = native.ROCSComparison(mols, native.ROCSOptions())
     assert comparison.ComparisonName() == "rocs"
     assert comparison.Size() == 3
-    # Only that a finite score comes back. The combo self-score is wrong until
-    # Task 20 repairs the color term; asserting its value here would pin the bug.
+    # Only that a finite score comes back. This is a typemap test, not a scoring
+    # test: what it exists to prove is that molecules survive the crossing into
+    # C++. The scores themselves are pinned in the C++ suite, and asserting a
+    # value here would couple a binding test to the overlay numerics.
     value = comparison.Compare(0, 1)
     assert math.isfinite(value)
     assert 0.0 <= value <= 2.0
 
 
 def test_rocs_shape_self_distance_is_zero(native):
-    """Shape-only distance has a real zero diagonal; combo does not yet."""
+    """Shape-only distance has a zero diagonal, asserted apart from combo.
+
+    Shape never depended on the color preparation that combo needs, so keeping
+    it as its own case means a regression in that preparation cannot make this
+    assertion fail, and a failure here points at the overlay itself.
+    """
     options = native.ROCSOptions()
     options.score_type = native.ROCSScoreType_Shape
     comparison = native.ROCSComparison(_conformer_series(), options)

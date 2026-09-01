@@ -25,6 +25,26 @@ def _multiconf_mols(smiles_list):
     return mols
 
 
+def _conformer_mols(smiles_list):
+    """The same, embedded in 3D, for the builders that require coordinates.
+
+    ``ROCSComparison`` refuses a molecule with fewer than three dimensions,
+    because a flat or coordinate-less molecule has no shape volume and every
+    overlay score it could produce would be meaningless.
+    """
+    pytest.importorskip("openeye.oeomega")
+    from openeye import oeomega
+
+    omega = oeomega.OEOmega()
+    omega.SetMaxConfs(1)
+    omega.SetStrictStereo(False)
+
+    mols = _multiconf_mols(smiles_list)
+    for mol in mols:
+        assert omega(mol)
+    return mols
+
+
 def test_extract_labels_uses_titles():
     mols = _mols(["CCO", "CCC"])
     assert _comparisons.extract_labels(mols) == ["mol0", "mol1"]
@@ -397,7 +417,10 @@ def test_a_none_valued_option_is_not_a_named_option():
 
 def test_none_is_unspecified_for_rocs_and_superpose_too():
     """The same convention, in the two builders next door."""
-    mols = _multiconf_mols(["CCO", "CCC"])
+    # Embedded, because ROCS refuses input without 3D coordinates. This test is
+    # about kwarg plumbing and never reads a score, but it still has to hand the
+    # builder molecules the builder will accept.
+    mols = _conformer_mols(["CCO", "CCC"])
     obj, _, _ = _comparisons.build_comparison(
         mols, "rocs", False, {"score_type": None, "color_ff_type": None},
         symmetric=True)
