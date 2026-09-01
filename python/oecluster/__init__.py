@@ -2016,8 +2016,6 @@ def hdbscan(distance_matrix, *, min_cluster_size=5, min_samples=None,
         raise ValueError("HDBSCAN alpha must be positive")
     if not isinstance(distance_matrix, SymmetricDistanceMatrix):
         raise TypeError("hdbscan() expects a SymmetricDistanceMatrix")
-    _gate.require_metric(distance_matrix, "hdbscan",
-                         allow_nonmetric=allow_nonmetric)
 
     method_map = {
         "eom": _oecluster.HDBSCANClusterSelectionMethod_EOM,
@@ -2028,6 +2026,11 @@ def hdbscan(distance_matrix, *, min_cluster_size=5, min_samples=None,
         raise ValueError(
             f"Unknown HDBSCAN cluster_selection_method: {cluster_selection_method!r}"
         )
+
+    # Local argument validation first: allow_nonmetric cannot rescue an unknown
+    # cluster_selection_method, so the gate must not pre-empt that message.
+    _gate.require_metric(distance_matrix, "hdbscan",
+                         allow_nonmetric=allow_nonmetric)
 
     options = HDBSCANOptions()
     options.min_cluster_size = int(min_cluster_size)
@@ -2070,8 +2073,6 @@ def agglomerative(distance_matrix, *, n_clusters=2, distance_threshold=None,
     """
     if not isinstance(distance_matrix, SymmetricDistanceMatrix):
         raise TypeError("agglomerative() expects a SymmetricDistanceMatrix")
-    _gate.require_metric(distance_matrix, "agglomerative",
-                         allow_nonmetric=allow_nonmetric)
     if distance_threshold is None and n_clusters < 1:
         raise ValueError("Agglomerative n_clusters must be at least one")
     if distance_threshold is not None and distance_threshold < 0.0:
@@ -2086,6 +2087,12 @@ def agglomerative(distance_matrix, *, n_clusters=2, distance_threshold=None,
     linkage_key = str(linkage).lower()
     if linkage_key not in linkage_map:
         raise ValueError(f"Unknown agglomerative linkage: {linkage!r}")
+
+    # Local argument validation first: allow_nonmetric cannot rescue a bad
+    # n_clusters, distance_threshold, or linkage, so the gate must not
+    # pre-empt those messages.
+    _gate.require_metric(distance_matrix, "agglomerative",
+                         allow_nonmetric=allow_nonmetric)
 
     options = AgglomerativeOptions()
     options.n_clusters = int(n_clusters)
@@ -2503,28 +2510,45 @@ def cluster_report(result, distance_matrix, *, preset="default",
         raise TypeError("cluster_report() expects a ClusteringResult")
     if not isinstance(distance_matrix, SymmetricDistanceMatrix):
         raise TypeError("cluster_report() expects a SymmetricDistanceMatrix")
-    _gate.require_metric(distance_matrix, "cluster_report",
-                         allow_nonmetric=allow_nonmetric)
 
-    options = _oecluster.ClusterReportOptions(_cluster_threshold(preset))
+    # Every caller argument is resolved into a local before the gate runs, so
+    # that an invalid preset, threshold, or representative method is reported
+    # ahead of an advisory refusal that names a remedy which cannot rescue it.
+    # The options object is still built only after the gate, as it was.
+    threshold = _cluster_threshold(preset)
+
+    coverage_vector = None
     if coverage_thresholds is not None:
-        vec = _oecluster.DoubleVector()
+        coverage_vector = _oecluster.DoubleVector()
         for value in coverage_thresholds:
             v = float(value)
             if v < 0.0:
                 raise ValueError("coverage thresholds must be non-negative")
-            vec.push_back(v)
-        options.coverage_thresholds = vec
+            coverage_vector.push_back(v)
+
+    bt = None
     if boundary_threshold is not None:
         bt = float(boundary_threshold)
         if bt < 0.0:
             raise ValueError("boundary_threshold must be non-negative")
-        options.boundary_threshold = bt
+
     method_key, native_method = _representative_method(representative_method)
     if method_key == "highest_neighborhood":
         raise ValueError(
             "cluster_report does not support the 'highest_neighborhood' "
             "representative method; use 'medoid', 'minimax', or 'weighted_medoid'")
+
+    # Local argument validation first: allow_nonmetric cannot rescue a bad
+    # preset or representative method, so the gate must not pre-empt those
+    # messages.
+    _gate.require_metric(distance_matrix, "cluster_report",
+                         allow_nonmetric=allow_nonmetric)
+
+    options = _oecluster.ClusterReportOptions(threshold)
+    if coverage_vector is not None:
+        options.coverage_thresholds = coverage_vector
+    if bt is not None:
+        options.boundary_threshold = bt
     options.representative_method = native_method
     options.treat_noise_as_singletons = bool(treat_noise_as_singletons)
     options.num_threads = int(num_threads)

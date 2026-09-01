@@ -61,6 +61,9 @@ def test_default_fingerprint_path_clusters_without_an_override():
 
 def test_similarity_matrix_is_refused_by_butina():
     dist = oecluster.pdist(_mols(), "fingerprint", similarity=True)
+    # ``is_distance`` is the fact this refusal fires on; ``zero_self`` is
+    # asserted alongside it only to record that both are False here.
+    assert dist.is_distance is False
     assert dist.metric_capabilities['zero_self'] is False
     with pytest.raises(ValueError, match="similarity=False"):
         oecluster.butina(dist, 0.5)
@@ -159,13 +162,43 @@ def test_a_similarity_that_self_scores_zero_is_still_refused():
         oecluster.butina(dist, 0.5, allow_nonmetric=True)
 
 
+def test_a_distance_whose_diagonal_does_not_vanish_is_refused():
+    """The complement: a genuine distance that fails the other tier-1 axiom.
+
+    ``combo_norm`` averages a shape Tanimoto with a colour Tanimoto. Methane
+    carries no colour features, so its colour self-similarity is 0.0 and only
+    the shape half of its self-score saturates: the diagonal sits at 0.5
+    rather than 0.0. The matrix is oriented correctly -- larger still means
+    further apart, so ``is_distance`` is True -- and it still fails the
+    zero-self axiom, which is its own non-overridable refusal with its own
+    message.
+
+    Together with ``test_a_similarity_that_self_scores_zero_is_still_refused``
+    this closes the square. That test is ``is_distance`` False with
+    ``zero_self`` True; this one is ``is_distance`` True with ``zero_self``
+    False. Neither fact implies the other in either direction, and each has a
+    refusal the other cannot stand in for -- which is the whole justification
+    for ``GateFacts`` keeping them apart. Delete either one and a tier-1
+    refusal goes untested.
+    """
+    dist = oecluster.pdist(_conformer_mols(["C", "C"]), "rocs")
+    assert dist.is_distance is True
+    assert dist.metric_capabilities['zero_self'] is False
+    with pytest.raises(ValueError, match="zero self-distance"):
+        oecluster.butina(dist, 0.5)
+    with pytest.raises(ValueError, match="cannot be overridden"):
+        oecluster.butina(dist, 0.5, allow_nonmetric=True)
+
+
 def test_rocs_shape_distance_is_admitted_with_no_override():
     """The counterpart: a ROCS configuration that is a true distance.
 
-    All four score types are true distances now that colour atoms are
-    prepared, ``combo_norm`` included -- see the test below. ``shape`` is
-    tested here because it is the one that never depended on the colour
-    repair.
+    On this six-molecule fixture all four score types are true distances now
+    that colour atoms are prepared -- see the test below. ``shape`` is tested
+    here because it is the one whose self-distance is zero for *every*
+    molecule: on a featureless fragment such as methane the other three stamp
+    ``zero_self`` No, because their colour term contributes nothing to the
+    self-score. Only ``shape`` never depended on the colour repair.
     """
     dist = oecluster.pdist(_conformer_mols(), "rocs", score_type="shape")
     assert dist.is_distance is True
@@ -177,7 +210,13 @@ def test_rocs_shape_distance_is_admitted_with_no_override():
 
 
 def test_rocs_combo_norm_is_admitted_now_that_colour_is_prepared():
-    """The default ROCS distance does vanish on the diagonal.
+    """The default ROCS distance vanishes on the diagonal for this fixture.
+
+    Not universally: ``combo_norm`` averages a shape term with a colour term,
+    so its self-distance is zero only for molecules that carry colour
+    features. Every molecule here does. Methane does not, and
+    ``test_a_distance_whose_diagonal_does_not_vanish_is_refused`` covers that
+    side.
 
     This test used to be a refusal. Nothing in the repository prepared colour
     atoms, so ``GetColorTanimoto()`` returned 0.0 for every pair including
@@ -278,7 +317,7 @@ def test_require_metric_accepts_probe_violations_with_the_override():
     _gate.require_metric(dist, "butina", allow_nonmetric=True)
 
 
-def test_require_metric_refuses_nan_present_without_override():
+def test_require_metric_refuses_nan_present_even_with_the_override():
     dist = oecluster.pdist(_mols(), "fingerprint")
     dist._facts['data_integrity'] = "nan_present"
     with pytest.raises(ValueError, match="cannot be overridden"):
