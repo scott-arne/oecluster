@@ -5,6 +5,7 @@
 
 #include "oecluster/comparisons/ROCSComparison.h"
 
+#include <cassert>
 #include <cmath>
 #include <oechem.h>
 #include <oeshape.h>
@@ -121,14 +122,26 @@ ROCSComparison::ROCSComparison(const std::vector<std::shared_ptr<OEChem::OEMol>>
         // all-zero coordinates round-trips to 3. Recomputing from the coordinates
         // makes the check test what the overlay will actually see. It mutates the
         // molecule, hence the snapshot above rather than the caller's copy.
+        //
+        // The refresh considers every conformer and takes the worst, so a
+        // multiconformer molecule carrying one exactly planar conformer drops to
+        // 2 and is refused even though BestOverlay would never have selected that
+        // conformer. This cannot bite real input -- an embedded conformer always
+        // carries some out-of-plane component, benzene measuring 3.4e-4 Angstrom
+        // -- and it errs toward refusing rather than scoring garbage.
         OEChem::OESetDimensionFromCoords(*shared->mols[i]);
 
         // ``< 3``, deliberately, and not the ``== 0`` that RMSDComparison uses.
         // Planar input is as unusable here as absent input: the toolkit finds no
         // coordinates it can overlay, warns, and returns a Tanimoto of exactly
         // 0.0, so every pair -- the diagonal included -- comes back at whichever
-        // value saturation puts it at for the configured score type. Nothing about
-        // that is detectable downstream, so it has to be refused here.
+        // value saturation puts it at for the configured score type. The four
+        // distance forms would at least be caught downstream, since a saturated
+        // diagonal of 1.0 or 2.0 is exactly what MeasureDiagonal stamps No on.
+        // The four similarity forms are the reason this has to be refused here:
+        // their self-similarity saturates at 0.0, which is indistinguishable from
+        // a correctly vanishing diagonal, so the measurement would stamp a tier-1
+        // hard ``zero_self = Yes`` over a matrix that is entirely saturation.
         if (shared->mols[i]->GetDimension() < 3) {
             throw ComparisonError(
                 "ROCSComparison requires 3D coordinates: molecule at index " +
@@ -154,7 +167,14 @@ ROCSComparison::ROCSComparison(std::shared_ptr<const SharedData> shared,
 }
 
 void ROCSComparison::MeasureDiagonal(SharedData& target) {
-    for (size_t i = 0; i < shared_->mols.size(); ++i) {
+    // Reads Compare(), which is a view onto shared_; writes only ``target``.
+    // The two have to be the same object or this measures one and stamps
+    // another. The sole call site satisfies that, having just assigned shared_.
+    assert(&target == shared_.get() &&
+           "MeasureDiagonal must stamp the SharedData that shared_ views");
+
+    bool diagonal_vanishes = true;
+    for (size_t i = 0; i < target.mols.size(); ++i) {
         const double self_score = Compare(i, i);
         if (!std::isfinite(self_score)) {
             // Tested explicitly, and before the threshold, because
@@ -162,19 +182,23 @@ void ROCSComparison::MeasureDiagonal(SharedData& target) {
             // diagonal as vanished and stamps a tier-1 Yes on a matrix that is
             // not a number. d(x, x) == 0 is definitively false when d(x, x) is
             // not a number, so No is provable here rather than merely cautious.
-            // Nothing later in the loop can weaken either stamp, so stop.
+            // Returning is safe only here: both stamps are already at their
+            // strongest and no later entry can change either.
             target.zero_self = Capability::No;
             target.data_integrity = DataIntegrity::NaNPresent;
             return;
         }
         if (std::abs(self_score) > SELF_SCORE_TOLERANCE) {
-            target.zero_self = Capability::No;
-            return;
+            // Remembered rather than returned on. A later entry cannot undo
+            // this, but it can still be a NaN that has to escalate
+            // data_integrity, and returning here would make that stamp depend
+            // on the caller's molecule order.
+            diagonal_vanishes = false;
         }
     }
     // An empty molecule set stamps Yes vacuously, which is correct: there is no
     // diagonal to violate.
-    target.zero_self = Capability::Yes;
+    target.zero_self = diagonal_vanishes ? Capability::Yes : Capability::No;
 }
 
 double ROCSComparison::Compare(size_t i, size_t j) {

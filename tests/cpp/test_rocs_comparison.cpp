@@ -247,6 +247,27 @@ TEST_F(ROCSComparisonTest, ANonFiniteDiagonalStampsNoAndFlagsNaN) {
     EXPECT_EQ(comparison.Facts().data_integrity, DataIntegrity::NaNPresent);
 }
 
+TEST_F(ROCSComparisonTest, ANonFiniteDiagonalIsFlaggedAfterANonzeroSelfScore) {
+    // Methane has no color atom, so its ComboNorm self-distance is 0.5 -- a
+    // finite, nonzero diagonal entry ahead of the NaN. Ordering it first is the
+    // whole point: an implementation that stops at the first nonzero entry
+    // reports Complete here and NaNPresent for the reverse order.
+    auto methane = MakeConformer("C");
+    auto broken = MakeConformer("c1ccc(O)cc1");
+    OESystem::OEIter<OEChem::OEAtomBase> atom = broken->GetAtoms();
+    ASSERT_TRUE(atom);
+    float coords[3];
+    ASSERT_TRUE(broken->GetCoords(&*atom, coords));
+    coords[0] = std::numeric_limits<float>::quiet_NaN();
+    ASSERT_TRUE(broken->SetCoords(&*atom, coords));
+
+    ROCSComparison comparison({methane, broken}, ROCSOptions());
+    ASSERT_TRUE(std::isfinite(comparison.Compare(0, 0)));
+    ASSERT_FALSE(std::isfinite(comparison.Compare(1, 1)));
+    EXPECT_EQ(comparison.Facts().zero_self, Capability::No);
+    EXPECT_EQ(comparison.Facts().data_integrity, DataIntegrity::NaNPresent);
+}
+
 TEST_F(ROCSComparisonTest, RealCoordinatesWithAStaleDimensionAreAdmitted) {
     // SetCoords does not refresh the dimension attribute, so a molecule with a
     // perfectly good conformer can report 0. Refusing it would reject input that
@@ -256,6 +277,10 @@ TEST_F(ROCSComparisonTest, RealCoordinatesWithAStaleDimensionAreAdmitted) {
     ROCSComparison comparison({mol}, ROCSOptions());
     EXPECT_NEAR(comparison.Compare(0, 0), 0.0, 1e-6);
     EXPECT_EQ(comparison.Facts().zero_self, Capability::Yes);
+    // The refresh has to land on the comparison's snapshot. Moving
+    // OESetDimensionFromCoords above the copy loop would still pass every other
+    // test in this file: InputMoleculesAreNotMutated only compares NumAtoms().
+    EXPECT_EQ(mol->GetDimension(), 0u);
 }
 
 TEST_F(ROCSComparisonTest, ZeroCoordinatesAreRefusedDespiteAThreeDimensionAttribute) {

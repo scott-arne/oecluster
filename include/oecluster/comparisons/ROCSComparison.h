@@ -59,11 +59,17 @@ public:
      *
      * Each molecule is copied, and the copies are shared across clones; the
      * caller's molecules are left untouched. Every molecule must carry 3D
-     * coordinates, and the constructor refuses the set otherwise. The test is
-     * made against the coordinates themselves: the dimension attribute is
-     * recomputed on the comparison's own copy before it is read, so a molecule
-     * whose coordinates are sound but whose attribute is stale -- ``SetCoords``
-     * does not refresh it -- is admitted rather than refused.
+     * coordinates, and the constructor refuses the set otherwise. The predicate
+     * is OEChem's own dimension attribute, recomputed from the coordinates on
+     * the comparison's copy before it is read, so a stale attribute --
+     * ``SetCoords`` does not refresh one -- causes no refusal. That is an
+     * axis count, not a geometric rank: a planar molecule rotated out of the
+     * xy-plane counts three, and is admitted. Admitting it is correct, and the
+     * reason this is the right guard rather than a rank test: across every input
+     * class measured, the recomputed attribute coincides exactly with whether
+     * OEShape can find coordinates to overlay at all. Genuinely linear molecules
+     * such as N#N, O=C=O and C#N overlay perfectly and are legitimate input; a
+     * rank test would refuse them.
      *
      * Construction also measures the diagonal once -- one self-overlay per
      * molecule, O(n) against the O(n^2) matrix this class exists to fill -- so
@@ -72,7 +78,7 @@ public:
      * :param mols: Shared pointers to molecules.
      * :param opts: Scoring options.
      * :raises ComparisonError: If any molecule pointer is null, or if any
-     *     molecule's coordinates span fewer than three dimensions.
+     *     molecule's recomputed dimension attribute is below three.
      */
     explicit ROCSComparison(const std::vector<std::shared_ptr<OEChem::OEMol>>& mols,
                         const Options& opts = Options());
