@@ -858,6 +858,28 @@ def test_sparse_storage_rejected_before_gate_in_cluster_report():
         oecluster.cluster_report(result, sparse)
 
 
+def test_storage_get_refuses_an_out_of_range_index():
+    """An unchecked Get read past the buffer instead of refusing.
+
+    Every backend computed a condensed index and dereferenced it, so the
+    values these calls returned -- ``0.0``, or on one probe an uninitialised
+    denormal -- came from outside the allocation. The diagonal cases matter
+    separately: the ``i == j`` shortcut answered ``0.0`` for indices naming no
+    item at all.
+    """
+    dense = oecluster.pdist(_mols()[:2], "fingerprint")
+    assert dense.num_samples == 2
+    assert dense.storage.Get(0, 1) == dense.condensed[0]
+    for i, j in [(0, 2), (1, 1399), (500, 1399), (1000, 1000)]:
+        with pytest.raises(RuntimeError, match="outside the storage range"):
+            dense.storage.Get(i, j)
+
+    sparse = _sparse_matrix()
+    for i, j in [(0, 6), (1000, 1000)]:
+        with pytest.raises(RuntimeError, match="outside the storage range"):
+            sparse.storage.Get(i, j)
+
+
 def test_cluster_report_refuses_a_result_from_a_smaller_matrix():
     """The under-range direction, which every range check misses.
 

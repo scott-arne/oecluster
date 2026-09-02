@@ -46,6 +46,8 @@ public:
      * :param i: Index of first item.
      * :param j: Index of second item.
      * :returns: Distance value between items i and j.
+     * :raises std::out_of_range: If either index is at or beyond NumSamples(),
+     *     including on the diagonal.
      */
     virtual double Get(size_t i, size_t j) const = 0;
 

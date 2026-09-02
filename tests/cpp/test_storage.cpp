@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include <filesystem>
+#include <stdexcept>
 #include "oecluster/StorageBackend.h"
 
 using namespace OECluster;
@@ -62,6 +63,30 @@ TEST(DenseStorageTest, InitializedToZero) {
     }
 }
 
+TEST(DenseStorageTest, GetOutOfRangeThrows) {
+    DenseStorage storage(2);
+    EXPECT_THROW(storage.Get(0, 2), std::out_of_range);
+    EXPECT_THROW(storage.Get(1, 1399), std::out_of_range);
+    EXPECT_THROW(storage.Get(500, 1399), std::out_of_range);
+}
+
+TEST(DenseStorageTest, GetOutOfRangeDiagonalThrows) {
+    // The diagonal shortcut used to answer 0.0 for an index naming no item.
+    DenseStorage storage(2);
+    EXPECT_THROW(storage.Get(1000, 1000), std::out_of_range);
+}
+
+TEST(DenseStorageTest, GetOutOfRangeMessageNamesIndexAndCount) {
+    DenseStorage storage(2);
+    try {
+        storage.Get(1, 1399);
+        FAIL() << "Expected std::out_of_range";
+    } catch (const std::out_of_range& e) {
+        EXPECT_STREQ(e.what(),
+                     "DenseStorage index 1399 is outside the storage range of 2 samples");
+    }
+}
+
 TEST(MMapStorageTest, CreateAndWrite) {
     auto path = std::filesystem::temp_directory_path() / "test_mmap.bin";
     {
@@ -87,6 +112,16 @@ TEST(MMapStorageTest, PersistsAfterDestruction) {
         MMapStorage storage(path.string(), 4);
         EXPECT_DOUBLE_EQ(storage.Get(0, 1), 0.5);
         EXPECT_DOUBLE_EQ(storage.Get(1, 2), 0.9);
+    }
+    std::filesystem::remove(path);
+}
+
+TEST(MMapStorageTest, GetOutOfRangeThrows) {
+    auto path = std::filesystem::temp_directory_path() / "test_mmap_range.bin";
+    {
+        MMapStorage storage(path.string(), 2);
+        EXPECT_THROW(storage.Get(0, 2), std::out_of_range);
+        EXPECT_THROW(storage.Get(1000, 1000), std::out_of_range);
     }
     std::filesystem::remove(path);
 }
@@ -117,4 +152,12 @@ TEST(SparseStorageTest, GetReturnsZeroForUnstored) {
     SparseStorage storage(4, 0.5);
     storage.Finalize();
     EXPECT_DOUBLE_EQ(storage.Get(0, 1), 0.0);
+}
+
+TEST(SparseStorageTest, GetOutOfRangeThrowsRatherThanMissing) {
+    // "Not stored" answers 0.0; "not an item" must not borrow that answer.
+    SparseStorage storage(4, 0.5);
+    storage.Finalize();
+    EXPECT_THROW(storage.Get(0, 4), std::out_of_range);
+    EXPECT_THROW(storage.Get(1000, 1000), std::out_of_range);
 }

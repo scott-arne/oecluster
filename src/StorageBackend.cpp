@@ -28,6 +28,50 @@
 
 namespace OECluster {
 
+namespace {
+
+/**
+ * @brief Build and throw the out-of-range diagnostic for a bad Get index.
+ *
+ * Deliberately out of line rather than folded into check_index_range: the
+ * message temporaries would otherwise force exception cleanup paths into
+ * every Get, which measured a third slower on a Get-bound workload than the
+ * two comparisons themselves cost. The wording follows
+ * ``detail::validate_cluster_members`` in Representative.cpp.
+ *
+ * :param backend: Storage class name, used in the message.
+ * :param index: The offending index.
+ * :param n: Number of samples the storage was constructed for.
+ * :raises std::out_of_range: Always.
+ */
+[[noreturn]] void report_index_out_of_range(const char* backend, size_t index,
+                                            size_t n) {
+    throw std::out_of_range(
+        std::string(backend) + " index " + std::to_string(index) +
+        " is outside the storage range of " + std::to_string(n) + " samples");
+}
+
+/**
+ * @brief Refuse a Get whose indices fall outside the stored sample range.
+ *
+ * Every backend computes a condensed index from the pair and dereferences it,
+ * so an out-of-range index reads past the buffer -- past the mapping, for
+ * MMapStorage -- rather than producing a wrong number.
+ *
+ * :param backend: Storage class name, used in the message.
+ * :param i: Index of first item.
+ * :param j: Index of second item.
+ * :param n: Number of samples the storage was constructed for.
+ * :raises std::out_of_range: If either index is at or beyond n.
+ */
+inline void check_index_range(const char* backend, size_t i, size_t j, size_t n) {
+    if (i >= n || j >= n) {
+        report_index_out_of_range(backend, i >= n ? i : j, n);
+    }
+}
+
+}  // namespace
+
 // DenseStorage implementation
 
 DenseStorage::DenseStorage(size_t n)
@@ -46,6 +90,10 @@ void DenseStorage::Set(size_t i, size_t j, double value) {
 }
 
 double DenseStorage::Get(size_t i, size_t j) const {
+    // Checked ahead of the diagonal shortcut: Get(1000, 1000) on a two-sample
+    // matrix names no real item either.
+    check_index_range("DenseStorage", i, j, n_);
+
     // Diagonal is always zero
     if (i == j) {
         return 0.0;
@@ -273,6 +321,8 @@ void MMapStorage::Set(size_t i, size_t j, double value) {
 }
 
 double MMapStorage::Get(size_t i, size_t j) const {
+    check_index_range("MMapStorage", i, j, n_);
+
     // Diagonal is always zero
     if (i == j) {
         return 0.0;
@@ -335,6 +385,10 @@ void SparseStorage::Set(size_t i, size_t j, double value) {
 }
 
 double SparseStorage::Get(size_t i, size_t j) const {
+    // Sparse lookups miss safely, but an out-of-range pair must still refuse
+    // rather than answer 0.0 -- "not stored" and "not an item" differ.
+    check_index_range("SparseStorage", i, j, n_);
+
     // Diagonal is always zero
     if (i == j) {
         return 0.0;
