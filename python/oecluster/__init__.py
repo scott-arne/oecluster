@@ -2688,8 +2688,9 @@ def cluster_report(result, distance_matrix, *, preset="default",
     :returns: A ClusterReport.
     :raises TypeError: If result/distance_matrix have the wrong type, or
         allow_nonmetric is not a bool.
-    :raises ValueError: If a preset/method/threshold is invalid, the matrix
-        uses sparse storage, or the matrix is not a metric.
+    :raises ValueError: If a preset/method/threshold is invalid, the result and
+        the matrix cover different numbers of samples, the matrix uses sparse
+        storage, or the matrix is not a metric.
     :raises RuntimeError: If the distance matrix cannot provide complete distances.
     """
     if not isinstance(result, ClusteringResult):
@@ -2730,6 +2731,19 @@ def cluster_report(result, distance_matrix, *, preset="default",
     # OverflowError below the gate. Zero stays legal: it means "choose for me".
     if num_threads_int < 0:
         raise ValueError("num_threads must be non-negative")
+
+    # Nothing else ties the result to the matrix: the native reporter reads
+    # cluster members as storage indices, so a result scored against a larger
+    # unrelated matrix stays in range and returns a confident, wrong scorecard.
+    # This outranks the storage and metric refusals below -- which matrix it is,
+    # sparse or dense, metric or not, cannot be the caller's first problem when
+    # it is the wrong matrix. ValueError, not TypeError: both argument types are
+    # right, their pairing is not.
+    if result.num_samples != distance_matrix.num_samples:
+        raise ValueError(
+            f"cluster_report requires a result and a distance matrix over the "
+            f"same items, but the result covers {result.num_samples} samples "
+            f"and the matrix {distance_matrix.num_samples}")
 
     # ValueError, not TypeError: the argument's type is right, its storage is not.
     if isinstance(distance_matrix.storage, SparseStorage):

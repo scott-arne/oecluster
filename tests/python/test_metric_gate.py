@@ -858,6 +858,48 @@ def test_sparse_storage_rejected_before_gate_in_cluster_report():
         oecluster.cluster_report(result, sparse)
 
 
+def test_cluster_report_refuses_a_result_from_a_smaller_matrix():
+    """The under-range direction, which every range check misses.
+
+    A three-sample result scored against a six-sample matrix keeps every
+    member index in range, so nothing native objects, and the scorecard comes
+    back over distances the result was never computed from.
+    """
+    big = oecluster.pdist(_mols(), "fingerprint")
+    small = oecluster.pdist(_mols()[:3], "fingerprint")
+    result = oecluster.butina(small, 0.5)
+    with pytest.raises(ValueError, match="result covers 3 samples"):
+        oecluster.cluster_report(result, big)
+
+
+def test_cluster_report_refuses_a_result_from_a_larger_matrix():
+    """The over-range direction, refused before the native reader is reached.
+
+    ``validate_cluster_members`` already caught this, but only after
+    ``ClusterReport.cpp`` had read the out-of-range pairs.
+    """
+    big = oecluster.pdist(_mols(), "fingerprint")
+    small = oecluster.pdist(_mols()[:3], "fingerprint")
+    result = oecluster.butina(big, 0.5)
+    with pytest.raises(ValueError, match="the matrix 3"):
+        oecluster.cluster_report(result, small)
+
+
+def test_cluster_report_sample_mismatch_outranks_the_storage_refusal():
+    """A mismatched pairing is the error the caller has to fix first.
+
+    Whether the matrix is sparse, or non-metric, is not the caller's problem
+    when it is the wrong matrix -- so the mismatch must not be pre-empted by
+    either of the refusals that follow it.
+    """
+    small = oecluster.pdist(_mols()[:3], "fingerprint", metric="dice")
+    result = oecluster.butina(small, 0.5, allow_nonmetric=True)
+    with pytest.raises(ValueError, match="same items"):
+        oecluster.cluster_report(result, _nonmetric_sparse())
+    with pytest.raises(ValueError, match="same items"):
+        oecluster.cluster_report(result, _nonmetric())
+
+
 def test_butina_and_dbscan_still_accept_sparse_storage():
     """Not an over-refusal: both build a threshold graph from sparse entries.
 
