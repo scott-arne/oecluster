@@ -17,6 +17,8 @@ and proven probe violations -- is a soundness warning that
 ``allow_nonmetric=True`` overrides.
 """
 
+import math
+
 import numpy as np
 
 from . import oecluster as _oecluster
@@ -42,7 +44,7 @@ def default_facts():
     This is what a distance matrix written before 5.0.0 loads as: the file
     recorded no capability claim, so the gate must not invent one. The one
     thing these facts cannot buy is a pass on non-finite data, which the gate
-    measures off the array rather than reads off the stamp.
+    measures off the stored distances rather than reads off the stamp.
 
     :returns: Fresh facts dictionary.
     """
@@ -89,19 +91,24 @@ def _has_nonfinite(distance_matrix):
     matrix whose values changed after the stamp was taken.
 
     :param distance_matrix: A :class:`SymmetricDistanceMatrix`.
-    :returns: True if any stored distance is NaN or infinite.
+    :returns: True if any distance the algorithms would read is NaN or
+        infinite.
     """
-    # Sparse storage is skipped because its data cannot diverge from its stamp,
-    # not because scanning it would be slow. ``SparseStorage::Set`` appends to
-    # an unmerged per-thread buffer that only ``Finalize`` folds into the
-    # entries ``Get`` and the algorithms read, so a post-construction write
-    # never reaches them; ``.condensed`` is a densified copy cached on first
-    # access, so writing through it never reaches the storage either; and
-    # ``from_file`` always rebuilds as ``DenseStorage``. Touching ``.condensed``
-    # here would measure nothing while costing a Python loop over every pair
-    # and seeding a cache that then silently diverges from the storage.
+    # Sparse storage is scanned entry by entry, not through ``.condensed``:
+    # for a sparse matrix ``.condensed`` is a densified copy cached on first
+    # access, so it answers for a snapshot the algorithms never read, while
+    # costing a Python loop over every pair and seeding a cache that then
+    # silently diverges from the storage. The entry list is deliberately left
+    # un-deduplicated -- ``ThresholdGraph`` tests every tuple ``Entries()``
+    # returns against the threshold, superseded duplicates included, so the raw
+    # list is exactly what the algorithms see, while ``Get`` reports only the
+    # last write for a pair. Values still sitting in an unmerged ``Set`` buffer
+    # are deliberately out of scope for the same reason: until ``Finalize``
+    # folds them in, they are invisible to ``Entries``, to ``Get`` and to the
+    # algorithms, so refusing on them would be over-refusal.
     if isinstance(distance_matrix.storage, _oecluster.SparseStorage):
-        return False
+        return any(not math.isfinite(value)
+                   for _, _, value in distance_matrix.storage._entries())
 
     # ``isfinite`` rather than ``isnan``: infinities break the algorithms the
     # same way, the native stamp already escalates on any non-finite value, and
@@ -125,9 +132,9 @@ def require_metric(distance_matrix, caller, *, allow_nonmetric=False):
     6. ``metric_probe == "violations_found"`` -- overridable.
 
     A fact of ``"unknown"`` never refuses on its own. Check 3 is the only one
-    that does not decide from the stamp alone: it also measures the array, so
-    a matrix stamped ``"unknown"`` -- or ``"complete"`` -- that actually holds
-    a non-finite value is refused on the measurement.
+    that does not decide from the stamp alone: it also measures the stored
+    distances, so a matrix stamped ``"unknown"`` -- or ``"complete"`` -- that
+    actually holds a non-finite value is refused on the measurement.
 
     The first two checks are separate because they answer separate questions.
     ``is_distance`` is about orientation -- whether a large number means "far"
@@ -174,11 +181,12 @@ def require_metric(distance_matrix, caller, *, allow_nonmetric=False):
             f"here treats the diagonal as the closest any pair can be.")
 
     # The stamp describes the data as computed. The caller can still write
-    # through ``.condensed`` or ``storage.Set``, and ``from_file`` trusts a
-    # file's stamp outright -- so the one tier-1 fact that is cheap to
-    # re-measure is re-measured, and a stamp that disagrees with the data
-    # loses. Testing the stamp first keeps an already-stamped matrix from
-    # paying for the scan.
+    # through ``.condensed``, or through ``storage.Set`` -- plus ``Finalize``
+    # on sparse storage -- and ``from_file`` trusts a file's stamp outright, so
+    # the one tier-1 fact that is cheap to re-measure is re-measured, and a
+    # stamp that disagrees with the data loses. Testing the stamp first
+    # short-circuits only a matrix already stamped ``nan_present``; every other
+    # matrix, including the common ``complete`` one, pays for the scan.
     if (facts['data_integrity'] == "nan_present"
             or _has_nonfinite(distance_matrix)):
         raise ValueError(

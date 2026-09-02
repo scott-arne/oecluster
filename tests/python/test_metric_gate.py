@@ -1,9 +1,11 @@
 import json
+import math
 
 import numpy as np
 import oecluster
 import pytest
 from oecluster import _gate
+from oecluster.oecluster import butina_cluster as _butina_cluster
 from openeye import oechem
 
 SMILES = ["CCO", "CCC", "CCCC", "c1ccccc1", "CCN", "CCOC"]
@@ -343,8 +345,12 @@ def test_a_nan_written_through_condensed_is_refused():
 def test_a_nan_written_through_storage_set_is_refused():
     """The same defect by the other write route.
 
-    ``storage.Set`` bypasses ``.condensed`` entirely, and neither route
-    updates the facts, so a gate reading only the stamp admits both.
+    ``storage.Set`` reaches the buffer without going through the ``.condensed``
+    property, and like the property it leaves the facts untouched, so a gate
+    reading only the stamp admits this route too. What makes the scan catch it
+    is that the two routes are not independent: for dense storage
+    ``.condensed`` is a zero-copy view over the very array ``DenseStorage::Set``
+    writes into, so scanning the view sees the ``Set``.
     """
     dist = oecluster.pdist(_mols(), "fingerprint")
     dist.storage.Set(0, 1, float('nan'))
@@ -430,23 +436,137 @@ def test_a_clean_matrix_still_clusters_through_every_entry_point():
     assert oecluster.cluster_report(result, dist).num_samples == 6
 
 
-def test_the_scan_skips_sparse_storage_and_leaves_it_clusterable():
+def _sparse_matrix():
+    """A clean six-item matrix held in ``SparseStorage``.
+
+    ``cutoff`` alone is what selects the sparse backend
+    (``__init__.py`` picks ``SparseStorage`` when ``cutoff > 0.0``); the
+    unrelated ``storage=`` keyword is a fingerprint bit-vector option and says
+    nothing about how the distances are stored.
+    """
+    sparse = oecluster.pdist(_mols(), "fingerprint", cutoff=0.9)
+    assert isinstance(sparse.storage, oecluster.SparseStorage)
+    return sparse
+
+
+def _finalized_sparse(value):
+    """A sparse matrix carrying ``value`` as a merged extra entry.
+
+    ``SparseStorage::Set`` only appends to an unmerged per-thread buffer, so
+    the write is invisible until ``Finalize`` -- public on every storage handle
+    a caller already holds -- folds it into the entries the algorithms iterate.
+    Neither ``-inf`` nor NaN compares greater than the cutoff, so neither is
+    dropped by ``Set``'s ``value > cutoff_`` filter.
+    """
+    sparse = _sparse_matrix()
+    before = len(sparse.storage._entries())
+    sparse.storage.Set(3, 0, value)
+    assert len(sparse.storage._entries()) == before
+    sparse.storage.Finalize()
+    assert len(sparse.storage._entries()) == before + 1
+    assert not math.isfinite(sparse.storage.Get(3, 0))
+    return sparse
+
+
+def test_the_scan_reads_sparse_entries_and_leaves_a_clean_one_clusterable():
     """Not an over-refusal, and not a new cache either.
 
-    Sparse storage is skipped because it cannot diverge from its stamp, so
+    The scan walks the merged entry list, which is exactly what
+    ``ThresholdGraph`` iterates, so a clean sparse matrix must still reach
     ``butina`` and ``dbscan`` -- the only two entry points a sparse matrix can
-    reach the gate through -- must behave exactly as before. The
-    ``_condensed_cache`` assertion is the other half: the gate must not have
+    get to the gate through -- and cluster as before. The
+    ``_condensed_cache`` assertion is the other half: the scan must not have
     densified this matrix behind the caller's back, because that cache would
     then be stale with respect to the storage.
     """
-    sparse = oecluster.pdist(_mols(), "fingerprint", storage="sparse",
-                             cutoff=0.9)
-    assert isinstance(sparse.storage, oecluster.SparseStorage)
+    sparse = _sparse_matrix()
     assert _gate._has_nonfinite(sparse) is False
     assert sparse._condensed_cache is None
     assert len(oecluster.butina(sparse, 0.4).labels) == 6
     assert len(oecluster.dbscan(sparse, 0.4, min_samples=2).labels) == 6
+    assert sparse._condensed_cache is None
+
+
+def test_an_infinity_finalized_into_sparse_storage_is_refused_by_butina():
+    """The write route a ``Set``-only measurement misses.
+
+    ``Finalize`` promotes the unmerged write into ``Entries()``, and
+    ``ThresholdGraph`` admits ``-inf`` as an edge because ``-inf <= threshold``
+    holds -- so this poisons the clusters rather than being ignored. The stamp
+    assertion comes first on purpose: it records that the stamp still says
+    ``complete``, so the refusal can only have come from the measurement. The
+    cache assertion records that measuring sparse entries does not densify.
+    """
+    sparse = _finalized_sparse(float('-inf'))
+    assert sparse.data_integrity == "complete"
+    with pytest.raises(ValueError, match="non-finite entries"):
+        oecluster.butina(sparse, 0.5)
+    assert sparse._condensed_cache is None
+
+
+def test_an_infinity_finalized_into_sparse_storage_is_refused_by_dbscan():
+    sparse = _finalized_sparse(float('-inf'))
+    assert sparse.data_integrity == "complete"
+    with pytest.raises(ValueError, match="non-finite entries"):
+        oecluster.dbscan(sparse, 0.5, min_samples=2)
+
+
+def test_a_nan_finalized_into_sparse_storage_is_refused():
+    """NaN takes the same route as ``-inf`` but leaves no trace in the labels.
+
+    A NaN entry is inert in ``ThresholdGraph``'s ``value <= threshold`` test,
+    so unlike ``-inf`` it fabricates no edge: driving the native clusterer
+    directly, past the gate, returns the same labels for the poisoned storage
+    as for a clean one. There is consequently no wrong answer downstream for a
+    caller to notice, which is why this asserts the refusal rather than a
+    change in labels.
+    """
+    options = oecluster.ButinaOptions()
+    options.distance_threshold = 0.5
+    clean = _sparse_matrix()
+    sparse = _finalized_sparse(float('nan'))
+    assert (list(_butina_cluster(sparse.storage, options).Labels())
+            == list(_butina_cluster(clean.storage, options).Labels()))
+
+    assert sparse.data_integrity == "complete"
+    with pytest.raises(ValueError, match="non-finite entries"):
+        oecluster.butina(sparse, 0.5)
+    with pytest.raises(ValueError, match="non-finite entries"):
+        oecluster.dbscan(sparse, 0.5, min_samples=2)
+
+
+@pytest.mark.parametrize("value", [float('-inf'), float('nan')])
+@pytest.mark.parametrize("call", [
+    lambda dm, **kw: oecluster.butina(dm, 0.5, **kw),
+    lambda dm, **kw: oecluster.dbscan(dm, 0.5, min_samples=2, **kw),
+])
+def test_finalized_sparse_nonfinite_data_cannot_be_overridden(call, value):
+    """Sparse non-finite data is tier 1, like every other non-finite route.
+
+    Matching on "cannot be overridden" distinguishes this from the tier-2
+    advisory, which names ``allow_nonmetric=True`` as the remedy.
+    """
+    sparse = _finalized_sparse(value)
+    with pytest.raises(ValueError, match="cannot be overridden"):
+        call(sparse, allow_nonmetric=True)
+
+
+def test_an_unfinalized_sparse_set_still_clusters():
+    """Not an over-refusal: the gate measures what the algorithms read.
+
+    Without ``Finalize`` the written value stays in an unmerged per-thread
+    buffer, invisible to ``Entries()``, to ``Get`` and therefore to
+    ``ThresholdGraph``. Refusing on it would break a call the native layer runs
+    correctly, so the labels must match the untouched matrix exactly.
+    """
+    expected = list(oecluster.butina(_sparse_matrix(), 0.5).labels)
+
+    sparse = _sparse_matrix()
+    sparse.storage.Set(3, 0, float('nan'))
+    assert sparse.storage.Get(3, 0) == 0.0
+    assert _gate._has_nonfinite(sparse) is False
+    assert list(oecluster.butina(sparse, 0.5).labels) == expected
+    assert len(oecluster.dbscan(sparse, 0.5, min_samples=2).labels) == 6
     assert sparse._condensed_cache is None
 
 
