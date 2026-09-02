@@ -545,3 +545,60 @@ def test_a_non_bool_allow_nonmetric_is_refused_in_cluster_report():
     result = oecluster.butina(dist, 0.5, allow_nonmetric=True)
     with pytest.raises(TypeError, match="allow_nonmetric must be True or False"):
         oecluster.cluster_report(result, dist, allow_nonmetric="False")
+
+
+def test_numpy_bool_true_overrides_the_gate():
+    """numpy.bool_ is accepted and coerces faithfully."""
+    dist = _nonmetric()
+    result = oecluster.butina(dist, 0.5, allow_nonmetric=np.True_)
+    assert len(result.labels) == 6
+
+
+def test_numpy_bool_false_leaves_the_gate_enforced():
+    """numpy.bool_ is accepted, and False still means the gate is on."""
+    dist = _nonmetric()
+    with pytest.raises(ValueError, match="triangle inequality"):
+        oecluster.butina(dist, 0.5, allow_nonmetric=np.False_)
+
+
+def test_a_string_false_still_raises_type_error():
+    """Regression guard: the numpy.bool_ widening must not admit strings."""
+    dist = _nonmetric()
+    with pytest.raises(TypeError, match="allow_nonmetric must be True or False"):
+        oecluster.butina(dist, 0.5, allow_nonmetric="False")
+
+
+def test_agglomerative_chunk_size_zero_before_gate():
+    """Zero chunk_size is rejected before the advisory for agglomerative.
+
+    The override cannot make chunk_size valid, so the gate must not pre-empt
+    this message. Match on "at least one" to distinguish from the advisory.
+    """
+    dist = _nonmetric()
+    assert dist.metric_capabilities['triangle'] is False
+    with pytest.raises(ValueError, match="chunk_size must be at least one"):
+        oecluster.agglomerative(dist, chunk_size=0)
+
+
+def test_agglomerative_nan_distance_threshold_before_gate():
+    """NaN distance_threshold is rejected before the advisory.
+
+    The override cannot make NaN valid, so the gate must not pre-empt this
+    message. Match on "must not be NaN" to distinguish from the advisory.
+    """
+    dist = _nonmetric()
+    assert dist.metric_capabilities['triangle'] is False
+    with pytest.raises(ValueError, match="distance_threshold must not be NaN"):
+        oecluster.agglomerative(dist, distance_threshold=float('nan'))
+
+
+def test_butina_dbscan_hdbscan_still_accept_chunk_size_zero():
+    """Zero chunk_size is legal for butina, dbscan, and hdbscan.
+
+    Agglomerative rejects zero; the other three must not. A mirror stricter
+    than the native rule breaks working code silently.
+    """
+    dist = oecluster.pdist(_mols(), "fingerprint")
+    assert len(oecluster.butina(dist, 0.5, chunk_size=0).labels) == 6
+    assert len(oecluster.dbscan(dist, 0.5, chunk_size=0).labels) == 6
+    assert len(oecluster.hdbscan(dist, min_cluster_size=2, chunk_size=0).labels) == 6

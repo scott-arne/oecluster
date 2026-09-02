@@ -2140,6 +2140,8 @@ def agglomerative(distance_matrix, *, n_clusters=2, distance_threshold=None,
         raise ValueError("Agglomerative n_clusters must be at least one")
     if distance_threshold is not None and distance_threshold < 0.0:
         raise ValueError("Agglomerative distance_threshold must be non-negative")
+    if distance_threshold is not None and np.isnan(distance_threshold):
+        raise ValueError("Agglomerative distance_threshold must not be NaN")
 
     linkage_map = {
         "single": _oecluster.AgglomerativeLinkageMethod_Single,
@@ -2160,7 +2162,7 @@ def agglomerative(distance_matrix, *, n_clusters=2, distance_threshold=None,
     # All three reach size_t option fields, where a negative value raises
     # OverflowError below the gate. n_clusters needs its own check because the
     # "at least one" guard above only runs when distance_threshold is omitted.
-    # Zero stays legal for the other two: it means "choose for me".
+    # Zero stays legal for num_threads: it means "choose for me".
     if n_clusters_int < 0:
         raise ValueError("Agglomerative n_clusters must be non-negative")
     if num_threads_int < 0:
@@ -2174,6 +2176,10 @@ def agglomerative(distance_matrix, *, n_clusters=2, distance_threshold=None,
             "Agglomerative clustering requires complete pairwise "
             "distances; SparseStorage is not supported")
 
+    # Native rule: chunk_size == 0 is rejected. Zero is legal for butina/dbscan.
+    if chunk_size_int == 0:
+        raise ValueError("Agglomerative chunk_size must be at least one")
+
     # The native bound on n_clusters applies only when no distance_threshold is
     # given, because a threshold cut ignores n_clusters entirely. Mirroring it
     # unconditionally would refuse calls that work today.
@@ -2185,9 +2191,9 @@ def agglomerative(distance_matrix, *, n_clusters=2, distance_threshold=None,
 
     # Local argument validation first: allow_nonmetric cannot rescue a bad
     # n_clusters, distance_threshold, linkage, or sparse storage, so the gate
-    # must not pre-empt those messages. The checks above run in the order
-    # agglomerative_cluster() applies them, so the fix-first reason is the same
-    # whichever layer reports it.
+    # must not pre-empt those messages. The storage, chunk_size, and n_clusters
+    # checks run in the order agglomerative_cluster() applies them, so the
+    # fix-first reason is the same whichever layer reports it.
     _gate.require_metric(distance_matrix, "agglomerative",
                          allow_nonmetric=allow_nonmetric)
 

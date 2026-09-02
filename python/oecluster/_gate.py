@@ -15,6 +15,8 @@ triangle inequality, subset-scored distances, and proven probe violations --
 is a soundness warning that ``allow_nonmetric=True`` overrides.
 """
 
+import numpy as np
+
 from . import oecluster as _oecluster
 
 _CAPABILITY = {
@@ -103,14 +105,15 @@ def require_metric(distance_matrix, caller, *, allow_nonmetric=False):
     :param distance_matrix: The matrix about to be clustered.
     :param caller: Name of the calling entry point, used in the messages.
     :param allow_nonmetric: Proceed despite a tier-2 violation.
-    :raises TypeError: If allow_nonmetric is not a bool.
+    :raises TypeError: If allow_nonmetric is not a bool or numpy.bool_.
     :raises ValueError: If a check refuses.
     """
     # A malformed override is a call the caller must fix whatever the matrix
     # looks like, so it is rejected before any fact is read. Truthiness would
     # be the wrong rule here: allow_nonmetric="False" reads to a caller as
-    # "off" while switching the tier-2 checks off.
-    if not isinstance(allow_nonmetric, bool):
+    # "off" while switching the tier-2 checks off. numpy.bool_ is permitted
+    # because it coerces faithfully and is never silently reinterpreted.
+    if not isinstance(allow_nonmetric, (bool, np.bool_)):
         raise TypeError(
             "allow_nonmetric must be True or False, "
             f"not {type(allow_nonmetric).__name__} "
