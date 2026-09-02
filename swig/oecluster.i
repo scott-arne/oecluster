@@ -1036,6 +1036,7 @@ public:
     double Get(size_t i, size_t j) const override;
     size_t NumSamples() const override;
     size_t NumPairs() const override;
+    double Cutoff() const;
     void Finalize() override;
 };
 

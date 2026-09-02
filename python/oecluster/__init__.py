@@ -983,17 +983,41 @@ class SymmetricDistanceMatrix(DistanceMatrix):
         """
         Save the distance matrix to a compressed .npz file.
 
+        Sparse storage is written as its entry list rather than as a condensed
+        array. ``.condensed`` densifies a sparse matrix by filling every pair
+        the cutoff omitted with ``0.0``, and those are the *farthest* pairs, so
+        saving it would hand every algorithm "identical" for the pairs the
+        cutoff called most distant.
+
         :param path: Output file path.
         """
-        np.savez_compressed(
-            path,
-            condensed=self.condensed,
-            comparison_name=np.array(self._comparison_name),
-            params_json=np.array(json.dumps(self._params)),
-            facts_json=np.array(json.dumps(self._facts)),
-            labels=np.array(self._labels),
-            num_samples=np.array(self.num_samples),
-        )
+        arrays = {
+            'comparison_name': np.array(self._comparison_name),
+            'params_json': np.array(json.dumps(self._params)),
+            'facts_json': np.array(json.dumps(self._facts)),
+            'labels': np.array(self._labels),
+            'num_samples': np.array(self.num_samples),
+        }
+
+        if isinstance(self._storage, SparseStorage):
+            # Written verbatim, duplicates included: ThresholdGraph tests every
+            # tuple Entries() returns, so a "tidied" list would cluster
+            # differently from the matrix that was saved.
+            entries = self._storage._entries()
+            arrays['storage_kind'] = np.array("sparse")
+            arrays['sparse_cutoff'] = np.array(self._storage.Cutoff(),
+                                               dtype=np.float64)
+            arrays['sparse_i'] = np.array([e[0] for e in entries],
+                                          dtype=np.int64)
+            arrays['sparse_j'] = np.array([e[1] for e in entries],
+                                          dtype=np.int64)
+            arrays['sparse_v'] = np.array([e[2] for e in entries],
+                                          dtype=np.float64)
+        else:
+            arrays['storage_kind'] = np.array("dense")
+            arrays['condensed'] = self.condensed
+
+        np.savez_compressed(path, **arrays)
 
     @classmethod
     def from_file(cls, path):
@@ -1014,11 +1038,24 @@ class SymmetricDistanceMatrix(DistanceMatrix):
             raise ValueError(
                 f"Unknown matrix_kind {kind!r}; a symmetric matrix file must not "
                 f"carry a matrix_kind key")
-        for required in ('condensed', 'comparison_name'):
+        # Absence of ``storage_kind`` means dense, so every file written before
+        # sparse serialization existed still loads exactly as it did.
+        storage_kind = str(data['storage_kind']) if 'storage_kind' in data \
+            else "dense"
+        if storage_kind not in ("dense", "sparse"):
+            raise ValueError(
+                f"Unknown storage_kind {storage_kind!r}; expected 'dense' or "
+                f"'sparse'")
+
+        if storage_kind == "sparse":
+            required_keys = ('comparison_name', 'sparse_cutoff', 'sparse_i',
+                             'sparse_j', 'sparse_v')
+        else:
+            required_keys = ('condensed', 'comparison_name')
+        for required in required_keys:
             if required not in data:
                 raise ValueError(
                     f"Malformed symmetric matrix: missing required key {required!r}")
-        condensed = data['condensed']
 
         comparison_name = str(data['comparison_name'])
         labels = list(data.get('labels', np.array([])))
@@ -1040,20 +1077,65 @@ class SymmetricDistanceMatrix(DistanceMatrix):
         else:
             num_samples = int(data['num_items'])
 
-        expected = num_samples * (num_samples - 1) // 2
-        if condensed.shape[0] != expected:
-            raise ValueError(
-                f"Malformed symmetric matrix: condensed length {condensed.shape[0]} "
-                f"!= expected {expected} for {num_samples} samples")
-        storage = DenseStorage(num_samples)
+        if storage_kind == "sparse":
+            storage = cls._sparse_storage_from_file(data, num_samples)
+        else:
+            condensed = data['condensed']
+            expected = num_samples * (num_samples - 1) // 2
+            if condensed.shape[0] != expected:
+                raise ValueError(
+                    f"Malformed symmetric matrix: condensed length "
+                    f"{condensed.shape[0]} != expected {expected} for "
+                    f"{num_samples} samples")
+            storage = DenseStorage(num_samples)
 
-        idx = 0
-        for i in range(num_samples):
-            for j in range(i + 1, num_samples):
-                storage.Set(i, j, float(condensed[idx]))
-                idx += 1
+            idx = 0
+            for i in range(num_samples):
+                for j in range(i + 1, num_samples):
+                    storage.Set(i, j, float(condensed[idx]))
+                    idx += 1
 
         return cls(storage, comparison_name, labels, params, facts)
+
+    @staticmethod
+    def _sparse_storage_from_file(data, num_samples):
+        """
+        Rebuild sparse storage from a saved entry list.
+
+        :param data: Open ``.npz`` archive.
+        :param num_samples: Sample count recorded in the file.
+        :returns: A finalized :class:`SparseStorage`.
+        :raises ValueError: If the saved entries cannot be replayed faithfully.
+        """
+        cutoff = float(data['sparse_cutoff'])
+        rows = data['sparse_i']
+        cols = data['sparse_j']
+        values = data['sparse_v']
+        if not (rows.shape[0] == cols.shape[0] == values.shape[0]):
+            raise ValueError(
+                f"Malformed symmetric matrix: sparse entry arrays have lengths "
+                f"{rows.shape[0]}, {cols.shape[0]}, {values.shape[0]}")
+
+        # Refuse rather than reload a matrix that would not be the one saved.
+        # SparseStorage.Set drops a value above the cutoff and asserts i != j,
+        # and ThresholdGraph indexes an n-element neighbour vector with the
+        # entry indices, so a file failing either would load quietly wrong.
+        if values.size and float(values.max()) > cutoff:
+            raise ValueError(
+                f"Malformed symmetric matrix: sparse entry value "
+                f"{float(values.max())} exceeds the recorded cutoff {cutoff}")
+        if rows.size and (int(rows.max()) >= num_samples
+                          or int(cols.max()) >= num_samples
+                          or bool((rows == cols).any())):
+            raise ValueError(
+                f"Malformed symmetric matrix: sparse entry indices are not "
+                f"distinct pairs below {num_samples}")
+
+        storage = SparseStorage(num_samples, cutoff)
+        for i, j, value in zip(rows, cols, values):
+            storage.Set(int(i), int(j), float(value))
+        storage.Finalize()
+        return storage
 
     def __array__(self):
         """Support numpy array interface."""

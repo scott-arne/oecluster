@@ -487,6 +487,79 @@ def test_the_scan_reads_sparse_entries_and_leaves_a_clean_one_clusterable():
     assert sparse._condensed_cache is None
 
 
+def test_a_sparse_matrix_survives_a_file_round_trip_as_sparse(tmp_path):
+    """The round trip used to hand back a dense matrix full of fake zeros.
+
+    ``to_file`` wrote ``.condensed``, which for sparse storage is a densified
+    copy where every pair the cutoff omitted -- the *farthest* pairs -- reads
+    as ``0.0``. Reloading therefore both silenced the ``SparseStorage``
+    refusals and inverted the omitted distances.
+    """
+    path = tmp_path / "sparse.npz"
+    sparse = _sparse_matrix()
+    sparse.to_file(str(path))
+
+    loaded = oecluster.load_distance_matrix(str(path))
+    assert isinstance(loaded.storage, oecluster.SparseStorage)
+    assert loaded.storage.Cutoff() == sparse.storage.Cutoff()
+    # Verbatim, in order: ThresholdGraph iterates every tuple Entries() holds,
+    # so an entry list that merely agrees pairwise would still cluster apart.
+    assert loaded.storage._entries() == sparse.storage._entries()
+
+    with pytest.raises(ValueError, match="SparseStorage is not supported"):
+        oecluster.hdbscan(loaded, min_cluster_size=2)
+    with pytest.raises(ValueError, match="SparseStorage is not supported"):
+        oecluster.agglomerative(loaded, n_clusters=2)
+
+
+def test_a_reloaded_sparse_matrix_clusters_identically(tmp_path):
+    """The half of the defect that no gate could have caught.
+
+    ``butina`` and ``dbscan`` legitimately accept sparse storage, so for them
+    the round trip was not refused -- it was silently answered against
+    distances where the most distant pairs had become the closest.
+    """
+    path = tmp_path / "sparse.npz"
+    sparse = _sparse_matrix()
+    sparse.to_file(str(path))
+    loaded = oecluster.load_distance_matrix(str(path))
+
+    assert (list(oecluster.butina(loaded, 0.6).labels)
+            == list(oecluster.butina(sparse, 0.6).labels))
+    assert (list(oecluster.dbscan(loaded, 0.6, min_samples=2).labels)
+            == list(oecluster.dbscan(sparse, 0.6, min_samples=2).labels))
+
+
+def test_a_dense_file_without_storage_kind_still_loads_as_dense(tmp_path):
+    """Absence of the new keys means dense, so 4.x files load unchanged."""
+    path = tmp_path / "legacy_dense.npz"
+    np.savez_compressed(
+        str(path),
+        condensed=np.array([0.1, 0.2, 0.3], dtype=np.float64),
+        comparison_name=np.array("fingerprint"),
+        params_json=np.array(json.dumps({})),
+        labels=np.array(["a", "b", "c"]),
+        num_samples=np.array(3),
+    )
+    loaded = oecluster.load_distance_matrix(str(path))
+    assert isinstance(loaded.storage, oecluster.DenseStorage)
+    assert list(loaded.condensed) == [0.1, 0.2, 0.3]
+
+
+def test_an_unknown_storage_kind_is_refused(tmp_path):
+    """An unrecognised kind must not fall through to the dense path."""
+    path = tmp_path / "future.npz"
+    np.savez_compressed(
+        str(path),
+        condensed=np.array([0.1, 0.2, 0.3], dtype=np.float64),
+        comparison_name=np.array("fingerprint"),
+        num_samples=np.array(3),
+        storage_kind=np.array("mmap"),
+    )
+    with pytest.raises(ValueError, match="Unknown storage_kind 'mmap'"):
+        oecluster.load_distance_matrix(str(path))
+
+
 def test_an_infinity_finalized_into_sparse_storage_is_refused_by_butina():
     """The write route a ``Set``-only measurement misses.
 
