@@ -324,6 +324,173 @@ def test_require_metric_refuses_nan_present_even_with_the_override():
         _gate.require_metric(dist, "butina", allow_nonmetric=True)
 
 
+def test_a_nan_written_through_condensed_is_refused():
+    """The gate measures the data, not just the stamp it was handed.
+
+    ``.condensed`` is the live zero-copy view over dense storage, so a caller
+    can write a NaN into a matrix long after the comparison stamped it
+    ``complete``. The stamp assertion comes first on purpose: it records that
+    the stamp still says ``complete``, so the refusal can only have come from
+    the measurement.
+    """
+    dist = oecluster.pdist(_mols(), "fingerprint")
+    dist.condensed[0] = float('nan')
+    assert dist.data_integrity == "complete"
+    with pytest.raises(ValueError, match="non-finite entries"):
+        oecluster.butina(dist, threshold=0.4)
+
+
+def test_a_nan_written_through_storage_set_is_refused():
+    """The same defect by the other write route.
+
+    ``storage.Set`` bypasses ``.condensed`` entirely, and neither route
+    updates the facts, so a gate reading only the stamp admits both.
+    """
+    dist = oecluster.pdist(_mols(), "fingerprint")
+    dist.storage.Set(0, 1, float('nan'))
+    assert dist.data_integrity == "complete"
+    with pytest.raises(ValueError, match="non-finite entries"):
+        oecluster.dbscan(dist, eps=0.4, min_samples=2)
+
+
+def test_a_nan_bearing_file_is_refused_though_its_stamp_says_complete(tmp_path):
+    """The file route needs no deliberate mutation of the loaded matrix.
+
+    ``from_file`` trusts ``facts_json`` outright and never checks it against
+    the ``condensed`` array it just loaded, so an untrusted or stale file
+    arrives with NaN data under a ``complete`` stamp. Deliberately left as a
+    known residual: ``loaded.data_integrity`` still reports ``complete``. The
+    gate is what stops it clustering.
+    """
+    path = tmp_path / "tampered.npz"
+    dist = oecluster.pdist(_mols(), "fingerprint")
+    dist.condensed[0] = float('nan')
+    dist.to_file(str(path))
+
+    loaded = oecluster.load_distance_matrix(str(path))
+    assert loaded.data_integrity == "complete"
+    assert np.isnan(loaded.condensed[0])
+    with pytest.raises(ValueError, match="non-finite entries"):
+        oecluster.butina(loaded, threshold=0.4)
+
+
+@pytest.mark.parametrize("call", [
+    lambda dm, **kw: oecluster.butina(dm, 0.4, **kw),
+    lambda dm, **kw: oecluster.dbscan(dm, 0.4, **kw),
+    lambda dm, **kw: oecluster.hdbscan(dm, min_cluster_size=2, **kw),
+    lambda dm, **kw: oecluster.agglomerative(dm, n_clusters=2, **kw),
+])
+def test_measured_nonfinite_data_cannot_be_overridden(call):
+    """Measured non-finite data is tier 1, so the override cannot rescue it.
+
+    Matching on "cannot be overridden" distinguishes this from the tier-2
+    advisory, which names ``allow_nonmetric=True`` as the remedy.
+    """
+    dist = oecluster.pdist(_mols(), "fingerprint")
+    dist.condensed[0] = float('nan')
+    with pytest.raises(ValueError, match="cannot be overridden"):
+        call(dist, allow_nonmetric=True)
+
+
+def test_measured_nonfinite_data_cannot_be_overridden_in_cluster_report():
+    dist = oecluster.pdist(_mols(), "fingerprint")
+    result = oecluster.butina(dist, 0.4)
+    dist.condensed[0] = float('nan')
+    with pytest.raises(ValueError, match="cannot be overridden"):
+        oecluster.cluster_report(result, dist, allow_nonmetric=True)
+
+
+def test_an_infinity_is_refused_too():
+    """Non-finite, not NaN-only.
+
+    This is not an over-refusal: the native predicates the stamp is built from
+    are already non-finite (``!std::isfinite``), and the refusal message says
+    "non-finite entries".
+    """
+    dist = oecluster.pdist(_mols(), "fingerprint")
+    dist.condensed[1] = float('inf')
+    assert dist.data_integrity == "complete"
+    with pytest.raises(ValueError, match="non-finite entries"):
+        oecluster.butina(dist, threshold=0.4)
+
+
+def test_a_clean_matrix_still_clusters_through_every_entry_point():
+    """Not an over-refusal: the scan must be silent on finite data.
+
+    A measurement stricter than the data warrants breaks working code without
+    a word, because no native error contradicts it.
+    """
+    dist = oecluster.pdist(_mols(), "fingerprint")
+    assert _gate._has_nonfinite(dist) is False
+    result = oecluster.butina(dist, 0.4)
+    assert len(result.labels) == 6
+    assert len(oecluster.dbscan(dist, 0.4, min_samples=2).labels) == 6
+    assert len(oecluster.hdbscan(dist, min_cluster_size=2).labels) == 6
+    assert len(oecluster.agglomerative(dist, n_clusters=2).labels) == 6
+    assert oecluster.cluster_report(result, dist).num_samples == 6
+
+
+def test_the_scan_skips_sparse_storage_and_leaves_it_clusterable():
+    """Not an over-refusal, and not a new cache either.
+
+    Sparse storage is skipped because it cannot diverge from its stamp, so
+    ``butina`` and ``dbscan`` -- the only two entry points a sparse matrix can
+    reach the gate through -- must behave exactly as before. The
+    ``_condensed_cache`` assertion is the other half: the gate must not have
+    densified this matrix behind the caller's back, because that cache would
+    then be stale with respect to the storage.
+    """
+    sparse = oecluster.pdist(_mols(), "fingerprint", storage="sparse",
+                             cutoff=0.9)
+    assert isinstance(sparse.storage, oecluster.SparseStorage)
+    assert _gate._has_nonfinite(sparse) is False
+    assert sparse._condensed_cache is None
+    assert len(oecluster.butina(sparse, 0.4).labels) == 6
+    assert len(oecluster.dbscan(sparse, 0.4, min_samples=2).labels) == 6
+    assert sparse._condensed_cache is None
+
+
+def test_all_unknown_facts_with_clean_data_still_cluster(tmp_path):
+    """Not an over-refusal: the scan must not convict "unknown" on its own.
+
+    A pre-5.0.0 file records no claim at all. The measurement answers only the
+    finiteness question, so an all-unknown matrix holding finite values still
+    clusters.
+    """
+    path = tmp_path / "legacy.npz"
+    np.savez_compressed(
+        str(path),
+        condensed=np.array([0.1, 0.2, 0.3], dtype=np.float64),
+        comparison_name=np.array("fingerprint"),
+        params_json=np.array(json.dumps({})),
+        labels=np.array(["a", "b", "c"]),
+        num_samples=np.array(3),
+    )
+    loaded = oecluster.load_distance_matrix(str(path))
+    assert loaded.data_integrity == "unknown"
+    assert loaded.metric_capabilities == {
+        'zero_self': "unknown", 'triangle': "unknown"}
+    assert _gate._has_nonfinite(loaded) is False
+    assert len(oecluster.butina(loaded, 0.5).labels) == 3
+
+
+def test_an_all_unknown_matrix_with_nonfinite_data_is_still_refused(tmp_path):
+    """The complement: "unknown" buys no pass on data that is measurably bad."""
+    path = tmp_path / "legacy_nan.npz"
+    np.savez_compressed(
+        str(path),
+        condensed=np.array([0.1, float('nan'), 0.3], dtype=np.float64),
+        comparison_name=np.array("fingerprint"),
+        params_json=np.array(json.dumps({})),
+        labels=np.array(["a", "b", "c"]),
+        num_samples=np.array(3),
+    )
+    loaded = oecluster.load_distance_matrix(str(path))
+    assert loaded.data_integrity == "unknown"
+    with pytest.raises(ValueError, match="non-finite entries"):
+        oecluster.butina(loaded, 0.5, allow_nonmetric=True)
+
+
 def test_require_metric_refuses_subset_scored_but_allows_the_override():
     dist = oecluster.pdist(_mols(), "fingerprint")
     dist._facts['data_integrity'] = "subset_scored"

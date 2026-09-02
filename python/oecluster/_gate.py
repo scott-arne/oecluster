@@ -9,10 +9,12 @@ refuses to run an algorithm whose assumptions those guarantees violate
 (:func:`require_metric`).
 
 The gate has two tiers. Tier 1 -- distance orientation, zero self-distance,
-and NaN-free data -- is a hard refusal that no keyword overrides, because the
-algorithms silently produce wrong output rather than failing. Tier 2 -- the
-triangle inequality, subset-scored distances, and proven probe violations --
-is a soundness warning that ``allow_nonmetric=True`` overrides.
+and finite data -- is a hard refusal that no keyword overrides, because the
+algorithms silently produce wrong output rather than failing. Finiteness is
+the one tier-1 fact the gate measures off the data rather than reads off the
+recorded stamp. Tier 2 -- the triangle inequality, subset-scored distances,
+and proven probe violations -- is a soundness warning that
+``allow_nonmetric=True`` overrides.
 """
 
 import numpy as np
@@ -36,9 +38,11 @@ def default_facts():
     """
     Build the facts dictionary for a matrix that made no claims.
 
-    Every value is the "unknown" form, which the gate never refuses. This is
-    what a distance matrix written before 5.0.0 loads as: the file recorded no
-    capability claim, so the gate must not invent one.
+    Every value is the "unknown" form, and no unknown fact refuses on its own.
+    This is what a distance matrix written before 5.0.0 loads as: the file
+    recorded no capability claim, so the gate must not invent one. The one
+    thing these facts cannot buy is a pass on non-finite data, which the gate
+    measures off the array rather than reads off the stamp.
 
     :returns: Fresh facts dictionary.
     """
@@ -77,6 +81,34 @@ def facts_from_comparison(comparison_obj):
     return facts
 
 
+def _has_nonfinite(distance_matrix):
+    """
+    Measure whether a matrix currently holds a non-finite distance.
+
+    This reads the data, not the recorded stamp, so it still answers for a
+    matrix whose values changed after the stamp was taken.
+
+    :param distance_matrix: A :class:`SymmetricDistanceMatrix`.
+    :returns: True if any stored distance is NaN or infinite.
+    """
+    # Sparse storage is skipped because its data cannot diverge from its stamp,
+    # not because scanning it would be slow. ``SparseStorage::Set`` appends to
+    # an unmerged per-thread buffer that only ``Finalize`` folds into the
+    # entries ``Get`` and the algorithms read, so a post-construction write
+    # never reaches them; ``.condensed`` is a densified copy cached on first
+    # access, so writing through it never reaches the storage either; and
+    # ``from_file`` always rebuilds as ``DenseStorage``. Touching ``.condensed``
+    # here would measure nothing while costing a Python loop over every pair
+    # and seeding a cache that then silently diverges from the storage.
+    if isinstance(distance_matrix.storage, _oecluster.SparseStorage):
+        return False
+
+    # ``isfinite`` rather than ``isnan``: infinities break the algorithms the
+    # same way, the native stamp already escalates on any non-finite value, and
+    # the refusal below says "non-finite entries".
+    return not np.isfinite(distance_matrix.condensed).all()
+
+
 def require_metric(distance_matrix, caller, *, allow_nonmetric=False):
     """
     Refuse to run a metric-assuming algorithm on a non-metric matrix.
@@ -86,12 +118,16 @@ def require_metric(distance_matrix, caller, *, allow_nonmetric=False):
 
     1. ``is_distance is False`` -- hard refusal.
     2. ``zero_self is False`` -- hard refusal.
-    3. ``data_integrity == "nan_present"`` -- hard refusal.
+    3. ``data_integrity == "nan_present"``, or the data itself holds a
+       non-finite entry -- hard refusal.
     4. ``triangle is False`` -- overridable.
     5. ``data_integrity == "subset_scored"`` -- overridable.
     6. ``metric_probe == "violations_found"`` -- overridable.
 
-    A fact of ``"unknown"`` never refuses.
+    A fact of ``"unknown"`` never refuses on its own. Check 3 is the only one
+    that does not decide from the stamp alone: it also measures the array, so
+    a matrix stamped ``"unknown"`` -- or ``"complete"`` -- that actually holds
+    a non-finite value is refused on the measurement.
 
     The first two checks are separate because they answer separate questions.
     ``is_distance`` is about orientation -- whether a large number means "far"
@@ -137,7 +173,14 @@ def require_metric(distance_matrix, caller, *, allow_nonmetric=False):
             f"itself. This cannot be overridden: every clustering algorithm "
             f"here treats the diagonal as the closest any pair can be.")
 
-    if facts['data_integrity'] == "nan_present":
+    # The stamp describes the data as computed. The caller can still write
+    # through ``.condensed`` or ``storage.Set``, and ``from_file`` trusts a
+    # file's stamp outright -- so the one tier-1 fact that is cheap to
+    # re-measure is re-measured, and a stamp that disagrees with the data
+    # loses. Testing the stamp first keeps an already-stamped matrix from
+    # paying for the scan.
+    if (facts['data_integrity'] == "nan_present"
+            or _has_nonfinite(distance_matrix)):
         raise ValueError(
             f"{caller} requires a complete distance matrix, but this matrix "
             f"contains non-finite entries. Recompute with "
