@@ -64,25 +64,62 @@ def test_descriptor_statistics_defaults_to_the_openeye_source():
 
 
 def test_descriptor_statistics_drops_zero_variance_columns():
-    stats = oecluster.descriptor_statistics(_mols())
+    """Adding water drops a column the clean set keeps.
+
+    The clean set drops nothing, so the drop report only becomes an oracle
+    once an input that provokes a drop is used.
+    """
+    clean = oecluster.descriptor_statistics(_mols())
+    stats = oecluster.descriptor_statistics(_mols(["O"] + SMILES))
+
+    assert clean['dropped'] == []
+    assert "FractionCsp3" in clean['columns']
+
+    assert stats['dropped'] == [("FractionCsp3", "zero-variance")]
+    assert "FractionCsp3" not in stats['columns']
     assert all(v > 0.0 for v in stats['variance'])
-    dropped_names = [name for name, _ in stats['dropped']]
-    assert not set(dropped_names) & set(stats['columns'])
-    assert all(reason in ("zero-variance", "non-numeric")
-               for _, reason in stats['dropped'])
 
 
 def test_descriptor_statistics_can_return_an_inverse_covariance():
     stats = oecluster.descriptor_statistics(_mols(), inverse_covariance=True)
     k = len(stats['columns'])
     assert stats['inverse_covariance'].shape == (k, k)
-    assert stats['inverse_covariance_rank'] <= k
+    # Pinned rather than bounded by k: the rank of a k x k matrix is at most k
+    # by construction, so ``rank <= k`` holds whatever the wrapper reports.
+    assert k == 11
+    assert stats['inverse_covariance_rows'] == 8
+    assert stats['inverse_covariance_rank'] == 7
+
+
+def test_descriptor_statistics_reports_the_covariance_row_count():
+    """Listwise deletion fits the covariance over fewer rows than the columns.
+
+    OpenEye assigns sodium no XLogP value, and XLogP survives the
+    zero-variance drop here, so the sodium row reaches the per-column
+    statistics but not the covariance. A caller reading ``num_rows`` beside
+    the matrix would overstate what produced it.
+    """
+    mols = _mols(["[Na+]"] + SMILES)
+    stats = oecluster.descriptor_statistics(mols, inverse_covariance=True)
+
+    assert stats['num_rows'] == 9
+    assert stats['inverse_covariance_rows'] == 8
+
+    assert "XLogP" in stats['columns']
+    xlogp_present = dict(zip(stats['columns'], stats['present_count']))["XLogP"]
+    assert xlogp_present == 8
 
 
 def test_descriptor_statistics_skips_inverse_covariance_by_default():
     stats = oecluster.descriptor_statistics(_mols())
     assert stats['inverse_covariance'] is None
     assert stats['inverse_covariance_rank'] == 0
+    assert stats['inverse_covariance_rows'] == 0
+
+
+def test_descriptor_statistics_needs_two_molecules_to_fit_a_variance():
+    with pytest.raises(RuntimeError, match="at least two molecules"):
+        oecluster.descriptor_statistics(_mols(["CCO"]))
 
 
 def test_descriptor_statistics_rejects_an_unknown_source():
@@ -145,6 +182,21 @@ def test_ignore_is_stamped_subset_scored_and_overridable():
     with pytest.raises(ValueError, match="subset"):
         oecluster.butina(dist, 1.0)
     oecluster.butina(dist, 1.0, allow_nonmetric=True)
+
+
+def test_an_invalid_missing_policy_is_reported_as_invalid():
+    """An explicit policy is never folded onto the default.
+
+    Both inputs get the same verdict on the same bad argument. Were the
+    normalizer to read "" as unspecified, the first call would filter under
+    complete-case, empty its own input, and be refused for a shape problem the
+    caller does not have.
+    """
+    untyped = _mols(["[Na+]", "[Fe]", "[He]"])
+    with pytest.raises(RuntimeError, match="Unknown missing-value policy"):
+        oecluster.pdist(untyped, "descriptor", missing="")
+    with pytest.raises(RuntimeError, match="Unknown missing-value policy"):
+        oecluster.pdist(_mols(), "descriptor", missing="")
 
 
 def test_similarity_is_rejected_for_descriptors():
@@ -229,12 +281,6 @@ def test_the_rdkit_bcut_columns_are_present_and_nan():
     assert np.all(np.isfinite(dist.condensed))
 
 
-# The tests below monkeypatch the mask instead of computing it. They cover the
-# plumbing the real oracles above cannot reach deterministically: which indices
-# the normalizer removes, that each cdist side is masked against its own list,
-# and that an emptied input blames the filtering.
-
-
 def test_complete_case_filtering_drops_and_records(monkeypatch):
     """The normalizer must remove the masked rows before labels are taken."""
     monkeypatch.setattr(_native, "descriptor_excluded_indices",
@@ -284,6 +330,19 @@ def test_an_empty_descriptor_input_is_not_blamed_on_the_filtering():
     """
     with pytest.raises(RuntimeError, match="at least two molecules"):
         oecluster.pdist([], "descriptor")
+
+
+def test_cdist_descriptor_filters_a_real_mask_end_to_end():
+    """cdist with the computed mask, nothing monkeypatched."""
+    a = _mols(["[Na+]", "CCO", "CCC", "CCCC"])
+    b = _mols(SMILES[3:])
+    cross = oecluster.cdist(a, b, "descriptor")
+
+    assert cross.shape == (3, 5)
+    assert cross.params['excluded_items_a'] == [[0, "missing-descriptor"]]
+    assert 'excluded_items_b' not in cross.params
+    assert cross.labels_a == ["mol1", "mol2", "mol3"]
+    assert np.isfinite(np.asarray(cross)).all()
 
 
 def test_cdist_filters_each_side_independently(monkeypatch):
@@ -370,3 +429,20 @@ def test_the_factory_class_builds_a_usable_comparison():
     dist = oecluster.pdist(_mols(), comparison)
     assert dist.num_samples == 8
     assert dist.metric_capabilities['triangle'] is True
+
+
+def test_the_factory_class_refuses_what_pdist_would_have_filtered():
+    """Applying no filtering means refusing, not admitting.
+
+    ``pdist(mols, "descriptor")`` drops the water row and scores the other
+    eight. The factory keeps the caller's list intact, so the same input meets
+    the default complete-case policy head-on.
+    """
+    mols = _mols(["O"] + SMILES)
+    assert oecluster.pdist(mols, "descriptor").num_samples == 8
+
+    with pytest.raises(RuntimeError, match="absent or non-finite"):
+        oecluster.DescriptorComparison(mols)
+
+    comparison = oecluster.DescriptorComparison(mols, missing="propagate")
+    assert comparison.Size() == 9

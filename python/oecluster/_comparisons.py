@@ -526,7 +526,12 @@ def descriptor_options(kwargs):
 
 def _normalize_descriptor(items, kwargs):
     """Drop molecules missing a descriptor value under the complete-case policy."""
-    policy = str(kwargs.get('missing') or 'complete_case').lower()
+    # Only ``None`` is unspecified, as in ``_default_selector``. Folding any
+    # other value onto the default would run the complete-case filter for a
+    # policy the caller never chose, and that filter can empty the item list
+    # and raise before C++ ever reports the value as invalid.
+    missing = kwargs.get('missing')
+    policy = 'complete_case' if missing is None else str(missing).lower()
     if policy != 'complete_case':
         return items, []
 

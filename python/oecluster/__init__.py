@@ -1604,9 +1604,8 @@ def pdist(items,
     if isinstance(comparison, str):
         items, excluded = _comparisons.normalize_items(
             comparison, items, kwargs)
-        # Only when normalization is what emptied the list. An input that
-        # arrived empty is a separate case that pdist has always answered with
-        # a 0-sample matrix, and ``excluded and`` is what keeps it answering.
+        # Refuse only when normalization is what emptied the list; an input
+        # that arrived empty is left for the comparison to answer.
         if excluded and len(items) == 0:
             raise ValueError(
                 "pdist requires a non-empty input set, but normalizing the "
@@ -2890,8 +2889,16 @@ def descriptor_statistics(mols, *, sources=None, columns=None, groups=None,
     :returns: Dict with keys ``columns``, ``mean``, ``variance``, ``minimum``,
         ``maximum``, ``present_count``, ``dropped`` (a list of
         ``(name, reason)`` pairs), ``num_rows``, ``inverse_covariance``
-        (a ``(k, k)`` array or None), and ``inverse_covariance_rank``.
-    :raises RuntimeError: If a source, column, or group name is unknown.
+        (a ``(k, k)`` array or None), ``inverse_covariance_rank``, and
+        ``inverse_covariance_rows``. The last is the row count the covariance
+        was actually fitted over, which can be smaller than ``num_rows``:
+        covariance uses listwise deletion, so a molecule missing any selected
+        descriptor still reaches the per-column statistics but not the
+        covariance.
+    :raises RuntimeError: If the descriptor layer refuses the request. Among
+        the reasons: an unknown source, column, or group name; fewer than two
+        molecules, which is too few to fit a variance; and a selection whose
+        columns are all constant.
     """
     options = _oecluster.DescriptorStatisticsOptions()
     if sources is not None:
@@ -2917,6 +2924,7 @@ def descriptor_statistics(mols, *, sources=None, columns=None, groups=None,
         'num_rows': int(native.num_rows),
         'inverse_covariance': None,
         'inverse_covariance_rank': int(native.inverse_covariance_rank),
+        'inverse_covariance_rows': int(native.inverse_covariance_rows),
     }
 
     flat = list(native.inverse_covariance)
@@ -3035,14 +3043,18 @@ class DescriptorComparison:
         :param metric: Descriptor metric name; defaults to
             "standardized_euclidean".
         :param variances: Explicit per-column variances, bypassing the pooled
-            fit. Requires an explicit ``columns`` list of the same length.
+            fit. The length must equal the number of selected columns, and a
+            ``columns`` list passed alongside must already be in ascending
+            schema order, which is the order ``descriptor_statistics`` returns.
         :param inverse_covariance: Explicit inverse covariance for
             "mahalanobis", bypassing the pooled fit.
         :param missing: Missing-value policy: "complete_case" (default),
             "propagate", or "ignore".
         :param p: Minkowski order.
         :returns: C++ DescriptorComparison object.
-        :raises RuntimeError: If an option value is rejected by the C++ layer.
+        :raises RuntimeError: If the C++ layer rejects an option value, or if
+            the policy is "complete_case" and a molecule has an absent or
+            non-finite value for a selected descriptor.
         """
         kwargs = {
             'sources': sources,
