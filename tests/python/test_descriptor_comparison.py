@@ -63,17 +63,41 @@ def test_descriptor_statistics_defaults_to_the_openeye_source():
     assert len(stats['present_count']) == len(stats['columns'])
 
 
-def test_descriptor_statistics_drops_zero_variance_columns():
-    """Adding water drops a column the clean set keeps.
+def test_a_constant_column_is_dropped_as_zero_variance():
+    """Six saturated non-aromatics make two columns genuinely constant."""
+    saturated = ["CCO", "CCC", "CCCC", "CCN", "CCOC", "CCCCCC"]
+    stats = oecluster.descriptor_statistics(_mols(saturated))
 
-    The clean set drops nothing, so the drop report only becomes an oracle
-    once an input that provokes a drop is used.
+    assert stats['dropped'] == [("FractionCsp3", "zero-variance"),
+                                ("AromaticRingCount", "zero-variance")]
+    assert "FractionCsp3" not in stats['columns']
+    assert "AromaticRingCount" not in stats['columns']
+    assert all(v > 0.0 for v in stats['variance'])
+
+    # A dropped column is absent from the reported arrays, so the report alone
+    # cannot show constancy. Spread over the column by itself can.
+    for name in ("FractionCsp3", "AromaticRingCount"):
+        spread = oecluster.pdist(_mols(saturated), "descriptor",
+                                 columns=[name], metric="euclidean")
+        assert np.max(np.abs(spread.condensed)) == 0.0
+
+
+def test_a_present_but_non_finite_value_drops_its_whole_column():
+    """One NaN value costs the column, under the constant-column label.
+
+    OpenEye reports water's FractionCsp3 as present and NaN, and a non-finite
+    variance is dropped by the same branch as a zero one. The reason string is
+    therefore the one ``test_a_constant_column_is_dropped_as_zero_variance``
+    gets, even though this column varies perfectly well over the eight
+    organics on its own. A caller reading the drop report cannot tell the two
+    causes apart.
     """
     clean = oecluster.descriptor_statistics(_mols())
+    clean_variance = dict(zip(clean['columns'], clean['variance']))
     stats = oecluster.descriptor_statistics(_mols(["O"] + SMILES))
 
     assert clean['dropped'] == []
-    assert "FractionCsp3" in clean['columns']
+    assert clean_variance["FractionCsp3"] > 0.0
 
     assert stats['dropped'] == [("FractionCsp3", "zero-variance")]
     assert "FractionCsp3" not in stats['columns']
@@ -84,29 +108,39 @@ def test_descriptor_statistics_can_return_an_inverse_covariance():
     stats = oecluster.descriptor_statistics(_mols(), inverse_covariance=True)
     k = len(stats['columns'])
     assert stats['inverse_covariance'].shape == (k, k)
-    # Pinned rather than bounded by k: the rank of a k x k matrix is at most k
-    # by construction, so ``rank <= k`` holds whatever the wrapper reports.
+    # A ``rank <= k`` bound admitted every value from 0 to k, including the 0
+    # the default path reports when nothing was fitted at all. Pin instead.
     assert k == 11
     assert stats['inverse_covariance_rows'] == 8
     assert stats['inverse_covariance_rank'] == 7
 
 
 def test_descriptor_statistics_reports_the_covariance_row_count():
-    """Listwise deletion fits the covariance over fewer rows than the columns.
+    """An absent value costs its row in the covariance but not elsewhere.
 
     OpenEye assigns sodium no XLogP value, and XLogP survives the
     zero-variance drop here, so the sodium row reaches the per-column
-    statistics but not the covariance. A caller reading ``num_rows`` beside
-    the matrix would overstate what produced it.
+    statistics but is deleted listwise from the covariance. A caller reading
+    ``num_rows`` beside the matrix would overstate what produced it.
+
+    This is the absent-value branch only. Water is also missing a selected
+    descriptor, but as a present NaN, which costs the whole column before the
+    covariance is fitted and so leaves no row to delete. The two shapes are
+    asserted side by side because the row count diverges between them.
     """
-    mols = _mols(["[Na+]"] + SMILES)
-    stats = oecluster.descriptor_statistics(mols, inverse_covariance=True)
+    absent = oecluster.descriptor_statistics(
+        _mols(["[Na+]"] + SMILES), inverse_covariance=True)
+    non_finite = oecluster.descriptor_statistics(
+        _mols(["O"] + SMILES), inverse_covariance=True)
 
-    assert stats['num_rows'] == 9
-    assert stats['inverse_covariance_rows'] == 8
+    assert absent['num_rows'] == 9
+    assert absent['inverse_covariance_rows'] == 8
 
-    assert "XLogP" in stats['columns']
-    xlogp_present = dict(zip(stats['columns'], stats['present_count']))["XLogP"]
+    assert non_finite['num_rows'] == 9
+    assert non_finite['inverse_covariance_rows'] == 9
+
+    assert "XLogP" in absent['columns']
+    xlogp_present = dict(zip(absent['columns'], absent['present_count']))["XLogP"]
     assert xlogp_present == 8
 
 
@@ -432,11 +466,12 @@ def test_the_factory_class_builds_a_usable_comparison():
 
 
 def test_the_factory_class_refuses_what_pdist_would_have_filtered():
-    """Applying no filtering means refusing, not admitting.
+    """The factory filters nothing, so the policy alone decides the outcome.
 
     ``pdist(mols, "descriptor")`` drops the water row and scores the other
-    eight. The factory keeps the caller's list intact, so the same input meets
-    the default complete-case policy head-on.
+    eight. The factory is handed all nine: under the default complete-case
+    policy that is a refusal, and under "propagate" it is a nine-item
+    comparison. Neither outcome is eight, which is what filtering would give.
     """
     mols = _mols(["O"] + SMILES)
     assert oecluster.pdist(mols, "descriptor").num_samples == 8
@@ -446,3 +481,17 @@ def test_the_factory_class_refuses_what_pdist_would_have_filtered():
 
     comparison = oecluster.DescriptorComparison(mols, missing="propagate")
     assert comparison.Size() == 9
+
+
+def test_one_molecule_is_refused_only_by_a_metric_that_fits_variances():
+    """The input-size floor belongs to the metric, not to the comparison.
+
+    "standardized_euclidean" fits its scale from the input, so a single
+    molecule gives it nothing to fit. "euclidean" fits nothing and accepts the
+    same input, which is why the refusal cannot be stated unconditionally.
+    """
+    with pytest.raises(RuntimeError, match="at least two molecules"):
+        oecluster.DescriptorComparison(_mols(["CCO"]))
+
+    assert oecluster.DescriptorComparison(
+        _mols(["CCO"]), metric="euclidean").Size() == 1

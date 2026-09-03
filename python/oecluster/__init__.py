@@ -2890,15 +2890,12 @@ def descriptor_statistics(mols, *, sources=None, columns=None, groups=None,
         ``maximum``, ``present_count``, ``dropped`` (a list of
         ``(name, reason)`` pairs), ``num_rows``, ``inverse_covariance``
         (a ``(k, k)`` array or None), ``inverse_covariance_rank``, and
-        ``inverse_covariance_rows``. The last is the row count the covariance
-        was actually fitted over, which can be smaller than ``num_rows``:
-        covariance uses listwise deletion, so a molecule missing any selected
-        descriptor still reaches the per-column statistics but not the
-        covariance.
+        ``inverse_covariance_rows``. The last is the number of rows behind the
+        fitted matrix: ``0`` when no matrix was requested, and not always
+        ``num_rows``.
     :raises RuntimeError: If the descriptor layer refuses the request. Among
-        the reasons: an unknown source, column, or group name; fewer than two
-        molecules, which is too few to fit a variance; and a selection whose
-        columns are all constant.
+        the reasons: an unknown source, column, or group name; and fewer than
+        two molecules, which is too few to fit a variance.
     """
     options = _oecluster.DescriptorStatisticsOptions()
     if sources is not None:
@@ -3052,9 +3049,11 @@ class DescriptorComparison:
             "propagate", or "ignore".
         :param p: Minkowski order.
         :returns: C++ DescriptorComparison object.
-        :raises RuntimeError: If the C++ layer rejects an option value, or if
-            the policy is "complete_case" and a molecule has an absent or
-            non-finite value for a selected descriptor.
+        :raises RuntimeError: If the C++ layer refuses the request. Among the
+            reasons: a rejected option value; a molecule with an absent or
+            non-finite value for a selected descriptor under the
+            "complete_case" policy; and too few molecules for a metric that
+            fits its variances from the input.
         """
         kwargs = {
             'sources': sources,
