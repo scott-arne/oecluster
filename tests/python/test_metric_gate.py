@@ -701,14 +701,26 @@ def test_a_non_scalar_sparse_cutoff_is_a_value_error(tmp_path):
         oecluster.load_distance_matrix(str(path))
 
 
+def test_a_one_element_sparse_cutoff_array_is_a_value_error(tmp_path):
+    """One element is still not the 0-d scalar ``to_file`` writes.
+
+    ``float()`` raises ``TypeError`` on this shape too, so weakening the rule
+    from ``ndim`` to ``size`` would reopen the same escape.
+    """
+    path = tmp_path / "one_element_cutoff.npz"
+    _write_sparse_file(path, num_samples=3, cutoff=(0.5,))
+    with pytest.raises(ValueError,
+                       match="sparse_cutoff must be a scalar, not a 1-D array"):
+        oecluster.load_distance_matrix(str(path))
+
+
 @pytest.mark.parametrize("cutoff", [float('nan'), float('inf')])
 def test_a_nan_or_positive_infinite_sparse_cutoff_still_loads(tmp_path, cutoff):
     """Not an over-refusal: the new cutoff rule is about shape, nothing else.
 
     These two replay into the same matrix -- ``0.1 > nan`` and ``0.1 > inf`` are
     both False, so nothing is dropped -- and refusing them would be a second
-    gate on data the format has no quarrel with. ``-inf`` is the non-finite
-    cutoff that does not replay; the test below covers it.
+    gate on data the format has no quarrel with.
     """
     path = tmp_path / "odd_cutoff.npz"
     _write_sparse_file(path, num_samples=3, cutoff=cutoff)
@@ -716,8 +728,8 @@ def test_a_nan_or_positive_infinite_sparse_cutoff_still_loads(tmp_path, cutoff):
     assert loaded.storage._entries() == [(0, 1, 0.1)]
 
 
-def test_a_negative_infinite_sparse_cutoff_is_refused_as_over_cutoff(tmp_path):
-    """The non-finite cutoff the shape rule is not what refuses.
+def test_an_entry_above_a_negative_infinite_sparse_cutoff_is_refused(tmp_path):
+    """An entry above a ``-inf`` cutoff is refused by the over-cutoff rule.
 
     ``0.1 > -inf`` holds, so ``Set`` would drop the entry and the file would
     replay as an empty matrix. The pre-existing over-cutoff rule catches that;

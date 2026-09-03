@@ -89,10 +89,7 @@ struct ClusterReportComparison {
  * :raises std::invalid_argument: If storage cannot provide complete distances,
  *     if a cluster in result is empty or repeats a member, or if result has at
  *     least one cluster and representative_method is HighestNeighborhood, whose
- *     neighbor threshold ClusterReportOptions has no field to supply. A result
- *     with no clusters -- what dbscan returns when every point is noise -- is
- *     reported without the requested representative method and without an
- *     exception.
+ *     neighbor threshold ClusterReportOptions has no field to supply.
  * :raises std::out_of_range: If a cluster member is at or beyond
  *     storage.NumSamples(), or if result has at least one cluster and labels
  *     more samples than storage holds.
