@@ -63,6 +63,23 @@ TEST(ClusterReportTest, SparseStorageThrows) {
                  std::invalid_argument);
 }
 
+// The bounds check on Get would otherwise answer first, naming the storage
+// class rather than the cluster member the caller has to fix. Both messages
+// contain "outside the storage range", so the assertion is on the part that
+// distinguishes them.
+TEST(ClusterReportTest, OutOfRangeClusterMemberNamesTheMemberNotTheBackend) {
+    const DenseStorage storage = MakeTwoClusterStorage();
+    const ClusteringResult result(
+        std::vector<ClusterLabel>{0, 0, 0, 0}, Clusters{{0, 1, 99}});
+
+    try {
+        cluster_report(result, storage, ClusterReportOptions());
+        FAIL() << "expected an out-of-range refusal";
+    } catch (const std::out_of_range& e) {
+        EXPECT_STREQ(e.what(), "Cluster member index is outside the storage range");
+    }
+}
+
 TEST(ClusterReportTest, BasicProfileTwoEqualClusters) {
     const DenseStorage storage = MakeTwoClusterStorage();
     const ClusteringResult result = MakeResult({0, 0, 1, 1});

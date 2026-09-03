@@ -6,13 +6,13 @@
 #include "oecluster/clustering/Representative.h"
 
 #include "ClusterMetrics.h"
+#include "DistanceAccess.h"
 
 #include <algorithm>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
 #include <string>
-#include <unordered_set>
 
 namespace OECluster {
 
@@ -24,23 +24,6 @@ double missing_metric() {
 
 bool has_threshold(const double threshold) {
     return threshold >= 0.0;
-}
-
-void validate_cluster_members(const Cluster& cluster, const size_t num_samples) {
-    if (cluster.empty()) {
-        throw std::invalid_argument("Cluster representative requires at least one member");
-    }
-
-    std::unordered_set<size_t> seen;
-    seen.reserve(cluster.size());
-    for (const size_t member : cluster) {
-        if (member >= num_samples) {
-            throw std::out_of_range("Cluster member index is outside the storage range");
-        }
-        if (!seen.insert(member).second) {
-            throw std::invalid_argument("Cluster members must be unique");
-        }
-    }
 }
 
 void validate_complete_distance_storage(
@@ -220,7 +203,7 @@ std::vector<ClusterRepresentative> rank_representatives(
     const Cluster& cluster,
     const StorageBackend& storage,
     const RepresentativeOptions& options) {
-    validate_cluster_members(cluster, storage.NumSamples());
+    detail::validate_cluster_members(cluster, storage.NumSamples());
     validate_complete_distance_storage(cluster, storage);
     validate_options(options);
     validate_vector_size(

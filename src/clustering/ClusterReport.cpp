@@ -191,6 +191,15 @@ ClusterReport cluster_report(
     report.size_entropy = size_entropy(sizes);
 
     if (!members.empty()) {
+        // Hoisted above the first storage read. Every cluster is validated
+        // anyway further down, by cluster_representative, but only after the
+        // intra-pair loop has already asked the backend for an out-of-range
+        // pair -- so the caller was told about a storage class instead of the
+        // bad cluster member that is the error they have to fix.
+        for (const Cluster& cluster : members) {
+            detail::validate_cluster_members(cluster, storage.NumSamples());
+        }
+
         // Intra-cluster pair distances, radii, diameters.
         std::vector<double> intra_pairs;
         std::vector<double> radii;

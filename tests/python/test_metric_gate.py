@@ -907,6 +907,26 @@ def test_cluster_report_refuses_a_result_from_a_larger_matrix():
         oecluster.cluster_report(result, small)
 
 
+def test_cluster_report_names_the_bad_member_not_the_storage_class():
+    """The bounds check on ``Get`` pre-empted the diagnosis the caller can act on.
+
+    Sample counts agree here, so the wrapper's mismatch guard passes and member
+    99 reached ``storage.Get`` before anything validated it -- answering with a
+    ``DenseStorage`` complaint about a backend the caller never chose. Matching
+    on "Cluster member index" is the point of the test: both messages carry
+    "outside the storage range", which is why the regression went unnoticed.
+    """
+    d3 = oecluster.pdist(_mols()[:3], "fingerprint")
+    bad = oecluster.ClusteringResult([0, 0, 0], [(0, 1, 99)])
+    with pytest.raises(RuntimeError, match="Cluster member index") as excinfo:
+        oecluster.cluster_report(bad, d3)
+    assert "DenseStorage" not in str(excinfo.value)
+    # The representative entry points always validated first; they are asserted
+    # alongside to pin that both paths now give the same domain message.
+    with pytest.raises(RuntimeError, match="Cluster member index"):
+        oecluster.representative((0, 1, 99), d3)
+
+
 def test_cluster_report_sample_mismatch_outranks_the_storage_refusal():
     """A mismatched pairing is the error the caller has to fix first.
 
