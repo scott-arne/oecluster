@@ -144,6 +144,29 @@ def test_descriptor_statistics_reports_the_covariance_row_count():
     assert xlogp_present == 8
 
 
+def test_reusing_variances_needs_the_columns_they_were_fitted_over():
+    """A dropped column desynchronizes ``variances=`` from the default selection.
+
+    ``descriptor_statistics`` reports over surviving columns only, so once
+    anything is dropped its ``variance`` list is shorter than the selection
+    ``pdist`` makes on its own, and the two are matched by position. Dropping
+    is by design, so this is the ordinary case, not an exotic one.
+    """
+    mols = _mols(["O"] + SMILES)
+    stats = oecluster.descriptor_statistics(mols)
+
+    assert stats['dropped'] == [("FractionCsp3", "zero-variance")]
+    assert len(stats['columns']) == 10
+
+    with pytest.raises(RuntimeError, match="11 columns are selected"):
+        oecluster.pdist(mols, "descriptor", variances=stats['variance'])
+
+    paired = oecluster.pdist(mols, "descriptor",
+                             columns=stats['columns'],
+                             variances=stats['variance'])
+    assert paired.num_samples == 9
+
+
 def test_descriptor_statistics_skips_inverse_covariance_by_default():
     stats = oecluster.descriptor_statistics(_mols())
     assert stats['inverse_covariance'] is None
@@ -234,13 +257,56 @@ def test_an_invalid_missing_policy_is_reported_as_invalid():
 
 
 def test_similarity_is_rejected_for_descriptors():
-    with pytest.raises(ValueError, match="no similarity form"):
-        oecluster.pdist(_mols(), "descriptor", similarity=True)
+    """Both inputs get the same verdict on the same bad argument.
+
+    The second input is one the complete-case filter empties. No input can
+    make ``similarity=True`` valid here, so a complaint about the emptied list
+    would describe a filter the caller never asked for instead of the argument
+    they have to change.
+    """
+    for mols in (_mols(), _mols(["[Na+]", "[Fe]", "[He]"])):
+        with pytest.raises(ValueError, match="no similarity form"):
+            oecluster.pdist(mols, "descriptor", similarity=True)
 
 
 def test_unknown_descriptor_kwargs_are_rejected():
-    with pytest.raises(TypeError, match="Unknown kwargs for descriptor"):
-        oecluster.pdist(_mols(), "descriptor", bogus=1)
+    """Both inputs get the same verdict, message included.
+
+    The type alone would not settle it: the emptied-list refusal is a
+    ``ValueError``, so a test that only named ``TypeError`` would catch this
+    one, but the similarity case above raises ``ValueError`` either way.
+    """
+    for mols in (_mols(), _mols(["[Na+]", "[Fe]", "[He]"])):
+        with pytest.raises(
+                TypeError,
+                match=r"Unknown kwargs for descriptor comparison: \['bogus'\]"):
+            oecluster.pdist(mols, "descriptor", bogus=1)
+
+
+def test_cdist_validates_arguments_before_filtering_either_side():
+    """The precedence holds on the rectangular path, whichever side empties."""
+    untyped = _mols(["[Na+]", "[Fe]", "[He]"])
+
+    for a, b in ((untyped, _mols()), (_mols(), untyped)):
+        with pytest.raises(ValueError, match="no similarity form"):
+            oecluster.cdist(a, b, "descriptor", similarity=True)
+        with pytest.raises(
+                TypeError,
+                match=r"Unknown kwargs for descriptor comparison: \['bogus'\]"):
+            oecluster.cdist(a, b, "descriptor", bogus=1)
+
+
+def test_an_emptied_input_is_still_refused_when_the_arguments_are_valid():
+    """Validating first must not cost the filter its own refusal.
+
+    With nothing wrong in the arguments there is no authoritative error to
+    outrank, so the emptied-list message is the right one and must survive.
+    """
+    untyped = _mols(["[Na+]", "[Fe]", "[He]"])
+    with pytest.raises(ValueError, match="left 0 items"):
+        oecluster.pdist(untyped, "descriptor")
+    with pytest.raises(ValueError, match="left 0 item"):
+        oecluster.cdist(untyped, _mols(), "descriptor")
 
 
 def test_complete_data_excludes_nothing():
@@ -456,6 +522,18 @@ def test_descriptor_options_does_not_consume_kwargs():
     kwargs = {'metric': "euclidean", 'missing': "propagate"}
     _comparisons.descriptor_options(kwargs)
     assert kwargs == {'metric': "euclidean", 'missing': "propagate"}
+
+
+def test_validate_request_does_not_consume_kwargs():
+    """The validator runs first, so consuming here would starve the builder.
+
+    ``build_comparison`` treats a leftover key as a builder bug and raises
+    ``RuntimeError``. A validator that popped would instead take keys the
+    builder needs, turning a valid request into that internal error.
+    """
+    kwargs = {'metric': "euclidean", 'missing': "propagate", 'p': 3.0}
+    _comparisons.validate_request("descriptor", False, kwargs)
+    assert kwargs == {'metric': "euclidean", 'missing': "propagate", 'p': 3.0}
 
 
 def test_the_factory_class_builds_a_usable_comparison():

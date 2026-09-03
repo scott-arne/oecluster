@@ -1602,6 +1602,9 @@ def pdist(items,
     :raises TypeError: If unknown kwargs are passed.
     """
     if isinstance(comparison, str):
+        # Before normalization: filtering can empty the list, and the refusal
+        # below would then answer for an argument no input could rescue.
+        _comparisons.validate_request(comparison, similarity, kwargs)
         items, excluded = _comparisons.normalize_items(
             comparison, items, kwargs)
         # Refuse only when normalization is what emptied the list; an input
@@ -1695,6 +1698,8 @@ def cdist(items_a, items_b, comparison, *,
     if not a or not b:
         raise ValueError("cdist requires non-empty input sets (set A or B is empty)")
 
+    # Before normalization, for the reason given in ``pdist``.
+    _comparisons.validate_request(comparison, similarity, kwargs)
     a, excluded_a = _comparisons.normalize_items(comparison, a, kwargs)
     b, excluded_b = _comparisons.normalize_items(comparison, b, kwargs)
     n_a = len(a)
@@ -2876,8 +2881,12 @@ def descriptor_statistics(mols, *, sources=None, columns=None, groups=None,
     Compute per-column descriptor statistics over a molecule set.
 
     The statistics are the ones the descriptor comparison fits internally, so
-    computing them here and passing ``variances=`` back to :func:`pdist` gives
-    a reusable, explicitly scoped standardization.
+    computing them here and passing them back to :func:`pdist` gives a
+    reusable, explicitly scoped standardization. They are reported over the
+    surviving columns, so ``columns=stats['columns']`` has to travel with
+    ``variances=`` or ``inverse_covariance=``: both are matched to columns by
+    position, and any dropped column leaves them shorter than the selection
+    :func:`pdist` would otherwise make.
 
     :param mols: List of OEMolBase molecules.
     :param sources: Descriptor source names: "openeye" (default), "mordred",

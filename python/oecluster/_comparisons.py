@@ -30,14 +30,16 @@ from .oecluster import SuperposeComparison as _SuperposeComparison
 Builder = Callable[[list[Any], bool, dict[str, Any], bool], tuple[Any, str]]
 Normalizer = Callable[[list[Any], dict[str, Any]],
                       tuple[list[Any], list[list[Any]]]]
+Validator = Callable[[bool, dict[str, Any]], None]
 
 _BUILDERS: dict[str, Builder] = {}
 _NORMALIZERS: dict[str, Normalizer] = {}
+_VALIDATORS: dict[str, Validator] = {}
 
 
-def register_comparison(name, builder, normalizer=None):
+def register_comparison(name, builder, normalizer=None, validator=None):
     """
-    Register a comparison builder, and optionally a normalizer, under a name.
+    Register a comparison builder, and optional hooks, under a name.
 
     :param name: Lowercase comparison name accepted by :func:`oecluster.pdist`
                  and :func:`oecluster.cdist`.
@@ -48,10 +50,18 @@ def register_comparison(name, builder, normalizer=None):
     :param normalizer: Optional callable ``(items, kwargs)`` returning
                        ``(kept_items, excluded)``. It must read ``kwargs``
                        without popping, because the builder runs afterwards.
+    :param validator: Optional callable ``(similarity, kwargs)`` raising on an
+                      argument no input could make valid. It runs before the
+                      normalizer and must also read ``kwargs`` without
+                      popping. Register one only when a comparison has a
+                      normalizer that could fail first and describe the wrong
+                      problem; the builder remains the enforcing copy.
     """
     _BUILDERS[name] = builder
     if normalizer is not None:
         _NORMALIZERS[name] = normalizer
+    if validator is not None:
+        _VALIDATORS[name] = validator
 
 
 def supported_comparisons():
@@ -130,6 +140,28 @@ def extract_labels(items):
         labels = [f"item_{idx}" for idx in range(len(items))]
 
     return labels
+
+
+def validate_request(comparison, similarity, kwargs):
+    """
+    Run a comparison's pre-normalization argument check, if it has one.
+
+    Called by ``pdist`` and ``cdist`` ahead of :func:`normalize_items` so that
+    an argument no input could make valid is reported before a normalizer gets
+    the chance to fail on the item list instead. A normalizer that filters can
+    empty the list, and the resulting complaint describes a filter the caller
+    never asked for rather than the argument they must change.
+
+    :param comparison: Comparison name.
+    :param similarity: Whether the caller asked for similarities.
+    :param kwargs: Comparison keyword options, read but never consumed.
+    :raises ValueError: If the comparison name is unknown, or a validator
+                        rejects an option value.
+    :raises TypeError: If a validator finds unknown keyword options.
+    """
+    validator = _VALIDATORS.get(_resolve_name(comparison))
+    if validator is not None:
+        validator(similarity, kwargs)
 
 
 def normalize_items(comparison, items, kwargs):
@@ -546,19 +578,40 @@ def _normalize_descriptor(items, kwargs):
     return kept, [[idx, "missing-descriptor"] for idx in excluded]
 
 
-def _build_descriptor(items, similarity, kwargs, symmetric):
-    """Build a :class:`DescriptorComparison` from keyword options."""
+def _validate_descriptor(similarity, kwargs):
+    """Reject a descriptor request that no input could make valid.
+
+    Registered as the comparison's validator so it also runs before
+    ``_normalize_descriptor``, whose complete-case filter can empty the item
+    list and have ``pdist`` refuse the shape instead of the argument. Reads
+    ``kwargs`` without popping: the normalizer and then the builder still need
+    every key, and ``build_comparison`` treats leftovers as a builder bug.
+
+    :param similarity: Whether the caller asked for similarities.
+    :param kwargs: Comparison keyword options, read but never consumed.
+    :raises ValueError: If similarities were requested.
+    :raises TypeError: If any keyword option is not a descriptor option.
+    """
     if similarity:
         raise ValueError(
             "the descriptor comparison has no similarity form: it measures "
             "distance in descriptor space. Use similarity=False.")
 
+    unknown = [key for key in kwargs if key not in _DESCRIPTOR_KEYS]
+    if unknown:
+        raise TypeError(
+            f"Unknown kwargs for descriptor comparison: {unknown}")
+
+
+def _build_descriptor(items, similarity, kwargs, symmetric):
+    """Build a :class:`DescriptorComparison` from keyword options."""
+    # Repeated rather than assumed: a prebuilt-comparison caller reaches the
+    # builder without passing through ``validate_request``.
+    _validate_descriptor(similarity, kwargs)
+
     opts = descriptor_options(kwargs)
     for key in _DESCRIPTOR_KEYS:
         kwargs.pop(key, None)
-    if kwargs:
-        raise TypeError(
-            f"Unknown kwargs for descriptor comparison: {list(kwargs)}")
 
     return _DescriptorComparison(items, opts), "descriptor"
 
@@ -573,4 +626,5 @@ register_comparison(
     "sitehopper",
     lambda items, similarity, kwargs, symmetric: _build_superpose(
         items, similarity, kwargs, symmetric, default_method="sitehopper"))
-register_comparison("descriptor", _build_descriptor, _normalize_descriptor)
+register_comparison("descriptor", _build_descriptor, _normalize_descriptor,
+                    _validate_descriptor)
