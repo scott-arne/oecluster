@@ -537,7 +537,9 @@ def _write_sparse_file(path, *, num_samples=3, cutoff=0.5, rows=(0,),
     The shapes these tests need cannot be produced by ``to_file`` any more,
     which is the point of M1 -- but ``from_file`` still reads untrusted input,
     so it has to keep refusing them. ``index_dtype`` and a sequence ``cutoff``
-    reach the two fields ``to_file`` fixes the type of.
+    vary three of the four sparse arrays ``to_file`` writes with a fixed dtype:
+    the two index arrays by dtype, the cutoff by shape. The fourth,
+    ``sparse_v``, this helper always writes as float64.
     """
     np.savez_compressed(
         str(path),
@@ -700,16 +702,34 @@ def test_a_non_scalar_sparse_cutoff_is_a_value_error(tmp_path):
 
 
 @pytest.mark.parametrize("cutoff", [float('nan'), float('inf')])
-def test_a_non_finite_sparse_cutoff_still_loads(tmp_path, cutoff):
+def test_a_nan_or_positive_infinite_sparse_cutoff_still_loads(tmp_path, cutoff):
     """Not an over-refusal: the new cutoff rule is about shape, nothing else.
 
-    A NaN or infinite cutoff replays into the same matrix, so refusing it would
-    be a second gate on data the format has no quarrel with.
+    These two replay into the same matrix -- ``0.1 > nan`` and ``0.1 > inf`` are
+    both False, so nothing is dropped -- and refusing them would be a second
+    gate on data the format has no quarrel with. ``-inf`` is the non-finite
+    cutoff that does not replay; the test below covers it.
     """
     path = tmp_path / "odd_cutoff.npz"
     _write_sparse_file(path, num_samples=3, cutoff=cutoff)
     loaded = oecluster.load_distance_matrix(str(path))
     assert loaded.storage._entries() == [(0, 1, 0.1)]
+
+
+def test_a_negative_infinite_sparse_cutoff_is_refused_as_over_cutoff(tmp_path):
+    """The non-finite cutoff the shape rule is not what refuses.
+
+    ``0.1 > -inf`` holds, so ``Set`` would drop the entry and the file would
+    replay as an empty matrix. The pre-existing over-cutoff rule catches that;
+    asserting on its message records which rule answers, so relaxing the shape
+    rule cannot be mistaken for relaxing this one.
+    """
+    path = tmp_path / "negative_inf_cutoff.npz"
+    _write_sparse_file(path, num_samples=3, cutoff=float('-inf'))
+    with pytest.raises(ValueError,
+                       match=r"sparse entry 0 has value 0\.1, above the cutoff "
+                             r"-inf"):
+        oecluster.load_distance_matrix(str(path))
 
 
 def test_a_dense_file_without_storage_kind_still_loads_as_dense(tmp_path):

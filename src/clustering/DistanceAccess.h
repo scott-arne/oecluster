@@ -51,7 +51,8 @@ inline double dense_distance(const double* data, size_t n, size_t i, size_t j) {
  * answers an unusable cluster with an empty result rather than a diagnosis.
  *
  * The messages name the cluster, not the operation that happens to be running:
- * ``cluster_report`` reaches this first, and its caller asked for a report.
+ * ``rank_representatives`` and ``cluster_report`` are both callers, and the
+ * report's caller never asked for a representative.
  *
  * :param cluster: Member indices to validate.
  * :param num_samples: Number of samples the storage holds.

@@ -80,10 +80,12 @@ TEST(ClusterReportTest, OutOfRangeClusterMemberNamesTheMemberNotTheBackend) {
     }
 }
 
-// validate_cluster_members is cluster_report's first diagnostic now, so its
-// wording has to describe the cluster. It used to name a representative
-// operation the caller of cluster_report never asked for -- the same
-// misdirection as naming the storage class above.
+// validate_cluster_members is cluster_report's first *cluster* diagnostic: the
+// completeness check exercised by SparseStorageThrows above answers earlier. So
+// its wording has to describe the cluster. It used to say "Cluster
+// representative requires at least one member", naming an operation the caller
+// of cluster_report never asked for -- the same misdirection as naming the
+// storage class above.
 TEST(ClusterReportTest, EmptyClusterNamesTheClusterNotARepresentative) {
     const DenseStorage storage = MakeTwoClusterStorage();
     const ClusteringResult result(

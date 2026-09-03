@@ -1183,9 +1183,11 @@ class SymmetricDistanceMatrix(DistanceMatrix):
         :returns: A finalized :class:`SparseStorage`.
         :raises ValueError: If the saved entries cannot be replayed faithfully.
         """
-        # Checked before the conversion, not after: ``float()`` on an array
-        # holding anything but a single value raises TypeError, which escapes
-        # the ValueError ``from_file`` documents for a malformed file.
+        # Checked before the conversion, not after: on the numpy in use,
+        # ``float()`` raises TypeError on a ``(1,)``-shaped array, and TypeError
+        # escapes the ValueError ``from_file`` documents for a malformed file.
+        # Hence ``ndim``, not ``size`` -- a one-element array is a single value
+        # but still not the 0-d scalar ``to_file`` writes.
         stored_cutoff = data['sparse_cutoff']
         if stored_cutoff.ndim != 0:
             raise ValueError(
