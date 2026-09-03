@@ -55,13 +55,14 @@ namespace {
  * @brief Refuse a Get whose indices fall outside the stored sample range.
  *
  * An out-of-range index yields a wrong answer, not a diagnosable failure, and
- * which one depends on the backend and the index. DenseStorage and MMapStorage
- * dereference the computed index, so past the end they read outside the
- * allocation -- which for MMapStorage can run past the mapping -- while inside
- * it they return whatever real pair the index collides with
- * (CondensedIndex(4, 0, 4) == 3 == CondensedIndex(4, 1, 2)). SparseStorage
+ * which one depends on the backend and the index. Off the diagonal,
+ * DenseStorage and MMapStorage dereference the computed index, so past the end
+ * they read outside the allocation -- which for MMapStorage can run past the
+ * mapping -- while inside it they return whatever real pair the index collides
+ * with (CondensedIndex(4, 0, 4) == 3 == CondensedIndex(4, 1, 2)). SparseStorage
  * dereferences nothing: its lookup collides the same way, or misses and
- * reports a bogus "not stored" 0.0. Each answers about a nonexistent item.
+ * reports a bogus "not stored" 0.0. On the diagonal every backend returns 0.0
+ * without an index. Each answers about a nonexistent item.
  *
  * :param backend: Storage class name, used in the message.
  * :param i: Index of first item.

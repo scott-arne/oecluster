@@ -1043,15 +1043,18 @@ def test_sparse_storage_rejected_before_gate_in_cluster_report():
 def test_storage_get_refuses_an_out_of_range_index():
     """An unchecked Get answered with a wrong number instead of refusing.
 
-    Which wrong number depended on the backend and the index. The dense probes
-    all compute an index past a one-element buffer, so those did read outside
-    the allocation, returning ``0.0`` -- and on one probe an uninitialised
-    denormal, which varied between runs and so is one possibility rather than
-    the behaviour. ``SparseStorage::Get`` never reads out of bounds at all: it
-    looks the pair up, and ``(0, 6)`` computes index 5, which is the stored
-    ``(1, 2)`` pair, so it answered ``0.5`` -- a real distance between the
-    wrong two items. The diagonal cases are separate again: the ``i == j``
-    shortcut answered ``0.0`` for indices naming no item at all.
+    Which wrong number depended on the backend and the index. The three
+    off-diagonal dense probes all read memory the one-element buffer does not
+    own, though not all of it past the end: the condensed formula runs in
+    ``size_t``, so ``(0, 2)`` and ``(1, 1399)`` index 1 and 1398 elements in,
+    while ``(500, 1399)`` underflows and lands about 964 KiB *before* the base.
+    Each returned whatever occupied that memory -- ``0.0`` and an uninitialised
+    denormal have both been seen, so neither is the behaviour.
+    ``SparseStorage::Get`` never reads out of bounds at all: it looks the pair
+    up, and ``(0, 6)`` computes index 5, which is the stored ``(1, 2)`` pair,
+    so it answered ``0.5`` -- a real distance between the wrong two items. The
+    ``(1000, 1000)`` probes reach neither: the ``i == j`` shortcut answered
+    ``0.0`` without computing an index, for a pair naming no item at all.
     """
     dense = oecluster.pdist(_mols()[:2], "fingerprint")
     assert dense.num_samples == 2

@@ -43,10 +43,15 @@ inline double dense_distance(const double* data, size_t n, size_t i, size_t j) {
 /**
  * @brief Refuse a cluster whose members cannot name items in the storage.
  *
- * Shared so that every consumer of a caller-supplied cluster can run it
- * *before* its first ``storage.Get``. A bad member index otherwise trips the
- * backend's own range check first, which reports a storage class rather than
- * the cluster the caller has to fix.
+ * Shared so that every path which reads storage for a caller-supplied cluster
+ * runs it *before* its first ``storage.Get``. A bad member index otherwise
+ * trips the backend's own range check first, which reports a storage class
+ * rather than the cluster the caller has to fix. A path that returns without
+ * reading storage skips it -- ``select_representatives`` with ``k == 0``
+ * answers an unusable cluster with an empty result rather than a diagnosis.
+ *
+ * The messages name the cluster, not the operation that happens to be running:
+ * ``cluster_report`` reaches this first, and its caller asked for a report.
  *
  * :param cluster: Member indices to validate.
  * :param num_samples: Number of samples the storage holds.
@@ -55,7 +60,7 @@ inline double dense_distance(const double* data, size_t n, size_t i, size_t j) {
  */
 inline void validate_cluster_members(const Cluster& cluster, const size_t num_samples) {
     if (cluster.empty()) {
-        throw std::invalid_argument("Cluster representative requires at least one member");
+        throw std::invalid_argument("Cluster must contain at least one member");
     }
 
     std::unordered_set<size_t> seen;

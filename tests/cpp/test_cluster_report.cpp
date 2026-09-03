@@ -80,6 +80,23 @@ TEST(ClusterReportTest, OutOfRangeClusterMemberNamesTheMemberNotTheBackend) {
     }
 }
 
+// validate_cluster_members is cluster_report's first diagnostic now, so its
+// wording has to describe the cluster. It used to name a representative
+// operation the caller of cluster_report never asked for -- the same
+// misdirection as naming the storage class above.
+TEST(ClusterReportTest, EmptyClusterNamesTheClusterNotARepresentative) {
+    const DenseStorage storage = MakeTwoClusterStorage();
+    const ClusteringResult result(
+        std::vector<ClusterLabel>{0, 0, 0, 0}, Clusters{{0, 1}, {}});
+
+    try {
+        cluster_report(result, storage, ClusterReportOptions());
+        FAIL() << "expected an empty-cluster refusal";
+    } catch (const std::invalid_argument& e) {
+        EXPECT_STREQ(e.what(), "Cluster must contain at least one member");
+    }
+}
+
 TEST(ClusterReportTest, BasicProfileTwoEqualClusters) {
     const DenseStorage storage = MakeTwoClusterStorage();
     const ClusteringResult result = MakeResult({0, 0, 1, 1});
