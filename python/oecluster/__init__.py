@@ -1138,6 +1138,15 @@ class SymmetricDistanceMatrix(DistanceMatrix):
                 raise ValueError(
                     f"{subject}: {name} must be a 1-D array, not "
                     f"{array.ndim}-D")
+        # Ahead of the comparisons below, which only mean what they say for an
+        # integer index. A float64 index array satisfies every one of them and
+        # is then truncated by the ``int(i)`` in the replay loop, so a file
+        # holding (0.7, 1.9) loads as the pair (0, 1) with nothing raised.
+        for name, array in (('sparse_i', rows), ('sparse_j', cols)):
+            if not np.issubdtype(array.dtype, np.integer):
+                raise ValueError(
+                    f"{subject}: {name} must hold integer indices, not "
+                    f"dtype {array.dtype}")
         if not (rows.shape[0] == cols.shape[0] == values.shape[0]):
             raise ValueError(
                 f"{subject}: sparse entry arrays have lengths "
@@ -1174,7 +1183,15 @@ class SymmetricDistanceMatrix(DistanceMatrix):
         :returns: A finalized :class:`SparseStorage`.
         :raises ValueError: If the saved entries cannot be replayed faithfully.
         """
-        cutoff = float(data['sparse_cutoff'])
+        # Checked before the conversion, not after: ``float()`` on an array
+        # holding anything but a single value raises TypeError, which escapes
+        # the ValueError ``from_file`` documents for a malformed file.
+        stored_cutoff = data['sparse_cutoff']
+        if stored_cutoff.ndim != 0:
+            raise ValueError(
+                f"Malformed symmetric matrix: sparse_cutoff must be a scalar, "
+                f"not a {stored_cutoff.ndim}-D array")
+        cutoff = float(stored_cutoff)
         rows = data['sparse_i']
         cols = data['sparse_j']
         values = data['sparse_v']

@@ -531,12 +531,13 @@ def test_a_reloaded_sparse_matrix_clusters_identically(tmp_path):
 
 
 def _write_sparse_file(path, *, num_samples=3, cutoff=0.5, rows=(0,),
-                       cols=(1,), values=(0.1,)):
+                       cols=(1,), values=(0.1,), index_dtype=np.int64):
     """Hand-build a sparse ``.npz``, bypassing ``to_file`` and its guards.
 
     The shapes these tests need cannot be produced by ``to_file`` any more,
     which is the point of M1 -- but ``from_file`` still reads untrusted input,
-    so it has to keep refusing them.
+    so it has to keep refusing them. ``index_dtype`` and a sequence ``cutoff``
+    reach the two fields ``to_file`` fixes the type of.
     """
     np.savez_compressed(
         str(path),
@@ -546,8 +547,8 @@ def _write_sparse_file(path, *, num_samples=3, cutoff=0.5, rows=(0,),
         num_samples=np.array(num_samples),
         storage_kind=np.array("sparse"),
         sparse_cutoff=np.array(cutoff, dtype=np.float64),
-        sparse_i=np.array(rows, dtype=np.int64),
-        sparse_j=np.array(cols, dtype=np.int64),
+        sparse_i=np.array(rows, dtype=index_dtype),
+        sparse_j=np.array(cols, dtype=index_dtype),
         sparse_v=np.array(values, dtype=np.float64),
     )
 
@@ -665,6 +666,50 @@ def test_a_two_dimensional_sparse_index_array_is_a_value_error(tmp_path):
     with pytest.raises(ValueError,
                        match="sparse_i must be a 1-D array, not 2-D"):
         oecluster.load_distance_matrix(str(path))
+
+
+def test_a_float_sparse_index_array_is_a_value_error(tmp_path):
+    """A wrong load with no exception at all, which is the worse failure.
+
+    ``0.7`` is not negative, not at or beyond ``num_samples``, and not equal to
+    ``1.9``, so every index rule passed and the replay loop's ``int(i)`` then
+    silently made the pair ``(0, 1)``. The file said one matrix and the loaded
+    object was another.
+    """
+    path = tmp_path / "float_index.npz"
+    _write_sparse_file(path, num_samples=3, rows=(0.7,), cols=(1.9,),
+                       index_dtype=np.float64)
+    with pytest.raises(ValueError,
+                       match="sparse_i must hold integer indices, not "
+                             "dtype float64"):
+        oecluster.load_distance_matrix(str(path))
+
+
+def test_a_non_scalar_sparse_cutoff_is_a_value_error(tmp_path):
+    """The cutoff escaped the documented type one line before the index arrays.
+
+    ``float()`` on a two-element array raises ``TypeError``, so a caller
+    catching the ``ValueError`` ``from_file`` documents saw the load abort
+    through them instead.
+    """
+    path = tmp_path / "vector_cutoff.npz"
+    _write_sparse_file(path, num_samples=3, cutoff=(0.5, 0.6))
+    with pytest.raises(ValueError,
+                       match="sparse_cutoff must be a scalar, not a 1-D array"):
+        oecluster.load_distance_matrix(str(path))
+
+
+@pytest.mark.parametrize("cutoff", [float('nan'), float('inf')])
+def test_a_non_finite_sparse_cutoff_still_loads(tmp_path, cutoff):
+    """Not an over-refusal: the new cutoff rule is about shape, nothing else.
+
+    A NaN or infinite cutoff replays into the same matrix, so refusing it would
+    be a second gate on data the format has no quarrel with.
+    """
+    path = tmp_path / "odd_cutoff.npz"
+    _write_sparse_file(path, num_samples=3, cutoff=cutoff)
+    loaded = oecluster.load_distance_matrix(str(path))
+    assert loaded.storage._entries() == [(0, 1, 0.1)]
 
 
 def test_a_dense_file_without_storage_kind_still_loads_as_dense(tmp_path):
