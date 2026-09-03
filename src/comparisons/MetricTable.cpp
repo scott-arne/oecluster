@@ -112,26 +112,11 @@ void validate_params(const std::string& name, const MetricParams& params) {
     }
 }
 
-}  // namespace
-
-std::string supported_metric_names(MetricSurface surface) {
-    std::ostringstream names;
-    bool first = true;
-    for (const MetricEntry& entry : METRIC_TABLE) {
-        if (!visible_on(entry, surface)) {
-            continue;
-        }
-        if (!first) {
-            names << ", ";
-        }
-        names << entry.name;
-        first = false;
-    }
-    return names.str();
-}
-
-OEFP::Metric resolve_metric(const std::string& name, bool similarity, const MetricParams& params,
-                            MetricSurface surface) {
+/// Look up an entry and apply every rule that does not need the built metric.
+/// resolve_metric and check_metric_request share this so the two can never
+/// answer differently about the same name.
+const MetricEntry& require_metric_entry(const std::string& name, bool similarity,
+                                        const MetricParams& params, MetricSurface surface) {
     const std::string key = to_lower(name);
 
     if (key == "haversine") {
@@ -170,7 +155,35 @@ OEFP::Metric resolve_metric(const std::string& name, bool similarity, const Metr
     }
 
     validate_params(key, params);
-    return found->make(similarity, params);
+    return *found;
+}
+
+}  // namespace
+
+std::string supported_metric_names(MetricSurface surface) {
+    std::ostringstream names;
+    bool first = true;
+    for (const MetricEntry& entry : METRIC_TABLE) {
+        if (!visible_on(entry, surface)) {
+            continue;
+        }
+        if (!first) {
+            names << ", ";
+        }
+        names << entry.name;
+        first = false;
+    }
+    return names.str();
+}
+
+OEFP::Metric resolve_metric(const std::string& name, bool similarity, const MetricParams& params,
+                            MetricSurface surface) {
+    return require_metric_entry(name, similarity, params, surface).make(similarity, params);
+}
+
+void check_metric_request(const std::string& name, bool similarity, const MetricParams& params,
+                          MetricSurface surface) {
+    require_metric_entry(name, similarity, params, surface);
 }
 
 }  // namespace OECluster

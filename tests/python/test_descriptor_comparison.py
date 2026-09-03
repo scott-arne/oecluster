@@ -270,12 +270,7 @@ def test_similarity_is_rejected_for_descriptors():
 
 
 def test_unknown_descriptor_kwargs_are_rejected():
-    """Both inputs get the same verdict, message included.
-
-    The type alone would not settle it: the emptied-list refusal is a
-    ``ValueError``, so a test that only named ``TypeError`` would catch this
-    one, but the similarity case above raises ``ValueError`` either way.
-    """
+    """Both inputs get the same verdict, message included."""
     for mols in (_mols(), _mols(["[Na+]", "[Fe]", "[He]"])):
         with pytest.raises(
                 TypeError,
@@ -294,6 +289,73 @@ def test_cdist_validates_arguments_before_filtering_either_side():
                 TypeError,
                 match=r"Unknown kwargs for descriptor comparison: \['bogus'\]"):
             oecluster.cdist(a, b, "descriptor", bogus=1)
+
+
+def test_an_unusable_option_value_outranks_the_emptied_input():
+    """A value no input can rescue is refused before the filter runs.
+
+    Argument *names* were already checked ahead of the filter; values were not,
+    so an emptied input answered for ``metric='bogus'`` with a complaint about
+    a filter the caller never asked for. Both values here are refused by C++
+    over any molecule set, and neither check needs the molecules or the
+    resolved columns, which is what lets them run first.
+    """
+    untyped = _mols(["[Na+]", "[Fe]", "[He]"])
+    clean = _mols()
+
+    for mols in (clean, untyped):
+        with pytest.raises(RuntimeError, match="Unknown metric 'bogus'"):
+            oecluster.pdist(mols, "descriptor", metric="bogus")
+        with pytest.raises(
+                RuntimeError,
+                match="variances applies only to "
+                      "metric='standardized_euclidean'"):
+            oecluster.pdist(mols, "descriptor", metric="euclidean",
+                            variances=[1.0])
+
+    for a, b in ((untyped, clean), (clean, untyped)):
+        with pytest.raises(RuntimeError, match="Unknown metric 'bogus'"):
+            oecluster.cdist(a, b, "descriptor", metric="bogus")
+        with pytest.raises(
+                RuntimeError,
+                match="variances applies only to "
+                      "metric='standardized_euclidean'"):
+            oecluster.cdist(a, b, "descriptor", metric="euclidean",
+                            variances=[1.0])
+
+
+def test_the_option_check_reaches_python_without_molecules():
+    """The pre-filter check is the C++ one, reached through SWIG.
+
+    Python cannot reproduce the metric table -- ``resolve_metric`` lives in a
+    private header -- so the validator has to call into C++ with the options
+    alone. Calling it here with no molecules at all is what shows the check is
+    genuinely molecule-independent rather than merely early.
+    """
+    with pytest.raises(RuntimeError, match="Unknown metric 'bogus'"):
+        _native.validate_descriptor_options(
+            _comparisons.descriptor_options({'metric': "bogus"}))
+    _native.validate_descriptor_options(_comparisons.descriptor_options({}))
+
+
+def test_pdist_and_cdist_agree_on_an_argument_no_input_can_rescue():
+    """One bad argument, one answer, whichever entry point is used.
+
+    ``cdist`` used to raise its own arrived-empty and cutoff refusals ahead of
+    the argument check, so these three calls gave three different messages.
+    The cutoff one was the worst: it named a remedy -- drop the cutoff, keep
+    ``similarity=True`` -- that cannot make the call valid.
+    """
+    clean = _mols()
+    untyped = _mols(["[Na+]", "[Fe]", "[He]"])
+
+    with pytest.raises(ValueError, match="no similarity form"):
+        oecluster.pdist([], "descriptor", similarity=True)
+    with pytest.raises(ValueError, match="no similarity form"):
+        oecluster.cdist([], clean, "descriptor", similarity=True)
+    with pytest.raises(ValueError, match="no similarity form"):
+        oecluster.cdist(untyped, clean, "descriptor", similarity=True,
+                        cutoff=0.5)
 
 
 def test_an_emptied_input_is_still_refused_when_the_arguments_are_valid():
@@ -527,9 +589,12 @@ def test_descriptor_options_does_not_consume_kwargs():
 def test_validate_request_does_not_consume_kwargs():
     """The validator runs first, so consuming here would starve the builder.
 
-    ``build_comparison`` treats a leftover key as a builder bug and raises
-    ``RuntimeError``. A validator that popped would instead take keys the
-    builder needs, turning a valid request into that internal error.
+    The failure is silent, not loud: ``build_comparison`` complains only about
+    keys left *over*, so a popped one is hidden rather than reported. Popping
+    ``missing`` from ``pdist(_mols(["O"] + SMILES[:4]), "descriptor",
+    missing="propagate")`` restores the default complete-case policy and
+    returns four molecules instead of five -- water dropped under a policy the
+    caller explicitly declined.
     """
     kwargs = {'metric': "euclidean", 'missing': "propagate", 'p': 3.0}
     _comparisons.validate_request("descriptor", False, kwargs)

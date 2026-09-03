@@ -1686,6 +1686,14 @@ def cdist(items_a, items_b, comparison, *,
             "prebuilt comparison objects are not supported because cdist must "
             "construct the combined A+B comparison itself")
 
+    # Above the two guards below, not merely above normalization as in
+    # ``pdist``: both of them can describe the wrong problem. The cutoff
+    # message names dropping the cutoff as the remedy, which cannot work when
+    # ``similarity=True`` is itself the invalid argument, and the arrived-empty
+    # message answers a shape question the caller did not ask. Hoisting also
+    # makes ``pdist`` and ``cdist`` give one answer to one bad argument.
+    _comparisons.validate_request(comparison, similarity, kwargs)
+
     if cutoff > 0.0 and similarity:
         raise ValueError(
             "cutoff > 0 is not supported with similarity=True: the cutoff zeroes "
@@ -1698,8 +1706,6 @@ def cdist(items_a, items_b, comparison, *,
     if not a or not b:
         raise ValueError("cdist requires non-empty input sets (set A or B is empty)")
 
-    # Before normalization, for the reason given in ``pdist``.
-    _comparisons.validate_request(comparison, similarity, kwargs)
     a, excluded_a = _comparisons.normalize_items(comparison, a, kwargs)
     b, excluded_b = _comparisons.normalize_items(comparison, b, kwargs)
     n_a = len(a)
@@ -2882,11 +2888,12 @@ def descriptor_statistics(mols, *, sources=None, columns=None, groups=None,
 
     The statistics are the ones the descriptor comparison fits internally, so
     computing them here and passing them back to :func:`pdist` gives a
-    reusable, explicitly scoped standardization. They are reported over the
-    surviving columns, so ``columns=stats['columns']`` has to travel with
-    ``variances=`` or ``inverse_covariance=``: both are matched to columns by
-    position, and any dropped column leaves them shorter than the selection
-    :func:`pdist` would otherwise make.
+    reusable, explicitly scoped standardization. Two arguments have to travel
+    with ``variances=`` or ``inverse_covariance=``: ``columns=stats['columns']``,
+    because the values are matched to columns by position and any dropped
+    column leaves them shorter than the selection :func:`pdist` would otherwise
+    make, and the same ``sources=`` these statistics were fitted over, because
+    a column name from one source is not in another source's schema.
 
     :param mols: List of OEMolBase molecules.
     :param sources: Descriptor source names: "openeye" (default), "mordred",

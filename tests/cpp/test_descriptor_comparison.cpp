@@ -15,6 +15,67 @@
 
 using namespace OECluster;
 
+namespace {
+
+/// Return the ComparisonError message a callable throws, or "" if it throws none.
+template <typename Callable>
+std::string refusal_message(Callable&& call) {
+    try {
+        call();
+    } catch (const ComparisonError& exc) {
+        return std::string(exc.what());
+    }
+    return std::string();
+}
+
+/// Every option mistake that needs neither the molecules nor the resolved
+/// column selection to detect. Shared by the two halves of the extraction
+/// test: the validator must catch each one, and the constructor must still
+/// report each one with the same words.
+std::vector<std::pair<std::string, DescriptorOptions>> molecule_independent_mistakes() {
+    std::vector<std::pair<std::string, DescriptorOptions>> cases;
+
+    DescriptorOptions unknown_metric;
+    unknown_metric.metric = "bogus";
+    cases.emplace_back("unknown metric", unknown_metric);
+
+    DescriptorOptions wrong_surface;
+    wrong_surface.metric = "tanimoto";
+    cases.emplace_back("bit-set metric on the descriptor surface", wrong_surface);
+
+    DescriptorOptions bad_exponent;
+    bad_exponent.metric = "minkowski";
+    bad_exponent.p = -1.0;
+    cases.emplace_back("non-positive Minkowski exponent", bad_exponent);
+
+    DescriptorOptions unknown_policy;
+    unknown_policy.missing = "drop";
+    cases.emplace_back("unknown missing-value policy", unknown_policy);
+
+    DescriptorOptions both_overrides;
+    both_overrides.variances = {1.0, 1.0};
+    both_overrides.inverse_covariance = {1.0, 0.0, 0.0, 1.0};
+    cases.emplace_back("both overrides at once", both_overrides);
+
+    DescriptorOptions variances_on_mahalanobis;
+    variances_on_mahalanobis.metric = "mahalanobis";
+    variances_on_mahalanobis.variances = {1.0};
+    cases.emplace_back("variances under mahalanobis", variances_on_mahalanobis);
+
+    DescriptorOptions inverse_on_euclidean;
+    inverse_on_euclidean.metric = "euclidean";
+    inverse_on_euclidean.inverse_covariance = {1.0};
+    cases.emplace_back("inverse_covariance under euclidean", inverse_on_euclidean);
+
+    DescriptorOptions ignore_on_fitted;
+    ignore_on_fitted.missing = "ignore";  // metric defaults to standardized_euclidean
+    cases.emplace_back("ignore under a fitted metric", ignore_on_fitted);
+
+    return cases;
+}
+
+}  // namespace
+
 class DescriptorComparisonTest : public ::testing::Test {
 protected:
     void SetUp() override {
@@ -279,6 +340,85 @@ TEST_F(DescriptorComparisonTest, NullMoleculeIsRejected) {
     std::vector<OEChem::OEMolBase*> with_null = mols_;
     with_null[1] = nullptr;
     EXPECT_THROW(DescriptorComparison(with_null, DescriptorOptions()), ComparisonError);
+}
+
+TEST(DescriptorOptionValidationTest, DefaultOptionsAreAccepted) {
+    EXPECT_NO_THROW(validate_descriptor_options(DescriptorOptions()));
+}
+
+TEST(DescriptorOptionValidationTest, EveryMoleculeIndependentMistakeIsCaught) {
+    // No molecules anywhere in this test: that is the point of the entry
+    // point. The Python layer calls it before the complete-case filter, which
+    // can empty the item list and answer for a filter the caller never asked
+    // for instead of the option they have to change.
+    for (const auto& entry : molecule_independent_mistakes()) {
+        const std::string message =
+            refusal_message([&] { validate_descriptor_options(entry.second); });
+        EXPECT_FALSE(message.empty()) << "not refused: " << entry.first;
+    }
+}
+
+TEST(DescriptorOptionValidationTest, TheUnknownMetricMessageNamesTheSurfacesMetrics) {
+    DescriptorOptions opts;
+    opts.metric = "bogus";
+    const std::string message =
+        refusal_message([&] { validate_descriptor_options(opts); });
+    EXPECT_NE(message.find("Unknown metric 'bogus'"), std::string::npos) << message;
+    EXPECT_NE(message.find("standardized_euclidean"), std::string::npos) << message;
+    // The fingerprint-only names must not be advertised here.
+    EXPECT_EQ(message.find("tanimoto"), std::string::npos) << message;
+}
+
+TEST(DescriptorOptionValidationTest, TheMetricNameIsFoldedBeforeItIsReported) {
+    // The constructor lowercases before resolving, so the validator must too
+    // or the same input would be refused with a differently-spelled message
+    // depending on which check reached it first.
+    DescriptorOptions opts;
+    opts.metric = "BOGUS";
+    const std::string message =
+        refusal_message([&] { validate_descriptor_options(opts); });
+    EXPECT_NE(message.find("Unknown metric 'bogus'"), std::string::npos) << message;
+}
+
+TEST(DescriptorOptionValidationTest, SchemaDependentMistakesAreLeftToTheConstructor) {
+    // The boundary: a check that needs the descriptor calculator's schema
+    // cannot run without one, so an unknown source, column, or group stays
+    // downstream. Nothing is lost by that -- the complete-case filter resolves
+    // the same selection and reports these itself.
+    DescriptorOptions unknown_source;
+    unknown_source.sources = {"nosuchsource"};
+    EXPECT_NO_THROW(validate_descriptor_options(unknown_source));
+
+    DescriptorOptions unknown_column;
+    unknown_column.columns = {"NoSuchColumn"};
+    EXPECT_NO_THROW(validate_descriptor_options(unknown_column));
+}
+
+TEST(DescriptorOptionValidationTest, TheInputSizeRuleIsLeftToTheConstructor) {
+    // A fitted metric over one molecule is a valid *option* set; only the
+    // input makes it impossible. Refusing it here would refuse it for every
+    // caller, including the ones passing enough molecules.
+    EXPECT_NO_THROW(validate_descriptor_options(DescriptorOptions()));
+
+    std::vector<OEChem::OEGraphMol> graph_mols(1);
+    OEChem::OESmilesToMol(graph_mols[0], "c1ccccc1");
+    std::vector<OEChem::OEMolBase*> mols{&static_cast<OEChem::OEMolBase&>(graph_mols[0])};
+    const std::string message =
+        refusal_message([&] { DescriptorComparison(mols, DescriptorOptions()); });
+    EXPECT_NE(message.find("at least two molecules"), std::string::npos) << message;
+}
+
+TEST_F(DescriptorComparisonTest, TheConstructorRepeatsEveryValidatorMessageVerbatim) {
+    // The extraction must not have changed what a caller is told, only when.
+    // Comparing the two messages byte for byte is also what keeps the
+    // constructor from growing a second copy of a rule that later drifts.
+    for (const auto& entry : molecule_independent_mistakes()) {
+        const std::string from_validator =
+            refusal_message([&] { validate_descriptor_options(entry.second); });
+        const std::string from_constructor =
+            refusal_message([&] { DescriptorComparison(mols_, entry.second); });
+        EXPECT_EQ(from_constructor, from_validator) << entry.first;
+    }
 }
 
 TEST(DescriptorComparisonMinimumInputTest, AFittedMetricNeedsTwoMolecules) {

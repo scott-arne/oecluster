@@ -56,6 +56,27 @@ OEFP::Metric resolve_metric(const std::string& name, bool similarity, const Metr
                             MetricSurface surface);
 
 /**
+ * @brief Apply every ``resolve_metric`` check without building the metric.
+ *
+ * A caller that only wants the verdict need not hold the variances or inverse
+ * covariance a fitted metric is constructed from, and asking ``resolve_metric``
+ * would not tell it so: OEFP builds a StandardizedEuclidean or Mahalanobis
+ * from an empty vector without complaint, yielding a metric that is not the
+ * one the comparison goes on to score with. This runs the same table lookup
+ * and the same parameter checks, raises the same messages, and returns
+ * nothing.
+ *
+ * :param name: User-facing metric name; ASCII case is folded.
+ * :param similarity: When true, require the metric to have a similarity form.
+ * :param params: Parameters for the parameterized metrics.
+ * :param surface: The comparison surface requesting the metric.
+ * :raises ComparisonError: When the name is unknown, is not available on the
+ *     requested surface, has no similarity form, or carries invalid parameters.
+ */
+void check_metric_request(const std::string& name, bool similarity, const MetricParams& params,
+                          MetricSurface surface);
+
+/**
  * @brief List the metric names available on a surface, for error messages.
  *
  * :param surface: The comparison surface.

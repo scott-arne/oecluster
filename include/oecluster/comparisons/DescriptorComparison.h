@@ -121,6 +121,32 @@ private:
 std::vector<size_t> descriptor_excluded_indices(const std::vector<OEChem::OEMolBase*>& mols,
                                                 const DescriptorOptions& opts);
 
+/**
+ * @brief Refuse the option mistakes no molecule set could make valid.
+ *
+ * The metric name and its parameters, the missing-value policy name, and
+ * whether a ``variances`` or ``inverse_covariance`` override belongs to the
+ * chosen metric are all decided by the options alone.
+ * ``DescriptorComparison``'s constructor calls this first and then adds only
+ * the checks that need the molecules or the resolved column selection, so the
+ * two can never disagree about a shared rule.
+ *
+ * It is exposed because a caller may filter its input before constructing --
+ * ``descriptor_excluded_indices`` is the intended route -- and a filter that
+ * empties the input would otherwise report the empty input instead of the
+ * option the caller has to change.
+ *
+ * :param opts: Descriptor options. The source, column, and group fields are
+ *     not inspected: resolving them needs the descriptor schema, so those
+ *     names stay the constructor's business.
+ * :raises ComparisonError: When the metric name or a metric parameter is
+ *     invalid for descriptor space, when the missing-value policy is unknown,
+ *     when both overrides are supplied at once, when an override does not
+ *     belong to the chosen metric, or when ``missing='ignore'`` is paired with
+ *     a fitted metric.
+ */
+void validate_descriptor_options(const DescriptorOptions& opts);
+
 }  // namespace OECluster
 
 #endif  // OECLUSTER_COMPARISONS_DESCRIPTORCOMPARISON_H

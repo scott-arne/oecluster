@@ -92,6 +92,47 @@ void require_complete_rows(const OEFP::DescriptorNumericMatrix& matrix) {
 
 }  // namespace
 
+void validate_descriptor_options(const DescriptorOptions& opts) {
+    const std::string metric_name = to_lower(opts.metric);
+
+    if (!opts.variances.empty() && !opts.inverse_covariance.empty()) {
+        throw ComparisonError(
+            "variances and inverse_covariance are mutually exclusive; supply the one "
+            "belonging to the requested metric");
+    }
+    const bool is_seuclidean =
+        metric_name == "standardized_euclidean" || metric_name == "seuclidean";
+    if (!opts.variances.empty() && !is_seuclidean) {
+        throw ComparisonError("variances applies only to metric='standardized_euclidean', not '" +
+                              opts.metric + "'");
+    }
+    if (!opts.inverse_covariance.empty() && metric_name != "mahalanobis") {
+        throw ComparisonError(
+            "inverse_covariance applies only to metric='mahalanobis', not '" + opts.metric + "'");
+    }
+
+    // normalize_missing validates by mapping, so calling it is what keeps the
+    // policy names in one place rather than in a check and a table that drift.
+    bool complete_case = false;
+    const OEFP::DescriptorMissingPolicy missing = normalize_missing(opts.missing, complete_case);
+    if (missing == OEFP::DescriptorMissingPolicy::Ignore && is_fitted_metric(metric_name)) {
+        throw ComparisonError(
+            "missing='ignore' is not available for metric='" + opts.metric +
+            "'; its whitening transform mixes columns, so a per-pair column subset is "
+            "incoherent. Use missing='complete_case' or an unfitted metric such as 'euclidean'");
+    }
+
+    // Only the name and the exponent are settled here; the metric itself is
+    // built at the end of the constructor from the variances fitted there.
+    // That is why check_metric_request exists apart from resolve_metric --
+    // resolving now would succeed and hand back a metric standardized by an
+    // empty vector. Pass the folded name: the constructor resolves the folded
+    // spelling, and an unknown metric must be reported the same way by both.
+    MetricParams params;
+    params.p = opts.p;
+    check_metric_request(metric_name, false, params, MetricSurface::Descriptor);
+}
+
 struct DescriptorComparison::Impl {
     OEFP::DescriptorNumericMatrix matrix;
     std::vector<std::string> dropped_columns;
@@ -115,35 +156,22 @@ DescriptorComparison::DescriptorComparison(const std::vector<OEChem::OEMolBase*>
     const std::vector<const OEChem::OEMolBase*> inputs =
         checked_inputs(mols, "DescriptorComparison");
 
+    // Everything decidable from the options alone, in one place. The Python
+    // layer calls the same function before its complete-case filter runs, so
+    // an unusable option value is reported as itself rather than as an item
+    // list the filter emptied. What stays below needs the molecules or the
+    // resolved column selection, which no options-only check can have.
+    validate_descriptor_options(opts);
+
     auto impl = std::make_shared<Impl>();
     const std::string metric_name = to_lower(opts.metric);
-
     const bool has_override = !opts.variances.empty() || !opts.inverse_covariance.empty();
-    if (has_override) {
-        if (!opts.variances.empty() && !opts.inverse_covariance.empty()) {
-            throw ComparisonError(
-                "variances and inverse_covariance are mutually exclusive; supply the one "
-                "belonging to the requested metric");
-        }
-    }
     const bool is_seuclidean =
         metric_name == "standardized_euclidean" || metric_name == "seuclidean";
-    if (!opts.variances.empty() && !is_seuclidean) {
-        throw ComparisonError("variances applies only to metric='standardized_euclidean', not '" +
-                              opts.metric + "'");
-    }
-    if (!opts.inverse_covariance.empty() && metric_name != "mahalanobis") {
-        throw ComparisonError(
-            "inverse_covariance applies only to metric='mahalanobis', not '" + opts.metric + "'");
-    }
 
+    // The policy name was accepted above; this call is the mapping half of the
+    // same function.
     impl->missing = normalize_missing(opts.missing, impl->complete_case);
-    if (impl->missing == OEFP::DescriptorMissingPolicy::Ignore && is_fitted_metric(metric_name)) {
-        throw ComparisonError(
-            "missing='ignore' is not available for metric='" + opts.metric +
-            "'; its whitening transform mixes columns, so a per-pair column subset is "
-            "incoherent. Use missing='complete_case' or an unfitted metric such as 'euclidean'");
-    }
 
     // A variance needs two observations. Without this the fit leaves every
     // variance NaN, every column is dropped, and the constructor blames the

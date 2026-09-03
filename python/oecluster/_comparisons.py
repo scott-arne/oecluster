@@ -156,8 +156,10 @@ def validate_request(comparison, similarity, kwargs):
     :param similarity: Whether the caller asked for similarities.
     :param kwargs: Comparison keyword options, read but never consumed.
     :raises ValueError: If the comparison name is unknown, or a validator
-                        rejects an option value.
+                        rejects an argument it owns outright.
     :raises TypeError: If a validator finds unknown keyword options.
+    :raises RuntimeError: If a validator hands an option value to C++ and C++
+                          refuses it.
     """
     validator = _VALIDATORS.get(_resolve_name(comparison))
     if validator is not None:
@@ -591,6 +593,7 @@ def _validate_descriptor(similarity, kwargs):
     :param kwargs: Comparison keyword options, read but never consumed.
     :raises ValueError: If similarities were requested.
     :raises TypeError: If any keyword option is not a descriptor option.
+    :raises RuntimeError: If C++ refuses an option value outright.
     """
     if similarity:
         raise ValueError(
@@ -602,11 +605,21 @@ def _validate_descriptor(similarity, kwargs):
         raise TypeError(
             f"Unknown kwargs for descriptor comparison: {unknown}")
 
+    # Only C++ can rule on a value: the metric table lives in a private header
+    # and is not reachable from here, so a Python copy of it would be a second
+    # source of truth that drifts. ``validate_descriptor_options`` is the
+    # subset of the constructor's checks that needs neither the molecules nor
+    # the resolved columns, which is what lets it run before the filter.
+    # Sources, columns and groups are not among them, and lose nothing by it:
+    # the filter resolves the same selection and reports those names itself.
+    _oecluster.validate_descriptor_options(descriptor_options(kwargs))
+
 
 def _build_descriptor(items, similarity, kwargs, symmetric):
     """Build a :class:`DescriptorComparison` from keyword options."""
-    # Repeated rather than assumed: a prebuilt-comparison caller reaches the
-    # builder without passing through ``validate_request``.
+    # ``build_comparison`` is a module-level entry point, reachable without the
+    # ``validate_request`` call ``pdist`` and ``cdist`` make first, so the
+    # builder stays the enforcing copy.
     _validate_descriptor(similarity, kwargs)
 
     opts = descriptor_options(kwargs)
