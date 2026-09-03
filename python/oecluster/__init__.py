@@ -990,6 +990,8 @@ class SymmetricDistanceMatrix(DistanceMatrix):
         cutoff called most distant.
 
         :param path: Output file path.
+        :raises ValueError: If sparse storage holds an entry that could not be
+            loaded back from the file.
         """
         arrays = {
             'comparison_name': np.array(self._comparison_name),
@@ -1004,15 +1006,23 @@ class SymmetricDistanceMatrix(DistanceMatrix):
             # tuple Entries() returns, so a "tidied" list would cluster
             # differently from the matrix that was saved.
             entries = self._storage._entries()
+            cutoff = self._storage.Cutoff()
+            rows = np.array([e[0] for e in entries], dtype=np.int64)
+            cols = np.array([e[1] for e in entries], dtype=np.int64)
+            values = np.array([e[2] for e in entries], dtype=np.float64)
+            # Checked before anything is written, not only on load.
+            # ``SparseStorage.Set`` enforces ``i != j`` with a bare ``assert``,
+            # compiled out of release builds, so a poked-at matrix reached here
+            # and wrote a file ``from_file`` then refused -- the caller lost the
+            # data and only found out on the next load.
+            self._validate_sparse_entries(
+                rows, cols, values, self.num_samples, cutoff,
+                "Refusing to write a malformed sparse matrix")
             arrays['storage_kind'] = np.array("sparse")
-            arrays['sparse_cutoff'] = np.array(self._storage.Cutoff(),
-                                               dtype=np.float64)
-            arrays['sparse_i'] = np.array([e[0] for e in entries],
-                                          dtype=np.int64)
-            arrays['sparse_j'] = np.array([e[1] for e in entries],
-                                          dtype=np.int64)
-            arrays['sparse_v'] = np.array([e[2] for e in entries],
-                                          dtype=np.float64)
+            arrays['sparse_cutoff'] = np.array(cutoff, dtype=np.float64)
+            arrays['sparse_i'] = rows
+            arrays['sparse_j'] = cols
+            arrays['sparse_v'] = values
         else:
             arrays['storage_kind'] = np.array("dense")
             arrays['condensed'] = self.condensed
@@ -1098,6 +1108,63 @@ class SymmetricDistanceMatrix(DistanceMatrix):
         return cls(storage, comparison_name, labels, params, facts)
 
     @staticmethod
+    def _validate_sparse_entries(rows, cols, values, num_samples, cutoff,
+                                 subject):
+        """
+        Refuse a sparse entry list that would not replay into the same matrix.
+
+        Shared by :meth:`to_file` and :meth:`from_file` so the write and read
+        sides cannot drift: anything ``to_file`` accepts, ``from_file``
+        accepts. The rules are what a replay needs. ``SparseStorage.Set``
+        silently drops a value above the cutoff, its ``i != j`` guard is a bare
+        ``assert`` compiled out of release builds, and ``ThresholdGraph``
+        indexes an ``n``-element neighbour vector with the entry indices.
+
+        Non-finite values are deliberately allowed: a sparse matrix may
+        legitimately carry them, and the metric gate is what refuses them at
+        clustering time.
+
+        :param rows: First index of each entry.
+        :param cols: Second index of each entry.
+        :param values: Distance of each entry.
+        :param num_samples: Number of samples the indices must fall below.
+        :param cutoff: Sparse storage cutoff the values must not exceed.
+        :param subject: Prefix naming what is being refused.
+        :raises ValueError: If any entry would not survive a replay.
+        """
+        for name, array in (('sparse_i', rows), ('sparse_j', cols),
+                            ('sparse_v', values)):
+            if array.ndim != 1:
+                raise ValueError(
+                    f"{subject}: {name} must be a 1-D array, not "
+                    f"{array.ndim}-D")
+        if not (rows.shape[0] == cols.shape[0] == values.shape[0]):
+            raise ValueError(
+                f"{subject}: sparse entry arrays have lengths "
+                f"{rows.shape[0]}, {cols.shape[0]}, {values.shape[0]}")
+
+        # Elementwise, not ``values.max() > cutoff``: max() propagates NaN and
+        # ``nan > cutoff`` is False, so one NaN entry switched the whole check
+        # off and every genuinely over-cutoff value was then silently dropped
+        # by Set -- the exact reload-a-different-matrix failure this prevents.
+        above = np.flatnonzero(values > cutoff)
+        if above.size:
+            first = int(above[0])
+            raise ValueError(
+                f"{subject}: sparse entry {first} has value "
+                f"{float(values[first])}, above the cutoff {cutoff}")
+
+        bad = np.flatnonzero(
+            (rows < 0) | (cols < 0) | (rows >= num_samples)
+            | (cols >= num_samples) | (rows == cols))
+        if bad.size:
+            first = int(bad[0])
+            raise ValueError(
+                f"{subject}: sparse entry {first} is "
+                f"({int(rows[first])}, {int(cols[first])}), not a pair of "
+                f"distinct indices below {num_samples}")
+
+    @staticmethod
     def _sparse_storage_from_file(data, num_samples):
         """
         Rebuild sparse storage from a saved entry list.
@@ -1111,25 +1178,12 @@ class SymmetricDistanceMatrix(DistanceMatrix):
         rows = data['sparse_i']
         cols = data['sparse_j']
         values = data['sparse_v']
-        if not (rows.shape[0] == cols.shape[0] == values.shape[0]):
-            raise ValueError(
-                f"Malformed symmetric matrix: sparse entry arrays have lengths "
-                f"{rows.shape[0]}, {cols.shape[0]}, {values.shape[0]}")
-
-        # Refuse rather than reload a matrix that would not be the one saved.
-        # SparseStorage.Set drops a value above the cutoff and asserts i != j,
-        # and ThresholdGraph indexes an n-element neighbour vector with the
-        # entry indices, so a file failing either would load quietly wrong.
-        if values.size and float(values.max()) > cutoff:
-            raise ValueError(
-                f"Malformed symmetric matrix: sparse entry value "
-                f"{float(values.max())} exceeds the recorded cutoff {cutoff}")
-        if rows.size and (int(rows.max()) >= num_samples
-                          or int(cols.max()) >= num_samples
-                          or bool((rows == cols).any())):
-            raise ValueError(
-                f"Malformed symmetric matrix: sparse entry indices are not "
-                f"distinct pairs below {num_samples}")
+        # Kept on the load side as well as in to_file: from_file reads
+        # untrusted input. It is the same rule, so the two cannot disagree
+        # about which files are legal.
+        SymmetricDistanceMatrix._validate_sparse_entries(
+            rows, cols, values, num_samples, cutoff,
+            "Malformed symmetric matrix")
 
         storage = SparseStorage(num_samples, cutoff)
         for i, j, value in zip(rows, cols, values):

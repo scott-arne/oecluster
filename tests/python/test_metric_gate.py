@@ -530,6 +530,143 @@ def test_a_reloaded_sparse_matrix_clusters_identically(tmp_path):
             == list(oecluster.dbscan(sparse, 0.6, min_samples=2).labels))
 
 
+def _write_sparse_file(path, *, num_samples=3, cutoff=0.5, rows=(0,),
+                       cols=(1,), values=(0.1,)):
+    """Hand-build a sparse ``.npz``, bypassing ``to_file`` and its guards.
+
+    The shapes these tests need cannot be produced by ``to_file`` any more,
+    which is the point of M1 -- but ``from_file`` still reads untrusted input,
+    so it has to keep refusing them.
+    """
+    np.savez_compressed(
+        str(path),
+        comparison_name=np.array("fingerprint"),
+        params_json=np.array(json.dumps({})),
+        labels=np.array([]),
+        num_samples=np.array(num_samples),
+        storage_kind=np.array("sparse"),
+        sparse_cutoff=np.array(cutoff, dtype=np.float64),
+        sparse_i=np.array(rows, dtype=np.int64),
+        sparse_j=np.array(cols, dtype=np.int64),
+        sparse_v=np.array(values, dtype=np.float64),
+    )
+
+
+def test_to_file_refuses_a_sparse_matrix_from_file_would_refuse(tmp_path):
+    """A silent write followed by a hard read failure is the worst shape.
+
+    ``SparseStorage::Set`` guards ``i != j`` with a bare ``assert``, compiled
+    out of this build, so a diagonal entry reaches ``Entries()`` and used to be
+    written happily -- then refused by ``from_file`` on the next load, by which
+    time the caller had already thrown the matrix away. The refusal has to come
+    at the write, and before the file exists.
+    """
+    path = tmp_path / "poked.npz"
+    sparse = _sparse_matrix()
+    sparse.storage.Set(2, 2, 0.11)
+    sparse.storage.Finalize()
+    with pytest.raises(ValueError,
+                       match=r"not a pair of distinct indices below 6"):
+        sparse.to_file(str(path))
+    assert not path.exists()
+
+
+def test_what_to_file_accepts_from_file_accepts(tmp_path):
+    """The two sides run one shared rule, so they cannot drift apart.
+
+    Round 7 put the check only on the load side, which made agreement a hope
+    rather than a guarantee. Cutoffs are swept because the cutoff is the one
+    file field the write side derives from the storage it is saving.
+    """
+    for cutoff in (0.1, 0.5, 0.9, 1.0):
+        path = tmp_path / f"clean_{cutoff}.npz"
+        sparse = oecluster.pdist(_mols(), "fingerprint", cutoff=cutoff)
+        assert isinstance(sparse.storage, oecluster.SparseStorage)
+        sparse.to_file(str(path))
+        loaded = oecluster.load_distance_matrix(str(path))
+        assert loaded.storage._entries() == sparse.storage._entries()
+
+
+@pytest.mark.parametrize("value", [float('-inf'), float('nan')])
+def test_poisoned_sparse_storage_round_trips_and_the_gate_still_refuses(
+        tmp_path, value):
+    """The write-side guard must not seize the refusal the metric gate owns.
+
+    ``to_file`` validates before writing now, so this pins where that rule
+    stops: at replay fidelity. A non-finite entry is a legal thing to store, so
+    it is written, reloaded unchanged, and convicted by the gate -- with a
+    message about the data -- rather than by the file format.
+    """
+    path = tmp_path / "poisoned.npz"
+    sparse = _finalized_sparse(value)
+    sparse.to_file(str(path))
+
+    loaded = oecluster.load_distance_matrix(str(path))
+    assert isinstance(loaded.storage, oecluster.SparseStorage)
+    assert not math.isfinite(loaded.storage.Get(3, 0))
+    assert len(loaded.storage._entries()) == len(sparse.storage._entries())
+
+    with pytest.raises(ValueError, match="non-finite entries"):
+        oecluster.butina(loaded, 0.5)
+    with pytest.raises(ValueError, match="cannot be overridden"):
+        oecluster.butina(loaded, 0.5, allow_nonmetric=True)
+
+
+def test_one_nan_entry_does_not_switch_off_the_cutoff_guard(tmp_path):
+    """``values.max()`` propagates NaN, and ``nan > cutoff`` is False.
+
+    So a single NaN turned the whole guard off, and the over-cutoff value it
+    was hiding was then dropped by ``Set``: the matrix loaded was not the
+    matrix in the file, which is precisely what the guard exists to prevent.
+    """
+    path = tmp_path / "nan_and_over.npz"
+    _write_sparse_file(path, num_samples=3, cutoff=0.5, rows=(0, 1),
+                       cols=(1, 2), values=(float('nan'), 0.9))
+    with pytest.raises(ValueError, match=r"sparse entry 1 has value 0\.9"):
+        oecluster.load_distance_matrix(str(path))
+
+
+def test_a_nan_below_the_cutoff_is_still_loaded(tmp_path):
+    """Not an over-refusal: NaN stays a legal sparse entry value.
+
+    Refusing it in the file format would be a second, earlier refusal for data
+    the metric gate already handles, and would break the round trip the gate's
+    own sparse tests depend on.
+    """
+    path = tmp_path / "nan_only.npz"
+    _write_sparse_file(path, num_samples=3, cutoff=0.5, rows=(0, 1),
+                       cols=(1, 2), values=(float('nan'), 0.2))
+    loaded = oecluster.load_distance_matrix(str(path))
+    entries = loaded.storage._entries()
+    assert [(e[0], e[1]) for e in entries] == [(0, 1), (1, 2)]
+    assert math.isnan(entries[0][2])
+    with pytest.raises(ValueError, match="non-finite entries"):
+        oecluster.butina(loaded, 0.5)
+
+
+def test_a_negative_sparse_index_is_a_value_error(tmp_path):
+    """``from_file`` documents ValueError; this shape reached SWIG instead.
+
+    The old bound check tested only ``.max()``, so ``-1`` passed it, reached
+    the replay loop and came back as an ``OverflowError`` about a ``size_t``
+    argument of a method the caller never named.
+    """
+    path = tmp_path / "negative.npz"
+    _write_sparse_file(path, num_samples=3, rows=(-1,), cols=(1,))
+    with pytest.raises(ValueError, match=r"sparse entry 0 is \(-1, 1\)"):
+        oecluster.load_distance_matrix(str(path))
+
+
+def test_a_two_dimensional_sparse_index_array_is_a_value_error(tmp_path):
+    """The other escape from the documented type, previously a TypeError."""
+    path = tmp_path / "twod.npz"
+    _write_sparse_file(path, num_samples=3, rows=((0,),), cols=((1,),),
+                       values=((0.1,),))
+    with pytest.raises(ValueError,
+                       match="sparse_i must be a 1-D array, not 2-D"):
+        oecluster.load_distance_matrix(str(path))
+
+
 def test_a_dense_file_without_storage_kind_still_loads_as_dense(tmp_path):
     """Absence of the new keys means dense, so 4.x files load unchanged."""
     path = tmp_path / "legacy_dense.npz"
