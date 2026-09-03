@@ -996,13 +996,17 @@ def test_sparse_storage_rejected_before_gate_in_cluster_report():
 
 
 def test_storage_get_refuses_an_out_of_range_index():
-    """An unchecked Get read past the buffer instead of refusing.
+    """An unchecked Get answered with a wrong number instead of refusing.
 
-    Every backend computed a condensed index and dereferenced it, so the
-    values these calls returned -- ``0.0``, or on one probe an uninitialised
-    denormal -- came from outside the allocation. The diagonal cases matter
-    separately: the ``i == j`` shortcut answered ``0.0`` for indices naming no
-    item at all.
+    Which wrong number depended on the backend and the index. The dense probes
+    all compute an index past a one-element buffer, so those did read outside
+    the allocation, returning ``0.0`` -- and on one probe an uninitialised
+    denormal, which varied between runs and so is one possibility rather than
+    the behaviour. ``SparseStorage::Get`` never reads out of bounds at all: it
+    looks the pair up, and ``(0, 6)`` computes index 5, which is the stored
+    ``(1, 2)`` pair, so it answered ``0.5`` -- a real distance between the
+    wrong two items. The diagonal cases are separate again: the ``i == j``
+    shortcut answered ``0.0`` for indices naming no item at all.
     """
     dense = oecluster.pdist(_mols()[:2], "fingerprint")
     assert dense.num_samples == 2

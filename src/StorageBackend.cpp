@@ -37,7 +37,7 @@ namespace {
  * message temporaries would otherwise force exception cleanup paths into
  * every Get, which measured a third slower on a Get-bound workload than the
  * two comparisons themselves cost. The wording follows
- * ``detail::validate_cluster_members`` in Representative.cpp.
+ * ``detail::validate_cluster_members`` in clustering/DistanceAccess.h.
  *
  * :param backend: Storage class name, used in the message.
  * :param index: The offending index.
@@ -54,9 +54,14 @@ namespace {
 /**
  * @brief Refuse a Get whose indices fall outside the stored sample range.
  *
- * Every backend computes a condensed index from the pair and dereferences it,
- * so an out-of-range index reads past the buffer -- past the mapping, for
- * MMapStorage -- rather than producing a wrong number.
+ * An out-of-range index yields a wrong answer, not a diagnosable failure, and
+ * which one depends on the backend and the index. DenseStorage and MMapStorage
+ * dereference the computed index, so past the end they read outside the
+ * allocation -- which for MMapStorage can run past the mapping -- while inside
+ * it they return whatever real pair the index collides with
+ * (CondensedIndex(4, 0, 4) == 3 == CondensedIndex(4, 1, 2)). SparseStorage
+ * dereferences nothing: its lookup collides the same way, or misses and
+ * reports a bogus "not stored" 0.0. Each answers about a nonexistent item.
  *
  * :param backend: Storage class name, used in the message.
  * :param i: Index of first item.

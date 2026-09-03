@@ -41,7 +41,8 @@ public:
      * @brief Retrieve a distance value for a pair of items.
      *
      * Handles symmetry automatically: Get(i, j) == Get(j, i).
-     * Diagonal elements (i == j) always return 0.0.
+     * Diagonal elements (i == j) return 0.0 for in-range indices; an
+     * out-of-range diagonal raises, per the clause below.
      *
      * :param i: Index of first item.
      * :param j: Index of second item.
