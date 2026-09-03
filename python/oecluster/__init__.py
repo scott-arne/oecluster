@@ -76,6 +76,8 @@ __all__ = [
     "FingerprintComparison",
     "ROCSComparison",
     "SuperposeComparison",
+    "DescriptorComparison",
+    "descriptor_statistics",
 ]
 
 
@@ -656,6 +658,7 @@ Options for parallel pairwise-distance computation.
 :ivar progress: Optional callback(completed, total) for progress reporting.
 """
 
+from .oecluster import DescriptorComparison as _DescriptorComparison
 from .oecluster import FingerprintComparison as _FingerprintComparison
 from .oecluster import FingerprintOptions
 from .oecluster import ROCSComparison as _ROCSComparison
@@ -1587,7 +1590,7 @@ def pdist(items,
 
     :param items: List of molecules, design units, or other items.
     :param comparison: Comparison method: "fingerprint", "rocs", "superpose",
-                       "sitehopper", or a C++ comparison object.
+                       "sitehopper", "descriptor", or a C++ comparison object.
     :param similarity: Return similarities instead of distances.
     :param num_threads: Number of threads (0 = auto).
     :param chunk_size: Pairs per work unit.
@@ -1601,6 +1604,13 @@ def pdist(items,
     if isinstance(comparison, str):
         items, excluded = _comparisons.normalize_items(
             comparison, items, kwargs)
+        # Only when normalization is what emptied the list. An input that
+        # arrived empty is a separate case that pdist has always answered with
+        # a 0-sample matrix, and ``excluded and`` is what keeps it answering.
+        if excluded and len(items) == 0:
+            raise ValueError(
+                "pdist requires a non-empty input set, but normalizing the "
+                f"inputs for the {comparison!r} comparison left 0 items")
         labels = _comparisons.extract_labels(items)
         comparison_obj, comparison_name, params = _comparisons.build_comparison(
             items, comparison, similarity, kwargs, symmetric=True)
@@ -1656,8 +1666,8 @@ def cdist(items_a, items_b, comparison, *,
     :param items_a: Reference items (rows of the result).
     :param items_b: Fit items (columns of the result).
     :param comparison: Comparison method name: "fingerprint", "rocs", "superpose",
-                       or "sitehopper". Prebuilt comparison objects are not
-                       supported.
+                       "sitehopper", or "descriptor". Prebuilt comparison objects
+                       are not supported.
     :param similarity: Return similarities instead of distances.
     :param num_threads: Number of threads (0 = auto).
     :param chunk_size: Pairs per work unit.
@@ -2861,6 +2871,61 @@ def compare_reports(*reports):
     return ClusterReportComparison(reports)
 
 
+def descriptor_statistics(mols, *, sources=None, columns=None, groups=None,
+                          inverse_covariance=False):
+    """
+    Compute per-column descriptor statistics over a molecule set.
+
+    The statistics are the ones the descriptor comparison fits internally, so
+    computing them here and passing ``variances=`` back to :func:`pdist` gives
+    a reusable, explicitly scoped standardization.
+
+    :param mols: List of OEMolBase molecules.
+    :param sources: Descriptor source names: "openeye" (default), "mordred",
+        or "rdkit".
+    :param columns: Optional explicit column names to restrict to.
+    :param groups: Optional descriptor group names to restrict to.
+    :param inverse_covariance: Also compute the pseudo-inverse covariance over
+        the surviving columns, for use with ``metric="mahalanobis"``.
+    :returns: Dict with keys ``columns``, ``mean``, ``variance``, ``minimum``,
+        ``maximum``, ``present_count``, ``dropped`` (a list of
+        ``(name, reason)`` pairs), ``num_rows``, ``inverse_covariance``
+        (a ``(k, k)`` array or None), and ``inverse_covariance_rank``.
+    :raises RuntimeError: If a source, column, or group name is unknown.
+    """
+    options = _oecluster.DescriptorStatisticsOptions()
+    if sources is not None:
+        options.sources = _comparisons._string_vector(sources)
+    if columns is not None:
+        options.columns = _comparisons._string_vector(columns)
+    if groups is not None:
+        options.groups = _comparisons._string_vector(groups)
+    options.inverse_covariance = bool(inverse_covariance)
+
+    native = _oecluster.descriptor_statistics(mols, options)
+
+    names = list(native.columns)
+    result = {
+        'columns': names,
+        'mean': list(native.mean),
+        'variance': list(native.variance),
+        'minimum': list(native.minimum),
+        'maximum': list(native.maximum),
+        'present_count': [int(count) for count in native.present_count],
+        'dropped': list(zip(list(native.dropped_columns),
+                            list(native.dropped_reasons))),
+        'num_rows': int(native.num_rows),
+        'inverse_covariance': None,
+        'inverse_covariance_rank': int(native.inverse_covariance_rank),
+    }
+
+    flat = list(native.inverse_covariance)
+    if flat:
+        k = len(names)
+        result['inverse_covariance'] = np.array(flat).reshape(k, k)
+    return result
+
+
 # Python wrapper classes for comparison construction
 class FingerprintComparison:
     """Fingerprint-based comparison using OEFP scalar metrics."""
@@ -2946,3 +3011,48 @@ class SuperposeComparison:
         if fit_predicate is not None:
             opts.fit_predicate = fit_predicate
         return _SuperposeComparison(items, opts)
+
+
+class DescriptorComparison:
+    """Distance in standardized molecular-descriptor space.
+
+    The molecules are taken as given. Unlike ``pdist(mols, "descriptor")``,
+    which resolves the complete-case mask before it fixes the item list, this
+    constructor applies no filtering: a prebuilt comparison object fixes its
+    own size.
+    """
+
+    def __new__(cls, mols, *, sources=None, columns=None, groups=None,
+                metric=None, variances=None, inverse_covariance=None,
+                missing=None, p=None):
+        """
+        Construct a DescriptorComparison.
+
+        :param mols: List of OEMolBase molecules.
+        :param sources: Descriptor source names; defaults to ["openeye"].
+        :param columns: Optional explicit column names.
+        :param groups: Optional descriptor group names.
+        :param metric: Descriptor metric name; defaults to
+            "standardized_euclidean".
+        :param variances: Explicit per-column variances, bypassing the pooled
+            fit. Requires an explicit ``columns`` list of the same length.
+        :param inverse_covariance: Explicit inverse covariance for
+            "mahalanobis", bypassing the pooled fit.
+        :param missing: Missing-value policy: "complete_case" (default),
+            "propagate", or "ignore".
+        :param p: Minkowski order.
+        :returns: C++ DescriptorComparison object.
+        :raises RuntimeError: If an option value is rejected by the C++ layer.
+        """
+        kwargs = {
+            'sources': sources,
+            'columns': columns,
+            'groups': groups,
+            'metric': metric,
+            'variances': variances,
+            'inverse_covariance': inverse_covariance,
+            'missing': missing,
+            'p': p,
+        }
+        return _DescriptorComparison(mols,
+                                     _comparisons.descriptor_options(kwargs))

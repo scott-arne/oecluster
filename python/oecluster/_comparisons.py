@@ -13,9 +13,17 @@ step (conformer expansion, complete-case filtering) without ``pdist`` and
 from collections.abc import Callable
 from typing import Any
 
+import numpy as np
+
 from . import oecluster as _oecluster
+from .oecluster import DescriptorComparison as _DescriptorComparison
+from .oecluster import (
+    DescriptorOptions,
+    FingerprintOptions,
+    ROCSOptions,
+    SuperposeOptions,
+)
 from .oecluster import FingerprintComparison as _FingerprintComparison
-from .oecluster import FingerprintOptions, ROCSOptions, SuperposeOptions
 from .oecluster import ROCSComparison as _ROCSComparison
 from .oecluster import SuperposeComparison as _SuperposeComparison
 
@@ -457,6 +465,99 @@ def _build_superpose(items, similarity, kwargs, symmetric, *, default_method):
     return comparison_obj, comparison_obj.ComparisonName()
 
 
+def _string_vector(values):
+    """Convert a Python sequence into a SWIG ``StringVector``."""
+    vector = _oecluster.StringVector()
+    for value in values:
+        vector.push_back(str(value))
+    return vector
+
+
+def _double_vector(values):
+    """Convert a Python sequence into a SWIG ``DoubleVector``."""
+    vector = _oecluster.DoubleVector()
+    for value in values:
+        vector.push_back(float(value))
+    return vector
+
+
+_DESCRIPTOR_KEYS = (
+    'sources',
+    'columns',
+    'groups',
+    'metric',
+    'variances',
+    'inverse_covariance',
+    'missing',
+    'p',
+)
+
+
+def descriptor_options(kwargs):
+    """
+    Build a :class:`DescriptorOptions` from keyword options.
+
+    Reads ``kwargs`` without consuming it, because the normalizer runs before
+    the builder and both need the same options.
+
+    :param kwargs: Comparison keyword options.
+    :returns: A populated ``DescriptorOptions``.
+    """
+    opts = DescriptorOptions()
+    if kwargs.get('sources') is not None:
+        opts.sources = _string_vector(kwargs['sources'])
+    if kwargs.get('columns') is not None:
+        opts.columns = _string_vector(kwargs['columns'])
+    if kwargs.get('groups') is not None:
+        opts.groups = _string_vector(kwargs['groups'])
+    if kwargs.get('metric') is not None:
+        opts.metric = str(kwargs['metric'])
+    if kwargs.get('variances') is not None:
+        opts.variances = _double_vector(kwargs['variances'])
+    if kwargs.get('inverse_covariance') is not None:
+        opts.inverse_covariance = _double_vector(
+            np.asarray(kwargs['inverse_covariance'], dtype=np.float64).ravel())
+    if kwargs.get('missing') is not None:
+        opts.missing = str(kwargs['missing']).lower()
+    if kwargs.get('p') is not None:
+        opts.p = float(kwargs['p'])
+    return opts
+
+
+def _normalize_descriptor(items, kwargs):
+    """Drop molecules missing a descriptor value under the complete-case policy."""
+    policy = str(kwargs.get('missing') or 'complete_case').lower()
+    if policy != 'complete_case':
+        return items, []
+
+    excluded = sorted(
+        int(index) for index in _oecluster.descriptor_excluded_indices(
+            items, descriptor_options(kwargs)))
+    if not excluded:
+        return items, []
+
+    dropped = set(excluded)
+    kept = [item for idx, item in enumerate(items) if idx not in dropped]
+    return kept, [[idx, "missing-descriptor"] for idx in excluded]
+
+
+def _build_descriptor(items, similarity, kwargs, symmetric):
+    """Build a :class:`DescriptorComparison` from keyword options."""
+    if similarity:
+        raise ValueError(
+            "the descriptor comparison has no similarity form: it measures "
+            "distance in descriptor space. Use similarity=False.")
+
+    opts = descriptor_options(kwargs)
+    for key in _DESCRIPTOR_KEYS:
+        kwargs.pop(key, None)
+    if kwargs:
+        raise TypeError(
+            f"Unknown kwargs for descriptor comparison: {list(kwargs)}")
+
+    return _DescriptorComparison(items, opts), "descriptor"
+
+
 register_comparison("fingerprint", _build_fingerprint)
 register_comparison("rocs", _build_rocs)
 register_comparison(
@@ -467,3 +568,4 @@ register_comparison(
     "sitehopper",
     lambda items, similarity, kwargs, symmetric: _build_superpose(
         items, similarity, kwargs, symmetric, default_method="sitehopper"))
+register_comparison("descriptor", _build_descriptor, _normalize_descriptor)
