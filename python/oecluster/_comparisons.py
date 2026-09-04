@@ -308,10 +308,13 @@ def reject_inapplicable_fingerprint_kwargs(named, *, fp_type, storage, metric):
     Only the Python surface can apply these rules. C++ receives a fully
     populated struct and cannot tell a deliberate value from a default, so it
     ignores unused fields instead -- a default-constructed ``FingerprintOptions``
-    must stay a working Morgan configuration. Every message names both the
-    option that would have been silently ignored and the one that replaces it.
+    must stay a working Morgan configuration. Every message names the option
+    that would have been silently ignored together with the setting that made
+    it inert, and offers a way out -- a replacement option to pass, or the
+    setting to change.
 
-    ``use_chirality`` applies to all four families and is never rejected.
+    ``use_chirality`` applies to all three families and is never rejected.
+    Six spellings fold onto those three; see ``_FAMILY_ALIASES``.
 
     Every rule here is advisory: it reports an option C++ accepts and silently
     ignores. Callers reach this function only after the C++ constructor has
@@ -616,13 +619,16 @@ def _validate_descriptor(similarity, kwargs):
     # no molecules in hand, which is what lets it run before the
     # filter -- including the rules matching ``variances`` and
     # ``inverse_covariance`` to the selected columns, since the schema comes
-    # from ``sources`` alone. It stops short of the source, column and group
-    # names on a request with no override: resolving those needs a schema, and
-    # with no override nothing on that path asks for one to be built, so C++
-    # reports them further down instead. Everything else left downstream reads
-    # the input; among those, the minimum input size, the complete-case row
-    # check, the refusal when every selected column is constant. None of it can
-    # be decided here.
+    # from ``sources`` alone. One of those is the semidefinite verdict on an
+    # ``inverse_covariance`` override, which costs an eigendecomposition and is
+    # paid again by ``descriptor_excluded_indices`` and by the constructor,
+    # neither of which reuses this one. It stops short of the source, column
+    # and group names on a request with no override: resolving those needs a
+    # schema, and with no override nothing on that path asks for one to be
+    # built, so C++ reports them further down instead. Everything else left
+    # downstream reads the input; among those, the minimum input size, the
+    # complete-case row check, the refusal when every selected column is
+    # constant. None of it can be decided here.
     _oecluster.validate_descriptor_options(descriptor_options(kwargs))
 
 

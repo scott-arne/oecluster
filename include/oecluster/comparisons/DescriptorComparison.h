@@ -29,7 +29,9 @@ struct DescriptorOptions {
     std::vector<std::string> groups;   ///< Group names, unioned with ``columns``.
     std::string metric = "standardized_euclidean";
     std::vector<double> variances;          ///< standardized_euclidean override.
-    std::vector<double> inverse_covariance; ///< mahalanobis override, row-major square.
+    /// mahalanobis override, row-major square. Read as (M + M^T) / 2, so
+    /// asymmetry alone is not a refusal: the symmetric part is what is judged.
+    std::vector<double> inverse_covariance;
     std::string missing = "complete_case";  ///< complete_case | propagate | ignore.
     double p = 2.0;                         ///< Minkowski order.
 };
@@ -143,6 +145,11 @@ std::vector<size_t> descriptor_excluded_indices(const std::vector<OEChem::OEMolB
  * override, because this function builds no calculator on that path and so
  * resolves no schema.
  *
+ * The semidefinite verdict on a ``mahalanobis`` override is OEFP's own,
+ * obtained by scoring a two-row probe rather than by keeping a second copy of
+ * the rule here. It costs an eigendecomposition of the supplied matrix, so it
+ * runs last and is skipped whenever a cheaper rule has already refused.
+ *
  * It is exposed because a caller may filter its input before constructing --
  * ``descriptor_excluded_indices`` is the intended route, and calls this itself
  * -- and a filter that empties the input would otherwise report the empty
@@ -157,8 +164,9 @@ std::vector<size_t> descriptor_excluded_indices(const std::vector<OEChem::OEMolB
  *     belong to the chosen metric; ``missing='ignore'`` is paired with a
  *     fitted metric; or, when an override is supplied, a source, column or
  *     group is unknown, ``columns`` is not in ascending schema order, the
- *     override's length does not match the selection, or an override entry is
- *     not finite (variances must also be strictly positive).
+ *     override's length does not match the selection, an override entry is
+ *     not finite (variances must also be strictly positive), or a
+ *     ``mahalanobis`` inverse covariance is not positive semidefinite.
  */
 void validate_descriptor_options(const DescriptorOptions& opts);
 

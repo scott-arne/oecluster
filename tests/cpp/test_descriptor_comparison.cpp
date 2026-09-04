@@ -28,21 +28,24 @@ std::string refusal_message(Callable&& call) {
     return std::string();
 }
 
-/// The option mistakes ``validate_descriptor_options`` refuses. Some need the
-/// descriptor schema, which is resolved from the source names alone, so they
-/// belong here too. Shared by the two halves of the extraction test: the
-/// validator must catch each one, and the constructor must still report each
-/// one with the same words.
+/// Option mistakes ``validate_descriptor_options`` refuses, paired with options
+/// that produce each. Some need the descriptor schema, which is resolved from
+/// the source names alone, so they belong here too. Shared by the two halves of
+/// the extraction test: the validator must catch each one, and the constructor
+/// must still report each one with the same words.
 ///
-/// Not every mistake that needs no molecules to detect: an unknown source,
-/// column or group name needs none either, but on a request with no override
-/// nothing asks for a schema to be built, so the validator accepts it and the
-/// name is reported downstream. TheSchemaIsResolvedOnlyWhenAnOverrideNeedsIt
-/// below is where that boundary is pinned.
+/// Neither a complete list of what the validator refuses nor of what needs no
+/// molecules. An unknown source, column or group name needs none either, and
+/// what the validator does with one depends on the override: with none it
+/// accepts, and the name is reported downstream; with one supplied it refuses
+/// the name here. Both halves are pinned by
+/// TheSchemaIsResolvedOnlyWhenAnOverrideNeedsIt below, not by this table.
 ///
-/// This table is the only thing that detects a rule growing a second copy, and
-/// it detects it only for the cases it lists, so a rule hoisted into the
-/// validator has to be added here or the drift it invites goes unmeasured.
+/// What this table detects is a rule the validator has *lost*: the constructor
+/// still refuses, the validator returns no message, and the two strings stop
+/// matching. It does not detect the reverse. A duplicate rule added to the
+/// constructor below its validate call is unreachable for every case listed
+/// here, because the validator refuses each of them first.
 std::vector<std::pair<std::string, DescriptorOptions>> molecule_independent_mistakes() {
     std::vector<std::pair<std::string, DescriptorOptions>> cases;
 
@@ -82,9 +85,12 @@ std::vector<std::pair<std::string, DescriptorOptions>> molecule_independent_mist
     ignore_on_fitted.missing = "ignore";  // metric defaults to standardized_euclidean
     cases.emplace_back("ignore under a fitted metric", ignore_on_fitted);
 
-    // The six cases below cover the five rules that match an override to the
-    // resolved selection. Each needs the schema; none needs a molecule. Where
-    // the fault is an entry's value rather than an array's length, ``columns``
+    // The seven cases below cover the six rules applied once the selection is
+    // resolved: the caller's column order, the two length rules, the two
+    // entry-value rules, and the semidefinite verdict. None needs a molecule.
+    // All but the inverse_covariance finiteness rule read the schema; that one
+    // is applied there only to keep it beside the length rule it follows. Where
+    // the fault is in the override's values rather than its length, ``columns``
     // is named explicitly, which keeps the case independent of how many columns
     // the default selection happens to have.
     DescriptorOptions variances_length;
@@ -112,6 +118,12 @@ std::vector<std::pair<std::string, DescriptorOptions>> molecule_independent_mist
     non_finite_inverse.inverse_covariance = {std::numeric_limits<double>::quiet_NaN(), 0.0, 0.0,
                                              1.0};
     cases.emplace_back("a non-finite inverse_covariance entry", non_finite_inverse);
+
+    DescriptorOptions non_semidefinite_inverse;
+    non_semidefinite_inverse.metric = "mahalanobis";
+    non_semidefinite_inverse.columns = {"MolecularWeight", "XLogP"};
+    non_semidefinite_inverse.inverse_covariance = {-1.0, 0.0, 0.0, -1.0};
+    cases.emplace_back("a non-semidefinite inverse_covariance", non_semidefinite_inverse);
 
     DescriptorOptions descending_columns;
     descending_columns.columns = {"XLogP", "MolecularWeight"};
@@ -442,6 +454,10 @@ TEST(DescriptorOptionValidationTest, TheSchemaIsResolvedOnlyWhenAnOverrideNeedsI
     unknown_column.columns = {"NoSuchColumn"};
     EXPECT_NO_THROW(validate_descriptor_options(unknown_column));
 
+    DescriptorOptions unknown_group;
+    unknown_group.groups = {"nosuchgroup"};
+    EXPECT_NO_THROW(validate_descriptor_options(unknown_group));
+
     // With an override the schema has to be resolved, so the same names are
     // reported here instead. Same message either way; only the messenger moves.
     unknown_source.variances = {1.0};
@@ -452,6 +468,46 @@ TEST(DescriptorOptionValidationTest, TheSchemaIsResolvedOnlyWhenAnOverrideNeedsI
     unknown_column.variances = {1.0};
     EXPECT_NE(refusal_message([&] { validate_descriptor_options(unknown_column); })
                   .find("Unknown descriptor column: NoSuchColumn"),
+              std::string::npos);
+
+    unknown_group.variances = {1.0};
+    EXPECT_NE(refusal_message([&] { validate_descriptor_options(unknown_group); })
+                  .find("Unknown or empty descriptor group: nosuchgroup"),
+              std::string::npos);
+}
+
+TEST(DescriptorOptionValidationTest, ANonSemidefiniteInverseCovarianceIsRefusedWithoutMolecules) {
+    // The verdict is read off an eigendecomposition, which only OEFP performs,
+    // so the validator obtains it by scoring a probe rather than by keeping a
+    // copy of the rule. Left to the first real scoring call it would surface
+    // long after the call that supplied the matrix, and through a wrapper that
+    // blames the pdist.
+    DescriptorOptions opts;
+    opts.metric = "mahalanobis";
+    opts.columns = {"MolecularWeight", "XLogP"};
+    opts.inverse_covariance = {-1.0, 0.0, 0.0, -1.0};
+    EXPECT_NE(refusal_message([&] { validate_descriptor_options(opts); })
+                  .find("positive semidefinite"),
+              std::string::npos);
+
+    // Indefinite with a positive diagonal, so a diagonal-only screen would wave
+    // it through; separating it takes a verdict on the matrix as a whole.
+    opts.inverse_covariance = {1.0, 2.0, 2.0, 1.0};
+    EXPECT_NE(refusal_message([&] { validate_descriptor_options(opts); })
+                  .find("positive semidefinite"),
+              std::string::npos);
+
+    // An asymmetric matrix is read as (M + M^T) / 2 rather than refused, so it
+    // is accepted whenever that symmetric part qualifies. Refusing here would
+    // reject a matrix OEFP goes on to score.
+    opts.inverse_covariance = {1.0, 0.5, -0.5, 1.0};
+    EXPECT_NO_THROW(validate_descriptor_options(opts));
+
+    // A cheaper rule still outranks it. The decomposition is the most expensive
+    // check here, and a caller whose matrix is also the wrong shape has to fix
+    // the shape first.
+    opts.inverse_covariance = {-1.0, 0.0, 0.0};
+    EXPECT_NE(refusal_message([&] { validate_descriptor_options(opts); }).find("square 2x2"),
               std::string::npos);
 }
 
@@ -727,9 +783,12 @@ TEST_F(DescriptorMissingnessTest, IgnoreEscalatesToNaNPresentWhenNaNActuallyReac
 
 // A gap that is present-and-NaN rather than absent, on the direct constructor
 // path that bypasses the Python normalizer. This is the case the validation
-// ordering exists for, and no test above reaches it: every gap in the fixture
-// above is absent-typed, so XLogP keeps a finite variance and the row check
-// fires no matter when it runs.
+// ordering exists for, and no test above reaches it -- though not for want of a
+// present-and-NaN gap. The missingness fixture has one, FractionCsp3 on its six
+// untyped species. It also has an absent gap on those same six rows, XLogP, so
+// the row check fires whether it runs before or after the zero-variance drop
+// removes FractionCsp3. Isolating the ordering needs a fixture whose only gap
+// is the present-and-NaN one, which is what this one is.
 //
 // Measured against OEFP 0.3.0 and OpenEye 2026.1.0 over water plus the five
 // organics: zero absent cells, exactly one present-and-NaN cell (FractionCsp3

@@ -321,6 +321,10 @@ UNRESCUABLE = [
     ({'metric': "mahalanobis", 'columns': ["MolecularWeight", "XLogP"],
       'inverse_covariance': [float("nan"), 0.0, 0.0, 1.0]},
      r"inverse_covariance\[0\] must be finite, got nan"),
+    # Indefinite with a positive diagonal, so only the eigenvalues refuse it.
+    ({'metric': "mahalanobis", 'columns': ["MolecularWeight", "XLogP"],
+      'inverse_covariance': [1.0, 2.0, 2.0, 1.0]},
+     "positive semidefinite"),
     ({'columns': ["XLogP", "MolecularWeight"], 'variances': [1.5, 2.5]},
      "columns must be in ascending schema order"),
 ]
@@ -399,10 +403,11 @@ def test_an_emptied_input_is_still_refused_when_the_arguments_are_valid():
     With nothing wrong in the arguments there is no authoritative error to
     outrank, so the emptied-list message is the right one and must survive.
     Over-refusing is the same size of defect as under-refusing, so two
-    well-formed overrides are checked too. Between them they satisfy all five
-    of the schema-matched override rules -- ascending columns, matching
-    length, finite and positive entries, on both the ``variances`` and the
-    ``inverse_covariance`` side -- and must still lose to the emptied input.
+    well-formed overrides are checked too. Between them they satisfy every
+    override rule that waits on the resolved selection -- ascending columns,
+    matching length, finite and positive entries, on both the ``variances``
+    and the ``inverse_covariance`` side, and the semidefinite verdict on the
+    latter -- and must still lose to the emptied input.
     """
     untyped = _mols(["[Na+]", "[Fe]", "[He]"])
     stats = oecluster.descriptor_statistics(_mols(), inverse_covariance=True)

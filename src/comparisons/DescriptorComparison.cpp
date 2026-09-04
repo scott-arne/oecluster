@@ -10,6 +10,7 @@
 #include <cctype>
 #include <cmath>
 #include <exception>
+#include <stdexcept>
 #include <oechem.h>
 #include <oefp/oefp.h>
 #include "../DescriptorBuild.h"
@@ -90,14 +91,16 @@ void require_complete_rows(const OEFP::DescriptorNumericMatrix& matrix) {
     }
 }
 
-/// Apply the five schema-matched override rules against an already-resolved
-/// selection. Other rules also govern an override -- mutual exclusion, and
-/// each override's tie to its metric -- but those read nothing but the
-/// options and so are settled before the schema exists.
+/// Apply the override rules that come after the selection is resolved. Most
+/// need it: the caller's column order, the two length rules, the per-column
+/// variance rule, and the semidefinite verdict, which needs the column count
+/// to read the override as a square. The inverse_covariance finiteness loop
+/// needs only the options and sits here to stay beside the length rule it
+/// follows.
 ///
-/// Separated from the rules that read nothing but the options so that
-/// ``validate_descriptor_options`` can show, in one glance, which half of its
-/// work needs the schema resolved and which does not.
+/// The split is on where the selection becomes available, not on what each
+/// rule reads, so that ``validate_descriptor_options`` shows in one glance
+/// where it starts paying for a schema.
 void check_override_against_selection(const OEFP::DescriptorSchema& schema,
                                       const std::vector<size_t>& selection,
                                       const DescriptorOptions& opts) {
@@ -170,6 +173,27 @@ void check_override_against_selection(const OEFP::DescriptorSchema& schema,
                                   std::to_string(opts.inverse_covariance[k]));
         }
     }
+
+    // The semidefinite verdict is read off an eigendecomposition inside OEFP's
+    // scoring path, so there is no rule here to restate: this is a two-row
+    // scoring call made only for the refusal it can raise. Without it a
+    // non-semidefinite matrix that is finite, square and correctly ordered
+    // still fails at the first distance -- the kind of report far from the
+    // mistake that the checks above exist to avoid.
+    // Runs last so that no rule with a cheaper verdict is pre-empted,
+    // and the decomposition is skipped entirely whenever one of them fires.
+    if (metric_name == "mahalanobis") {
+        const std::vector<double> probe(2 * selection.size(), 0.0);
+        try {
+            OEFP::PDistNumeric(probe.data(), nullptr, 2, selection.size(),
+                               OEFP::Metric::Mahalanobis(opts.inverse_covariance),
+                               OEFP::DescriptorMissingPolicy::Propagate);
+        } catch (const std::invalid_argument& exc) {
+            throw ComparisonError("inverse_covariance was rejected: " + std::string(exc.what()) +
+                                  " Pass inverse_covariance=stats.inverse_covariance from "
+                                  "descriptor_statistics rather than building the matrix by hand");
+        }
+    }
 }
 
 }  // namespace
@@ -214,13 +238,16 @@ void validate_descriptor_options(const DescriptorOptions& opts) {
     params.p = opts.p;
     check_metric_request(metric_name, false, params, MetricSurface::Descriptor);
 
-    // The remaining rules all belong to an override, and an override is matched
-    // to the resolved selection by position, so they need the schema -- which
-    // comes from opts.sources alone and never from a molecule. Resolving it
-    // here is what lets a mistake no molecule set could rescue be refused
-    // before a filter that can empty the item list. Without an override there
-    // is nothing here to check, so the calculator is not built at all: that is
-    // the common path and it must not start paying for a schema no rule reads.
+    // What is left runs only when an override is supplied, and an override is
+    // matched to the resolved selection by position, so it needs the schema --
+    // which comes from opts.sources alone and never from a molecule. Building
+    // that schema also refuses an unknown source, column or group name; that is
+    // not an override rule, but it is reported from here because the override
+    // is what asked for the schema. Resolving it here is what lets a mistake no
+    // molecule set could rescue be refused before a filter that can empty the
+    // item list. Without an override there is nothing here to check, so the
+    // calculator is not built at all: that is the common path and it must not
+    // start paying for a schema no rule reads.
     const bool has_override = !opts.variances.empty() || !opts.inverse_covariance.empty();
     if (!has_override) {
         return;
@@ -322,10 +349,11 @@ DescriptorComparison::DescriptorComparison(const std::vector<OEChem::OEMolBase*>
         }
 
         if (has_override) {
-            // Every rule an override has to satisfy was applied by
-            // validate_descriptor_options above, against the selection this
-            // same schema resolves. Repeating one here would be the second copy
-            // that later drifts.
+            // validate_descriptor_options ran above against the selection this
+            // same schema resolves, semidefinite verdict included -- it gets
+            // that one by handing OEFP a two-row probe rather than by owning a
+            // copy of the rule. Restating any of them here would be the second
+            // copy that later drifts, so the values are taken as given.
             impl->variances = opts.variances;
             impl->inverse_covariance = opts.inverse_covariance;
         } else if (is_fitted_metric(metric_name)) {
