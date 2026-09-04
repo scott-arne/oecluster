@@ -291,13 +291,19 @@ def test_cdist_validates_arguments_before_filtering_either_side():
             oecluster.cdist(a, b, "descriptor", bogus=1)
 
 
-# Every option mistake no molecule set can rescue, paired with the message it
-# has to produce. The last six need the descriptor schema, which is resolved
-# from ``sources`` alone -- that is why the boundary is "needs no molecules"
-# rather than "needs no schema", and it is what puts them ahead of a filter
-# that can empty the item list. ``columns`` is named explicitly wherever an
-# entry's value is what is wrong, so the case does not depend on how many
-# columns the default selection happens to hold.
+# Option mistakes no molecule set can rescue, paired with the message each has
+# to produce. Not the whole set -- the C++ table in
+# ``tests/cpp/test_descriptor_comparison.cpp`` is wider, and unknown
+# source/column/group names are unrescuable too but are reported downstream on
+# a request with no override. These are the ones pinned through the Python
+# surface, chosen to cover both halves of the boundary.
+#
+# The last six need the descriptor schema, which is resolved from ``sources``
+# alone -- that is why the boundary is "needs no molecules" rather than "needs
+# no schema", and it is what puts them ahead of a filter that can empty the
+# item list. ``columns`` is named explicitly wherever an entry's value is what
+# is wrong, so the case does not depend on how many columns the default
+# selection happens to hold.
 UNRESCUABLE = [
     ({'metric': "bogus"}, "Unknown metric 'bogus'"),
     ({'metric': "euclidean", 'variances': [1.0]},
@@ -394,8 +400,8 @@ def test_an_emptied_input_is_still_refused_when_the_arguments_are_valid():
     outrank, so the emptied-list message is the right one and must survive.
     Over-refusing is the same size of defect as under-refusing, so two
     well-formed overrides are checked too. Between them they satisfy all five
-    of the hoisted override rules -- ascending columns, matching length,
-    finite and positive entries, on both the ``variances`` and the
+    of the schema-matched override rules -- ascending columns, matching
+    length, finite and positive entries, on both the ``variances`` and the
     ``inverse_covariance`` side -- and must still lose to the emptied input.
     """
     untyped = _mols(["[Na+]", "[Fe]", "[He]"])

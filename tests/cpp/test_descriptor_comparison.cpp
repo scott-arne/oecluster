@@ -28,11 +28,17 @@ std::string refusal_message(Callable&& call) {
     return std::string();
 }
 
-/// Every option mistake that needs no molecules to detect. Some need the
+/// The option mistakes ``validate_descriptor_options`` refuses. Some need the
 /// descriptor schema, which is resolved from the source names alone, so they
 /// belong here too. Shared by the two halves of the extraction test: the
 /// validator must catch each one, and the constructor must still report each
 /// one with the same words.
+///
+/// Not every mistake that needs no molecules to detect: an unknown source,
+/// column or group name needs none either, but on a request with no override
+/// nothing asks for a schema to be built, so the validator accepts it and the
+/// name is reported downstream. TheSchemaIsResolvedOnlyWhenAnOverrideNeedsIt
+/// below is where that boundary is pinned.
 ///
 /// This table is the only thing that detects a rule growing a second copy, and
 /// it detects it only for the cases it lists, so a rule hoisted into the
@@ -387,7 +393,7 @@ TEST(DescriptorOptionValidationTest, DefaultOptionsAreAccepted) {
     EXPECT_NO_THROW(validate_descriptor_options(DescriptorOptions()));
 }
 
-TEST(DescriptorOptionValidationTest, EveryMoleculeIndependentMistakeIsCaught) {
+TEST(DescriptorOptionValidationTest, EveryTabledMistakeIsRefusedWithoutMolecules) {
     // No molecules anywhere in this test: that is the point of the entry
     // point. The Python layer calls it before the complete-case filter, which
     // can empty the item list and answer for a filter the caller never asked
@@ -465,11 +471,10 @@ TEST(DescriptorOptionValidationTest, TheInputSizeRuleIsLeftToTheConstructor) {
 
 TEST(DescriptorOptionValidationTest, TheAllColumnsConstantRuleIsLeftToTheConstructor) {
     // One of the rules the constructor keeps because it has to read the input
-    // to decide, and the one an earlier draft of this header's prose forgot: a
+    // to decide, and the one DescriptorComparison.h's prose once omitted: a
     // fitted metric needs spread to fit against, and whether there is any is a
-    // fact about the molecules. Deliberately no ordinal: NullMoleculeIsRejected
-    // above covers another input-reading refusal, and every count this comment
-    // has carried so far has been wrong within a round of being written.
+    // fact about the molecules. Deliberately no ordinal -- NullMoleculeIsRejected
+    // above covers another input-reading refusal, and the set is open.
     // Identical inputs make every selected column constant, which no option
     // value can be blamed for and no validator could have foreseen.
     DescriptorOptions single_column;

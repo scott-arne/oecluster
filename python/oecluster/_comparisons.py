@@ -581,7 +581,12 @@ def _normalize_descriptor(items, kwargs):
 
 
 def _validate_descriptor(similarity, kwargs):
-    """Reject the descriptor arguments C++ can rule on before any molecule is read.
+    """Reject descriptor arguments before any molecule is read.
+
+    Two of the rules are this layer's own -- no similarity form, no unknown
+    keyword. The option values go to ``validate_descriptor_options``, which
+    does not answer for every mistake C++ can decide without molecules; the
+    comment on that call says which it leaves downstream.
 
     Registered as the comparison's validator so it also runs before
     ``_normalize_descriptor``, whose complete-case filter can empty the item
@@ -607,8 +612,8 @@ def _validate_descriptor(similarity, kwargs):
 
     # Only C++ can rule on a value: the metric table lives in a private header
     # and is not reachable from here, so a Python copy of it would be a second
-    # source of truth that drifts. ``validate_descriptor_options`` holds the
-    # checks that need no molecules, which is what lets it run before the
+    # source of truth that drifts. ``validate_descriptor_options`` decides with
+    # no molecules in hand, which is what lets it run before the
     # filter -- including the rules matching ``variances`` and
     # ``inverse_covariance`` to the selected columns, since the schema comes
     # from ``sources`` alone. It stops short of the source, column and group

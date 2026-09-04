@@ -90,7 +90,10 @@ void require_complete_rows(const OEFP::DescriptorNumericMatrix& matrix) {
     }
 }
 
-/// Apply the five override rules against an already-resolved selection.
+/// Apply the five schema-matched override rules against an already-resolved
+/// selection. Other rules also govern an override -- mutual exclusion, and
+/// each override's tie to its metric -- but those read nothing but the
+/// options and so are settled before the schema exists.
 ///
 /// Separated from the rules that read nothing but the options so that
 /// ``validate_descriptor_options`` can show, in one glance, which half of its
@@ -257,12 +260,13 @@ DescriptorComparison::DescriptorComparison(const std::vector<OEChem::OEMolBase*>
     const std::vector<const OEChem::OEMolBase*> inputs =
         checked_inputs(mols, "DescriptorComparison");
 
-    // The option rules that need no molecules, in one place. It stops short
-    // of the source, column and group names on a request with no override:
-    // those need a schema, and on that path this function builds no
-    // calculator and so resolves none. Everything else left below reads the
-    // input; among those, the minimum count a fit requires, the complete-case
-    // row check, the refusal when every selected column is constant.
+    // Option rules decided with no molecules in hand, in one place.
+    // validate_descriptor_options stops short of the source, column and group
+    // names on a request with no override: those need a schema, and on that
+    // path it builds no calculator and so resolves none. Everything else left
+    // below reads the input; among those, the minimum count a fit requires,
+    // the complete-case row check, the refusal when every selected column is
+    // constant.
     //
     // The Python layer calls the same function before its complete-case
     // filter runs, so an unusable option value is reported as itself rather
