@@ -394,9 +394,9 @@ def test_an_emptied_input_is_still_refused_when_the_arguments_are_valid():
     outrank, so the emptied-list message is the right one and must survive.
     Over-refusing is the same size of defect as under-refusing, so two
     well-formed overrides are checked too. Between them they satisfy all five
-    of the hoisted rules -- ascending columns, matching length, finite and
-    positive entries, on both the ``variances`` and the ``inverse_covariance``
-    side -- and must still lose to the emptied input.
+    of the hoisted override rules -- ascending columns, matching length,
+    finite and positive entries, on both the ``variances`` and the
+    ``inverse_covariance`` side -- and must still lose to the emptied input.
     """
     untyped = _mols(["[Na+]", "[Fe]", "[He]"])
     stats = oecluster.descriptor_statistics(_mols(), inverse_covariance=True)
@@ -441,11 +441,11 @@ def test_the_filter_refuses_the_options_it_is_handed():
 def test_a_selection_with_no_spread_is_refused_by_the_constructor():
     """A fitted metric needs variance, and only the molecules supply it.
 
-    This is the third of the constructor's input-reading rules -- alongside
-    the minimum input size and the complete-case row check -- and the one the
-    header's prose once omitted. (The constructor keeps name checks as well,
-    which read no input.) It cannot move upstream: the options here are
-    perfectly valid, and identical inputs are what make them unusable.
+    This is one of the rules the constructor keeps because it has to read the
+    input to decide -- the null-pointer scan and the complete-case row check
+    are two others -- and the one the header's prose once omitted. It cannot
+    move upstream: the options here are perfectly valid, and identical inputs
+    are what make them unusable.
     """
     # First, the placement pin: the validator must accept these options, so a
     # build that moved the rule upstream fails here rather than below.

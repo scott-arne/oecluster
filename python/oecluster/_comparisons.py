@@ -581,7 +581,7 @@ def _normalize_descriptor(items, kwargs):
 
 
 def _validate_descriptor(similarity, kwargs):
-    """Reject a descriptor request that no input could make valid.
+    """Reject the descriptor arguments C++ can rule on before any molecule is read.
 
     Registered as the comparison's validator so it also runs before
     ``_normalize_descriptor``, whose complete-case filter can empty the item
