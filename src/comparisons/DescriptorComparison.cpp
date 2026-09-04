@@ -90,6 +90,85 @@ void require_complete_rows(const OEFP::DescriptorNumericMatrix& matrix) {
     }
 }
 
+/// Apply the five override rules against an already-resolved selection.
+///
+/// Separated from the rules that read nothing but the options so that
+/// ``validate_descriptor_options`` can show, in one glance, which half of its
+/// work needs the schema resolved and which does not.
+void check_override_against_selection(const OEFP::DescriptorSchema& schema,
+                                      const std::vector<size_t>& selection,
+                                      const DescriptorOptions& opts) {
+    const std::string metric_name = to_lower(opts.metric);
+    const bool is_seuclidean =
+        metric_name == "standardized_euclidean" || metric_name == "seuclidean";
+
+    // resolve_column_indices sorts into ascending schema order, but the
+    // override arrives in the caller's order and is consumed positionally.
+    // Equal lengths would then pair each column with the wrong number and
+    // score silently wrong distances, so require the caller's own ordering to
+    // already agree.
+    if (!opts.columns.empty()) {
+        std::vector<size_t> requested;
+        requested.reserve(opts.columns.size());
+        for (const std::string& name : opts.columns) {
+            requested.push_back(schema.IndexOf(name));
+        }
+        if (!std::is_sorted(requested.begin(), requested.end())) {
+            std::string expected;
+            for (const size_t index : selection) {
+                if (!expected.empty()) {
+                    expected += ", ";
+                }
+                expected += schema.Definition(index).name;
+            }
+            throw ComparisonError(
+                "columns must be in ascending schema order when variances or "
+                "inverse_covariance is supplied, because those values are matched to "
+                "columns by position; got the requested names in a different order. "
+                "Use columns={" + expected + "}, or pass columns=stats.columns from "
+                "descriptor_statistics, which is already in this order");
+        }
+    }
+
+    // An override is scoped to the columns it was fitted over, so nothing is
+    // dropped under it: a second drop would silently desync the selection from
+    // the supplied numbers.
+    if (is_seuclidean && opts.variances.size() != selection.size()) {
+        throw ComparisonError(
+            "variances has " + std::to_string(opts.variances.size()) + " entries but " +
+            std::to_string(selection.size()) +
+            " columns are selected; pass columns=stats.columns alongside "
+            "variances=stats.variance");
+    }
+    if (metric_name == "mahalanobis" &&
+        opts.inverse_covariance.size() != selection.size() * selection.size()) {
+        throw ComparisonError(
+            "inverse_covariance has " + std::to_string(opts.inverse_covariance.size()) +
+            " entries but " + std::to_string(selection.size()) +
+            " columns are selected, which needs a square " +
+            std::to_string(selection.size()) + "x" + std::to_string(selection.size()) +
+            " matrix; pass columns=stats.columns alongside "
+            "inverse_covariance=stats.inverse_covariance");
+    }
+    // OEFP rejects these on the first scoring call. Checking here reports the
+    // mistake where it was made, with the column named.
+    for (size_t k = 0; k < opts.variances.size(); ++k) {
+        if (!std::isfinite(opts.variances[k]) || opts.variances[k] <= 0.0) {
+            throw ComparisonError("variances[" + std::to_string(k) + "] for column '" +
+                                  schema.Definition(selection[k]).name +
+                                  "' must be finite and strictly positive, got " +
+                                  std::to_string(opts.variances[k]));
+        }
+    }
+    for (size_t k = 0; k < opts.inverse_covariance.size(); ++k) {
+        if (!std::isfinite(opts.inverse_covariance[k])) {
+            throw ComparisonError("inverse_covariance[" + std::to_string(k) +
+                                  "] must be finite, got " +
+                                  std::to_string(opts.inverse_covariance[k]));
+        }
+    }
+}
+
 }  // namespace
 
 void validate_descriptor_options(const DescriptorOptions& opts) {
@@ -131,6 +210,28 @@ void validate_descriptor_options(const DescriptorOptions& opts) {
     MetricParams params;
     params.p = opts.p;
     check_metric_request(metric_name, false, params, MetricSurface::Descriptor);
+
+    // The remaining rules all belong to an override, and an override is matched
+    // to the resolved selection by position, so they need the schema -- which
+    // comes from opts.sources alone and never from a molecule. Resolving it
+    // here is what lets a mistake no molecule set could rescue be refused
+    // before a filter that can empty the item list. Without an override there
+    // is nothing here to check, so the calculator is not built at all: that is
+    // the common path and it must not start paying for a schema no rule reads.
+    const bool has_override = !opts.variances.empty() || !opts.inverse_covariance.empty();
+    if (!has_override) {
+        return;
+    }
+
+    const std::shared_ptr<const OEFP::DescriptorCalculator> calculator =
+        make_descriptor_calculator(opts.sources);
+    // numeric_selection reports dropped columns through out-parameters the
+    // caller is expected to keep; a verdict-only caller has nowhere to put them.
+    std::vector<std::string> ignored_columns;
+    std::vector<std::string> ignored_reasons;
+    const std::vector<size_t> selection =
+        numeric_selection(calculator->Schema(), opts, ignored_columns, ignored_reasons);
+    check_override_against_selection(calculator->Schema(), selection, opts);
 }
 
 struct DescriptorComparison::Impl {
@@ -156,11 +257,14 @@ DescriptorComparison::DescriptorComparison(const std::vector<OEChem::OEMolBase*>
     const std::vector<const OEChem::OEMolBase*> inputs =
         checked_inputs(mols, "DescriptorComparison");
 
-    // Everything decidable from the options alone, in one place. The Python
+    // Everything decidable without the molecules, in one place. The Python
     // layer calls the same function before its complete-case filter runs, so
     // an unusable option value is reported as itself rather than as an item
-    // list the filter emptied. What stays below needs the molecules or the
-    // resolved column selection, which no options-only check can have.
+    // list the filter emptied. Only two rules stay below, and both genuinely
+    // need the input: the minimum molecule count a fit requires, and the
+    // complete-case row check. When an override is supplied this resolves the
+    // schema a second time, since the call above resolved its own copy; that
+    // is the price of the two never disagreeing about a shared rule.
     validate_descriptor_options(opts);
 
     auto impl = std::make_shared<Impl>();
@@ -209,72 +313,10 @@ DescriptorComparison::DescriptorComparison(const std::vector<OEChem::OEMolBase*>
         }
 
         if (has_override) {
-            // resolve_column_indices sorts into ascending schema order, but the
-            // override arrives in the caller's order and is consumed
-            // positionally below. Equal lengths would then pair each column
-            // with the wrong number and score silently wrong distances, so
-            // require the caller's own ordering to already agree.
-            if (!opts.columns.empty()) {
-                std::vector<size_t> requested;
-                requested.reserve(opts.columns.size());
-                for (const std::string& name : opts.columns) {
-                    requested.push_back(schema.IndexOf(name));
-                }
-                if (!std::is_sorted(requested.begin(), requested.end())) {
-                    std::string expected;
-                    for (const size_t index : selection) {
-                        if (!expected.empty()) {
-                            expected += ", ";
-                        }
-                        expected += schema.Definition(index).name;
-                    }
-                    throw ComparisonError(
-                        "columns must be in ascending schema order when variances or "
-                        "inverse_covariance is supplied, because those values are matched to "
-                        "columns by position; got the requested names in a different order. "
-                        "Use columns={" + expected + "}, or pass columns=stats.columns from "
-                        "descriptor_statistics, which is already in this order");
-                }
-            }
-
-            // An override is scoped to the columns it was fitted over, so nothing
-            // is dropped here: a second drop would silently desync the selection
-            // from the supplied numbers.
-            if (is_seuclidean && opts.variances.size() != selection.size()) {
-                throw ComparisonError(
-                    "variances has " + std::to_string(opts.variances.size()) + " entries but " +
-                    std::to_string(selection.size()) +
-                    " columns are selected; pass columns=stats.columns alongside "
-                    "variances=stats.variance");
-            }
-            if (metric_name == "mahalanobis" &&
-                opts.inverse_covariance.size() != selection.size() * selection.size()) {
-                throw ComparisonError(
-                    "inverse_covariance has " + std::to_string(opts.inverse_covariance.size()) +
-                    " entries but " + std::to_string(selection.size()) +
-                    " columns are selected, which needs a square " +
-                    std::to_string(selection.size()) + "x" + std::to_string(selection.size()) +
-                    " matrix; pass columns=stats.columns alongside "
-                    "inverse_covariance=stats.inverse_covariance");
-            }
-            // OEFP rejects these on the first scoring call. Checking here
-            // reports the mistake where it was made, with the column named.
-            for (size_t k = 0; k < opts.variances.size(); ++k) {
-                if (!std::isfinite(opts.variances[k]) || opts.variances[k] <= 0.0) {
-                    throw ComparisonError(
-                        "variances[" + std::to_string(k) + "] for column '" +
-                        schema.Definition(selection[k]).name +
-                        "' must be finite and strictly positive, got " +
-                        std::to_string(opts.variances[k]));
-                }
-            }
-            for (size_t k = 0; k < opts.inverse_covariance.size(); ++k) {
-                if (!std::isfinite(opts.inverse_covariance[k])) {
-                    throw ComparisonError("inverse_covariance[" + std::to_string(k) +
-                                          "] must be finite, got " +
-                                          std::to_string(opts.inverse_covariance[k]));
-                }
-            }
+            // Every rule an override has to satisfy was applied by
+            // validate_descriptor_options above, against the selection this
+            // same schema resolves. Repeating one here would be the second copy
+            // that later drifts.
             impl->variances = opts.variances;
             impl->inverse_covariance = opts.inverse_covariance;
         } else if (is_fitted_metric(metric_name)) {
@@ -513,6 +555,14 @@ std::vector<size_t> descriptor_excluded_indices(const std::vector<OEChem::OEMolB
                                                 const DescriptorOptions& opts) {
     const std::vector<const OEChem::OEMolBase*> inputs =
         checked_inputs(mols, "descriptor_excluded_indices");
+
+    // This function is the documented way to filter an input before
+    // constructing, so the options handed to it are the ones the constructor
+    // will see next. Refusing them here means the caller who follows that
+    // advice is told about a bad metric or a mismatched override at the call
+    // where the mistake is, instead of getting a mask computed from options
+    // that were never going to build.
+    validate_descriptor_options(opts);
 
     const std::shared_ptr<const OEFP::DescriptorCalculator> calculator =
         make_descriptor_calculator(opts.sources);

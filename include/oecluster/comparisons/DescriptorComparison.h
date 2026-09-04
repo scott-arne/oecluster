@@ -65,10 +65,11 @@ public:
      *
      * :param mols: Pointers to molecules (not owned). Must not contain nulls.
      * :param opts: Descriptor options.
-     * :raises ComparisonError: When a source, column, group, metric, or missing
-     *     policy is invalid; when an override does not match the selection; when
-     *     every selected column is constant; or when ``complete_case`` is
-     *     requested and a selected value is absent or non-finite.
+     * :raises ComparisonError: Among the reasons: a source, column, group,
+     *     metric, or missing policy is invalid; an override does not match the
+     *     selection; a fitted metric was asked to fit fewer than two molecules;
+     *     every selected column is constant; or ``complete_case`` is requested
+     *     and a selected value is absent or non-finite.
      */
     explicit DescriptorComparison(const std::vector<OEChem::OEMolBase*>& mols,
                                   const Options& opts = Options());
@@ -111,12 +112,16 @@ private:
  * finite. The selection is resolved exactly as ``DescriptorComparison`` would
  * resolve it, before any zero-variance drop, so filtering and scoring agree.
  *
+ * The options are validated by ``validate_descriptor_options`` before anything
+ * is computed, because the caller who filters here goes on to construct with
+ * the same options. Only the source, column, and group fields change *which*
+ * indices come back; the rest can only turn the call into a refusal.
+ *
  * :param mols: Pointers to molecules (not owned). Must not contain nulls.
- * :param opts: Descriptor options; only the source, column, and group fields
- *     affect the result.
+ * :param opts: Descriptor options.
  * :returns: Ascending indices into *mols*.
- * :raises ComparisonError: When a source, column, or group is unknown, or a
- *     molecule pointer is null.
+ * :raises ComparisonError: When a molecule pointer is null, or for any reason
+ *     ``validate_descriptor_options`` refuses these options.
  */
 std::vector<size_t> descriptor_excluded_indices(const std::vector<OEChem::OEMolBase*>& mols,
                                                 const DescriptorOptions& opts);
@@ -124,26 +129,30 @@ std::vector<size_t> descriptor_excluded_indices(const std::vector<OEChem::OEMolB
 /**
  * @brief Refuse the option mistakes no molecule set could make valid.
  *
- * The metric name and its parameters, the missing-value policy name, and
- * whether a ``variances`` or ``inverse_covariance`` override belongs to the
- * chosen metric are all decided by the options alone.
- * ``DescriptorComparison``'s constructor calls this first and then adds only
- * the checks that need the molecules or the resolved column selection, so the
- * two can never disagree about a shared rule.
+ * The boundary is *needs no molecules*, not *needs no schema*: the descriptor
+ * schema is resolved from ``opts.sources`` alone, so the rules that match an
+ * override against the selected columns belong here too.
+ * ``DescriptorComparison``'s constructor calls this first and keeps only the
+ * two rules that genuinely need the input -- the minimum molecule count a fit
+ * requires, and the ``complete_case`` row check -- so the two can never
+ * disagree about a shared rule.
  *
  * It is exposed because a caller may filter its input before constructing --
- * ``descriptor_excluded_indices`` is the intended route -- and a filter that
- * empties the input would otherwise report the empty input instead of the
- * option the caller has to change.
+ * ``descriptor_excluded_indices`` is the intended route, and calls this itself
+ * -- and a filter that empties the input would otherwise report the empty
+ * input instead of the option the caller has to change.
  *
  * :param opts: Descriptor options. The source, column, and group fields are
- *     not inspected: resolving them needs the descriptor schema, so those
- *     names stay the constructor's business.
- * :raises ComparisonError: When the metric name or a metric parameter is
- *     invalid for descriptor space, when the missing-value policy is unknown,
- *     when both overrides are supplied at once, when an override does not
- *     belong to the chosen metric, or when ``missing='ignore'`` is paired with
- *     a fitted metric.
+ *     inspected only when an override is supplied; with no override there is
+ *     no rule here that reads the schema, and the calculator is not built.
+ * :raises ComparisonError: Among the reasons: the metric name or a metric
+ *     parameter is invalid for descriptor space; the missing-value policy is
+ *     unknown; both overrides are supplied at once; an override does not
+ *     belong to the chosen metric; ``missing='ignore'`` is paired with a
+ *     fitted metric; or, when an override is supplied, a source, column or
+ *     group is unknown, ``columns`` is not in ascending schema order, the
+ *     override's length does not match the selection, or an override entry is
+ *     not finite (variances must also be strictly positive).
  */
 void validate_descriptor_options(const DescriptorOptions& opts);
 

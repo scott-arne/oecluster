@@ -291,37 +291,59 @@ def test_cdist_validates_arguments_before_filtering_either_side():
             oecluster.cdist(a, b, "descriptor", bogus=1)
 
 
-def test_an_unusable_option_value_outranks_the_emptied_input():
+# Every option mistake no molecule set can rescue, paired with the message it
+# has to produce. The last six need the descriptor schema, which is resolved
+# from ``sources`` alone -- that is why the boundary is "needs no molecules"
+# rather than "needs no schema", and it is what puts them ahead of a filter
+# that can empty the item list. ``columns`` is named explicitly wherever an
+# entry's value is what is wrong, so the case does not depend on how many
+# columns the default selection happens to hold.
+UNRESCUABLE = [
+    ({'metric': "bogus"}, "Unknown metric 'bogus'"),
+    ({'metric': "euclidean", 'variances': [1.0]},
+     "variances applies only to metric='standardized_euclidean'"),
+    ({'variances': [1.0, 2.0]},
+     r"variances has 2 entries but \d+ columns are selected"),
+    ({'metric': "mahalanobis", 'inverse_covariance': [1.0, 2.0, 3.0]},
+     r"inverse_covariance has 3 entries but \d+ columns are selected"),
+    ({'columns': ["MolecularWeight", "XLogP"], 'variances': [0.0, 1.0]},
+     (r"variances\[0\] for column 'MolecularWeight' must be finite and "
+      r"strictly positive")),
+    ({'columns': ["MolecularWeight", "XLogP"],
+      'variances': [float("nan"), 1.0]},
+     r"variances\[0\] for column 'MolecularWeight' .* got nan"),
+    ({'metric': "mahalanobis", 'columns': ["MolecularWeight", "XLogP"],
+      'inverse_covariance': [float("nan"), 0.0, 0.0, 1.0]},
+     r"inverse_covariance\[0\] must be finite, got nan"),
+    ({'columns': ["XLogP", "MolecularWeight"], 'variances': [1.5, 2.5]},
+     "columns must be in ascending schema order"),
+]
+
+
+@pytest.mark.parametrize(("kwargs", "expected"), UNRESCUABLE,
+                         ids=[str(case[0]) for case in UNRESCUABLE])
+def test_an_unusable_option_value_outranks_the_emptied_input(kwargs, expected):
     """A value no input can rescue is refused before the filter runs.
 
     Argument *names* were already checked ahead of the filter; values were not,
     so an emptied input answered for ``metric='bogus'`` with a complaint about
-    a filter the caller never asked for. Both values here are refused by C++
-    over any molecule set, and neither check needs the molecules or the
-    resolved columns, which is what lets them run first.
+    a filter the caller never asked for. The clean input is what shows the
+    message is unchanged, and the emptied one is what shows it now wins.
+
+    The ``variances has N entries`` case is the one whose remedy is the
+    documented ``descriptor_statistics`` recipe, so suppressing it withheld the
+    fix from the caller who was part-way through following the documentation.
     """
     untyped = _mols(["[Na+]", "[Fe]", "[He]"])
     clean = _mols()
 
     for mols in (clean, untyped):
-        with pytest.raises(RuntimeError, match="Unknown metric 'bogus'"):
-            oecluster.pdist(mols, "descriptor", metric="bogus")
-        with pytest.raises(
-                RuntimeError,
-                match="variances applies only to "
-                      "metric='standardized_euclidean'"):
-            oecluster.pdist(mols, "descriptor", metric="euclidean",
-                            variances=[1.0])
+        with pytest.raises(RuntimeError, match=expected):
+            oecluster.pdist(mols, "descriptor", **kwargs)
 
     for a, b in ((untyped, clean), (clean, untyped)):
-        with pytest.raises(RuntimeError, match="Unknown metric 'bogus'"):
-            oecluster.cdist(a, b, "descriptor", metric="bogus")
-        with pytest.raises(
-                RuntimeError,
-                match="variances applies only to "
-                      "metric='standardized_euclidean'"):
-            oecluster.cdist(a, b, "descriptor", metric="euclidean",
-                            variances=[1.0])
+        with pytest.raises(RuntimeError, match=expected):
+            oecluster.cdist(a, b, "descriptor", **kwargs)
 
 
 def test_the_option_check_reaches_python_without_molecules():
@@ -331,10 +353,17 @@ def test_the_option_check_reaches_python_without_molecules():
     private header -- so the validator has to call into C++ with the options
     alone. Calling it here with no molecules at all is what shows the check is
     genuinely molecule-independent rather than merely early.
+
+    The override case is the one that fixes the boundary: matching
+    ``variances`` to the selection needs the descriptor schema, and the schema
+    comes from ``sources``, so it too is decided here with nothing to score.
     """
     with pytest.raises(RuntimeError, match="Unknown metric 'bogus'"):
         _native.validate_descriptor_options(
             _comparisons.descriptor_options({'metric': "bogus"}))
+    with pytest.raises(RuntimeError, match="columns are selected"):
+        _native.validate_descriptor_options(
+            _comparisons.descriptor_options({'variances': [1.0, 2.0]}))
     _native.validate_descriptor_options(_comparisons.descriptor_options({}))
 
 
@@ -363,12 +392,50 @@ def test_an_emptied_input_is_still_refused_when_the_arguments_are_valid():
 
     With nothing wrong in the arguments there is no authoritative error to
     outrank, so the emptied-list message is the right one and must survive.
+    Over-refusing is the same size of defect as under-refusing, so two
+    well-formed overrides are checked too. Between them they satisfy all five
+    of the hoisted rules -- ascending columns, matching length, finite and
+    positive entries, on both the ``variances`` and the ``inverse_covariance``
+    side -- and must still lose to the emptied input.
     """
     untyped = _mols(["[Na+]", "[Fe]", "[He]"])
-    with pytest.raises(ValueError, match="left 0 items"):
-        oecluster.pdist(untyped, "descriptor")
-    with pytest.raises(ValueError, match="left 0 item"):
-        oecluster.cdist(untyped, _mols(), "descriptor")
+    stats = oecluster.descriptor_statistics(_mols(), inverse_covariance=True)
+    good_variances = {'columns': list(stats['columns']),
+                      'variances': list(stats['variance'])}
+    good_inverse = {'metric': "mahalanobis",
+                    'columns': list(stats['columns']),
+                    'inverse_covariance': stats['inverse_covariance']}
+
+    for kwargs in ({}, good_variances, good_inverse):
+        with pytest.raises(ValueError, match="left 0 items"):
+            oecluster.pdist(untyped, "descriptor", **kwargs)
+        with pytest.raises(ValueError, match="left 0 item"):
+            oecluster.cdist(untyped, _mols(), "descriptor", **kwargs)
+
+
+def test_the_filter_refuses_the_options_it_is_handed():
+    """The documented pre-filtering route validates what it is given.
+
+    The header points a C++ caller at ``descriptor_excluded_indices`` to filter
+    before constructing, so the options it gets are the ones the constructor
+    sees next. It used to return a mask for options that could never build --
+    a bogus metric, an unknown policy, both overrides at once -- and the caller
+    learned nothing until the construction it was preparing for.
+    """
+    clean = _mols()
+    for kwargs, expected in (({'metric': "bogus"}, "Unknown metric 'bogus'"),
+                             ({'missing': "drop"},
+                              "Unknown missing-value policy"),
+                             ({'variances': [1.0],
+                               'inverse_covariance': [1.0]},
+                              "mutually exclusive")):
+        with pytest.raises(RuntimeError, match=expected):
+            _native.descriptor_excluded_indices(
+                clean, _comparisons.descriptor_options(kwargs))
+
+    # Still a filter, not only a gate: valid options get their mask.
+    assert list(_native.descriptor_excluded_indices(
+        clean, _native.DescriptorOptions())) == []
 
 
 def test_complete_data_excludes_nothing():

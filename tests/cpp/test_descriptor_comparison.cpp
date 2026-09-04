@@ -28,10 +28,15 @@ std::string refusal_message(Callable&& call) {
     return std::string();
 }
 
-/// Every option mistake that needs neither the molecules nor the resolved
-/// column selection to detect. Shared by the two halves of the extraction
-/// test: the validator must catch each one, and the constructor must still
-/// report each one with the same words.
+/// Every option mistake that needs no molecules to detect. Some need the
+/// descriptor schema, which is resolved from the source names alone, so they
+/// belong here too. Shared by the two halves of the extraction test: the
+/// validator must catch each one, and the constructor must still report each
+/// one with the same words.
+///
+/// This table is the only thing that detects a rule growing a second copy, and
+/// it detects it only for the cases it lists, so a rule hoisted into the
+/// validator has to be added here or the drift it invites goes unmeasured.
 std::vector<std::pair<std::string, DescriptorOptions>> molecule_independent_mistakes() {
     std::vector<std::pair<std::string, DescriptorOptions>> cases;
 
@@ -70,6 +75,42 @@ std::vector<std::pair<std::string, DescriptorOptions>> molecule_independent_mist
     DescriptorOptions ignore_on_fitted;
     ignore_on_fitted.missing = "ignore";  // metric defaults to standardized_euclidean
     cases.emplace_back("ignore under a fitted metric", ignore_on_fitted);
+
+    // The six cases below cover the five rules that match an override to the
+    // resolved selection. Each needs the schema; none needs a molecule. Where
+    // the fault is an entry's value rather than an array's length, ``columns``
+    // is named explicitly, which keeps the case independent of how many columns
+    // the default selection happens to have.
+    DescriptorOptions variances_length;
+    variances_length.variances = {1.0, 2.0};
+    cases.emplace_back("variances length against the selection", variances_length);
+
+    DescriptorOptions inverse_length;
+    inverse_length.metric = "mahalanobis";
+    inverse_length.inverse_covariance = {1.0, 2.0, 3.0};
+    cases.emplace_back("inverse_covariance is not square over the selection", inverse_length);
+
+    DescriptorOptions non_positive_variance;
+    non_positive_variance.columns = {"MolecularWeight", "XLogP"};
+    non_positive_variance.variances = {0.0, 1.0};
+    cases.emplace_back("a zero variance entry", non_positive_variance);
+
+    DescriptorOptions non_finite_variance;
+    non_finite_variance.columns = {"MolecularWeight", "XLogP"};
+    non_finite_variance.variances = {std::numeric_limits<double>::quiet_NaN(), 1.0};
+    cases.emplace_back("a non-finite variance entry", non_finite_variance);
+
+    DescriptorOptions non_finite_inverse;
+    non_finite_inverse.metric = "mahalanobis";
+    non_finite_inverse.columns = {"MolecularWeight", "XLogP"};
+    non_finite_inverse.inverse_covariance = {std::numeric_limits<double>::quiet_NaN(), 0.0, 0.0,
+                                             1.0};
+    cases.emplace_back("a non-finite inverse_covariance entry", non_finite_inverse);
+
+    DescriptorOptions descending_columns;
+    descending_columns.columns = {"XLogP", "MolecularWeight"};
+    descending_columns.variances = {1.5, 2.5};
+    cases.emplace_back("columns out of ascending schema order", descending_columns);
 
     return cases;
 }
@@ -380,11 +421,13 @@ TEST(DescriptorOptionValidationTest, TheMetricNameIsFoldedBeforeItIsReported) {
     EXPECT_NE(message.find("Unknown metric 'bogus'"), std::string::npos) << message;
 }
 
-TEST(DescriptorOptionValidationTest, SchemaDependentMistakesAreLeftToTheConstructor) {
-    // The boundary: a check that needs the descriptor calculator's schema
-    // cannot run without one, so an unknown source, column, or group stays
-    // downstream. Nothing is lost by that -- the complete-case filter resolves
-    // the same selection and reports these itself.
+TEST(DescriptorOptionValidationTest, TheSchemaIsResolvedOnlyWhenAnOverrideNeedsIt) {
+    // The boundary is "needs no molecules", so the schema is fair game -- but
+    // no rule reads it unless an override is supplied, and building a
+    // calculator to check nothing would tax every plain request. An unknown
+    // name is therefore still reported downstream on the plain path, which is
+    // where descriptor_excluded_indices and the constructor both resolve the
+    // same selection and report it themselves.
     DescriptorOptions unknown_source;
     unknown_source.sources = {"nosuchsource"};
     EXPECT_NO_THROW(validate_descriptor_options(unknown_source));
@@ -392,6 +435,18 @@ TEST(DescriptorOptionValidationTest, SchemaDependentMistakesAreLeftToTheConstruc
     DescriptorOptions unknown_column;
     unknown_column.columns = {"NoSuchColumn"};
     EXPECT_NO_THROW(validate_descriptor_options(unknown_column));
+
+    // With an override the schema has to be resolved, so the same names are
+    // reported here instead. Same message either way; only the messenger moves.
+    unknown_source.variances = {1.0};
+    EXPECT_NE(refusal_message([&] { validate_descriptor_options(unknown_source); })
+                  .find("Unknown descriptor source: nosuchsource"),
+              std::string::npos);
+
+    unknown_column.variances = {1.0};
+    EXPECT_NE(refusal_message([&] { validate_descriptor_options(unknown_column); })
+                  .find("Unknown descriptor column: NoSuchColumn"),
+              std::string::npos);
 }
 
 TEST(DescriptorOptionValidationTest, TheInputSizeRuleIsLeftToTheConstructor) {
