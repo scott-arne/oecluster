@@ -438,6 +438,30 @@ def test_the_filter_refuses_the_options_it_is_handed():
         clean, _native.DescriptorOptions())) == []
 
 
+def test_a_selection_with_no_spread_is_refused_by_the_constructor():
+    """A fitted metric needs variance, and only the molecules supply it.
+
+    This is the third rule the constructor keeps -- alongside the minimum
+    input size and the complete-case row check -- and the one the header's
+    prose once omitted. It cannot move upstream: the options here are
+    perfectly valid, and identical inputs are what make them unusable.
+    """
+    identical = _mols(["CCO", "CCO"])
+    with pytest.raises(RuntimeError,
+                       match="Every selected descriptor column has zero "
+                             "variance"):
+        oecluster.pdist(identical, "descriptor", columns=["MolecularWeight"])
+
+    # The options alone are never enough to know: the same request over
+    # molecules that differ is fine, and an unfitted metric never asks.
+    assert oecluster.pdist(_mols(["CCO", "CCCC"]), "descriptor",
+                           columns=["MolecularWeight"]).num_samples == 2
+    assert oecluster.pdist(identical, "descriptor",
+                           metric="euclidean").num_samples == 2
+    _native.validate_descriptor_options(
+        _comparisons.descriptor_options({'columns': ["MolecularWeight"]}))
+
+
 def test_complete_data_excludes_nothing():
     dist = oecluster.pdist(_mols(), "descriptor")
     assert 'excluded_items' not in dist.params

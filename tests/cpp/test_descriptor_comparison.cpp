@@ -463,6 +463,34 @@ TEST(DescriptorOptionValidationTest, TheInputSizeRuleIsLeftToTheConstructor) {
     EXPECT_NE(message.find("at least two molecules"), std::string::npos) << message;
 }
 
+TEST(DescriptorOptionValidationTest, TheAllColumnsConstantRuleIsLeftToTheConstructor) {
+    // The third rule the constructor keeps for itself, and the one an earlier
+    // draft of this header's prose forgot: a fitted metric needs some spread
+    // to fit against, and whether there is any is a fact about the molecules.
+    // Identical inputs make every selected column constant, which no option
+    // value can be blamed for and no validator could have foreseen.
+    DescriptorOptions single_column;
+    single_column.columns = {"MolecularWeight"};
+    EXPECT_NO_THROW(validate_descriptor_options(single_column));
+
+    std::vector<OEChem::OEGraphMol> graph_mols(2);
+    OEChem::OESmilesToMol(graph_mols[0], "CCO");
+    OEChem::OESmilesToMol(graph_mols[1], "CCO");
+    std::vector<OEChem::OEMolBase*> mols{&static_cast<OEChem::OEMolBase&>(graph_mols[0]),
+                                         &static_cast<OEChem::OEMolBase&>(graph_mols[1])};
+    const std::string message =
+        refusal_message([&] { DescriptorComparison(mols, single_column); });
+    EXPECT_NE(message.find("Every selected descriptor column has zero variance"),
+              std::string::npos)
+        << message;
+
+    // It is a property of the fit, not of the molecules alone: an unfitted
+    // metric asks nothing of the spread and must still score the same input.
+    DescriptorOptions unfitted = single_column;
+    unfitted.metric = "euclidean";
+    EXPECT_NO_THROW(DescriptorComparison(mols, unfitted));
+}
+
 TEST_F(DescriptorComparisonTest, TheConstructorRepeatsEveryValidatorMessageVerbatim) {
     // The extraction must not have changed what a caller is told, only when.
     // Comparing the two messages byte for byte is also what keeps the

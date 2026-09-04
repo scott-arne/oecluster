@@ -132,10 +132,16 @@ std::vector<size_t> descriptor_excluded_indices(const std::vector<OEChem::OEMolB
  * The boundary is *needs no molecules*, not *needs no schema*: the descriptor
  * schema is resolved from ``opts.sources`` alone, so the rules that match an
  * override against the selected columns belong here too.
- * ``DescriptorComparison``'s constructor calls this first and keeps only the
- * two rules that genuinely need the input -- the minimum molecule count a fit
- * requires, and the ``complete_case`` row check -- so the two can never
- * disagree about a shared rule.
+ * ``DescriptorComparison``'s constructor calls this first, so the two can
+ * never disagree about a rule they share.
+ *
+ * The constructor still refuses on its own account. Among those reasons: the
+ * input is smaller than a fitted metric needs; a ``complete_case`` row check
+ * fails; every selected column is constant over these molecules. Each reads
+ * the molecules, so nothing here can anticipate it. The constructor also
+ * keeps the source, column and group name checks on any request with no
+ * override, because this function builds no calculator on that path and so
+ * resolves no schema.
  *
  * It is exposed because a caller may filter its input before constructing --
  * ``descriptor_excluded_indices`` is the intended route, and calls this itself

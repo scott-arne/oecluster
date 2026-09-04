@@ -611,8 +611,11 @@ def _validate_descriptor(similarity, kwargs):
     # check that needs no molecules, which is what lets it run before the
     # filter. That includes the rules matching ``variances`` and
     # ``inverse_covariance`` to the selected columns: the schema comes from
-    # ``sources`` alone. Only the minimum input size and the complete-case row
-    # check are left downstream, and neither can be decided here.
+    # ``sources`` alone. What is left downstream either reads the molecules --
+    # the minimum input size, the complete-case row check, the refusal when
+    # every selected column is constant -- or, on a request with no override,
+    # the source, column and group names, which C++ reports from the same
+    # selection the filter resolves. None of it can be decided here.
     _oecluster.validate_descriptor_options(descriptor_options(kwargs))
 
 
