@@ -257,16 +257,17 @@ DescriptorComparison::DescriptorComparison(const std::vector<OEChem::OEMolBase*>
     const std::vector<const OEChem::OEMolBase*> inputs =
         checked_inputs(mols, "DescriptorComparison");
 
-    // Everything decidable without the molecules, in one place. The Python
-    // layer calls the same function before its complete-case filter runs, so
-    // an unusable option value is reported as itself rather than as an item
-    // list the filter emptied. What stays below either reads the molecules --
-    // the minimum count a fit requires, the complete-case row check, the
-    // refusal when every selected column is constant -- or is a name check
-    // this function skipped because no override asked it to resolve a schema.
-    // When an override is supplied this resolves the schema a second time,
-    // since the call above resolved its own copy; that is the price of the
-    // two never disagreeing about a shared rule.
+    // The option rules that need no molecules, in one place. It stops short
+    // of the source, column and group names on a request with no override:
+    // those need a schema, and with no override there is nothing asking for
+    // one to be built. The Python layer calls the same function before its
+    // complete-case filter runs, so an unusable option value is reported as
+    // itself rather than as an item list the filter emptied. Everything else
+    // left below reads the input; among those, the minimum count a fit
+    // requires, the complete-case row check, the refusal when every selected
+    // column is constant. When an override is supplied this resolves the
+    // schema a second time, since the call above resolved its own copy; that
+    // is the price of the two never disagreeing about a shared rule.
     validate_descriptor_options(opts);
 
     auto impl = std::make_shared<Impl>();

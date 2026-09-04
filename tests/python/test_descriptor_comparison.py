@@ -441,11 +441,17 @@ def test_the_filter_refuses_the_options_it_is_handed():
 def test_a_selection_with_no_spread_is_refused_by_the_constructor():
     """A fitted metric needs variance, and only the molecules supply it.
 
-    This is the third rule the constructor keeps -- alongside the minimum
-    input size and the complete-case row check -- and the one the header's
-    prose once omitted. It cannot move upstream: the options here are
+    This is the third of the constructor's input-reading rules -- alongside
+    the minimum input size and the complete-case row check -- and the one the
+    header's prose once omitted. (The constructor keeps name checks as well,
+    which read no input.) It cannot move upstream: the options here are
     perfectly valid, and identical inputs are what make them unusable.
     """
+    # First, the placement pin: the validator must accept these options, so a
+    # build that moved the rule upstream fails here rather than below.
+    _native.validate_descriptor_options(
+        _comparisons.descriptor_options({'columns': ["MolecularWeight"]}))
+
     identical = _mols(["CCO", "CCO"])
     with pytest.raises(RuntimeError,
                        match="Every selected descriptor column has zero "
@@ -453,13 +459,12 @@ def test_a_selection_with_no_spread_is_refused_by_the_constructor():
         oecluster.pdist(identical, "descriptor", columns=["MolecularWeight"])
 
     # The options alone are never enough to know: the same request over
-    # molecules that differ is fine, and an unfitted metric never asks.
+    # molecules that differ is fine, and an unfitted metric never asks. Each
+    # control changes exactly one thing against the refused call above.
     assert oecluster.pdist(_mols(["CCO", "CCCC"]), "descriptor",
                            columns=["MolecularWeight"]).num_samples == 2
-    assert oecluster.pdist(identical, "descriptor",
-                           metric="euclidean").num_samples == 2
-    _native.validate_descriptor_options(
-        _comparisons.descriptor_options({'columns': ["MolecularWeight"]}))
+    assert oecluster.pdist(identical, "descriptor", metric="euclidean",
+                           columns=["MolecularWeight"]).num_samples == 2
 
 
 def test_complete_data_excludes_nothing():

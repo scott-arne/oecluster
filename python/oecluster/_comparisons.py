@@ -607,15 +607,17 @@ def _validate_descriptor(similarity, kwargs):
 
     # Only C++ can rule on a value: the metric table lives in a private header
     # and is not reachable from here, so a Python copy of it would be a second
-    # source of truth that drifts. ``validate_descriptor_options`` is every
-    # check that needs no molecules, which is what lets it run before the
-    # filter. That includes the rules matching ``variances`` and
-    # ``inverse_covariance`` to the selected columns: the schema comes from
-    # ``sources`` alone. What is left downstream either reads the molecules --
-    # the minimum input size, the complete-case row check, the refusal when
-    # every selected column is constant -- or, on a request with no override,
-    # the source, column and group names, which C++ reports from the same
-    # selection the filter resolves. None of it can be decided here.
+    # source of truth that drifts. ``validate_descriptor_options`` holds the
+    # checks that need no molecules, which is what lets it run before the
+    # filter -- including the rules matching ``variances`` and
+    # ``inverse_covariance`` to the selected columns, since the schema comes
+    # from ``sources`` alone. It stops short of the source, column and group
+    # names on a request with no override: resolving those needs a schema, and
+    # with no override nothing on that path asks for one to be built, so C++
+    # reports them further down instead. Everything else left downstream reads
+    # the input; among those, the minimum input size, the complete-case row
+    # check, the refusal when every selected column is constant. None of it can
+    # be decided here.
     _oecluster.validate_descriptor_options(descriptor_options(kwargs))
 
 

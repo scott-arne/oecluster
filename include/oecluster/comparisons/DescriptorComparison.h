@@ -127,7 +127,7 @@ std::vector<size_t> descriptor_excluded_indices(const std::vector<OEChem::OEMolB
                                                 const DescriptorOptions& opts);
 
 /**
- * @brief Refuse the option mistakes no molecule set could make valid.
+ * @brief Refuse option mistakes before any molecule is read.
  *
  * The boundary is *needs no molecules*, not *needs no schema*: the descriptor
  * schema is resolved from ``opts.sources`` alone, so the rules that match an
@@ -138,7 +138,7 @@ std::vector<size_t> descriptor_excluded_indices(const std::vector<OEChem::OEMolB
  * The constructor still refuses on its own account. Among those reasons: the
  * input is smaller than a fitted metric needs; a ``complete_case`` row check
  * fails; every selected column is constant over these molecules. Each reads
- * the molecules, so nothing here can anticipate it. The constructor also
+ * the input, so nothing here can anticipate it. The constructor also
  * keeps the source, column and group name checks on any request with no
  * override, because this function builds no calculator on that path and so
  * resolves no schema.

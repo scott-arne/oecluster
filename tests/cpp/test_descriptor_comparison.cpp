@@ -464,9 +464,11 @@ TEST(DescriptorOptionValidationTest, TheInputSizeRuleIsLeftToTheConstructor) {
 }
 
 TEST(DescriptorOptionValidationTest, TheAllColumnsConstantRuleIsLeftToTheConstructor) {
-    // The third rule the constructor keeps for itself, and the one an earlier
-    // draft of this header's prose forgot: a fitted metric needs some spread
+    // The third of the constructor's input-reading rules, and the one an
+    // earlier draft of this header's prose forgot: a fitted metric needs spread
     // to fit against, and whether there is any is a fact about the molecules.
+    // The constructor keeps name checks too, so this is not the third of all
+    // it keeps -- only of those that have to read the input to decide.
     // Identical inputs make every selected column constant, which no option
     // value can be blamed for and no validator could have foreseen.
     DescriptorOptions single_column;
