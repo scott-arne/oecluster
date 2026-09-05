@@ -472,14 +472,14 @@ separately, under `params["excluded_items_a"]` and
 `propagate` keeps every molecule and lets the absence flow into the distances
 as NaN; it stamps `data_integrity` as `'nan_present'` on the strength of the
 policy, whether or not a NaN actually reached the matrix, and the clustering
-entry points refuse that with no override available. `ignore` scores each pair over the features both
-molecules have, which produces distances that are not mutually comparable; it
-stamps `'subset_scored'`, which the clustering entry points refuse unless
-`allow_nonmetric=True`. An observed NaN outranks that stamp: a value that is
-present but not finite is not skipped, and takes `data_integrity` to
-`'nan_present'` under `ignore` too. `ignore` is not available with
-`standardized_euclidean` or `mahalanobis` at all, since their fitted
-transforms mix columns and a per-pair subset of them is incoherent.
+entry points refuse that with no override available. `ignore` scores each pair
+over the features both molecules have, which produces distances that are not
+mutually comparable; it stamps `'subset_scored'`, which the clustering entry
+points refuse unless `allow_nonmetric=True`. An observed NaN outranks that
+stamp: a value that is present but not finite is not skipped, and takes
+`data_integrity` to `'nan_present'` under `ignore` too. `ignore` is not
+available with `standardized_euclidean` or `mahalanobis` at all, since their
+fitted transforms mix columns and a per-pair subset of them is incoherent.
 
 ### RMSD
 
