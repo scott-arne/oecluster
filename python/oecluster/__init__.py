@@ -1184,19 +1184,14 @@ class SymmetricDistanceMatrix(DistanceMatrix):
 
         array = np.asarray(values, dtype=np.float64)
 
+        square = None
         if array.ndim == 2:
             if array.shape[0] != array.shape[1]:
                 raise ValueError(
                     f"a 2-D input must be square, got shape "
                     f"{tuple(array.shape)}")
             n = array.shape[0]
-            if check:
-                if not np.allclose(array, array.T, equal_nan=True):
-                    raise ValueError("a 2-D distance matrix must be symmetric")
-                if np.any(np.diagonal(array) != 0.0):
-                    raise ValueError(
-                        "a 2-D distance matrix must have a zero diagonal; a "
-                        "non-zero self-distance is not a distance")
+            square = array
             condensed = np.ascontiguousarray(array[np.triu_indices(n, k=1)])
         elif array.ndim == 1:
             length = array.shape[0]
@@ -1210,19 +1205,33 @@ class SymmetricDistanceMatrix(DistanceMatrix):
             raise ValueError(
                 f"expected a 1-D or 2-D array, got {array.ndim} dimensions")
 
-        if check:
-            if not np.all(np.isfinite(condensed)):
-                raise ValueError(
-                    "distance matrix contains non-finite values; remove or "
-                    "impute them before clustering")
-            if np.any(condensed < 0.0):
-                raise ValueError("distance matrix contains negative values")
-
+        # Ahead of the value checks, because no number in the input can make a
+        # miscounted labels= valid. Leaving it below them made the answer to
+        # one bad argument depend on the data and on check=.
         if labels is not None:
             labels = list(labels)
             if len(labels) != n:
                 raise ValueError(
                     f"labels length {len(labels)} != item count {n}")
+
+        if check:
+            # The whole input, so a 2-D diagonal is measured too: a NaN there
+            # is a missing self-distance, and calling it a non-zero one would
+            # send the caller to recompute rather than to impute or drop.
+            # Every check below can then assume finite numbers.
+            if not np.all(np.isfinite(array)):
+                raise ValueError(
+                    "distance matrix contains non-finite values; remove or "
+                    "impute them before clustering")
+            if square is not None:
+                if not np.allclose(square, square.T):
+                    raise ValueError("a 2-D distance matrix must be symmetric")
+                if np.any(np.diagonal(square) != 0.0):
+                    raise ValueError(
+                        "a 2-D distance matrix must have a zero diagonal; a "
+                        "non-zero self-distance is not a distance")
+            if np.any(condensed < 0.0):
+                raise ValueError("distance matrix contains negative values")
 
         # is_distance, zero_self and triangle all stay "unknown" from
         # default_facts(). The zero diagonal checked above is the caller's

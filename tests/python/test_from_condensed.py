@@ -48,6 +48,36 @@ def test_from_condensed_rejects_a_label_count_mismatch():
         SymmetricDistanceMatrix.from_condensed(condensed, labels=["a", "b"])
 
 
+def test_a_bad_label_count_is_reported_ahead_of_the_data():
+    """One bad ``labels=`` must not tell two stories.
+
+    No number in the array can make a miscounted label list valid, so the
+    label count is the authoritative complaint. It used to lose to the value
+    checks, which meant the call whose author had already miscounted the items
+    was the one that never got told the item count.
+    """
+    for array in ([1.0], [np.nan], [-5.0]):
+        with pytest.raises(ValueError,
+                           match=r"labels length 3 != item count 2"):
+            SymmetricDistanceMatrix.from_condensed(
+                array, labels=["a", "b", "c"])
+
+
+def test_a_non_finite_diagonal_is_refused_as_non_finite():
+    """NaN on the diagonal is a missing self-distance, not a non-zero one.
+
+    The two want different fixes -- impute or drop the item, against recompute
+    -- and the finiteness check ran on the strict upper triangle, so the
+    diagonal was only ever refused for failing ``!= 0.0`` by accident.
+    """
+    _, square = _metric_condensed(n=3)
+    for bad in (np.nan, np.inf):
+        broken = square.copy()
+        broken[1, 1] = bad
+        with pytest.raises(ValueError, match="non-finite"):
+            SymmetricDistanceMatrix.from_condensed(broken)
+
+
 def test_from_condensed_rejects_non_finite_values():
     condensed, _ = _metric_condensed(n=3)
     condensed = condensed.copy()
