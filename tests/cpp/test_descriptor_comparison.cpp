@@ -563,9 +563,12 @@ TEST(DescriptorOptionValidationTest, TheAllColumnsConstantRuleIsLeftToTheConstru
 }
 
 TEST_F(DescriptorComparisonTest, TheConstructorRepeatsEveryValidatorMessageVerbatim) {
-    // The extraction must not have changed what a caller is told, only when.
-    // Comparing the two messages byte for byte is also what keeps the
-    // constructor from growing a second copy of a rule that later drifts.
+    // The extraction must not have changed what a caller is told, only when:
+    // for every tabled refusal the constructor path reports the validator's own
+    // wording. It does not also keep the constructor from growing a second copy
+    // of a rule -- a duplicate below the validate call is unreachable for every
+    // case in the table, and the suite passed with one inserted. The caption on
+    // molecule_independent_mistakes() has the rest.
     for (const auto& entry : molecule_independent_mistakes()) {
         const std::string from_validator =
             refusal_message([&] { validate_descriptor_options(entry.second); });
