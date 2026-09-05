@@ -748,3 +748,76 @@ def test_one_molecule_is_refused_only_by_a_metric_that_fits_variances():
 
     assert oecluster.DescriptorComparison(
         _mols(["CCO"]), metric="euclidean").Size() == 1
+
+
+SEQUENCE_OPTIONS = ("sources", "columns", "groups", "variances",
+                    "inverse_covariance")
+
+
+@pytest.mark.parametrize("option", SEQUENCE_OPTIONS)
+def test_an_empty_sequence_option_is_not_the_same_as_omitting_it(option):
+    """Only ``None`` is unspecified, on every entry point that builds options.
+
+    Emptiness is the native layer's own encoding of "no override", so an empty
+    sequence used to reach C++ indistinguishable from an omitted option and
+    silently produce the default result: over ``_mols()`` every one of these
+    five scored ``3.4842533260889486`` and dropped no column, exactly as
+    passing nothing does.
+
+    The keyword path and the prebuilt path are separate code in the package --
+    ``pdist`` and ``cdist`` reach ``descriptor_options`` through the validator
+    and the builder, while ``DescriptorComparison`` calls it directly -- so
+    both are checked. The message has to name the option, since a caller who
+    passed several has no other way to tell which one was empty.
+    """
+    match = rf"{option}= was given as an empty sequence"
+
+    with pytest.raises(ValueError, match=match):
+        oecluster.pdist(_mols(), "descriptor", **{option: []})
+    with pytest.raises(ValueError, match=match):
+        oecluster.cdist(_mols(), _mols(), "descriptor", **{option: []})
+    with pytest.raises(ValueError, match=match):
+        oecluster.DescriptorComparison(_mols(), **{option: []})
+
+
+def test_an_empty_inverse_covariance_array_is_refused_once_flattened():
+    """The matrix form is raveled first, so a ``(0, 0)`` array is empty too.
+
+    ``inverse_covariance`` is the one option accepted as a 2-D array, and the
+    guard has to see what C++ will see rather than the shape handed in.
+    """
+    with pytest.raises(ValueError,
+                       match="inverse_covariance= was given as an empty"):
+        oecluster.pdist(_mols(), "descriptor", metric="mahalanobis",
+                        inverse_covariance=np.zeros((0, 0)))
+
+
+def test_an_empty_sequence_never_pre_empts_an_authoritative_refusal():
+    """The emptiness guard runs inside the options builder, after both names.
+
+    ``similarity=True`` and an unknown keyword are decided by
+    ``_validate_descriptor`` before it builds any options, so a caller who has
+    made two mistakes is still told about the one that outranks the other.
+    """
+    with pytest.raises(ValueError, match="no similarity form"):
+        oecluster.pdist(_mols(), "descriptor", similarity=True, variances=[])
+    with pytest.raises(
+            TypeError,
+            match=r"Unknown kwargs for descriptor comparison: \['bogus'\]"):
+        oecluster.pdist(_mols(), "descriptor", bogus=1, variances=[])
+
+
+@pytest.mark.parametrize("option", ("sources", "columns", "groups"))
+def test_descriptor_statistics_refuses_an_empty_sequence_option(option):
+    """It builds its own options object, so it needs the guard of its own.
+
+    ``descriptor_statistics`` shares the vector conversion with
+    ``descriptor_options`` but not the option building, and before the guard
+    each of these three returned the same eleven default columns as passing
+    nothing at all.
+    """
+    assert len(oecluster.descriptor_statistics(_mols())['columns']) == 11
+
+    with pytest.raises(ValueError,
+                       match=rf"{option}= was given as an empty sequence"):
+        oecluster.descriptor_statistics(_mols(), **{option: []})

@@ -3168,17 +3168,22 @@ def descriptor_statistics(mols, *, sources=None, columns=None, groups=None,
         ``inverse_covariance_rows``. The last is the number of rows behind the
         fitted matrix: ``0`` when no matrix was requested, and not always
         ``num_rows``.
+    :raises ValueError: If ``sources``, ``columns`` or ``groups`` is passed as
+        an empty sequence, which C++ cannot tell apart from an omitted option.
     :raises RuntimeError: If the descriptor layer refuses the request. Among
         the reasons: an unknown source, column, or group name; and fewer than
         two molecules, which is too few to fit a variance.
     """
     options = _oecluster.DescriptorStatisticsOptions()
     if sources is not None:
-        options.sources = _comparisons._string_vector(sources)
+        options.sources = _comparisons._nonempty_vector(
+            'sources', _comparisons._string_vector(sources))
     if columns is not None:
-        options.columns = _comparisons._string_vector(columns)
+        options.columns = _comparisons._nonempty_vector(
+            'columns', _comparisons._string_vector(columns))
     if groups is not None:
-        options.groups = _comparisons._string_vector(groups)
+        options.groups = _comparisons._nonempty_vector(
+            'groups', _comparisons._string_vector(groups))
     options.inverse_covariance = bool(inverse_covariance)
 
     native = _oecluster.descriptor_statistics(mols, options)
@@ -3374,6 +3379,9 @@ class DescriptorComparison:
             "propagate", or "ignore".
         :param p: Minkowski order.
         :returns: C++ DescriptorComparison object.
+        :raises ValueError: If ``sources``, ``columns``, ``groups``,
+            ``variances`` or ``inverse_covariance`` is passed as an empty
+            sequence, which C++ cannot tell apart from an omitted option.
         :raises RuntimeError: If the C++ layer refuses the request. Among the
             reasons: a rejected option value; a molecule with an absent or
             non-finite value for a selected descriptor under the

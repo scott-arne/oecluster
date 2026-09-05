@@ -543,6 +543,31 @@ def _double_vector(values):
     return vector
 
 
+def _nonempty_vector(name, vector):
+    """
+    Refuse a descriptor option that was supplied as an empty sequence.
+
+    Emptiness is the native layer's own encoding of "no override":
+    ``DescriptorComparison.cpp`` keys ``has_override`` and the
+    ``variances``/``inverse_covariance`` pairing rules off ``.empty()``, and a
+    selection option left empty resolves to the same default schema as one
+    never set. An empty sequence therefore arrives in C++ indistinguishable
+    from an omitted option, so the only place the two can still be told apart
+    is here, before the conversion is handed over.
+
+    :param name: The keyword option name, used in the message.
+    :param vector: The converted native vector.
+    :returns: ``vector`` unchanged.
+    :raises ValueError: If the converted sequence is empty.
+    """
+    if len(vector) == 0:
+        raise ValueError(
+            f"{name}= was given as an empty sequence, which the descriptor "
+            f"layer cannot tell apart from never passing it. Pass the values "
+            f"you want, or omit {name}= to take the default.")
+    return vector
+
+
 _DESCRIPTOR_KEYS = (
     'sources',
     'columns',
@@ -564,21 +589,30 @@ def descriptor_options(kwargs):
 
     :param kwargs: Comparison keyword options.
     :returns: A populated ``DescriptorOptions``.
+    :raises ValueError: If any sequence-valued option was passed as an empty
+        sequence, which C++ cannot distinguish from an omitted option.
     """
     opts = DescriptorOptions()
     if kwargs.get('sources') is not None:
-        opts.sources = _string_vector(kwargs['sources'])
+        opts.sources = _nonempty_vector(
+            'sources', _string_vector(kwargs['sources']))
     if kwargs.get('columns') is not None:
-        opts.columns = _string_vector(kwargs['columns'])
+        opts.columns = _nonempty_vector(
+            'columns', _string_vector(kwargs['columns']))
     if kwargs.get('groups') is not None:
-        opts.groups = _string_vector(kwargs['groups'])
+        opts.groups = _nonempty_vector(
+            'groups', _string_vector(kwargs['groups']))
     if kwargs.get('metric') is not None:
         opts.metric = str(kwargs['metric'])
     if kwargs.get('variances') is not None:
-        opts.variances = _double_vector(kwargs['variances'])
+        opts.variances = _nonempty_vector(
+            'variances', _double_vector(kwargs['variances']))
     if kwargs.get('inverse_covariance') is not None:
-        opts.inverse_covariance = _double_vector(
-            np.asarray(kwargs['inverse_covariance'], dtype=np.float64).ravel())
+        opts.inverse_covariance = _nonempty_vector(
+            'inverse_covariance',
+            _double_vector(
+                np.asarray(kwargs['inverse_covariance'],
+                           dtype=np.float64).ravel()))
     if kwargs.get('missing') is not None:
         opts.missing = str(kwargs['missing']).lower()
     if kwargs.get('p') is not None:
@@ -624,7 +658,8 @@ def _validate_descriptor(similarity, kwargs):
 
     :param similarity: Whether the caller asked for similarities.
     :param kwargs: Comparison keyword options, read but never consumed.
-    :raises ValueError: If similarities were requested.
+    :raises ValueError: If similarities were requested, or if a sequence-valued
+        option was passed as an empty sequence.
     :raises TypeError: If any keyword option is not a descriptor option.
     :raises RuntimeError: If C++ refuses an option value outright.
     """
