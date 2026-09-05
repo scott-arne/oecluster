@@ -254,7 +254,8 @@ def probe_triangle(condensed, n, *, samples=100000, seed=0):
         probe.
     :param seed: Seed for the sampler, fixed so results are reproducible.
     :returns: Dict with ``metric_probe``, ``probe_violations``, and
-              ``probe_sampled``.
+              ``probe_sampled``. The two counts are of *distinct* inequalities,
+              not of draws.
     """
     skipped = {'metric_probe': "not_run", 'probe_violations': 0,
                'probe_sampled': 0}
@@ -269,6 +270,22 @@ def probe_triangle(condensed, n, *, samples=100000, seed=0):
     i, j, k = i[distinct], j[distinct], k[distinct]
     if i.size == 0:
         return skipped
+
+    # Drawing with replacement means the same inequality arrives many times
+    # over, and ``d(i, k) <= d(i, j) + d(j, k)`` is the same inequality with
+    # the two ends swapped. Counting draws would report more triples than a
+    # small matrix contains -- a 4-item matrix admits 12 of these while the
+    # default draw survives ~37000 times -- and ``require_metric`` prints
+    # both counts as the evidence behind its refusal.
+    lo = np.minimum(i, k)
+    hi = np.maximum(i, k)
+    # One integer code per triple rather than ``np.unique(rows, axis=0)``,
+    # which lexsorts a structured view: measured 7.6 ms against 51 ms for the
+    # same 62129 triples at n = 60. Overflowing int64 would take n > 2e6,
+    # whose condensed array alone would be some 17 TB.
+    _, keep = np.unique((lo.astype(np.int64) * n + j) * n + hi,
+                        return_index=True)
+    i, j, k = lo[keep], j[keep], hi[keep]
 
     d_ij = condensed_lookup(condensed, n, i, j)
     d_jk = condensed_lookup(condensed, n, j, k)

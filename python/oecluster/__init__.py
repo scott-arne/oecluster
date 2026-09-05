@@ -822,12 +822,12 @@ class DistanceMatrix(abc.ABC):
 
     @property
     def probe_violations(self):
-        """Get the number of triple violations the probe found."""
+        """Get the number of distinct violating triples the probe found."""
         return self._facts['probe_violations']
 
     @property
     def probe_sampled(self):
-        """Get the number of triples the probe sampled."""
+        """Get the number of distinct triples the probe tested."""
         return self._facts['probe_sampled']
 
     @abc.abstractmethod

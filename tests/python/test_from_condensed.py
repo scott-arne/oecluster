@@ -190,7 +190,7 @@ def test_the_probe_tolerance_keeps_a_collinear_metric_clean():
 
     Collinear points make the triangle inequality an equality, which is where
     floating-point rounding pushes a genuine metric a few ulps over the line.
-    Measured on this 200-point set: 1272 violations in 98502 sampled triples
+    Measured on this 200-point set: 1256 violations in 97273 sampled triples
     with the ``1e-9 * scale`` term deleted, and 0 with it in place.
     """
     points = np.arange(200, dtype=np.float64)[:, None] * np.array([0.1, 0.0])
@@ -200,8 +200,37 @@ def test_the_probe_tolerance_keeps_a_collinear_metric_clean():
     assert _gate.probe_triangle(condensed, 200) == {
         'metric_probe': "no_violations_found",
         'probe_violations': 0,
-        'probe_sampled': 98502,
+        'probe_sampled': 97273,
     }
+
+
+def test_the_probe_counts_distinct_triples_not_draws():
+    """A draw count would overstate the evidence the refusal cites.
+
+    A 4-item matrix admits exactly 12 inequalities of the form
+    ``d(i, k) <= d(i, j) + d(j, k)``: ``C(4, 2)`` unordered end pairs times the
+    2 remaining choices of ``j``. The sampler draws with replacement, so a
+    count of surviving draws puts ``probe_sampled`` in the tens of thousands
+    for a matrix that contains twelve tests.
+    """
+    condensed = np.full(6, 0.1)
+    condensed[1] = 10.0
+    result = _gate.probe_triangle(condensed, 4)
+    assert result['probe_sampled'] == 12
+    # d(0, 2) = 10.0 against 0.1 everywhere else, so the two inequalities that
+    # route from 0 to 2 through 1 and through 3 are the violations that exist.
+    assert result['probe_violations'] == 2
+
+
+def test_deduplication_still_leaves_a_large_sample_on_a_large_set():
+    """Deduplication must not quietly shrink the probe into uselessness.
+
+    ``probe_sampled`` depends only on ``n``, the draw count and the seed, so
+    this figure is a property of the sampler rather than of the distances.
+    """
+    condensed, _ = _metric_condensed(n=60)
+    result = _gate.probe_triangle(condensed, 60)
+    assert result['probe_sampled'] == 62129
 
 
 def test_the_probe_is_skipped_below_three_items():
@@ -216,7 +245,7 @@ def test_the_probe_catches_real_non_metric_distances(metric):
 
     A planted violation proves the arithmetic; this proves the sampler finds
     violations at the density real non-metrics actually produce. Measured on
-    this 60-point set: cosine 11757 violations in 95105 sampled triples.
+    this 60-point set: cosine 7708 violations in 62129 sampled triples.
     """
     scipy_distance = pytest.importorskip("scipy.spatial.distance")
     rng = np.random.default_rng(7)
