@@ -298,12 +298,14 @@ def test_cdist_validates_arguments_before_filtering_either_side():
 # a request with no override. These are the ones pinned through the Python
 # surface, chosen to cover both halves of the boundary.
 #
-# The last six need the descriptor schema, which is resolved from ``sources``
-# alone -- that is why the boundary is "needs no molecules" rather than "needs
-# no schema", and it is what puts them ahead of a filter that can empty the
-# item list. ``columns`` is named explicitly wherever an entry's value is what
-# is wrong, so the case does not depend on how many columns the default
-# selection happens to hold.
+# Every case below the first two is applied only once the descriptor schema is
+# resolved, and that schema comes from ``sources`` alone -- which is why the
+# boundary is "needs no molecules" rather than "needs no schema", and what puts
+# them ahead of a filter that can empty the item list. Most read the schema; the
+# ``inverse_covariance`` finiteness case does not, and is applied there only to
+# stay beside the length rule it follows. Where the fault is in the override's
+# values rather than its length, ``columns`` is named explicitly, so the case
+# does not depend on how many columns the default selection happens to hold.
 UNRESCUABLE = [
     ({'metric': "bogus"}, "Unknown metric 'bogus'"),
     ({'metric': "euclidean", 'variances': [1.0]},
@@ -321,7 +323,8 @@ UNRESCUABLE = [
     ({'metric': "mahalanobis", 'columns': ["MolecularWeight", "XLogP"],
       'inverse_covariance': [float("nan"), 0.0, 0.0, 1.0]},
      r"inverse_covariance\[0\] must be finite, got nan"),
-    # Indefinite with a positive diagonal, so only the eigenvalues refuse it.
+    # Indefinite with a positive diagonal, so a diagonal-only screen would wave
+    # it through; separating it takes a verdict on the matrix as a whole.
     ({'metric': "mahalanobis", 'columns': ["MolecularWeight", "XLogP"],
       'inverse_covariance': [1.0, 2.0, 2.0, 1.0]},
      "positive semidefinite"),

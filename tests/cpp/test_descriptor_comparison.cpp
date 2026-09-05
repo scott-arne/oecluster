@@ -41,11 +41,18 @@ std::string refusal_message(Callable&& call) {
 /// the name here. Both halves are pinned by
 /// TheSchemaIsResolvedOnlyWhenAnOverrideNeedsIt below, not by this table.
 ///
-/// What this table detects is a rule the validator has *lost*: the constructor
-/// still refuses, the validator returns no message, and the two strings stop
-/// matching. It does not detect the reverse. A duplicate rule added to the
-/// constructor below its validate call is unreachable for every case listed
-/// here, because the validator refuses each of them first.
+/// What this table detects is a rule the validator has *lost*, and
+/// EveryTabledMistakeIsRefusedWithoutMolecules is what detects it: the validator
+/// falls silent and that test fails on its own, whatever the constructor does
+/// next. The byte-for-byte comparison in
+/// TheConstructorRepeatsEveryValidatorMessageVerbatim is a second net only where
+/// construction still reaches an independent refusal, and for some cases it
+/// reaches none -- with the inverse_covariance-under-euclidean rule deleted the
+/// constructor stores the override, resolves a euclidean metric that ignores it,
+/// and falls silent too, so the two messages still agree. Neither test detects
+/// the reverse: a duplicate rule added to the constructor below its validate
+/// call is unreachable for every case listed here, because the validator refuses
+/// each of them first.
 std::vector<std::pair<std::string, DescriptorOptions>> molecule_independent_mistakes() {
     std::vector<std::pair<std::string, DescriptorOptions>> cases;
 
