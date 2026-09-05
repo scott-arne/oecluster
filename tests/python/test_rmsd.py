@@ -140,7 +140,6 @@ def test_expanded_poses_have_exact_source_conformer_coordinates():
         source_coords.append(per_atom)
 
     # Expand and verify coordinates match
-    from oecluster import _comparisons
     expanded, _ = _comparisons._normalize_rmsd([mol], {})
     assert len(expanded) == 3
 
@@ -160,19 +159,25 @@ def test_expansion_with_atom_index_gaps():
     Atom deletions (hydrogen suppression, salt stripping) leave index gaps.
     Coordinate mapping must use iteration order, not raw indices, or the
     assignment silently scrambles atoms.
+
+    The conformers differ by a per-atom displacement rather than a rigid
+    translation. A rigid shift cannot detect the misassignment this test is
+    named for: it moves every atom identically, so a scramble applied
+    consistently to both poses leaves every pairwise distance unchanged.
     """
     mol = oechem.OEMol()
     # Interleaved hydrogens force GetMaxAtomIdx=9 when NumAtoms=3 after suppression
     oechem.OESmilesToMol(mol, "C([H])([H])([H])C([H])([H])O[H]")
     oechem.OEGenerate2DCoordinates(mol)
 
-    # Build three conformers with known shifts
+    # Build three conformers, each atom displaced by its own amount
     base = oechem.OEFloatArray(mol.GetMaxAtomIdx() * 3)
     mol.GetCoords(base)
-    for shift in [1.0, 2.5]:
+    for scale in [1.0, 2.5]:
         moved = oechem.OEFloatArray(list(base))
-        for idx in range(0, len(moved), 3):
-            moved[idx] += shift
+        for slot in range(mol.GetMaxAtomIdx()):
+            moved[slot * 3] += scale * (slot + 1)
+            moved[slot * 3 + 1] += scale * 0.3 * slot
         mol.NewConf(moved)
 
     oechem.OESuppressHydrogens(mol)
@@ -194,8 +199,11 @@ def test_expansion_with_atom_index_gaps():
 def test_mixing_single_and_multiconformer_molecules():
     """Single-conformer inputs pass through; multi-conformer are rebuilt.
 
-    Both paths must agree on the coordinate assignment, so mixing them in one
-    pdist verifies no systematic divergence.
+    The distances pin the labels and the pass-through against the expansion in
+    one matrix. They do not pin the coordinate assignment: the poses differ by
+    a rigid translation, which a consistent atom scramble leaves unchanged.
+    ``test_expanded_poses_have_exact_source_conformer_coordinates`` is what
+    covers that.
     """
     single = _pose("CCCO", 0.5, "single")
     multi = _multiconformer("CCCO", (0.0, 2.0), "multi")

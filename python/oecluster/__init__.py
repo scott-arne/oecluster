@@ -3107,8 +3107,9 @@ class RMSDComparison:
         :returns: C++ RMSDComparison object.
         :raises RuntimeError: If the C++ layer refuses the request. Among the
             reasons: a molecule with no coordinates; a mix of 2D and 3D input;
-            molecules that do not share one topology; and, with
-            ``automorph=False`` or ``heavy_only=False``, a differing atom count,
+            molecules that do not share one topology; with
+            ``heavy_only=False``, a differing atom count once hydrogens are
+            counted; and, with ``automorph=False``, a differing atom count,
             element order, or bond set.
         """
         kwargs = {

@@ -677,7 +677,8 @@ def _expand_conformers_requested(kwargs):
     :param kwargs: Comparison keyword options, read but never consumed.
     :returns: Whether multi-conformer molecules should be expanded. Omitting
         the flag means yes.
-    :raises TypeError: If ``expand_conformers`` is present and is not a bool.
+    :raises TypeError: If ``expand_conformers`` is present and is neither a
+        bool nor a ``numpy.bool_``.
     """
     expand = kwargs.get('expand_conformers')
     if expand is None:
@@ -720,7 +721,11 @@ def _normalize_rmsd(items, kwargs):
             src = oechem.OEFloatArray(conf.GetMaxAtomIdx() * 3)
             conf.GetCoords(src)
             dst = oechem.OEFloatArray(single.GetMaxAtomIdx() * 3)
-            for src_atom, dst_atom in zip(conf.GetAtoms(), single.GetAtoms()):
+            # strict=True because a length mismatch would otherwise be silent:
+            # OEFloatArray zero-initializes, so the unwritten atoms would sit at
+            # the origin and produce a plausible-looking distance.
+            for src_atom, dst_atom in zip(
+                    conf.GetAtoms(), single.GetAtoms(), strict=True):
                 for axis in range(3):
                     dst[dst_atom.GetIdx() * 3 + axis] = src[
                         src_atom.GetIdx() * 3 + axis]
@@ -743,8 +748,11 @@ def _validate_rmsd(similarity, kwargs):
     :param similarity: Whether the caller asked for similarities.
     :param kwargs: Comparison keyword options, read but never consumed.
     :raises ValueError: If similarities were requested.
-    :raises TypeError: If any keyword option is not an RMSD option, or if
-        ``expand_conformers`` is present and is not a bool.
+    :raises TypeError: If any keyword option is not an RMSD option, if
+        ``expand_conformers`` is present and is neither a bool nor a
+        ``numpy.bool_``, or if an option value is of a type ``RMSDOptions``
+        will not take.
+    :raises RuntimeError: If C++ refuses an option value outright.
     """
     if similarity:
         raise ValueError(
@@ -754,6 +762,11 @@ def _validate_rmsd(similarity, kwargs):
     if unknown:
         raise TypeError(f"Unknown kwargs for rmsd comparison: {unknown}")
     _expand_conformers_requested(kwargs)
+    # Building the options here is what puts the option-value refusals ahead of
+    # cdist's guards too. Without it, cdist([], b, "rmsd", overlay="false")
+    # reports the empty input set -- the same misdirection the similarity check
+    # above exists to prevent.
+    rmsd_options(kwargs)
 
 
 def _build_rmsd(items, similarity, kwargs, symmetric):
