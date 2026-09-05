@@ -292,9 +292,12 @@ methane's `combo_norm` self-distance was measured at `5.1e-01`, and water's at
 guaranteed to vanish for every molecule, so read
 `dm.metric_capabilities['zero_self']` for the set in hand rather than choosing
 a `score_type` in the hope of one. None of that carries over to
-`similarity=True`, where a self-score saturates at 1.0 instead of vanishing --
-`shape` stamps `zero_self` false on every set, and so do `combo_norm`, `combo`
-and `color` on coloured molecules. The exception is a colour similarity over
+`similarity=True`, where a self-score sits at or just under 1.0 instead of
+vanishing -- the same shortfall as above, read from the other end: methane's
+shape self-similarity measures `0.9896` and Cl2's `0.9863` where ethane's is
+exactly `1.0`. Either way the value is nowhere near zero, so `shape` stamps
+`zero_self` false on every set, and so do `combo_norm`, `combo` and `color` on
+coloured molecules. The exception is a colour similarity over
 molecules with no colour features, which self-scores 0.0 and is stamped
 `zero_self` true. It is refused anyway: a similarity fails `is_distance`
 before `zero_self` is consulted, which is why the two facts are kept apart.
