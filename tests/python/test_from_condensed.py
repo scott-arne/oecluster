@@ -110,6 +110,19 @@ def test_from_condensed_rejects_a_non_zero_diagonal():
         SymmetricDistanceMatrix.from_condensed(square)
 
 
+def test_a_complex_input_is_refused():
+    """The float64 conversion discards the imaginary part behind a warning.
+
+    A warning is not a refusal, and a caller who filtered it got a matrix
+    built from half the numbers they passed. Not gated on ``check``: no
+    assertion by the caller makes the real part the right half to keep.
+    """
+    values = np.array([1 + 2j, 1.0, 1.0])
+    for flag in (True, False):
+        with pytest.raises(ValueError, match="complex"):
+            SymmetricDistanceMatrix.from_condensed(values, check=flag)
+
+
 def test_from_condensed_rejects_a_non_square_matrix():
     with pytest.raises(ValueError, match="square"):
         SymmetricDistanceMatrix.from_condensed(np.zeros((3, 4)))

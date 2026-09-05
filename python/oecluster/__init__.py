@@ -1182,7 +1182,16 @@ class SymmetricDistanceMatrix(DistanceMatrix):
                 f"({check!r}). A falsy value would silently disable every "
                 f"ingress check.")
 
-        array = np.asarray(values, dtype=np.float64)
+        # Ahead of the float64 conversion, which discards the imaginary part
+        # behind a ComplexWarning the caller may have filtered. Not gated on
+        # check=: no assertion by the caller makes the real part the right
+        # half of a complex number to keep.
+        array = np.asarray(values)
+        if np.iscomplexobj(array):
+            raise ValueError(
+                f"expected real distances, got a complex input (dtype "
+                f"{array.dtype}); converting would discard the imaginary part")
+        array = array.astype(np.float64, copy=False)
 
         square = None
         if array.ndim == 2:
