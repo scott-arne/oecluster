@@ -89,6 +89,20 @@ def test_conformers_are_expanded_and_labeled():
                            "ligB:conf0", "ligB:conf1"]
 
 
+def test_each_expanded_pose_carries_its_own_coordinates():
+    """Counting the poses is not enough; the coordinates have to move too.
+
+    An expansion that copied the source molecule's active conformer into every
+    pose would satisfy the count and the labels above and still produce an
+    all-zeros matrix. The shifts are chosen so each pairwise distance is the
+    translation between two poses, which no other coordinate assignment
+    reproduces.
+    """
+    mols = [_multiconformer("CCCO", (0.0, 1.0, 3.0), "ligA")]
+    dist = oecluster.pdist(mols, "rmsd", automorph=False)
+    np.testing.assert_allclose(dist.condensed, [1.0, 3.0, 2.0], atol=1e-4)
+
+
 def test_expansion_can_be_disabled():
     mols = [_multiconformer("CCCO", (0.0, 1.0, 2.0), "ligA"),
             _multiconformer("CCCO", (0.0, 3.0), "ligB")]
