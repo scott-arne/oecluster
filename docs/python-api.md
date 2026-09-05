@@ -276,10 +276,22 @@ still caught.
 `zero_self` is measured rather than assumed. A ROCS comparison scores every
 molecule against itself at construction and stamps the capability from what it
 finds, so the same `score_type` can pass over one molecule set and refuse over
-another. As a distance, `score_type="shape"` vanishes on the diagonal for any
-molecule whatever its colour features; `combo_norm` (the default), `combo` and
-`color` vanish for molecules that carry colour features, and stamp `zero_self`
-false over a set containing one that does not. None of that carries over to
+another. As a distance, two independent things make a diagonal fail to vanish.
+A shape self-overlay does not always saturate: on small compact molecules the
+best self-overlay comes back a little short, leaving a `score_type="shape"`
+self-distance around `1e-2` rather than `0`. Methane, water, Cl2 and Br2 have
+all been measured there, while ethane, benzene and ethanol seat on themselves
+exactly -- and whether a given small molecule lands on zero depends on the
+conformer it was embedded with, which is why the stamp is measured per set and
+not tabulated per `score_type`. Separately, a colour term contributes nothing
+for a molecule that carries no colour features, so `color` self-scores `1.0`
+as a distance there; methane and Cl2 do that, water does not. `combo_norm`
+(the default) and `combo` average the two terms and inherit both causes:
+methane's `combo_norm` self-distance was measured at `5.1e-01`, and water's at
+`5.6e-03` even though water's colour term vanishes. No `score_type` is
+guaranteed to vanish for every molecule, so read
+`dm.metric_capabilities['zero_self']` for the set in hand rather than choosing
+a `score_type` in the hope of one. None of that carries over to
 `similarity=True`, where a self-score saturates at 1.0 instead of vanishing --
 `shape` stamps `zero_self` false on every set, and so do `combo_norm`, `combo`
 and `color` on coloured molecules. The exception is a colour similarity over
