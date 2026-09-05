@@ -1183,7 +1183,8 @@ class SymmetricDistanceMatrix(DistanceMatrix):
         :param seed: Seed for the probe sampler.
         :returns: SymmetricDistanceMatrix.
         :raises TypeError: If check is not a bool or numpy.bool_.
-        :raises ValueError: If the shape, length, or values are invalid.
+        :raises ValueError: If the shape, dtype, length, or values are
+            invalid.
         """
         # Rejected before the input is even read: a malformed switch is a call
         # the caller must fix whatever the numbers look like. Truthiness would
@@ -1262,10 +1263,10 @@ class SymmetricDistanceMatrix(DistanceMatrix):
                 raise ValueError("distance matrix contains negative values")
 
         # is_distance, zero_self and triangle all stay "unknown" from
-        # default_facts(). The zero diagonal checked above is the caller's
-        # diagonal, not a property of whatever produced the numbers, so it
-        # proves nothing durable -- and calling the argument a "distance
-        # matrix" is not evidence that it is one.
+        # default_facts(). A zero diagonal, where there was one to check, is
+        # the caller's diagonal rather than a property of whatever produced
+        # the numbers, so it proves nothing durable -- and calling the
+        # argument a "distance matrix" is not evidence that it is one.
         facts = _gate.default_facts()
         if check:
             # Only now, having measured it. Under check=False nothing looked
