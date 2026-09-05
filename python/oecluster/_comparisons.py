@@ -55,9 +55,11 @@ def register_comparison(name, builder, normalizer=None, validator=None):
     :param validator: Optional callable ``(similarity, kwargs)`` raising on an
                       argument no input could make valid. It runs before the
                       normalizer and must also read ``kwargs`` without
-                      popping. Register one only when a comparison has a
-                      normalizer that could fail first and describe the wrong
-                      problem; the builder remains the enforcing copy.
+                      popping. Register one whenever a later guard would
+                      otherwise report a different problem first -- a
+                      normalizer that empties the input, or the cutoff and
+                      arrived-empty checks :func:`oecluster.cdist` makes after
+                      validation. The builder remains the enforcing copy.
     """
     _BUILDERS[name] = builder
     if normalizer is not None:
@@ -668,6 +670,28 @@ def rmsd_options(kwargs):
     return opts
 
 
+def _expand_conformers_requested(kwargs):
+    """
+    Read the ``expand_conformers`` flag, refusing any non-bool value.
+
+    :param kwargs: Comparison keyword options, read but never consumed.
+    :returns: Whether multi-conformer molecules should be expanded. Omitting
+        the flag means yes.
+    :raises TypeError: If ``expand_conformers`` is present and is not a bool.
+    """
+    expand = kwargs.get('expand_conformers')
+    if expand is None:
+        return True
+    if not isinstance(expand, (bool, np.bool_)):
+        raise TypeError(
+            "expand_conformers must be True or False, "
+            f"not {type(expand).__name__} ({expand!r}). "
+            "Accepting anything else would let a value like 'false' or 0 "
+            "settle the expansion by truthiness rather than by what the "
+            "caller wrote.")
+    return bool(expand)
+
+
 def _normalize_rmsd(items, kwargs):
     """
     Expand multi-conformer molecules into one molecule per pose.
@@ -678,16 +702,8 @@ def _normalize_rmsd(items, kwargs):
     Either way the caller's molecules are untouched, because the comparison
     takes its own snapshot.
     """
-    expand = kwargs.get('expand_conformers')
-    if expand is not None:
-        if not isinstance(expand, (bool, np.bool_)):
-            raise TypeError(
-                "expand_conformers must be True or False, "
-                f"not {type(expand).__name__} ({expand!r}). "
-                "A truthy value would silently enable a feature the caller "
-                "did not request.")
-        if not expand:
-            return items, []
+    if not _expand_conformers_requested(kwargs):
+        return items, []
 
     from openeye import oechem
 
@@ -717,15 +733,18 @@ def _normalize_rmsd(items, kwargs):
 def _validate_rmsd(similarity, kwargs):
     """Reject RMSD arguments before any molecule is read.
 
-    Registered as the comparison's validator so it also runs before
-    ``_normalize_rmsd``, whose expansion work can be skipped when an argument
-    is already known to be invalid.
+    Registered as the comparison's validator so it runs ahead of
+    ``_normalize_rmsd`` and, in :func:`oecluster.cdist`, ahead of the cutoff
+    and arrived-empty guards. Without it,
+    ``cdist(a, b, "rmsd", similarity=True, cutoff=0.5)`` would report the
+    cutoff and name a remedy that cannot work, instead of naming the argument
+    the caller has to fix.
 
     :param similarity: Whether the caller asked for similarities.
     :param kwargs: Comparison keyword options, read but never consumed.
     :raises ValueError: If similarities were requested.
-    :raises TypeError: If any keyword option is not an RMSD option or if
-        ``expand_conformers`` is given a truthy non-bool value.
+    :raises TypeError: If any keyword option is not an RMSD option, or if
+        ``expand_conformers`` is present and is not a bool.
     """
     if similarity:
         raise ValueError(
@@ -734,6 +753,7 @@ def _validate_rmsd(similarity, kwargs):
     unknown = [key for key in kwargs if key not in _RMSD_KEYS]
     if unknown:
         raise TypeError(f"Unknown kwargs for rmsd comparison: {unknown}")
+    _expand_conformers_requested(kwargs)
 
 
 def _build_rmsd(items, similarity, kwargs, symmetric):

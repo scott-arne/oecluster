@@ -1,6 +1,7 @@
 import numpy as np
 import oecluster
 import pytest
+from oecluster import _comparisons
 from openeye import oechem
 
 
@@ -216,6 +217,33 @@ def test_expansion_can_be_disabled():
     dist = oecluster.pdist(mols, "rmsd", expand_conformers=False)
     assert dist.num_samples == 2
     assert dist.labels == ["ligA", "ligB"]
+
+
+@pytest.mark.parametrize("value", ["false", "", 0, 1, 2.5])
+def test_non_bool_expand_conformers_is_refused(value):
+    """A non-bool must not settle the expansion by truthiness.
+
+    Falsy strings and ints are refused alongside truthy ones: ``"false"``
+    would enable the expansion and ``0`` would disable it, in both cases by
+    coincidence rather than by what the caller wrote.
+    """
+    mols = [_multiconformer("CCCO", (0.0, 1.0), "ligA")]
+    with pytest.raises(TypeError, match="expand_conformers must be True or"):
+        oecluster.pdist(mols, "rmsd", expand_conformers=value)
+
+
+def test_build_comparison_also_refuses_a_non_bool_expand_conformers():
+    """The validator, not the normalizer, owns this refusal.
+
+    ``build_comparison`` never calls the normalizer, so a check living only
+    there would let the direct builder path accept the value and silently
+    discard it.
+    """
+    mols = [_pose("CCCO", 0.0, "a"), _pose("CCCO", 1.0, "b")]
+    with pytest.raises(TypeError, match="expand_conformers must be True or"):
+        _comparisons.build_comparison(
+            mols, "rmsd", False, {"expand_conformers": "false"},
+            symmetric=True)
 
 
 def test_expansion_does_not_modify_the_input():
