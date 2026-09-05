@@ -161,7 +161,9 @@ def validate_request(comparison, similarity, kwargs):
     :param kwargs: Comparison keyword options, read but never consumed.
     :raises ValueError: If the comparison name is unknown, or a validator
                         rejects an argument it owns outright.
-    :raises TypeError: If a validator finds unknown keyword options.
+    :raises TypeError: If a validator refuses a keyword name it does not know,
+                       or an option value whose type the comparison's options
+                       object will not take.
     :raises RuntimeError: If a validator hands an option value to C++ and C++
                           refuses it.
     """
@@ -672,13 +674,17 @@ def rmsd_options(kwargs):
 
 def _expand_conformers_requested(kwargs):
     """
-    Read the ``expand_conformers`` flag, refusing any non-bool value.
+    Read the ``expand_conformers`` flag, refusing a value that is not boolean.
+
+    ``numpy.bool_`` counts as boolean here, matching
+    :func:`oecluster._gate.require_metric`. The three C++ options do not accept
+    it, because their SWIG setters take a plain ``bool``.
 
     :param kwargs: Comparison keyword options, read but never consumed.
     :returns: Whether multi-conformer molecules should be expanded. Omitting
-        the flag means yes.
-    :raises TypeError: If ``expand_conformers`` is present and is neither a
-        bool nor a ``numpy.bool_``.
+        the flag, or passing ``None``, means yes.
+    :raises TypeError: If ``expand_conformers`` is given a value other than
+        ``None``, a bool, or a ``numpy.bool_``.
     """
     expand = kwargs.get('expand_conformers')
     if expand is None:
@@ -749,10 +755,9 @@ def _validate_rmsd(similarity, kwargs):
     :param kwargs: Comparison keyword options, read but never consumed.
     :raises ValueError: If similarities were requested.
     :raises TypeError: If any keyword option is not an RMSD option, if
-        ``expand_conformers`` is present and is neither a bool nor a
-        ``numpy.bool_``, or if an option value is of a type ``RMSDOptions``
+        ``expand_conformers`` is given a value other than ``None``, a bool, or
+        a ``numpy.bool_``, or if an option value is of a type ``RMSDOptions``
         will not take.
-    :raises RuntimeError: If C++ refuses an option value outright.
     """
     if similarity:
         raise ValueError(

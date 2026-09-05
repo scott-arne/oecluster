@@ -161,9 +161,23 @@ def test_expansion_with_atom_index_gaps():
     assignment silently scrambles atoms.
 
     The conformers differ by a per-atom displacement rather than a rigid
-    translation. A rigid shift cannot detect the misassignment this test is
-    named for: it moves every atom identically, so a scramble applied
-    consistently to both poses leaves every pairwise distance unchanged.
+    translation, because a rigid translation hides the raw-index bug. Under
+    that bug every conformer is misread through the same fixed index mapping,
+    and a translation moves every slot of the coordinate array by the same
+    vector, so the misread poses end up translated by that same vector too and
+    every pairwise distance survives intact. Displacing each atom by its own
+    amount makes the misread pick up another atom's displacement, which the
+    distances do show. Measured: with the bug reinstated this test passed under
+    a rigid translation and fails under the displacement.
+
+    A consistent relabelling of the atoms is a different mutation, and this
+    test cannot catch it: RMSD pairs atom k of one pose with atom k of the
+    other, and every pose here comes out of the expansion, so relabelling them
+    all the same way is invisible. Other tests do catch it, among them
+    ``test_expanded_poses_have_exact_source_conformer_coordinates`` by
+    comparing coordinates directly, and
+    ``test_mixing_single_and_multiconformer_molecules`` because its
+    single-conformer molecule bypasses the expansion and so stays unrelabelled.
     """
     mol = oechem.OEMol()
     # Interleaved hydrogens force GetMaxAtomIdx=9 when NumAtoms=3 after suppression
@@ -199,11 +213,13 @@ def test_expansion_with_atom_index_gaps():
 def test_mixing_single_and_multiconformer_molecules():
     """Single-conformer inputs pass through; multi-conformer are rebuilt.
 
-    The distances pin the labels and the pass-through against the expansion in
-    one matrix. They do not pin the coordinate assignment: the poses differ by
-    a rigid translation, which a consistent atom scramble leaves unchanged.
-    ``test_expanded_poses_have_exact_source_conformer_coordinates`` is what
-    covers that.
+    Mixing the two paths is what gives this test its reach. The single-conformer
+    molecule bypasses the expansion, so it is the one item a mistake inside the
+    expansion cannot touch, and every distance measured against it exposes that
+    mistake. A relabelling applied consistently to all three poses would be
+    invisible to a matrix built purely from expanded poses; here it moves the
+    two cross-distances. Measured: reversing the atom pairing in the expansion
+    fails this test.
     """
     single = _pose("CCCO", 0.5, "single")
     multi = _multiconformer("CCCO", (0.0, 2.0), "multi")
