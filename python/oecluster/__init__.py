@@ -1159,7 +1159,9 @@ class SymmetricDistanceMatrix(DistanceMatrix):
         object to interrogate, and the caller asserting a value is not
         evidence, so the probe result is the only claim this path makes.
 
-        :param values: 1-D condensed array or 2-D square distance matrix.
+        :param values: 1-D condensed array or 2-D square distance matrix. A
+            square input must be symmetric to within ``rtol=1e-9,
+            atol=1e-12``, and its strict upper triangle is the half kept.
         :param labels: Optional item labels; must match the item count.
         :param comparison_name: Name recorded on the matrix.
         :param params: Optional provenance recorded on the matrix and echoed
@@ -1236,7 +1238,13 @@ class SymmetricDistanceMatrix(DistanceMatrix):
                     "distance matrix contains non-finite values; remove or "
                     "impute them before clustering")
             if square is not None:
-                if not np.allclose(square, square.T):
+                # A stated tolerance, not np.allclose's inherited rtol=1e-5:
+                # d(i, j) and d(j, i) run the same arithmetic on the same
+                # operands, and measured exactly 0.0 asymmetry across scipy's
+                # metrics in float64, in float32 and through the Gram trick.
+                # Above this the halves disagree about the data, and the lower
+                # one is discarded unread.
+                if not np.allclose(square, square.T, rtol=1e-9, atol=1e-12):
                     raise ValueError("a 2-D distance matrix must be symmetric")
                 if np.any(np.diagonal(square) != 0.0):
                     raise ValueError(

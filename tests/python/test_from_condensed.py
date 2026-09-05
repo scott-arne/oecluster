@@ -102,6 +102,28 @@ def test_from_condensed_rejects_an_asymmetric_square_matrix():
         SymmetricDistanceMatrix.from_condensed(square)
 
 
+def test_a_small_asymmetry_is_refused_rather_than_resolved():
+    """The lower triangle is discarded, so the tolerance decides what is lost.
+
+    ``np.allclose``'s inherited ``rtol=1e-5`` accepted a disagreement far
+    above anything a genuine computation produces -- measured 0.0 asymmetry
+    for six scipy metrics over float64, float32 and Gram-trick pipelines --
+    and resolved it in silence in favour of the upper triangle. The tolerance
+    is now stated rather than inherited, and pinned here from both sides; the
+    other asymmetry test perturbs by 1.0 and so pins nothing about the edge.
+    """
+    _, square = _metric_condensed(n=4)
+    inside = square.copy()
+    inside[0, 1] += 1e-11 * square[0, 1]
+    accepted = SymmetricDistanceMatrix.from_condensed(inside)
+    assert accepted.condensed[0] == inside[0, 1]
+
+    outside = square.copy()
+    outside[0, 1] += 1e-6 * square[0, 1]
+    with pytest.raises(ValueError, match="symmetric"):
+        SymmetricDistanceMatrix.from_condensed(outside)
+
+
 def test_from_condensed_rejects_a_non_zero_diagonal():
     _, square = _metric_condensed(n=4)
     square = square.copy()
