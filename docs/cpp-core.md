@@ -54,13 +54,19 @@ returning `false` asks the engine to fall back to per-pair `Compare()` calls.
 The concrete comparisons are:
 
 - `FingerprintComparison` — OEFP fingerprint similarity/distance, configured by
-  `FingerprintOptions` (`fp_type`, `metric`, `numbits`, distance bounds,
+  `FingerprintOptions` (`fp_type`, `storage`, `metric`, `numbits`, the
+  per-family shape parameters, the per-metric parameters, `use_chirality`,
   `similarity`).
 - `ROCSComparison` — ROCS shape/color overlay, configured by `ROCSOptions`
   (`score_type`, `color_ff_type`, `similarity`).
 - `SuperposeComparison` — protein superposition and binding-site comparison,
   configured by `SuperposeOptions` (`method`, `score_type`, oeselect
   `predicate`/`ref_predicate`/`fit_predicate`, `similarity`).
+- `DescriptorComparison` — distance in standardized descriptor space,
+  configured by `DescriptorOptions` (`sources`, `columns`, `groups`, `metric`,
+  `variances`, `inverse_covariance`, `missing`, `p`).
+- `RMSDComparison` — coordinate RMSD between poses of one molecule, configured
+  by `RMSDOptions` (`overlay`, `automorph`, `heavy_only`).
 
 ## Storage Backends
 
