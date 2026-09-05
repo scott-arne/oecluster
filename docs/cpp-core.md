@@ -62,9 +62,11 @@ The concrete comparisons are:
 - `SuperposeComparison` — protein superposition and binding-site comparison,
   configured by `SuperposeOptions` (`method`, `score_type`, oeselect
   `predicate`/`ref_predicate`/`fit_predicate`, `similarity`).
-- `DescriptorComparison` — distance in standardized descriptor space,
-  configured by `DescriptorOptions` (`sources`, `columns`, `groups`, `metric`,
-  `variances`, `inverse_covariance`, `missing`, `p`).
+- `DescriptorComparison` — distance in descriptor space, standardized only
+  under `standardized_euclidean`, `seuclidean` and `mahalanobis`, the three
+  metrics that fit a scale from the input; configured by `DescriptorOptions`
+  (`sources`, `columns`, `groups`, `metric`, `variances`,
+  `inverse_covariance`, `missing`, `p`).
 - `RMSDComparison` — coordinate RMSD between poses of one molecule, configured
   by `RMSDOptions` (`overlay`, `automorph`, `heavy_only`).
 

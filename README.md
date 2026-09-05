@@ -595,8 +595,11 @@ generates patch surfaces when needed, and compares binding-site patch scores.
 
 Computes distances over molecular descriptor columns. The default metric
 standardizes each column by the variance fitted over the molecules passed in,
-so the same pair gets a different distance in a different set; pass `columns=`
-and `variances=` from `descriptor_statistics()` to fix the scaling across runs.
+so the same pair gets a different distance in a different set; pass `sources=`,
+`columns=` and `variances=` from `descriptor_statistics()` together to fix the
+scaling across runs, `sources=` included because column names are resolved
+against it and an `rdkit` or `mordred` name is not in the default `openeye`
+schema.
 See [docs/python-api.md](docs/python-api.md#descriptor) for the full parameter
 table, the column-selection rules, and what each `missing` policy stamps on the
 matrix.
