@@ -250,8 +250,8 @@ def test_a_non_bool_check_is_refused():
     """``check=None`` reads as unspecified and turned the whole ingress off.
 
     A caller threading an optional flag through -- ``check=opts.get("check")``
-    -- got no validation, no probe and no diagnostic, on the one argument that
-    gates every check this constructor makes.
+    -- got no validation, no probe and no diagnostic, on the argument that
+    decides whether the numbers are looked at at all.
     """
     condensed = np.array([1.0, np.nan, -5.0])
     for bad in (None, 0, "", 1):
