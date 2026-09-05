@@ -445,6 +445,29 @@ def test_fill_dense_storage_refuses_a_multi_dimensional_array():
             storage, storage._data_ptr(), 6)), np.zeros(6))
 
 
+def test_the_two_empty_shapes_resolve_to_different_item_counts():
+    """A length-0 condensed input is one item; a 0x0 square is none.
+
+    ``n * (n - 1) / 2 == 0`` is solved by both 0 and 1, and the quadratic
+    picks 1. That is the answer the single-item ``pdist`` round trip needs --
+    one item has no pairs -- so it is pinned rather than changed. The 2-D path
+    reads its count off the shape, so the same emptiness resolves to 0 there.
+    """
+    from openeye import oechem
+
+    assert SymmetricDistanceMatrix.from_condensed(np.zeros(0)).num_samples == 1
+    assert SymmetricDistanceMatrix.from_condensed(
+        np.zeros((0, 0))).num_samples == 0
+
+    mol = oechem.OEGraphMol()
+    oechem.OESmilesToMol(mol, "CCO")
+    computed = oecluster.pdist([mol], "fingerprint")
+    assert computed.num_samples == 1
+    assert np.asarray(computed).shape == (0,)
+    assert SymmetricDistanceMatrix.from_condensed(
+        np.asarray(computed)).num_samples == 1
+
+
 def test_condensed_lookup_matches_the_square_form():
     condensed, square = _metric_condensed(n=7)
     i = np.array([0, 3, 6, 2])

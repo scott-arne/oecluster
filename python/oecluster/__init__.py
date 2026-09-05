@@ -1149,27 +1149,37 @@ class SymmetricDistanceMatrix(DistanceMatrix):
         ``scipy.spatial.distance.pdist`` returns) or a 2-D square matrix,
         whose strict upper triangle is taken.
 
-        Ingress runs the checks a computed matrix gets for free: values must
-        be finite and non-negative, a square input must be symmetric with a
-        zero diagonal, and a sample of triples is tested against the triangle
-        inequality. A violation found here is recorded and later refused by
-        the clustering entry points unless ``allow_nonmetric=True``.
+        Ingress measures what the numbers alone can show: values must be
+        finite and non-negative, a square input must additionally be symmetric
+        with a zero diagonal, and a sample of triples is tested against the
+        triangle inequality. A violation found here is recorded and later
+        refused by the clustering entry points unless ``allow_nonmetric=True``.
+        A computed matrix instead reads a ``triangle`` capability off its
+        comparison object, which can be a positive claim; there is no object
+        to ask here, which is why the probe exists.
 
-        Both capability facts are stamped ``"unknown"``. There is no metric
-        object to interrogate, and the caller asserting a value is not
-        evidence, so the probe result is the only claim this path makes.
+        All three capability facts -- ``is_distance``, ``zero_self`` and
+        ``triangle`` -- are stamped ``"unknown"``. There is no metric object
+        to interrogate, and the caller asserting a value is not evidence, so
+        the probe result is the only claim this path makes.
 
         :param values: 1-D condensed array or 2-D square distance matrix. A
             square input must be symmetric to within ``rtol=1e-9,
-            atol=1e-12``, and its strict upper triangle is the half kept.
+            atol=1e-12``, and its strict upper triangle is the half kept. The
+            two empty shapes differ: a length-0 condensed array is one item,
+            which is what the single-item ``pdist`` round trip needs, while a
+            0x0 square is no items.
         :param labels: Optional item labels; must match the item count.
         :param comparison_name: Name recorded on the matrix.
         :param params: Optional provenance recorded on the matrix and echoed
             by ``repr``; copied, so later mutation of the caller's dict does
             not change the matrix.
         :param check: When False, skip the value checks and the probe
-            together. Shape and length arithmetic still runs -- an input that
-            maps to no item count cannot be stored at all.
+            together, and leave ``data_integrity`` at ``"unknown"`` since
+            nothing measured it. The shape and length arithmetic, the label
+            count and the complex-dtype refusal still run: an input that maps
+            to no item count, or whose numbers cannot be stored as given,
+            cannot be stored at all.
         :param probe_triples: Triples to sample for the triangle probe; a
             non-positive count skips it.
         :param seed: Seed for the probe sampler.
