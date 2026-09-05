@@ -390,6 +390,24 @@ def test_pdist_round_trips_through_from_condensed():
     assert reloaded.metric_capabilities['zero_self'] == "unknown"
 
 
+def test_fill_dense_storage_refuses_a_multi_dimensional_array():
+    """The helper's own diagnostic must be what the caller sees.
+
+    The guard compared ``shape[0]`` only, so an array whose leading dimension
+    matched reached ``np.copyto`` and failed there with a numpy broadcast
+    message, leaving the docstring's ``:raises ValueError:`` describing a
+    guard that had not fired. Reachable through a hand-written ``.npz``.
+    """
+    storage = oecluster.DenseStorage(4)
+    assert storage.NumPairs() == 6
+    for shape in ((6, 2), (6, 1, 1)):
+        with pytest.raises(ValueError, match=r"condensed shape"):
+            oecluster._fill_dense_storage(storage, np.zeros(shape))
+    np.testing.assert_array_equal(
+        np.asarray(oecluster._StorageView(
+            storage, storage._data_ptr(), 6)), np.zeros(6))
+
+
 def test_condensed_lookup_matches_the_square_form():
     condensed, square = _metric_condensed(n=7)
     i = np.array([0, 3, 6, 2])

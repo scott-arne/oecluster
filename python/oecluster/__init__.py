@@ -720,13 +720,16 @@ def _fill_dense_storage(storage, condensed):
 
     :param storage: DenseStorage whose ``NumPairs()`` matches ``condensed``.
     :param condensed: 1-D array of condensed distances.
-    :raises ValueError: If the lengths disagree.
+    :raises ValueError: If the shape does not match the storage capacity.
     """
     num_pairs = storage.NumPairs()
     values = np.ascontiguousarray(condensed, dtype=np.float64)
-    if values.shape[0] != num_pairs:
+    # ``ndim`` and ``size``, not ``shape[0]``: an array whose leading
+    # dimension happens to match reaches ``np.copyto`` and is refused there
+    # with a broadcast message that names neither this helper nor the storage.
+    if values.ndim != 1 or values.size != num_pairs:
         raise ValueError(
-            f"condensed length {values.shape[0]} does not match the storage "
+            f"condensed shape {values.shape} does not match the storage "
             f"capacity {num_pairs}")
     if num_pairs == 0:
         return
