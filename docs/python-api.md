@@ -393,13 +393,18 @@ clustering entry points refuse one outright; see
 [Metric Requirements](#metric-requirements).
 
 Naming an option that the rest of the configuration would ignore raises
-`TypeError` naming the option that replaces it, rather than accepting a value
-that has no effect:
+`TypeError` naming the ignored option and a way out -- a replacement option
+where one exists, and otherwise dropping the option or changing the setting
+that made it inapplicable -- rather than accepting a value that has no effect:
 
 ```python
 oecluster.pdist(mols, "fingerprint", max_distance=2)
 # TypeError: max_distance does not apply to fp_type='morgan'; it belongs to
 # 'atom_pair'. Use radius instead, or select one of those families.
+
+oecluster.pdist(mols, "fingerprint", p=3.0)
+# TypeError: p does not apply to metric='tanimoto'; it belongs to
+# 'minkowski'. Drop p, or select metric='minkowski'.
 ```
 
 The rule covers `radius`, `min_distance`, `max_distance` and
