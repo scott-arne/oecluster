@@ -762,3 +762,35 @@ def test_a_reset_numbits_never_reaches_a_successful_call():
         # Dropping numbits is the remedy the message names, and it must work.
         oecluster.pdist(
             mols, "fingerprint", storage=storage, metric="bray_curtis")
+
+
+def test_a_non_string_selector_names_the_argument():
+    """A bare AttributeError blames ``.lower()``, which no caller wrote.
+
+    Reached only by calling the rule functions directly: on the pdist and
+    cdist paths the SWIG setters refuse a non-string first.
+    """
+    with pytest.raises(TypeError, match=r"fp_type must be a string or None"):
+        _comparisons.canonical_fingerprint_family(2)
+    with pytest.raises(TypeError, match=r"storage must be a string or None"):
+        _comparisons.numbits_is_inapplicable({"numbits"}, 3)
+    with pytest.raises(TypeError, match=r"metric must be a string or None"):
+        _comparisons.reject_inapplicable_fingerprint_kwargs(
+            {"p"}, fp_type=None, storage=None, metric=["minkowski"])
+
+
+def test_the_selector_guard_still_lets_every_string_through():
+    """Refusing a non-string must not start refusing a chosen string.
+
+    The empty string is the case that decides it: it is not ``None``, so it is
+    a selection, and it has to reach the rules folded rather than be turned
+    back into the default or refused outright.
+    """
+    assert _comparisons._default_selector(None, "binary", "storage") == "binary"
+    assert _comparisons._default_selector("", "binary", "storage") == ""
+    assert _comparisons._default_selector("SPARSE", "binary", "storage") == "sparse"
+
+    # A selector this module cannot name loses its advisory rules rather than
+    # raising, and the empty string is one such selector.
+    assert _comparisons.canonical_fingerprint_family("") is None
+    assert not _comparisons.numbits_is_inapplicable({"numbits"}, "")

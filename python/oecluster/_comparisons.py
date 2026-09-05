@@ -108,7 +108,7 @@ def _set_if_given(opts, key, value):
         setattr(opts, key, value)
 
 
-def _default_selector(value, default):
+def _default_selector(value, default, name):
     """Fold a selector to lowercase, defaulting only when it is ``None``.
 
     ``None`` means unspecified and takes the default. Every other value -- an
@@ -116,8 +116,25 @@ def _default_selector(value, default):
     the default would let this module give advice about a selection that was
     never made. See ``_set_if_given``: the real value reaches C++ either way,
     so the two have to agree on what "unspecified" means.
+
+    :param value: The selector as the caller gave it.
+    :param default: The selector to use when ``value`` is ``None``.
+    :param name: The argument name to blame in the failure message.
+    :returns: ``default``, or ``value`` folded to lowercase.
+    :raises TypeError: If ``value`` is neither ``None`` nor a string.
     """
-    return default if value is None else value.lower()
+    if value is None:
+        return default
+    # A non-string reaches here only from a direct call to one of this
+    # module's rule functions: on the pdist and cdist paths the SWIG setters
+    # have already refused anything but a string. Naming the argument still
+    # beats the bare "'int' object has no attribute 'lower'" that the fold
+    # would otherwise produce, which blames a method the caller never wrote.
+    if not isinstance(value, str):
+        raise TypeError(
+            f"{name} must be a string or None, not "
+            f"{type(value).__name__} ({value!r})")
+    return value.lower()
 
 
 def extract_labels(items):
@@ -287,7 +304,7 @@ def canonical_fingerprint_family(fp_type):
     The family-keyed rules stand aside in that case: a family this module cannot
     name has no advisory rules to apply.
     """
-    return _FAMILY_ALIASES.get(_default_selector(fp_type, 'morgan'))
+    return _FAMILY_ALIASES.get(_default_selector(fp_type, 'morgan', 'fp_type'))
 
 
 def numbits_is_inapplicable(named, storage):
@@ -306,7 +323,7 @@ def numbits_is_inapplicable(named, storage):
     :returns: ``True`` when ``numbits`` was named and the storage is sparse.
     """
     return ('numbits' in named
-            and _default_selector(storage, 'binary') in _SPARSE_STORAGES)
+            and _default_selector(storage, 'binary', 'storage') in _SPARSE_STORAGES)
 
 
 def reject_inapplicable_fingerprint_kwargs(named, *, fp_type, storage, metric):
@@ -336,10 +353,10 @@ def reject_inapplicable_fingerprint_kwargs(named, *, fp_type, storage, metric):
     :raises TypeError: If a named option does not apply to this configuration.
     """
     named = set(named)
-    spelling = _default_selector(fp_type, 'morgan')
+    spelling = _default_selector(fp_type, 'morgan', 'fp_type')
     family = canonical_fingerprint_family(fp_type)
-    store = _default_selector(storage, 'binary')
-    metric_name = _default_selector(metric, 'tanimoto')
+    store = _default_selector(storage, 'binary', 'storage')
+    metric_name = _default_selector(metric, 'tanimoto', 'metric')
 
     if numbits_is_inapplicable(named, storage):
         raise TypeError(
