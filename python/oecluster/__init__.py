@@ -1162,8 +1162,11 @@ class SymmetricDistanceMatrix(DistanceMatrix):
         the probe result is the only claim this path makes.
 
         :param values: 1-D condensed array or 2-D square distance matrix. A
-            square input must be symmetric to within ``rtol=1e-9,
-            atol=1e-12``, and its strict upper triangle is the half kept. The
+            square input must be symmetric to within ``rtol=1e-5,
+            atol=1e-8`` -- loose enough for a float32-computed matrix, which
+            is asymmetric in its last bit -- and its strict upper triangle is
+            the half kept, so a disagreement below that tolerance is
+            discarded unread. The
             two empty shapes differ: a length-0 condensed array is one item,
             which is what the single-item ``pdist`` round trip needs, while a
             0x0 square is no items.
@@ -1189,22 +1192,23 @@ class SymmetricDistanceMatrix(DistanceMatrix):
         # Rejected before the input is even read: a malformed switch is a call
         # the caller must fix whatever the numbers look like. Truthiness would
         # be the wrong rule, since check=None reads to a caller as
-        # "unspecified" while switching every check below off.
+        # "unspecified" while turning off every check that reads the numbers.
         if not isinstance(check, (bool, np.bool_)):
             raise TypeError(
                 f"check must be True or False, not {type(check).__name__} "
-                f"({check!r}). A falsy value would silently disable every "
-                f"ingress check.")
+                f"({check!r}). A falsy value would silently disable the value "
+                f"checks and the probe.")
 
-        # Ahead of the float64 conversion, which discards the imaginary part
-        # behind a ComplexWarning the caller may have filtered. Not gated on
-        # check=: no assertion by the caller makes the real part the right
-        # half of a complex number to keep.
+        # Ahead of the float64 conversion, which keeps the real part behind a
+        # ComplexWarning the caller may have filtered. Not gated on check=:
+        # no assertion by the caller makes half of a complex number a
+        # distance. The message states the contract rather than a loss, since
+        # an all-zero imaginary part loses nothing and is still refused.
         array = np.asarray(values)
         if np.iscomplexobj(array):
             raise ValueError(
                 f"expected real distances, got a complex input (dtype "
-                f"{array.dtype}); converting would discard the imaginary part")
+                f"{array.dtype}); a distance is a real number")
         array = array.astype(np.float64, copy=False)
 
         square = None
@@ -1247,13 +1251,24 @@ class SymmetricDistanceMatrix(DistanceMatrix):
                     "distance matrix contains non-finite values; remove or "
                     "impute them before clustering")
             if square is not None:
-                # A stated tolerance, not np.allclose's inherited rtol=1e-5:
-                # d(i, j) and d(j, i) run the same arithmetic on the same
-                # operands, and measured exactly 0.0 asymmetry across scipy's
-                # metrics in float64, in float32 and through the Gram trick.
-                # Above this the halves disagree about the data, and the lower
-                # one is discarded unread.
-                if not np.allclose(square, square.T, rtol=1e-9, atol=1e-12):
+                # A stated tolerance that happens to equal np.allclose's
+                # defaults, not an inherited one. A tighter rtol=1e-9 was
+                # tried and refused ordinary float32 output: the Gram-trick
+                # euclidean that torch.cdist, faiss and cuML use adds the two
+                # squared norms in sequence, so d(i, j) and d(j, i) differ in
+                # the association order alone -- measured up to 1.99e-7
+                # relative, under two float32 ulp, across 150 configurations.
+                # 1e-5 is roughly 84 of those ulp, which leaves room for a
+                # worse-conditioned pipeline than any measured here.
+                #
+                # The cost is real and accepted: a float64 producer whose
+                # halves genuinely disagree at 1e-6 passes, and the lower one
+                # is then discarded unread. The input's dtype cannot separate
+                # the two cases -- the float32 matrix above arrives as
+                # float64, having been widened by a caller for unrelated
+                # reasons -- so a dtype-dependent tolerance would only make
+                # the same data refuse or pass by accident.
+                if not np.allclose(square, square.T, rtol=1e-5, atol=1e-8):
                     raise ValueError("a 2-D distance matrix must be symmetric")
                 if np.any(np.diagonal(square) != 0.0):
                     raise ValueError(

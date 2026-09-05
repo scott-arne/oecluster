@@ -105,23 +105,55 @@ def test_from_condensed_rejects_an_asymmetric_square_matrix():
 def test_a_small_asymmetry_is_refused_rather_than_resolved():
     """The lower triangle is discarded, so the tolerance decides what is lost.
 
-    ``np.allclose``'s inherited ``rtol=1e-5`` accepted a disagreement far
-    above anything a genuine computation produces -- measured 0.0 asymmetry
-    for six scipy metrics over float64, float32 and Gram-trick pipelines --
-    and resolved it in silence in favour of the upper triangle. The tolerance
-    is now stated rather than inherited, and pinned here from both sides; the
-    other asymmetry test perturbs by 1.0 and so pins nothing about the edge.
+    ``rtol=1e-5, atol=1e-8`` is a stated decision that happens to equal
+    ``np.allclose``'s defaults. A tighter ``rtol=1e-9`` was tried first and
+    refused ordinary float32 output, which is what the other test in this pair
+    pins. Both sides of the stated tolerance are pinned here; the coarse
+    asymmetry test perturbs by 1.0 and so says nothing about the edge.
     """
     _, square = _metric_condensed(n=4)
     inside = square.copy()
-    inside[0, 1] += 1e-11 * square[0, 1]
+    inside[0, 1] += 1e-7 * square[0, 1]
     accepted = SymmetricDistanceMatrix.from_condensed(inside)
     assert accepted.condensed[0] == inside[0, 1]
 
     outside = square.copy()
-    outside[0, 1] += 1e-6 * square[0, 1]
+    outside[0, 1] += 1e-4 * square[0, 1]
     with pytest.raises(ValueError, match="symmetric"):
         SymmetricDistanceMatrix.from_condensed(outside)
+
+
+def test_a_float32_gram_trick_matrix_is_not_refused():
+    """Over-refusal is the failure mode this tolerance is sized against.
+
+    ``torch.cdist``'s ``use_mm_for_euclid_dist`` mode, faiss and cuML all
+    compute ``D^2 = -2 X X^T + |x|^2 + |y|^2`` by adding the two squared norms
+    in sequence. Addition is commutative but not associative, so ``d(i, j)``
+    and ``d(j, i)`` differ in the association order alone. Measured on this
+    150x16 float32 set: 9.536743e-07 absolute, 1.184596e-07 relative, which is
+    one float32 ulp (eps = 1.192093e-07). A sweep of 150 configurations over
+    n, dimension, spread and offset put the worst case at 1.99e-07.
+
+    Under ``rtol=1e-9`` this raised "a 2-D distance matrix must be symmetric".
+    """
+    rng = np.random.default_rng(11)
+    points = rng.normal(size=(150, 16)).astype(np.float32)
+    gram = points @ points.T
+    norms = np.einsum('ij,ij->i', points, points)[:, None]
+    square = -2.0 * gram
+    square += norms
+    square += norms.reshape(1, -1)
+    square = np.sqrt(np.maximum(square, 0)).astype(np.float64)
+    np.fill_diagonal(square, 0.0)
+
+    asymmetry = np.abs(square - square.T)
+    denominator = np.maximum(np.abs(square), np.abs(square.T))
+    relative = np.where(denominator > 0.0,
+                        asymmetry / np.maximum(denominator, 1e-300), 0.0)
+    assert relative.max() > np.finfo(np.float32).eps / 2.0
+
+    dm = SymmetricDistanceMatrix.from_condensed(square)
+    assert dm.num_samples == 150
 
 
 def test_from_condensed_rejects_a_non_zero_diagonal():
@@ -247,7 +279,7 @@ def test_check_false_leaves_data_integrity_unknown(tmp_path):
 
 
 def test_a_non_bool_check_is_refused():
-    """``check=None`` reads as unspecified and turned the whole ingress off.
+    """``check=None`` reads as unspecified and turned the value checks off.
 
     A caller threading an optional flag through -- ``check=opts.get("check")``
     -- got no validation, no probe and no diagnostic, on the argument that
@@ -285,11 +317,16 @@ def test_params_are_recorded_and_default_to_empty():
 
 
 def test_an_explicitly_falsy_params_is_not_treated_as_unspecified():
-    """Only None means unspecified.
+    """A falsy non-mapping is a mistake, not a way of saying nothing.
 
     ``dict(params or {})`` turned ``params=0`` and ``params=False`` into an
     empty dict with no diagnostic, where ``DistanceMatrix.__init__`` writes
     ``params if params is not None else {}``.
+
+    An empty *iterable* still yields ``{}`` without complaint -- ``dict([])``
+    and ``dict('')`` are both an empty mapping -- and that is left alone.
+    ``params`` records provenance rather than switching behaviour, so no
+    provenance and empty provenance are the same matrix either way.
     """
     condensed, _ = _metric_condensed(n=3)
     for bad in (0, False):
