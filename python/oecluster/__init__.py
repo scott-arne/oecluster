@@ -1169,8 +1169,19 @@ class SymmetricDistanceMatrix(DistanceMatrix):
             non-positive count skips it.
         :param seed: Seed for the probe sampler.
         :returns: SymmetricDistanceMatrix.
+        :raises TypeError: If check is not a bool or numpy.bool_.
         :raises ValueError: If the shape, length, or values are invalid.
         """
+        # Rejected before the input is even read: a malformed switch is a call
+        # the caller must fix whatever the numbers look like. Truthiness would
+        # be the wrong rule, since check=None reads to a caller as
+        # "unspecified" while switching every check below off.
+        if not isinstance(check, (bool, np.bool_)):
+            raise TypeError(
+                f"check must be True or False, not {type(check).__name__} "
+                f"({check!r}). A falsy value would silently disable every "
+                f"ingress check.")
+
         array = np.asarray(values, dtype=np.float64)
 
         if array.ndim == 2:

@@ -158,6 +158,26 @@ def test_check_false_skips_validation_and_the_probe():
     oecluster.butina(dm, 0.5)
 
 
+def test_a_non_bool_check_is_refused():
+    """``check=None`` reads as unspecified and turned the whole ingress off.
+
+    A caller threading an optional flag through -- ``check=opts.get("check")``
+    -- got no validation, no probe and no diagnostic, on the one argument that
+    gates every check this constructor makes.
+    """
+    condensed = np.array([1.0, np.nan, -5.0])
+    for bad in (None, 0, "", 1):
+        with pytest.raises(TypeError, match="check must be True or False"):
+            SymmetricDistanceMatrix.from_condensed(condensed, check=bad)
+
+
+def test_a_numpy_bool_check_is_accepted():
+    condensed, _ = _metric_condensed(n=3)
+    dm = SymmetricDistanceMatrix.from_condensed(condensed,
+                                                check=np.bool_(False))
+    assert dm.metric_probe == "not_run"
+
+
 def test_check_false_still_rejects_a_structurally_impossible_input():
     """Skipping the value checks does not skip the shape arithmetic.
 
