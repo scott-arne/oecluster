@@ -284,6 +284,21 @@ def test_params_are_recorded_and_default_to_empty():
     assert dm.params == {"source": "scipy", "metric": "cosine"}
 
 
+def test_an_explicitly_falsy_params_is_not_treated_as_unspecified():
+    """Only None means unspecified.
+
+    ``dict(params or {})`` turned ``params=0`` and ``params=False`` into an
+    empty dict with no diagnostic, where ``DistanceMatrix.__init__`` writes
+    ``params if params is not None else {}``.
+    """
+    condensed, _ = _metric_condensed(n=3)
+    for bad in (0, False):
+        with pytest.raises(TypeError):
+            SymmetricDistanceMatrix.from_condensed(condensed, params=bad)
+    assert SymmetricDistanceMatrix.from_condensed(
+        condensed, params=None).params == {}
+
+
 def test_params_are_copied_from_the_callers_dict():
     """The docstring promises a copy, so the promise is pinned here."""
     condensed, _ = _metric_condensed(n=3)

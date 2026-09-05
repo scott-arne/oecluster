@@ -1270,7 +1270,12 @@ class SymmetricDistanceMatrix(DistanceMatrix):
 
         storage = DenseStorage(n)
         _fill_dense_storage(storage, condensed)
-        return cls(storage, comparison_name, labels, dict(params or {}), facts)
+        # ``is not None`` rather than truthiness, matching
+        # ``DistanceMatrix.__init__``: an explicitly passed value must not be
+        # silently equivalent to passing nothing. ``dict`` because this path
+        # promises the caller a copy.
+        copied = dict(params) if params is not None else {}
+        return cls(storage, comparison_name, labels, copied, facts)
 
     @staticmethod
     def _validate_sparse_entries(rows, cols, values, num_samples, cutoff,
