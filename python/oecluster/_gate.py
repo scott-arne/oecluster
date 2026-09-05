@@ -282,9 +282,9 @@ def probe_triangle(condensed, n, *, samples=100000, seed=0):
     # Drawing with replacement means the same inequality arrives many times
     # over, and ``d(i, k) <= d(i, j) + d(j, k)`` is the same inequality with
     # the two ends swapped. Counting draws would report more triples than a
-    # small matrix contains -- a 4-item matrix admits 12 of these while the
-    # default draw survives ~37000 times -- and ``require_metric`` prints
-    # both counts as the evidence behind its refusal.
+    # small matrix contains -- a 4-item matrix admits 12 of these, and the
+    # default draw reported 6233 violations of 37646 where 2 of 12 exist --
+    # and ``require_metric`` prints both counts as its evidence.
     lo = np.minimum(i, k)
     hi = np.maximum(i, k)
     # One integer code per triple rather than ``np.unique(rows, axis=0)``,
