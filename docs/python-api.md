@@ -549,8 +549,11 @@ those through `oecluster.oecluster`, or let the wrapper build them from
 keywords. To check the split against the version you have installed:
 
 ```python
-from oecluster import oecluster as raw
-[n for n in dir(raw) if n.endswith("Options") and not hasattr(oecluster, n)]
+import oecluster
+
+raw = oecluster.oecluster
+print([n for n in dir(raw)
+       if n.endswith("Options") and not hasattr(oecluster, n)])
 ```
 
 ## Exceptions
