@@ -466,10 +466,26 @@ patch-score comparison.
 | `p` | Minkowski order | `2.0` |
 
 `seuclidean` is an alias of `standardized_euclidean`. Non-numeric columns are
-dropped from any selection, as are columns whose variance over the input is
-zero: over `["CCO", "CCC"]` the openeye source loses `HeavyAtomCount`,
-`FractionCsp3`, `AromaticRingCount` and `RotatableBondCount` that way. The
-drops are readable as `(name, reason)` pairs from `descriptor_statistics()`
+dropped from any selection, on every metric. A zero-variance column is dropped
+only where a variance is being fitted -- `standardized_euclidean`, `seuclidean`
+and `mahalanobis` -- and only when that fit actually runs: over `["CCO", "CCC"]`
+those three metrics lose `HeavyAtomCount`, `FractionCsp3`, `AromaticRingCount`
+and `RotatableBondCount` that way, while `euclidean`, `hamming` and the other
+raw metrics keep all eleven openeye columns. Supplying `variances=` or
+`inverse_covariance=` skips the fit, so the selection is used exactly as given
+and nothing is dropped for variance even on a fitted metric.
+
+`descriptor_statistics()` has no metric to key on and fits regardless, so it
+reports those same four as `zero-variance` over that pair and leaves them out
+of its `columns`. Its `dropped` list and a raw-metric comparison's
+`DroppedColumns()` therefore disagree over the same molecules, and the
+difference reaches the distances rather than staying in the metadata:
+`pdist(mols, "descriptor", metric="hamming")` scores `["CCO", "CCC"]` at
+`0.636364` over all eleven columns, and the same call restricted to the
+`columns` that `descriptor_statistics()` hands back scores `1.0` over the seven
+the fit left.
+
+The drops are readable as `(name, reason)` pairs from `descriptor_statistics()`
 under its `dropped` key, and from a prebuilt `DescriptorComparison` through
 `DroppedColumns()` and `DroppedReasons()`; `pdist()` does not carry them in
 `params`.
