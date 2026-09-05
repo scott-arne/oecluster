@@ -295,12 +295,15 @@ a `score_type` in the hope of one. None of that carries over to
 `similarity=True`, where a self-score sits at or just under 1.0 instead of
 vanishing -- the same shortfall as above, read from the other end: methane's
 shape self-similarity measures `0.9896` and Cl2's `0.9863` where ethane's is
-exactly `1.0`. Either way the value is nowhere near zero, so `shape` stamps
-`zero_self` false on every set, and so do `combo_norm`, `combo` and `color` on
-coloured molecules. The exception is a colour similarity over
-molecules with no colour features, which self-scores 0.0 and is stamped
-`zero_self` true. It is refused anyway: a similarity fails `is_distance`
-before `zero_self` is consulted, which is why the two facts are kept apart.
+exactly `1.0`. Either way the value is nowhere near zero, so on a non-empty set
+`shape` stamps `zero_self` false, and so do `combo_norm`, `combo` and `color`
+on coloured molecules. The one exception among non-empty sets is a colour
+similarity over molecules with no colour features, which self-scores 0.0 and is
+stamped `zero_self` true. It is refused anyway: a similarity fails
+`is_distance` before `zero_self` is consulted, which is why the two facts are
+kept apart. An empty set is stamped true as well, and vacuously so: `pdist`
+accepts it, and with no diagonal to measure the stamp comes back true for every
+`score_type` in either mode.
 
 The remaining checks are soundness warnings that `allow_nonmetric=True`
 overrides: a measure known to violate the triangle inequality, distances
