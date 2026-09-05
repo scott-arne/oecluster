@@ -8,6 +8,7 @@ overlay, protein superposition, and binding site comparison.
 """
 
 import abc
+import ctypes
 import json
 import hashlib
 import importlib.machinery
@@ -709,6 +710,33 @@ class _StorageView:
         }
 
 
+def _fill_dense_storage(storage, condensed):
+    """
+    Copy a condensed distance array into a dense storage buffer in one pass.
+
+    Writing through ``storage.Set`` costs one SWIG call per pair, which is
+    quadratic in the item count; the storage buffer is contiguous float64, so
+    a single copy replaces the loop.
+
+    :param storage: DenseStorage whose ``NumPairs()`` matches ``condensed``.
+    :param condensed: 1-D array of condensed distances.
+    :raises ValueError: If the lengths disagree.
+    """
+    num_pairs = storage.NumPairs()
+    values = np.ascontiguousarray(condensed, dtype=np.float64)
+    if values.shape[0] != num_pairs:
+        raise ValueError(
+            f"condensed length {values.shape[0]} does not match the storage "
+            f"capacity {num_pairs}")
+    if num_pairs == 0:
+        return
+
+    buffer = np.ctypeslib.as_array(
+        ctypes.cast(storage._data_ptr(), ctypes.POINTER(ctypes.c_double)),
+        shape=(num_pairs,))
+    np.copyto(buffer, values)
+
+
 class DistanceMatrix(abc.ABC):
     """
     Abstract base for distance matrices computed from a set of items.
@@ -1103,14 +1131,103 @@ class SymmetricDistanceMatrix(DistanceMatrix):
                     f"{condensed.shape[0]} != expected {expected} for "
                     f"{num_samples} samples")
             storage = DenseStorage(num_samples)
-
-            idx = 0
-            for i in range(num_samples):
-                for j in range(i + 1, num_samples):
-                    storage.Set(i, j, float(condensed[idx]))
-                    idx += 1
+            _fill_dense_storage(storage, condensed)
 
         return cls(storage, comparison_name, labels, params, facts)
+
+    @classmethod
+    def from_condensed(cls, values, *, labels=None,
+                       comparison_name="precomputed", params=None, check=True,
+                       probe_triples=100000, seed=0):
+        """
+        Build a distance matrix from distances computed elsewhere.
+
+        Accepts either a 1-D condensed array (upper triangle, row-major, as
+        ``scipy.spatial.distance.pdist`` returns) or a 2-D square matrix,
+        whose strict upper triangle is taken.
+
+        Ingress runs the checks a computed matrix gets for free: values must
+        be finite and non-negative, a square input must be symmetric with a
+        zero diagonal, and a sample of triples is tested against the triangle
+        inequality. A violation found here is recorded and later refused by
+        the clustering entry points unless ``allow_nonmetric=True``.
+
+        Both capability facts are stamped ``"unknown"``. There is no metric
+        object to interrogate, and the caller asserting a value is not
+        evidence, so the probe result is the only claim this path makes.
+
+        :param values: 1-D condensed array or 2-D square distance matrix.
+        :param labels: Optional item labels; must match the item count.
+        :param comparison_name: Name recorded on the matrix.
+        :param params: Optional provenance recorded on the matrix and echoed
+            by ``repr``; copied, so later mutation of the caller's dict does
+            not change the matrix.
+        :param check: When False, skip the value checks and the probe
+            together. Shape and length arithmetic still runs -- an input that
+            maps to no item count cannot be stored at all.
+        :param probe_triples: Triples to sample for the triangle probe; a
+            non-positive count skips it.
+        :param seed: Seed for the probe sampler.
+        :returns: SymmetricDistanceMatrix.
+        :raises ValueError: If the shape, length, or values are invalid.
+        """
+        array = np.asarray(values, dtype=np.float64)
+
+        if array.ndim == 2:
+            if array.shape[0] != array.shape[1]:
+                raise ValueError(
+                    f"a 2-D input must be square, got shape "
+                    f"{tuple(array.shape)}")
+            n = array.shape[0]
+            if check:
+                if not np.allclose(array, array.T, equal_nan=True):
+                    raise ValueError("a 2-D distance matrix must be symmetric")
+                if np.any(np.diagonal(array) != 0.0):
+                    raise ValueError(
+                        "a 2-D distance matrix must have a zero diagonal; a "
+                        "non-zero self-distance is not a distance")
+            condensed = np.ascontiguousarray(array[np.triu_indices(n, k=1)])
+        elif array.ndim == 1:
+            length = array.shape[0]
+            n = round((1.0 + np.sqrt(1.0 + 8.0 * length)) / 2.0)
+            if n * (n - 1) // 2 != length:
+                raise ValueError(
+                    f"{length} is not a valid condensed length: no item count "
+                    f"n satisfies n * (n - 1) / 2 == {length}")
+            condensed = np.ascontiguousarray(array)
+        else:
+            raise ValueError(
+                f"expected a 1-D or 2-D array, got {array.ndim} dimensions")
+
+        if check:
+            if not np.all(np.isfinite(condensed)):
+                raise ValueError(
+                    "distance matrix contains non-finite values; remove or "
+                    "impute them before clustering")
+            if np.any(condensed < 0.0):
+                raise ValueError("distance matrix contains negative values")
+
+        if labels is not None:
+            labels = list(labels)
+            if len(labels) != n:
+                raise ValueError(
+                    f"labels length {len(labels)} != item count {n}")
+
+        # is_distance, zero_self and triangle all stay "unknown" from
+        # default_facts(). The zero diagonal checked above is the caller's
+        # diagonal, not a property of whatever produced the numbers, so it
+        # proves nothing durable -- and calling the argument a "distance
+        # matrix" is not evidence that it is one.
+        facts = _gate.default_facts()
+        facts['data_integrity'] = "complete"
+        if check:
+            facts.update(_gate.probe_triangle(condensed, n,
+                                              samples=probe_triples,
+                                              seed=seed))
+
+        storage = DenseStorage(n)
+        _fill_dense_storage(storage, condensed)
+        return cls(storage, comparison_name, labels, dict(params or {}), facts)
 
     @staticmethod
     def _validate_sparse_entries(rows, cols, values, num_samples, cutoff,

@@ -218,3 +218,67 @@ def require_metric(distance_matrix, caller, *, allow_nonmetric=False):
             f"({facts['probe_violations']} of {facts['probe_sampled']} "
             f"sampled triples); {caller} assumes a metric. "
             f"Pass allow_nonmetric=True to proceed anyway.")
+
+
+def condensed_lookup(condensed, n, i, j):
+    """
+    Look up ``d(i, j)`` in a condensed distance array, vectorized.
+
+    :param condensed: 1-D condensed distance array for ``n`` items.
+    :param n: Number of items.
+    :param i: Array of row indices.
+    :param j: Array of column indices, elementwise distinct from ``i``.
+    :returns: Array of distances.
+    """
+    lo = np.minimum(i, j).astype(np.int64)
+    hi = np.maximum(i, j).astype(np.int64)
+    return condensed[n * lo + hi - ((lo + 2) * (lo + 1)) // 2]
+
+
+def probe_triangle(condensed, n, *, samples=100000, seed=0):
+    """
+    Sample triples looking for a proven triangle-inequality violation.
+
+    The probe can only disprove: a violating triple proves the matrix is not a
+    metric, while finding none proves nothing. The caller therefore records
+    the outcome separately from the ``triangle`` capability, which stays
+    unknown either way.
+
+    The comparison carries a tolerance that grows with the longest side of the
+    triple, so that floating-point noise in a genuine metric does not read as
+    a violation.
+
+    :param condensed: 1-D condensed distance array.
+    :param n: Number of items.
+    :param samples: Number of triples to draw; a non-positive count skips the
+        probe.
+    :param seed: Seed for the sampler, fixed so results are reproducible.
+    :returns: Dict with ``metric_probe``, ``probe_violations``, and
+              ``probe_sampled``.
+    """
+    skipped = {'metric_probe': "not_run", 'probe_violations': 0,
+               'probe_sampled': 0}
+    if n < 3 or samples <= 0:
+        return skipped
+
+    rng = np.random.default_rng(seed)
+    i = rng.integers(0, n, size=samples)
+    j = rng.integers(0, n, size=samples)
+    k = rng.integers(0, n, size=samples)
+    distinct = (i != j) & (j != k) & (i != k)
+    i, j, k = i[distinct], j[distinct], k[distinct]
+    if i.size == 0:
+        return skipped
+
+    d_ij = condensed_lookup(condensed, n, i, j)
+    d_jk = condensed_lookup(condensed, n, j, k)
+    d_ik = condensed_lookup(condensed, n, i, k)
+    scale = np.maximum(1.0, np.maximum(d_ij, np.maximum(d_jk, d_ik)))
+    violations = int(np.count_nonzero(d_ik > d_ij + d_jk + 1e-9 * scale))
+
+    return {
+        'metric_probe': ("violations_found" if violations
+                         else "no_violations_found"),
+        'probe_violations': violations,
+        'probe_sampled': int(i.size),
+    }
