@@ -648,6 +648,7 @@ def _build_descriptor(items, similarity, kwargs, symmetric):
     return _DescriptorComparison(items, opts), "descriptor"
 
 
+# expand_conformers is a Python-only normalizer key, never reaching RMSDOptions.
 _RMSD_KEYS = ('overlay', 'automorph', 'heavy_only', 'expand_conformers')
 
 
@@ -661,12 +662,9 @@ def rmsd_options(kwargs):
     :returns: A populated ``RMSDOptions``.
     """
     opts = RMSDOptions()
-    if kwargs.get('overlay') is not None:
-        opts.overlay = bool(kwargs['overlay'])
-    if kwargs.get('automorph') is not None:
-        opts.automorph = bool(kwargs['automorph'])
-    if kwargs.get('heavy_only') is not None:
-        opts.heavy_only = bool(kwargs['heavy_only'])
+    _set_if_given(opts, 'overlay', kwargs.get('overlay'))
+    _set_if_given(opts, 'automorph', kwargs.get('automorph'))
+    _set_if_given(opts, 'heavy_only', kwargs.get('heavy_only'))
     return opts
 
 
@@ -675,12 +673,21 @@ def _normalize_rmsd(items, kwargs):
     Expand multi-conformer molecules into one molecule per pose.
 
     ``OERMSD`` compares a single pose against a single pose, so each conformer
-    becomes its own item, titled ``"<title>:conf<n>"``. Expansion copies, so
-    the caller's molecules are untouched.
+    becomes its own item, titled ``"<title>:conf<n>"``. Multi-conformer inputs
+    are expanded into copies; single-conformer inputs pass through unchanged.
+    Either way the caller's molecules are untouched, because the comparison
+    takes its own snapshot.
     """
-    if kwargs.get('expand_conformers') is not None and not kwargs[
-            'expand_conformers']:
-        return items, []
+    expand = kwargs.get('expand_conformers')
+    if expand is not None:
+        if not isinstance(expand, (bool, np.bool_)):
+            raise TypeError(
+                "expand_conformers must be True or False, "
+                f"not {type(expand).__name__} ({expand!r}). "
+                "A truthy value would silently enable a feature the caller "
+                "did not request.")
+        if not expand:
+            return items, []
 
     from openeye import oechem
 
@@ -694,26 +701,51 @@ def _normalize_rmsd(items, kwargs):
         for conf_index, conf in enumerate(item.GetConfs()):
             single = oechem.OEMol()
             oechem.OEAddMols(single, oechem.OEGraphMol(item))
-            coords = oechem.OEFloatArray(conf.GetMaxAtomIdx() * 3)
-            conf.GetCoords(coords)
-            single.SetCoords(coords)
+            src = oechem.OEFloatArray(conf.GetMaxAtomIdx() * 3)
+            conf.GetCoords(src)
+            dst = oechem.OEFloatArray(single.GetMaxAtomIdx() * 3)
+            for src_atom, dst_atom in zip(conf.GetAtoms(), single.GetAtoms()):
+                for axis in range(3):
+                    dst[dst_atom.GetIdx() * 3 + axis] = src[
+                        src_atom.GetIdx() * 3 + axis]
+            single.SetCoords(dst)
             single.SetTitle(f"{title}:conf{conf_index}")
             expanded.append(single)
     return expanded, []
 
 
-def _build_rmsd(items, similarity, kwargs, symmetric):
-    """Build an :class:`RMSDComparison` from keyword options."""
+def _validate_rmsd(similarity, kwargs):
+    """Reject RMSD arguments before any molecule is read.
+
+    Registered as the comparison's validator so it also runs before
+    ``_normalize_rmsd``, whose expansion work can be skipped when an argument
+    is already known to be invalid.
+
+    :param similarity: Whether the caller asked for similarities.
+    :param kwargs: Comparison keyword options, read but never consumed.
+    :raises ValueError: If similarities were requested.
+    :raises TypeError: If any keyword option is not an RMSD option or if
+        ``expand_conformers`` is given a truthy non-bool value.
+    """
     if similarity:
         raise ValueError(
             "the rmsd comparison has no similarity form: RMSD is a distance "
             "in angstroms. Use similarity=False.")
+    unknown = [key for key in kwargs if key not in _RMSD_KEYS]
+    if unknown:
+        raise TypeError(f"Unknown kwargs for rmsd comparison: {unknown}")
+
+
+def _build_rmsd(items, similarity, kwargs, symmetric):
+    """Build an :class:`RMSDComparison` from keyword options."""
+    # ``build_comparison`` is a module-level entry point, reachable without the
+    # ``validate_request`` call ``pdist`` and ``cdist`` make first, so the
+    # builder stays the enforcing copy.
+    _validate_rmsd(similarity, kwargs)
 
     opts = rmsd_options(kwargs)
     for key in _RMSD_KEYS:
         kwargs.pop(key, None)
-    if kwargs:
-        raise TypeError(f"Unknown kwargs for rmsd comparison: {list(kwargs)}")
 
     return _RMSDComparison(items, opts), "rmsd"
 
@@ -730,4 +762,4 @@ register_comparison(
         items, similarity, kwargs, symmetric, default_method="sitehopper"))
 register_comparison("descriptor", _build_descriptor, _normalize_descriptor,
                     _validate_descriptor)
-register_comparison("rmsd", _build_rmsd, _normalize_rmsd)
+register_comparison("rmsd", _build_rmsd, _normalize_rmsd, _validate_rmsd)

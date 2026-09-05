@@ -1592,7 +1592,8 @@ def pdist(items,
 
     :param items: List of molecules, design units, or other items.
     :param comparison: Comparison method: "fingerprint", "rocs", "superpose",
-                       "sitehopper", "descriptor", or a C++ comparison object.
+                       "sitehopper", "descriptor", "rmsd", or a C++ comparison
+                       object.
     :param similarity: Return similarities instead of distances.
     :param num_threads: Number of threads (0 = auto).
     :param chunk_size: Pairs per work unit.
@@ -1670,8 +1671,8 @@ def cdist(items_a, items_b, comparison, *,
     :param items_a: Reference items (rows of the result).
     :param items_b: Fit items (columns of the result).
     :param comparison: Comparison method name: "fingerprint", "rocs", "superpose",
-                       "sitehopper", or "descriptor". Prebuilt comparison objects
-                       are not supported.
+                       "sitehopper", "descriptor", or "rmsd". Prebuilt comparison
+                       objects are not supported.
     :param similarity: Return similarities instead of distances.
     :param num_threads: Number of threads (0 = auto).
     :param chunk_size: Pairs per work unit.
@@ -3094,9 +3095,9 @@ class RMSDComparison:
         """
         Construct an RMSDComparison.
 
-        Every molecule must share one topology; use ``pdist(mols, "rmsd")``
-        instead if the poses need conformer expansion first, since this
-        factory takes the molecules exactly as given.
+        The molecules are taken as given. Use ``pdist(mols, "rmsd")`` instead
+        if the poses need conformer expansion first, since this factory
+        receives the molecules exactly as passed.
 
         :param mols: List of OEMol molecules with coordinates.
         :param overlay: Superpose before measuring, removing rigid-body
@@ -3104,7 +3105,11 @@ class RMSDComparison:
         :param automorph: Minimize over graph automorphisms. Defaults to True.
         :param heavy_only: Ignore hydrogens. Defaults to True.
         :returns: C++ RMSDComparison object.
-        :raises RuntimeError: If the molecules do not share a topology.
+        :raises RuntimeError: If the C++ layer refuses the request. Among the
+            reasons: a molecule with no coordinates; a mix of 2D and 3D input;
+            molecules that do not share one topology; and, with
+            ``automorph=False`` or ``heavy_only=False``, a differing atom count,
+            element order, or bond set.
         """
         kwargs = {
             'overlay': overlay,

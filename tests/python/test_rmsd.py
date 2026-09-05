@@ -95,12 +95,106 @@ def test_each_expanded_pose_carries_its_own_coordinates():
     An expansion that copied the source molecule's active conformer into every
     pose would satisfy the count and the labels above and still produce an
     all-zeros matrix. The shifts are chosen so each pairwise distance is the
-    translation between two poses, which no other coordinate assignment
-    reproduces.
+    translation between two poses, which detects that each pose carries a
+    distinct conformer's coordinates rather than a shared one.
     """
     mols = [_multiconformer("CCCO", (0.0, 1.0, 3.0), "ligA")]
     dist = oecluster.pdist(mols, "rmsd", automorph=False)
     np.testing.assert_allclose(dist.condensed, [1.0, 3.0, 2.0], atol=1e-4)
+
+
+def test_expanded_poses_have_exact_source_conformer_coordinates():
+    """Per-atom coordinate equality, not just a derived distance.
+
+    Verifies that expansion copies coordinates correctly, atom by atom. A
+    per-atom check detects misassignments that could still yield plausible
+    overall distances.
+    """
+    mol = _multiconformer("CCCO", (0.0, 1.5, 3.0), "ligA")
+    # Extract source conformer coordinates for comparison
+    source_coords = []
+    for conf in mol.GetConfs():
+        coords = oechem.OEFloatArray(conf.GetMaxAtomIdx() * 3)
+        conf.GetCoords(coords)
+        per_atom = []
+        for atom in conf.GetAtoms():
+            idx = atom.GetIdx()
+            per_atom.append((coords[idx * 3], coords[idx * 3 + 1],
+                           coords[idx * 3 + 2]))
+        source_coords.append(per_atom)
+
+    # Expand and verify coordinates match
+    from oecluster import _comparisons
+    expanded, _ = _comparisons._normalize_rmsd([mol], {})
+    assert len(expanded) == 3
+
+    for i, pose in enumerate(expanded):
+        pose_coords = oechem.OEFloatArray(pose.GetMaxAtomIdx() * 3)
+        pose.GetCoords(pose_coords)
+        for j, atom in enumerate(pose.GetAtoms()):
+            idx = atom.GetIdx()
+            expected = source_coords[i][j]
+            actual = (pose_coords[idx * 3], pose_coords[idx * 3 + 1],
+                     pose_coords[idx * 3 + 2])
+            np.testing.assert_allclose(actual, expected, atol=1e-8,
+                err_msg=f"Pose {i}, atom {j}: coordinates mismatch")
+
+
+def test_expansion_with_atom_index_gaps():
+    """Molecule with GetMaxAtomIdx() > NumAtoms() must still expand correctly.
+
+    Atom deletions (hydrogen suppression, salt stripping) leave index gaps.
+    Coordinate mapping must use iteration order, not raw indices, or the
+    assignment silently scrambles atoms.
+    """
+    mol = oechem.OEMol()
+    # Interleaved hydrogens force GetMaxAtomIdx=9 when NumAtoms=3 after suppression
+    oechem.OESmilesToMol(mol, "C([H])([H])([H])C([H])([H])O[H]")
+    oechem.OEGenerate2DCoordinates(mol)
+
+    # Build three conformers with known shifts
+    base = oechem.OEFloatArray(mol.GetMaxAtomIdx() * 3)
+    mol.GetCoords(base)
+    for shift in [1.0, 2.5]:
+        moved = oechem.OEFloatArray(list(base))
+        for idx in range(0, len(moved), 3):
+            moved[idx] += shift
+        mol.NewConf(moved)
+
+    oechem.OESuppressHydrogens(mol)
+    assert mol.NumAtoms() == 3
+    assert mol.GetMaxAtomIdx() > 3  # gaps present
+
+    # Ground truth: direct OERMSD on the source conformers
+    expected_dists = []
+    confs = list(mol.GetConfs())
+    for i in range(len(confs)):
+        for j in range(i + 1, len(confs)):
+            d = oechem.OERMSD(confs[i], confs[j], True, True, False)
+            expected_dists.append(d)
+
+    dist = oecluster.pdist([mol], "rmsd")
+    np.testing.assert_allclose(dist.condensed, expected_dists, atol=1e-4)
+
+
+def test_mixing_single_and_multiconformer_molecules():
+    """Single-conformer inputs pass through; multi-conformer are rebuilt.
+
+    Both paths must agree on the coordinate assignment, so mixing them in one
+    pdist verifies no systematic divergence.
+    """
+    single = _pose("CCCO", 0.5, "single")
+    multi = _multiconformer("CCCO", (0.0, 2.0), "multi")
+
+    dist = oecluster.pdist([single, multi], "rmsd", automorph=False)
+    assert dist.num_samples == 3
+    assert dist.labels == ["single", "multi:conf0", "multi:conf1"]
+    # single at 0.5, multi:conf0 at 0.0 (base 2D), multi:conf1 at 0.0+2.0=2.0
+    # Condensed order: (0,1), (0,2), (1,2)
+    # = (single,multi:conf0), (single,multi:conf1), (multi:conf0,multi:conf1)
+    # = dist(0.5,0.0), dist(0.5,2.0), dist(0.0,2.0)
+    # = 0.5, 1.5, 2.0
+    np.testing.assert_allclose(dist.condensed, [0.5, 1.5, 2.0], atol=1e-4)
 
 
 def test_expansion_can_be_disabled():
@@ -127,10 +221,11 @@ def test_single_conformer_molecules_keep_their_titles():
 def test_cdist_expands_each_side():
     a = [_multiconformer("CCCO", (0.0, 1.0), "ligA")]
     b = [_pose("CCCO", 2.0, "ligB")]
-    cross = oecluster.cdist(a, b, "rmsd")
+    cross = oecluster.cdist(a, b, "rmsd", automorph=False)
     assert cross.shape == (2, 1)
     assert cross.labels_a == ["ligA:conf0", "ligA:conf1"]
     assert cross.labels_b == ["ligB"]
+    np.testing.assert_allclose(cross.matrix, [[2.0], [1.0]], atol=1e-4)
 
 
 def test_cdist_expands_the_b_side():
