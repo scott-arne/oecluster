@@ -220,15 +220,48 @@ def test_the_factory_class_enforces_the_same_explicitness_rules():
         oecluster.FingerprintComparison(_mols(), tversky_beta=0.5)
 
 
-@pytest.mark.parametrize("family", FAMILIES)
-def test_use_chirality_is_accepted_by_every_family(family):
-    """Not an over-refusal: every family reads ``use_chirality``.
+def _stereo_pair():
+    """A specified stereocentre against the same constitution, unspecified."""
+    mols = []
+    for idx, smi in enumerate(["C[C@](N)(O)C(=O)O", "CC(N)(O)C(=O)O"]):
+        mol = oechem.OEGraphMol()
+        oechem.OESmilesToMol(mol, smi)
+        mol.SetTitle(f"stereo{idx}")
+        mols.append(mol)
+    return mols
 
-    A rule table that swept it in with the family-only options -- ``radius``,
-    ``min_distance``, ``max_distance`` and ``torsion_atom_count``, the four
-    keys of ``_FAMILY_ONLY_KEYS`` -- would refuse a call the C++ layer
-    honours, which the explicitness rules exist to prevent rather than to
-    cause.
+
+@pytest.mark.parametrize("family", FAMILIES)
+def test_use_chirality_is_read_by_every_family(family):
+    """Not an over-refusal, and not a discard either.
+
+    A rule table that swept ``use_chirality`` in with the family-only options
+    -- ``radius``, ``min_distance``, ``max_distance`` and
+    ``torsion_atom_count``, the four keys of ``_FAMILY_ONLY_KEYS`` -- would
+    refuse a call the C++ layer honours, which the explicitness rules exist to
+    prevent rather than to cause. The construction below is what pins that,
+    and on its own it was all this test used to do. A construction that raises
+    nothing cannot tell a forwarded option from a discarded one: deleting
+    ``use_chirality`` from the key list ``_build_fingerprint`` copies onto the
+    options struct left the old test green, which is the silent-equivalence
+    regression it was named for.
+
+    The condensed vectors are what pin the forwarding, and the fixture is
+    load-bearing. Of four tried it is the only one that moves all four
+    families: a specified stereocentre carrying four heavy substituents,
+    against the same constitution with the stereo left unspecified.
+    ``use_chirality=False`` scores that pair at exactly 0.0 in every family,
+    which is what makes the difference chirality and nothing else about the
+    fixture.
+
+    An enantiomer pair does not serve here, which is worth recording because
+    it is the first thing the next person will reach for. Measured over
+    ``C[C@H](N)C(=O)O`` / ``C[C@@H](N)C(=O)O`` and over the four-substituent
+    ``C[C@](N)(O)C(=O)O`` / ``C[C@@](N)(O)C(=O)O``, morgan and
+    topological_torsions separate the two, while ``atom_pair`` and
+    ``topological_atom_pair`` score 0.0 with the option set either way. That
+    is what those two fixtures show; whether it holds for every enantiomer
+    pair was not established here.
 
     Universal is not the same as unruled: ``numbits`` is read by all four
     families too (2048 against a tight enough width moves the condensed vector
@@ -238,3 +271,13 @@ def test_use_chirality_is_accepted_by_every_family(family):
     """
     oecluster.FingerprintComparison(_mols(), fp_type=family,
                                     use_chirality=True)
+
+    def stereo(flag):
+        return oecluster.pdist(_stereo_pair(), "fingerprint", fp_type=family,
+                               use_chirality=flag).condensed
+
+    ignored = stereo(False)
+    honoured = stereo(True)
+    assert ignored[0] == pytest.approx(0.0, abs=1e-12)
+    assert honoured[0] > 0.0
+    assert not np.allclose(honoured, ignored)
