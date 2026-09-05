@@ -224,6 +224,14 @@ def condensed_lookup(condensed, n, i, j):
     """
     Look up ``d(i, j)`` in a condensed distance array, vectorized.
 
+    ``i`` and ``j`` must be elementwise distinct. This is a precondition, not
+    a check: enforcing it would cost a comparison over the ~1e5 elements the
+    probe passes, and the probe already filters. Violating it does not raise.
+    A diagonal entry has no place in a condensed array, so the arithmetic
+    yields an index that numpy resolves against some other pair -- ``i == j
+    == 0`` yields ``-1``, which wraps to the last element -- and the caller
+    receives an ordinary-looking distance belonging to a different pair.
+
     :param condensed: 1-D condensed distance array for ``n`` items.
     :param n: Number of items.
     :param i: Array of row indices.

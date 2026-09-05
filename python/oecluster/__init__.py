@@ -463,7 +463,6 @@ def _preload_shared_libs():
     would pollute the global symbol namespace and cause segfaults in
     unrelated C extensions such as ``_sqlite3``.
     """
-    import ctypes
     import sys
     if sys.platform not in ('linux', 'darwin'):
         return
@@ -521,7 +520,6 @@ def _preload_bundled_libs():
     if sys.platform != 'linux':
         return
 
-    import ctypes
     pkg_name = __name__
     pkg_dir = os.path.dirname(os.path.abspath(__file__))
     site_dir = os.path.dirname(pkg_dir)
