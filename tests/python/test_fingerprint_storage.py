@@ -222,11 +222,19 @@ def test_the_factory_class_enforces_the_same_explicitness_rules():
 
 @pytest.mark.parametrize("family", FAMILIES)
 def test_use_chirality_is_accepted_by_every_family(family):
-    """Not an over-refusal: ``use_chirality`` is the one option every family reads.
+    """Not an over-refusal: every family reads ``use_chirality``.
 
-    A rule table that swept it in with the family-only options would refuse a
-    call the C++ layer honours, which the explicitness rules exist to prevent
-    rather than to cause.
+    A rule table that swept it in with the family-only options -- ``radius``,
+    ``min_distance``, ``max_distance`` and ``torsion_atom_count``, the four
+    keys of ``_FAMILY_ONLY_KEYS`` -- would refuse a call the C++ layer
+    honours, which the explicitness rules exist to prevent rather than to
+    cause.
+
+    Universal is not the same as unruled: ``numbits`` is read by all four
+    families too (2048 against a tight enough width moves the condensed vector
+    for every one of them over this file's fixture), but its rule is keyed on
+    storage rather than on family, so the family-only table was never where it
+    belonged.
     """
     oecluster.FingerprintComparison(_mols(), fp_type=family,
                                     use_chirality=True)
