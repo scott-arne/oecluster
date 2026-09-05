@@ -659,8 +659,11 @@ Options for parallel pairwise-distance computation.
 """
 
 from .oecluster import DescriptorComparison as _DescriptorComparison
-from .oecluster import FingerprintComparison as _FingerprintComparison
-from .oecluster import FingerprintOptions
+# Re-exported only. The wrapper class below builds its options through
+# _comparisons, but oecluster.FingerprintOptions is a documented name and has
+# to keep resolving here; the redundant alias says so rather than leaving the
+# import looking dead.
+from .oecluster import FingerprintOptions as FingerprintOptions
 from .oecluster import RMSDComparison as _RMSDComparison
 from .oecluster import ROCSComparison as _ROCSComparison
 from .oecluster import ROCSOptions
@@ -3207,33 +3210,76 @@ def descriptor_statistics(mols, *, sources=None, columns=None, groups=None,
 class FingerprintComparison:
     """Fingerprint-based comparison using OEFP scalar metrics."""
 
-    def __new__(cls, mols, *, fp_type=None, metric=None, numbits=None,
-                min_distance=None, max_distance=None, similarity=False):
+    def __new__(cls, mols, *, fp_type=None, storage=None, metric=None,
+                numbits=None, radius=None, min_distance=None,
+                max_distance=None, torsion_atom_count=None,
+                use_chirality=None, p=None, tversky_alpha=None,
+                tversky_beta=None, similarity=False):
         """
         Construct a FingerprintComparison.
 
         :param mols: List of OEMolBase molecules.
-        :param fp_type: Fingerprint type.
-        :param metric: OEFP scalar metric name.
-        :param numbits: Fingerprint size in bits.
-        :param min_distance: Minimum Atom Pair graph distance.
-        :param max_distance: Morgan radius or maximum Atom Pair graph distance.
+        :param fp_type: Fingerprint family: "morgan" (the default),
+            "atom_pair", "topological_atom_pair", or "topological_torsions".
+            "topological_atom_pair" selects the same generator as "atom_pair".
+        :param storage: Fingerprint storage: "binary" (the default), "count",
+            "sparse", or "sparse_count". A counted storage needs a metric
+            defined on counts, such as "bray_curtis" or "manhattan".
+        :param metric: OEFP scalar metric name. Defaults to "tanimoto".
+        :param numbits: Fingerprint size in bits. Defaults to 2048. A sparse
+            storage keeps its family's own domain rather than folding to a
+            width, and naming this alongside one raises.
+        :param radius: Morgan radius. Defaults to 2.
+        :param min_distance: Minimum atom-pair graph distance. Defaults to 1.
+        :param max_distance: Maximum atom-pair graph distance. Defaults to 30.
+            This no longer sets the Morgan radius; naming it with
+            ``fp_type="morgan"`` raises. Use ``radius``.
+        :param torsion_atom_count: Torsion path length. Defaults to 4.
+        :param use_chirality: Distinguish stereocenters. Defaults to False.
+        :param p: Minkowski order. Defaults to 2.0.
+        :param tversky_alpha: Tversky reference weight. Defaults to 0.5.
+        :param tversky_beta: Tversky fit weight. Defaults to 0.5.
         :param similarity: Return similarity instead of distance.
         :returns: C++ FingerprintComparison object.
+        :raises TypeError: If a named option does not apply to the selected
+            family, storage, or metric.
+        :raises RuntimeError: If the C++ layer refuses the request. Among the
+            reasons: an unknown family, storage, or metric; a metric with no
+            similarity form under ``similarity=True``; the one family and
+            storage combination OEFP provides no batch type for; and a bit-set
+            metric on a counted storage.
         """
-        opts = FingerprintOptions()
-        opts.similarity = similarity
-        if fp_type is not None:
-            opts.fp_type = fp_type
-        if metric is not None:
-            opts.metric = metric
-        if numbits is not None:
-            opts.numbits = numbits
-        if min_distance is not None:
-            opts.min_distance = min_distance
-        if max_distance is not None:
-            opts.max_distance = max_distance
-        return _FingerprintComparison(mols, opts)
+        # Delegated to the keyword surface's own builder rather than
+        # reimplemented, so this path cannot become the way around the
+        # explicitness rules. The ordering is part of what has to match: the
+        # builder constructs the C++ object before applying any advisory rule,
+        # which is what keeps an advisory refusal from pre-empting an
+        # authoritative one.
+        #
+        # symmetric=False because this builds a comparison, not a pdist. An
+        # asymmetric Tversky is a legal comparison -- Compare(i, j) and
+        # Compare(j, i) differ, which is the point of it -- and C++ refuses it
+        # only at FingerprintComparison::TryPDist, where pdist meets it.
+        # Refusing here instead would deny the direct-Compare caller an object
+        # the C++ constructor accepts.
+        comparison, _ = _comparisons._build_fingerprint(
+            mols, similarity,
+            {
+                'fp_type': fp_type,
+                'storage': storage,
+                'metric': metric,
+                'numbits': numbits,
+                'radius': radius,
+                'min_distance': min_distance,
+                'max_distance': max_distance,
+                'torsion_atom_count': torsion_atom_count,
+                'use_chirality': use_chirality,
+                'p': p,
+                'tversky_alpha': tversky_alpha,
+                'tversky_beta': tversky_beta,
+            },
+            symmetric=False)
+        return comparison
 
 
 class ROCSComparison:

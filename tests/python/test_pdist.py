@@ -441,3 +441,35 @@ def test_condensed_stays_a_zero_copy_view():
 
     arr[0] = 0.125
     assert storage.Get(0, 1) == pytest.approx(0.125)
+
+
+def test_default_fingerprint_path_is_unchanged_by_the_5_0_0_rewrite():
+    """Golden values for the untouched default: morgan/binary/tanimoto.
+
+    The literals are the Jaccard distances over OEFP's own radius-2, 2048-bit
+    binary Morgan fingerprints, so a change to any of the defaults the second
+    call spells out moves them. The second call is not the oracle -- both sides
+    would move together -- it only pins that spelling the defaults out is the
+    same request as leaving them off.
+    """
+    import oecluster
+    from openeye import oechem
+
+    smiles = ["CCO", "CCC", "CCCC", "c1ccccc1"]
+    mols = []
+    for smi in smiles:
+        mol = oechem.OEGraphMol()
+        oechem.OESmilesToMol(mol, smi)
+        mols.append(mol)
+
+    dist = oecluster.pdist(mols, "fingerprint")
+    np.testing.assert_allclose(
+        dist.condensed,
+        [4.0 / 7.0, 5.0 / 8.0, 1.0, 0.5, 1.0, 1.0],
+        rtol=0.0, atol=1e-12)
+
+    reference = oecluster.pdist(
+        mols, "fingerprint", fp_type="morgan", storage="binary",
+        metric="tanimoto", numbits=2048, radius=2, similarity=False)
+    np.testing.assert_array_equal(dist.condensed, reference.condensed)
+    assert dist.metric_capabilities == {'zero_self': True, 'triangle': True}
