@@ -9,8 +9,10 @@ Advanced users can still reach the lower-level SWIG bindings at
 `oecluster.oecluster` (and the compiled extension `oecluster._oecluster`) when
 they need direct control over the C++ classes.
 
-The generated reference for every public symbol is in
-[](api/python). This page is the narrative guide.
+A generated reference for the classes and functions defined in the `oecluster`
+package is in [](api/python). The option and storage structs that come straight
+from the SWIG bindings -- `FingerprintOptions`, `ButinaOptions` and
+`DenseStorage` among them -- are outside it. This page is the narrative guide.
 
 ## Distance Matrices
 
@@ -329,14 +331,15 @@ dm.is_distance       # 'unknown'
 
 The three capability facts -- `is_distance`, `zero_self` and `triangle` --
 stay `'unknown'` on that path. There is no comparison to interrogate, and a
-caller's assurance is not evidence, so the probe result is the only claim made.
-What the checks do record is `data_integrity`, stamped `'complete'`, and the
-probe's own `metric_probe`, `probe_violations` and `probe_sampled`. Pass
-`probe_triples=0` to skip the probe alone, or `check=False` to skip the value
-checks and the probe together, which also leaves `data_integrity` at
-`'unknown'` since nothing measured it. The refusals that do not read the
-numbers still run either way, among them the shape and length arithmetic, the
-label count, the masked-array refusal and the complex-dtype refusal.
+caller's assurance is not evidence, so the probe result is the only capability
+claim made. What the checks do record is `data_integrity`, stamped
+`'complete'`, and the probe's own `metric_probe`, `probe_violations` and
+`probe_sampled`. Pass `probe_triples=0` to skip the probe alone, or
+`check=False` to skip the value checks and the probe together, which also
+leaves `data_integrity` at `'unknown'` since nothing measured it. The refusals
+that do not read the numbers still run either way, among them the shape and
+length arithmetic, the label count, the masked-array refusal and the
+complex-dtype refusal.
 
 Distance matrices written before 5.0.0 record no facts at all and load with
 `is_distance`, `zero_self`, `triangle` and `data_integrity` every one
