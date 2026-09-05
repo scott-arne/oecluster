@@ -453,8 +453,16 @@ def test_default_fingerprint_path_is_unchanged_by_the_5_0_0_rewrite():
     rather than against a second ``oecluster`` call, which would move with the
     thing it is meant to check.
 
-    Which of the six defaults the second call spells out this fixture actually
-    pins, measured by moving each one in turn:
+    Two levels, because neither pins what the other does.
+    ``FingerprintOptions()`` carries the declared defaults, so asserting on it
+    pins them exactly -- and it is the struct the keyword path uses:
+    ``_build_fingerprint`` constructs a default one and overwrites only the
+    fields the caller named. The golden vector then pins that the pipeline
+    honours the struct rather than reaching some other setting, which the
+    struct assertions on their own do not.
+
+    Of the six defaults the second call spells out, this is what the *vector*
+    resolves on its own, measured by moving each one in turn:
 
     * ``fp_type`` and ``similarity`` are pinned: each of the other three
       families moves six entries, and ``similarity=True`` moves eight.
@@ -467,15 +475,21 @@ def test_default_fingerprint_path_is_unchanged_by_the_5_0_0_rewrite():
       keyword accepts; every one of them moves this vector. The exception is
       ``'jaccard'``, which is the same measure under another name and yields
       an identical vector.
-    * ``storage`` is pinned only by accident. ``'count'`` and
-      ``'sparse_count'`` cannot reach this vector because the default
-      ``tanimoto`` is a bit-set metric they refuse outright, while ``'sparse'``
-      yields an identical vector and would go unnoticed.
-    * ``numbits`` is not pinned. 4096, 1024 and 512 all reproduce this vector;
-      only 256 and below move it, because five small saturated molecules do
-      not collide at a plausible width. Making 2048-vs-1024 observable needs a
-      forced collision and a much larger, more brittle fixture, so a
-      ``numbits`` regression is outside what this test can catch.
+    * ``storage`` is resolved only in part. ``'count'`` and ``'sparse_count'``
+      cannot reach this vector because the default ``tanimoto`` is a bit-set
+      metric they refuse outright, but ``'sparse'`` yields an identical vector
+      and the literals alone would not notice it.
+    * ``numbits`` is not resolved at all. 8192, 4096, 1024 and 512 all
+      reproduce this vector; only 256 and below move it, because five small
+      saturated molecules do not collide at a plausible width. Making
+      2048-vs-1024 observable in output would need a forced collision and a
+      much larger, more brittle fixture.
+
+    Both are pinned at the declared level instead:
+    ``FingerprintOptions().storage`` separates ``'binary'`` from ``'sparse'``
+    and ``FingerprintOptions().numbits`` catches a width change the vector
+    cannot see. Neither assertion says anything about what the pipeline then
+    does with the value, which is what the literals below are for.
 
     The second call is not the oracle -- both sides would move together -- it
     only pins that spelling the defaults out is the same request as leaving
@@ -483,6 +497,13 @@ def test_default_fingerprint_path_is_unchanged_by_the_5_0_0_rewrite():
     """
     import oecluster
     from openeye import oechem
+
+    declared = oecluster.FingerprintOptions()
+    assert declared.fp_type == "morgan"
+    assert declared.storage == "binary"
+    assert declared.metric == "tanimoto"
+    assert declared.numbits == 2048
+    assert declared.radius == 2
 
     smiles = ["CCO", "CCC", "CCCC", "c1ccccc1", "CCCCCC"]
     mols = []
