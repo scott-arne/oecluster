@@ -61,11 +61,43 @@ def test_count_storage_separates_homologs_that_binary_cannot():
 
 
 def test_the_atom_pair_window_defaults_to_the_oefp_values():
-    """The old default truncated the window to 0-2 bonds."""
-    dist = oecluster.pdist(_mols(), "fingerprint", fp_type="atom_pair")
-    narrow = oecluster.pdist(_mols(), "fingerprint", fp_type="atom_pair",
-                             min_distance=0, max_distance=2)
-    assert not np.allclose(dist.condensed, narrow.condensed)
+    """The default window is 1-30, not the 0-2 the 4.x default truncated to.
+
+    A C31 chain is added to the fixture for this test alone, and it is what
+    makes the upper bound observable: the six molecules the rest of the file
+    uses top out at a graph distance of 15, so every window from 1-15 to 1-30
+    -- and the old default's replacement, whatever it were -- reproduces the
+    same vector over them. With the chain in, 1-29 moves five entries.
+
+    What this pins, measured by moving each bound in turn:
+
+    * ``max_distance`` is pinned exactly at 30. 29 moves five entries, and 31
+      is refused outright by OEFP ("max_distance must be smaller than 31"), so
+      there is no larger value the default could be.
+    * ``min_distance`` is pinned below 2 -- 2-30 moves all fifteen entries --
+      but 0 and 1 are indistinguishable here and, as far as this fixture can
+      tell, everywhere: an atom pair at graph distance 0 is an atom with
+      itself, which OEFP does not enumerate. The default is documented as 1;
+      this test cannot tell it from 0.
+    """
+    mols = _mols()
+    chain = oechem.OEGraphMol()
+    oechem.OESmilesToMol(chain, "C" * 31)
+    chain.SetTitle("c31")
+    mols.append(chain)
+
+    def window(**kwargs):
+        return oecluster.pdist(mols, "fingerprint", fp_type="atom_pair",
+                               **kwargs).condensed
+
+    default = window()
+    np.testing.assert_array_equal(default,
+                                  window(min_distance=1, max_distance=30))
+    assert not np.allclose(default, window(min_distance=1, max_distance=29))
+    assert not np.allclose(default, window(min_distance=2, max_distance=30))
+    assert not np.allclose(default, window(min_distance=0, max_distance=2))
+    with pytest.raises(RuntimeError, match="smaller than 31"):
+        window(min_distance=1, max_distance=31)
 
 
 def test_topological_atom_pair_is_an_alias_of_atom_pair():
