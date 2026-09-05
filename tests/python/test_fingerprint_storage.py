@@ -60,26 +60,42 @@ def test_count_storage_separates_homologs_that_binary_cannot():
     assert counted.condensed[0] > 0.1
 
 
-def test_the_atom_pair_window_defaults_to_the_oefp_values():
-    """The default window is 1-30, not the 0-2 the 4.x default truncated to.
+def test_the_declared_atom_pair_window_is_1_to_30_and_output_honours_it():
+    """The declared window is 1-30, and the output vector honours it.
+
+    Two levels, because neither pins what the other does.
+    ``FingerprintOptions()`` carries the declared defaults, so asserting on it
+    pins both bounds exactly -- and it is the struct the keyword path uses:
+    ``_build_fingerprint`` constructs a default one and overwrites only the
+    fields the caller named. The condensed vector then pins that the pipeline
+    honours the struct rather than reaching some other window, which the
+    struct assertion on its own does not, and that the window in force is not
+    the 0-2 the 4.x default truncated to.
 
     A C31 chain is added to the fixture for this test alone, and it is what
-    makes the upper bound observable: the six molecules the rest of the file
-    uses top out at a graph distance of 15, so every window from 1-15 to 1-30
-    -- and the old default's replacement, whatever it were -- reproduces the
-    same vector over them. With the chain in, 1-29 moves five entries.
+    makes the upper bound observable in output: the six molecules the rest of
+    the file uses top out at a graph distance of 15, so every window from 1-15
+    to 1-30 -- and the old default's replacement, whatever it were --
+    reproduces the same vector over them. With the chain in the vector has
+    twenty-one entries, and 1-29 moves five of them.
 
-    What this pins, measured by moving each bound in turn:
+    What the output vector resolves, measured by moving each bound in turn:
 
     * ``max_distance`` is pinned exactly at 30. 29 moves five entries, and 31
       is refused outright by OEFP ("max_distance must be smaller than 31"), so
       there is no larger value the default could be.
-    * ``min_distance`` is pinned below 2 -- 2-30 moves all fifteen entries --
-      but 0 and 1 are indistinguishable here and, as far as this fixture can
-      tell, everywhere: an atom pair at graph distance 0 is an atom with
-      itself, which OEFP does not enumerate. The default is documented as 1;
-      this test cannot tell it from 0.
+    * ``min_distance`` is pinned below 2 -- 2-30 moves fifteen of the
+      twenty-one -- but 0 and 1 are indistinguishable here and, as far as this
+      fixture can tell, everywhere: an atom pair at graph distance 0 is an atom
+      with itself, which OEFP does not enumerate. 0-30 reproduces the default
+      vector exactly, so a default of 0 would pass the vector assertions
+      unnoticed. Only the declared value separates the two, which is what the
+      ``FingerprintOptions`` assertions are for.
     """
+    declared = oecluster.FingerprintOptions()
+    assert declared.min_distance == 1
+    assert declared.max_distance == 30
+
     mols = _mols()
     chain = oechem.OEGraphMol()
     oechem.OESmilesToMol(chain, "C" * 31)
