@@ -20,10 +20,12 @@ from .oecluster import DescriptorComparison as _DescriptorComparison
 from .oecluster import (
     DescriptorOptions,
     FingerprintOptions,
+    RMSDOptions,
     ROCSOptions,
     SuperposeOptions,
 )
 from .oecluster import FingerprintComparison as _FingerprintComparison
+from .oecluster import RMSDComparison as _RMSDComparison
 from .oecluster import ROCSComparison as _ROCSComparison
 from .oecluster import SuperposeComparison as _SuperposeComparison
 
@@ -646,6 +648,76 @@ def _build_descriptor(items, similarity, kwargs, symmetric):
     return _DescriptorComparison(items, opts), "descriptor"
 
 
+_RMSD_KEYS = ('overlay', 'automorph', 'heavy_only', 'expand_conformers')
+
+
+def rmsd_options(kwargs):
+    """
+    Build an :class:`RMSDOptions` from keyword options.
+
+    Reads ``kwargs`` without consuming it.
+
+    :param kwargs: Comparison keyword options.
+    :returns: A populated ``RMSDOptions``.
+    """
+    opts = RMSDOptions()
+    if kwargs.get('overlay') is not None:
+        opts.overlay = bool(kwargs['overlay'])
+    if kwargs.get('automorph') is not None:
+        opts.automorph = bool(kwargs['automorph'])
+    if kwargs.get('heavy_only') is not None:
+        opts.heavy_only = bool(kwargs['heavy_only'])
+    return opts
+
+
+def _normalize_rmsd(items, kwargs):
+    """
+    Expand multi-conformer molecules into one molecule per pose.
+
+    ``OERMSD`` compares a single pose against a single pose, so each conformer
+    becomes its own item, titled ``"<title>:conf<n>"``. Expansion copies, so
+    the caller's molecules are untouched.
+    """
+    if kwargs.get('expand_conformers') is not None and not kwargs[
+            'expand_conformers']:
+        return items, []
+
+    from openeye import oechem
+
+    expanded = []
+    for idx, item in enumerate(items):
+        num_confs = item.NumConfs() if hasattr(item, "NumConfs") else 1
+        if num_confs <= 1:
+            expanded.append(item)
+            continue
+        title = item.GetTitle() or f"mol_{idx}"
+        for conf_index, conf in enumerate(item.GetConfs()):
+            single = oechem.OEMol()
+            oechem.OEAddMols(single, oechem.OEGraphMol(item))
+            coords = oechem.OEFloatArray(conf.GetMaxAtomIdx() * 3)
+            conf.GetCoords(coords)
+            single.SetCoords(coords)
+            single.SetTitle(f"{title}:conf{conf_index}")
+            expanded.append(single)
+    return expanded, []
+
+
+def _build_rmsd(items, similarity, kwargs, symmetric):
+    """Build an :class:`RMSDComparison` from keyword options."""
+    if similarity:
+        raise ValueError(
+            "the rmsd comparison has no similarity form: RMSD is a distance "
+            "in angstroms. Use similarity=False.")
+
+    opts = rmsd_options(kwargs)
+    for key in _RMSD_KEYS:
+        kwargs.pop(key, None)
+    if kwargs:
+        raise TypeError(f"Unknown kwargs for rmsd comparison: {list(kwargs)}")
+
+    return _RMSDComparison(items, opts), "rmsd"
+
+
 register_comparison("fingerprint", _build_fingerprint)
 register_comparison("rocs", _build_rocs)
 register_comparison(
@@ -658,3 +730,4 @@ register_comparison(
         items, similarity, kwargs, symmetric, default_method="sitehopper"))
 register_comparison("descriptor", _build_descriptor, _normalize_descriptor,
                     _validate_descriptor)
+register_comparison("rmsd", _build_rmsd, _normalize_rmsd)

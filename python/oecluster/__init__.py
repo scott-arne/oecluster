@@ -77,6 +77,7 @@ __all__ = [
     "ROCSComparison",
     "SuperposeComparison",
     "DescriptorComparison",
+    "RMSDComparison",
     "descriptor_statistics",
 ]
 
@@ -661,6 +662,7 @@ Options for parallel pairwise-distance computation.
 from .oecluster import DescriptorComparison as _DescriptorComparison
 from .oecluster import FingerprintComparison as _FingerprintComparison
 from .oecluster import FingerprintOptions
+from .oecluster import RMSDComparison as _RMSDComparison
 from .oecluster import ROCSComparison as _ROCSComparison
 from .oecluster import ROCSOptions
 from .oecluster import SuperposeComparison as _SuperposeComparison
@@ -3083,3 +3085,30 @@ class DescriptorComparison:
         }
         return _DescriptorComparison(mols,
                                      _comparisons.descriptor_options(kwargs))
+
+
+class RMSDComparison:
+    """Coordinate RMSD between poses of one molecule."""
+
+    def __new__(cls, mols, *, overlay=None, automorph=None, heavy_only=None):
+        """
+        Construct an RMSDComparison.
+
+        Every molecule must share one topology; use ``pdist(mols, "rmsd")``
+        instead if the poses need conformer expansion first, since this
+        factory takes the molecules exactly as given.
+
+        :param mols: List of OEMol molecules with coordinates.
+        :param overlay: Superpose before measuring, removing rigid-body
+            differences. Defaults to False (in-frame RMSD).
+        :param automorph: Minimize over graph automorphisms. Defaults to True.
+        :param heavy_only: Ignore hydrogens. Defaults to True.
+        :returns: C++ RMSDComparison object.
+        :raises RuntimeError: If the molecules do not share a topology.
+        """
+        kwargs = {
+            'overlay': overlay,
+            'automorph': automorph,
+            'heavy_only': heavy_only,
+        }
+        return _RMSDComparison(mols, _comparisons.rmsd_options(kwargs))
