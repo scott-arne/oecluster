@@ -1,5 +1,7 @@
 """Tests for the precomputed-distance ingress and the triangle probe."""
 
+import warnings
+
 import numpy as np
 import oecluster
 import pytest
@@ -123,37 +125,67 @@ def test_a_small_asymmetry_is_refused_rather_than_resolved():
         SymmetricDistanceMatrix.from_condensed(outside)
 
 
-def test_a_float32_gram_trick_matrix_is_not_refused():
-    """Over-refusal is the failure mode this tolerance is sized against.
+def _float32_gram_square(n=150, dimension=16, seed=11):
+    """Build a square matrix the way a float32 GPU pipeline builds one.
 
     ``torch.cdist``'s ``use_mm_for_euclid_dist`` mode, faiss and cuML all
     compute ``D^2 = -2 X X^T + |x|^2 + |y|^2`` by adding the two squared norms
-    in sequence. Addition is commutative but not associative, so ``d(i, j)``
-    and ``d(j, i)`` differ in the association order alone. Measured on this
-    150x16 float32 set: 9.536743e-07 absolute, 1.184596e-07 relative, which is
-    one float32 ulp (eps = 1.192093e-07). A sweep of 150 configurations over
-    n, dimension, spread and offset put the worst case at 1.99e-07.
-
-    Under ``rtol=1e-9`` this raised "a 2-D distance matrix must be symmetric".
+    in sequence. The output is handed back exactly as produced -- no
+    symmetrizing, no zeroed diagonal -- because pre-conditioning it here is
+    what hid the diagonal over-refusal from the earlier version of this test.
     """
-    rng = np.random.default_rng(11)
-    points = rng.normal(size=(150, 16)).astype(np.float32)
+    points = np.random.default_rng(seed).normal(
+        size=(n, dimension)).astype(np.float32)
     gram = points @ points.T
     norms = np.einsum('ij,ij->i', points, points)[:, None]
     square = -2.0 * gram
     square += norms
     square += norms.reshape(1, -1)
-    square = np.sqrt(np.maximum(square, 0)).astype(np.float64)
-    np.fill_diagonal(square, 0.0)
+    return np.sqrt(np.maximum(square, 0)).astype(np.float64)
+
+
+def test_a_float32_gram_trick_matrix_is_not_refused():
+    """Over-refusal is the failure mode both square tolerances are sized against.
+
+    Addition is commutative but not associative, so the sequential sum above
+    makes ``d(i, j)`` and ``d(j, i)`` differ in the association order alone,
+    and makes ``d(i, i)`` a cancellation residue rather than zero. Measured on
+    this 150x16 set: asymmetry 9.536743e-07 absolute, 1.184596e-07 relative --
+    one float32 ulp (eps = 1.192093e-07) -- and 21 non-zero self-distances up
+    to 2.762136e-03 against a largest distance of 10.777.
+
+    Under ``rtol=1e-9`` this raised "must be symmetric"; under an exact-zero
+    diagonal it raised "must have a zero diagonal".
+    """
+    square = _float32_gram_square()
 
     asymmetry = np.abs(square - square.T)
     denominator = np.maximum(np.abs(square), np.abs(square.T))
     relative = np.where(denominator > 0.0,
                         asymmetry / np.maximum(denominator, 1e-300), 0.0)
     assert relative.max() > np.finfo(np.float32).eps / 2.0
+    assert np.count_nonzero(np.diagonal(square)) > 0
 
     dm = SymmetricDistanceMatrix.from_condensed(square)
     assert dm.num_samples == 150
+
+
+def test_the_diagonal_tolerance_still_catches_a_forgotten_diagonal():
+    """The other side of the 3e-2 tolerance, on the cheapest real confusion.
+
+    A caller who forgot to zero the diagonal of an otherwise valid matrix is
+    the nearest thing to the roundoff regime the tolerance admits: a diagonal
+    of 1.0 against distances of order 7 is 1.4e-1, against measured roundoff
+    of at most 6.6e-3. Without both halves pinned, widening the tolerance
+    further would go unnoticed.
+    """
+    square = _float32_gram_square()
+    np.fill_diagonal(square, 1.0)
+    largest = square[~np.eye(150, dtype=bool)].max()
+    assert 1.0 / largest > 3e-2
+
+    with pytest.raises(ValueError, match="zero diagonal"):
+        SymmetricDistanceMatrix.from_condensed(square)
 
 
 def test_from_condensed_rejects_a_non_zero_diagonal():
@@ -162,6 +194,36 @@ def test_from_condensed_rejects_a_non_zero_diagonal():
     square[2, 2] = 0.5
     with pytest.raises(ValueError, match="diagonal"):
         SymmetricDistanceMatrix.from_condensed(square)
+
+
+def test_a_masked_array_is_refused_rather_than_read_through():
+    """``np.asarray`` returns the buffer, so the mask is silently dropped.
+
+    The values behind the mask are exactly the ones the caller marked as not
+    distances, and reading them stamps ``data_integrity`` complete over
+    numbers nobody vouched for. Not gated on ``check``: the loss happens at
+    the conversion, which runs either way. A masked NaN is caught today only
+    because ``asarray`` exposes it -- any other hidden payload is not.
+    """
+    values = np.ma.masked_array([1.0, 2.0, 3.0], mask=[False, True, False])
+    values.data[1] = 100.0
+    for flag in (True, False):
+        with pytest.raises(ValueError, match="masked array"):
+            SymmetricDistanceMatrix.from_condensed(values, check=flag)
+
+    square = np.ma.masked_array(
+        [[0.0, 1.0, 2.0], [1.0, 0.0, 5.0], [2.0, 5.0, 0.0]],
+        mask=np.zeros((3, 3), dtype=bool))
+    square.mask[1, 2] = square.mask[2, 1] = True
+    with pytest.raises(ValueError, match="masked array"):
+        SymmetricDistanceMatrix.from_condensed(square)
+
+
+def test_a_masked_array_with_nothing_masked_is_accepted():
+    """Refusing the container rather than the loss would be over-refusal."""
+    values = np.ma.masked_array([1.0, 2.0, 3.0], mask=False)
+    dm = SymmetricDistanceMatrix.from_condensed(values)
+    assert list(dm.condensed) == [1.0, 2.0, 3.0]
 
 
 def test_a_complex_input_is_refused():
@@ -213,6 +275,26 @@ def test_a_planted_violation_is_found_and_refused():
     dm = SymmetricDistanceMatrix.from_condensed(condensed, probe_triples=2000)
     assert dm.metric_probe == "violations_found"
     assert dm.probe_violations > 0
+    with pytest.raises(ValueError, match="sampled triples"):
+        oecluster.butina(dm, 0.5)
+    oecluster.butina(dm, 0.5, allow_nonmetric=True)
+
+
+def test_a_planted_violation_is_found_through_the_square_path():
+    """Square input is a first-class ingress, and only the 1-D path was pinned.
+
+    Forcing ``probe_triples=0`` whenever ``values.ndim == 2`` left every other
+    test in this file passing, so a regression that skipped the probe for
+    square matrices would have shipped: non-metric square input would cluster
+    without ``allow_nonmetric=True``.
+    """
+    square = np.full((4, 4), 0.1)
+    np.fill_diagonal(square, 0.0)
+    square[0, 2] = square[2, 0] = 10.0   # d(0, 2) >> d(0, 1) + d(1, 2)
+    dm = SymmetricDistanceMatrix.from_condensed(square, probe_triples=2000)
+    assert dm.metric_probe == "violations_found"
+    assert dm.probe_violations > 0
+    assert dm.probe_sampled > 0
     with pytest.raises(ValueError, match="sampled triples"):
         oecluster.butina(dm, 0.5)
     oecluster.butina(dm, 0.5, allow_nonmetric=True)
@@ -480,6 +562,30 @@ def test_fill_dense_storage_refuses_a_multi_dimensional_array():
     np.testing.assert_array_equal(
         np.asarray(oecluster._StorageView(
             storage, storage._data_ptr(), 6)), np.zeros(6))
+
+
+def test_a_complex_payload_in_a_file_is_refused_not_halved(tmp_path):
+    """``from_condensed``'s complex refusal does not cover the file path.
+
+    A hand-written ``.npz`` reaches the storage buffer through
+    ``_fill_dense_storage``, whose ``dtype=np.float64`` conversion kept the
+    real part behind a ``ComplexWarning``: this file loaded as
+    ``[1., 3., 5.]``, a matrix built from half the numbers it stored.
+    """
+    path = tmp_path / "complex.npz"
+    np.savez(path,
+             storage_kind=np.array("dense"),
+             comparison_name=np.array("precomputed"),
+             labels=np.array(["a", "b", "c"]),
+             params_json=np.array("{}"),
+             facts_json=np.array("{}"),
+             num_samples=np.array(3),
+             condensed=np.array([1 + 2j, 3 + 4j, 5 + 6j]))
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")   # a ComplexWarning is not a refusal
+        with pytest.raises(ValueError, match="complex"):
+            SymmetricDistanceMatrix.from_file(str(path))
 
 
 def test_the_two_empty_shapes_resolve_to_different_item_counts():

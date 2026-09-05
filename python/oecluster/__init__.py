@@ -718,9 +718,18 @@ def _fill_dense_storage(storage, condensed):
 
     :param storage: DenseStorage whose ``NumPairs()`` matches ``condensed``.
     :param condensed: 1-D array of condensed distances.
-    :raises ValueError: If the shape does not match the storage capacity.
+    :raises ValueError: If the input is complex, or if the shape does not
+        match the storage capacity.
     """
     num_pairs = storage.NumPairs()
+    # Ahead of the conversion, which is what discards the imaginary part.
+    # ``from_condensed`` refuses complex before it ever reaches here, so this
+    # guard exists for ``from_file``: the .npz payload is caller-supplied and
+    # crosses into the buffer with no dtype check of its own.
+    if np.iscomplexobj(condensed):
+        raise ValueError(
+            f"expected real distances, got a complex input (dtype "
+            f"{np.asarray(condensed).dtype}); a distance is a real number")
     values = np.ascontiguousarray(condensed, dtype=np.float64)
     # ``ndim`` and ``size``, not ``shape[0]``: an array whose leading
     # dimension happens to match reaches ``np.copyto`` and is refused there
@@ -1149,8 +1158,8 @@ class SymmetricDistanceMatrix(DistanceMatrix):
 
         Ingress measures what the numbers alone can show: values must be
         finite and non-negative, a square input must additionally be symmetric
-        with a zero diagonal, and a sample of triples is tested against the
-        triangle inequality. A violation found here is recorded and later
+        with a diagonal near zero, and a sample of triples is tested against
+        the triangle inequality. A violation found here is recorded and later
         refused by the clustering entry points unless ``allow_nonmetric=True``.
         A computed matrix instead reads a ``triangle`` capability off its
         comparison object, which can be a positive claim; there is no object
@@ -1166,7 +1175,12 @@ class SymmetricDistanceMatrix(DistanceMatrix):
             atol=1e-8`` -- loose enough for a float32-computed matrix, which
             is asymmetric in its last bit -- and its strict upper triangle is
             the half kept, so a disagreement below that tolerance is
-            discarded unread. The
+            discarded unread. Its diagonal must likewise be zero only to
+            within ``3e-2`` of the largest distance, which the same float32
+            producers miss by roundoff; the diagonal is discarded too, so
+            this catches a matrix that is not a distance matrix rather than
+            an imprecise one. Neither array is accepted masked: the values
+            behind an active mask would be read as distances. The
             two empty shapes differ: a length-0 condensed array is one item,
             which is what the single-item ``pdist`` round trip needs, while a
             0x0 square is no items.
@@ -1177,10 +1191,11 @@ class SymmetricDistanceMatrix(DistanceMatrix):
             not change the matrix.
         :param check: When False, skip the value checks and the probe
             together, and leave ``data_integrity`` at ``"unknown"`` since
-            nothing measured it. The shape and length arithmetic, the label
-            count and the complex-dtype refusal still run: an input that maps
-            to no item count, or whose numbers cannot be stored as given,
-            cannot be stored at all.
+            nothing measured it. The refusals that do not read the numbers
+            still run -- among them the shape and length arithmetic, the
+            label count, the masked-array refusal and the complex-dtype
+            refusal: an input that maps to no item count, or whose numbers
+            cannot be stored as given, cannot be stored at all.
         :param probe_triples: Triples to sample for the triangle probe; a
             non-positive count skips it.
         :param seed: Seed for the probe sampler.
@@ -1198,6 +1213,20 @@ class SymmetricDistanceMatrix(DistanceMatrix):
                 f"check must be True or False, not {type(check).__name__} "
                 f"({check!r}). A falsy value would silently disable the value "
                 f"checks and the probe.")
+
+        # Ahead of ``np.asarray``, because that call is what loses the mask:
+        # it hands back the data buffer, so the entries the caller marked
+        # invalid are read as distances and stamped ``complete``. Refused
+        # rather than filled, since there is no distance to substitute. A
+        # masked array with nothing actually masked is accepted -- the caller
+        # loses nothing, and refusing it would be refusing a container.
+        if np.ma.isMaskedArray(values):
+            masked = int(np.ma.getmaskarray(values).sum())
+            if masked:
+                raise ValueError(
+                    f"expected a plain array, got a masked array with "
+                    f"{masked} masked entries; the values behind the mask "
+                    f"would be read as distances")
 
         # Ahead of the float64 conversion, which keeps the real part behind a
         # ComplexWarning the caller may have filtered. Not gated on check=:
@@ -1270,10 +1299,45 @@ class SymmetricDistanceMatrix(DistanceMatrix):
                 # the same data refuse or pass by accident.
                 if not np.allclose(square, square.T, rtol=1e-5, atol=1e-8):
                     raise ValueError("a 2-D distance matrix must be symmetric")
-                if np.any(np.diagonal(square) != 0.0):
+                # The diagonal is discarded with the rest of the lower
+                # triangle, so this check is here to catch a matrix that is
+                # not a distance matrix at all -- not to police roundoff.
+                # Exact zero did the latter, and refused the same float32
+                # Gram-trick output the tolerance above was widened to accept:
+                # self-distances of 2.8e-3 against distances of 10.8 on the
+                # set the paired test builds.
+                #
+                # 3e-2 relative to the largest distance is the geometric
+                # midpoint of the two regimes, roughly 4.6x clear of each.
+                # Measured roundoff tops out at 6.6e-3 (offset 10, d = 128;
+                # it grows with the offset, because the trick cancels the
+                # squared norms against themselves). The cheapest real
+                # confusion measured is a caller who forgot to zero a diagonal
+                # of 1.0 against distances of order 7, at 1.4e-1; a similarity
+                # matrix sits at 1.2 and an RBF kernel at 5.5.
+                #
+                # Widening costs no safety here, and that is worth stating:
+                # zeroing the diagonal already admits the same numbers at any
+                # offset, so this check was never guarding precision. It only
+                # ever refused callers who had not pre-zeroed.
+                zero_diagonal_rtol = 3e-2
+                # ``if n`` because a 0x0 square has no diagonal to reduce over
+                # and ``max`` has no identity for an empty array.
+                diagonal = (float(np.abs(np.diagonal(square)).max())
+                            if n else 0.0)
+                # ``abs`` on the scale too, because the negative-value check
+                # runs below this one: a matrix of negative distances has to
+                # be reported as negative, not as a diagonal that failed a
+                # negative tolerance. With no distance to measure against
+                # (n < 2, or every distance zero) the only defensible
+                # tolerance is zero, which is what a zero scale gives.
+                scale = float(np.abs(condensed).max()) if condensed.size else 0.0
+                if diagonal > zero_diagonal_rtol * scale:
                     raise ValueError(
-                        "a 2-D distance matrix must have a zero diagonal; a "
-                        "non-zero self-distance is not a distance")
+                        f"a 2-D distance matrix must have a zero diagonal, "
+                        f"within {zero_diagonal_rtol:g} of the largest "
+                        f"distance ({scale:g}); the largest self-distance is "
+                        f"{diagonal:g}")
             if np.any(condensed < 0.0):
                 raise ValueError("distance matrix contains negative values")
 
