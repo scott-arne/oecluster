@@ -1239,8 +1239,11 @@ class SymmetricDistanceMatrix(DistanceMatrix):
         # proves nothing durable -- and calling the argument a "distance
         # matrix" is not evidence that it is one.
         facts = _gate.default_facts()
-        facts['data_integrity'] = "complete"
         if check:
+            # Only now, having measured it. Under check=False nothing looked
+            # at the numbers, and ``to_file`` would write the claim into the
+            # .npz for ``from_file`` to read back as evidence.
+            facts['data_integrity'] = "complete"
             facts.update(_gate.probe_triangle(condensed, n,
                                               samples=probe_triples,
                                               seed=seed))

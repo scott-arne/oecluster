@@ -184,8 +184,31 @@ def test_check_false_skips_validation_and_the_probe():
     assert dm.metric_probe == "not_run"
     assert dm.metric_capabilities == {'zero_self': "unknown",
                                       'triangle': "unknown"}
-    assert dm.data_integrity == "complete"
+    assert dm.data_integrity == "unknown"
     oecluster.butina(dm, 0.5)
+
+
+def test_check_false_leaves_data_integrity_unknown(tmp_path):
+    """A check that did not run must not stamp a positive fact.
+
+    ``"complete"`` under ``check=False`` asserted a finiteness nothing had
+    measured, and ``to_file`` wrote that claim into the ``.npz`` for
+    ``from_file`` to read back verbatim, so it outlived the process that made
+    it. ``"unknown"`` is what ``default_facts`` supplies and it never refuses
+    on its own, so the same clean data still clusters under either flag.
+    """
+    condensed, _ = _metric_condensed(n=4)
+    checked = SymmetricDistanceMatrix.from_condensed(condensed, check=True)
+    assert checked.data_integrity == "complete"
+
+    dm = SymmetricDistanceMatrix.from_condensed(condensed, check=False)
+    assert dm.data_integrity == "unknown"
+    oecluster.butina(dm, 1.0)
+
+    path = tmp_path / "unchecked.npz"
+    dm.to_file(str(path))
+    reloaded = oecluster.load_distance_matrix(str(path))
+    assert reloaded.data_integrity == "unknown"
 
 
 def test_a_non_bool_check_is_refused():
