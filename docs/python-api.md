@@ -38,7 +38,7 @@ dm.to_file("distances.npz")
 are `"descriptor"`, `"fingerprint"`, `"rmsd"`, `"rocs"`, `"sitehopper"`, and
 `"superpose"` (`"sitehopper"` is a superpose mode). See
 [Comparison Methods](#comparison-methods) for the keyword arguments each one
-accepts, and [Metric requirements](#metric-requirements) for which of them
+accepts, and [Metric Requirements](#metric-requirements) for which of them
 produce a matrix the clustering algorithms will accept.
 
 Storage is chosen by keyword:
@@ -239,7 +239,7 @@ separately; `treat_noise_as_singletons=True` (the default) folds noise into the
 singleton interpretation. The report requires complete pairwise distances
 (dense or memory-mapped storage); a sparse (`cutoff`) matrix raises.
 
-## Metric requirements
+## Metric Requirements
 
 `butina()`, `dbscan()`, `hdbscan()`, `agglomerative()`, and `cluster_report()`
 assume their input is a metric: an item's distance to itself is zero, and the
@@ -276,10 +276,16 @@ still caught.
 `zero_self` is measured rather than assumed. A ROCS comparison scores every
 molecule against itself at construction and stamps the capability from what it
 finds, so the same `score_type` can pass over one molecule set and refuse over
-another. `score_type="shape"` vanishes on the diagonal for any molecule
-whatever its colour features; `combo_norm` (the default), `combo` and `color`
-vanish for molecules that carry colour features, and stamp `zero_self` false
-over a set containing one that does not.
+another. As a distance, `score_type="shape"` vanishes on the diagonal for any
+molecule whatever its colour features; `combo_norm` (the default), `combo` and
+`color` vanish for molecules that carry colour features, and stamp `zero_self`
+false over a set containing one that does not. None of that carries over to
+`similarity=True`, where a self-score saturates at 1.0 instead of vanishing --
+`shape` stamps `zero_self` false on every set, and so do `combo_norm`, `combo`
+and `color` on coloured molecules. The exception is a colour similarity over
+molecules with no colour features, which self-scores 0.0 and is stamped
+`zero_self` true. It is refused anyway: a similarity fails `is_distance`
+before `zero_self` is consulted, which is why the two facts are kept apart.
 
 The remaining checks are soundness warnings that `allow_nonmetric=True`
 overrides: a measure known to violate the triangle inequality, distances
@@ -363,7 +369,7 @@ the two metrics with a similarity form. That is the only place `jaccard` and
 `tanimoto` differ: their distances are equal to the bit, but only `tanimoto`
 can be asked for a similarity. A similarity is not a distance, and the
 clustering entry points refuse one outright; see
-[Metric requirements](#metric-requirements).
+[Metric Requirements](#metric-requirements).
 
 Naming an option that the rest of the configuration would ignore raises
 `TypeError` naming the option that replaces it, rather than accepting a value
@@ -459,11 +465,14 @@ dm = oecluster.pdist(mols, "descriptor",
 `missing` controls what happens to a molecule whose descriptor value is
 absent. `complete_case` (the default) drops those molecules before computing
 anything and records them in `params["excluded_items"]` as
-`[index, "missing-descriptor"]` pairs. `propagate` keeps every molecule and
-lets the absence flow into the distances as NaN; it stamps `data_integrity`
-as `'nan_present'` on the strength of the policy, whether or not a NaN
-actually reached the matrix, and the clustering entry points refuse that with
-no override available. `ignore` scores each pair over the features both
+`[index, "missing-descriptor"]` pairs, indexed against the list as passed. On
+the `cdist()` path each side is filtered against its own indices and reported
+separately, under `params["excluded_items_a"]` and
+`params["excluded_items_b"]`; a side that lost nothing gets no key at all.
+`propagate` keeps every molecule and lets the absence flow into the distances
+as NaN; it stamps `data_integrity` as `'nan_present'` on the strength of the
+policy, whether or not a NaN actually reached the matrix, and the clustering
+entry points refuse that with no override available. `ignore` scores each pair over the features both
 molecules have, which produces distances that are not mutually comparable; it
 stamps `'subset_scored'`, which the clustering entry points refuse unless
 `allow_nonmetric=True`. An observed NaN outranks that stamp: a value that is
@@ -513,13 +522,26 @@ users who need direct access to the C++ options and classes. The comparison
 wrappers -- `DescriptorComparison`, `FingerprintComparison`, `RMSDComparison`,
 `ROCSComparison` and `SuperposeComparison` -- are on the top-level package, as
 are most of the option structs (`PDistOptions`, `ButinaOptions`,
-`FingerprintOptions` and the rest). `DescriptorOptions` and `RMSDOptions` are
-the exceptions: reach them through `oecluster.oecluster`, or let the wrapper
-build them from keywords.
+`FingerprintOptions` and the rest). Four are not: `ClusterReportOptions`,
+`DescriptorOptions`, `DescriptorStatisticsOptions` and `RMSDOptions`. Reach
+those through `oecluster.oecluster`, or let the wrapper build them from
+keywords. To check the split against the version you have installed:
+
+```python
+from oecluster import oecluster as raw
+[n for n in dir(raw) if n.endswith("Options") and not hasattr(oecluster, n)]
+```
 
 ## Exceptions
 
-Invalid arguments raise standard Python exceptions: unknown comparison or
-representative method names, a `"highest_neighborhood"` request without a
-`threshold`, a sparse matrix passed where complete distances are required, and
-similar misuse raise `ValueError` or `RuntimeError` with a descriptive message.
+Invalid arguments raise standard Python exceptions with a descriptive message.
+Among the causes: an unknown comparison or representative method name and a
+`"highest_neighborhood"` request without a `threshold` raise `ValueError`; a
+sparse matrix passed where complete distances are required raises
+`RuntimeError`, which is also how a refusal from the C++ layer usually
+surfaces.
+
+`TypeError` covers argument misuse, and is the usual outcome of the
+explicitness rules described under [Fingerprint](#fingerprint): an argument
+named where the rest of the configuration would ignore it, an argument of the
+wrong type, and an unrecognized keyword all raise it.

@@ -584,6 +584,37 @@ protein components automatically.
 Use `method="sitehopper"` in the superpose comparison. It accepts design units,
 generates patch surfaces when needed, and compares binding-site patch scores.
 
+### Descriptor
+
+| Parameter | Values | Default |
+|-----------|--------|---------|
+| `sources` | `openeye`, `mordred`, `rdkit` | `["openeye"]` |
+| `columns` | Explicit column names | every numeric column of the selected sources |
+| `metric` | 10 metrics, from `euclidean` to `mahalanobis` | `standardized_euclidean` |
+| `missing` | `complete_case`, `propagate`, `ignore` | `complete_case` |
+
+Computes distances over molecular descriptor columns. The default metric
+standardizes each column by the variance fitted over the molecules passed in,
+so the same pair gets a different distance in a different set; pass `columns=`
+and `variances=` from `descriptor_statistics()` to fix the scaling across runs.
+See [docs/python-api.md](docs/python-api.md#descriptor) for the full parameter
+table, the column-selection rules, and what each `missing` policy stamps on the
+matrix.
+
+### RMSD
+
+| Parameter | Values | Default |
+|-----------|--------|---------|
+| `overlay` | Superpose before measuring | `False` |
+| `automorph` | Minimize over graph automorphisms | `True` |
+| `heavy_only` | Ignore hydrogens | `True` |
+| `expand_conformers` | Expand multi-conformer inputs into one item per pose | `True` |
+
+Compares poses of one molecule: every input must share a topology and carry
+coordinates. Use `rocs` to compare different molecules by shape. See
+[docs/python-api.md](docs/python-api.md#rmsd) for the conformer labeling and
+the `expand_conformers` caveat.
+
 ---
 
 ## Storage Backends

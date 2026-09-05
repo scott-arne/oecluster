@@ -3238,7 +3238,14 @@ class FingerprintComparison:
         :param use_chirality: Distinguish stereocenters. Defaults to False.
         :param p: Minkowski order. Defaults to 2.0.
         :param tversky_alpha: Tversky reference weight. Defaults to 0.5.
-        :param tversky_beta: Tversky fit weight. Defaults to 0.5.
+        :param tversky_beta: Tversky fit weight. Defaults to 0.5. Unequal
+            ``tversky_alpha`` and ``tversky_beta`` build a valid asymmetric
+            comparison, but the object is good only for direct ``Compare(i, j)``
+            calls: ``pdist()`` then refuses it for the asymmetry, and
+            ``cdist()`` takes no prebuilt comparison object at all. Ask
+            ``pdist()``/``cdist()`` for the same configuration by keyword
+            instead if you want the diagnostic that names the two weights and
+            points at ``cdist()``.
         :param similarity: Return similarity instead of distance.
         :returns: C++ FingerprintComparison object.
         :raises TypeError: If a named option does not apply to the selected
