@@ -106,21 +106,36 @@ def test_each_expanded_pose_carries_its_own_coordinates():
 def test_expanded_poses_have_exact_source_conformer_coordinates():
     """Per-atom coordinate equality, not just a derived distance.
 
-    Verifies that expansion copies coordinates correctly, atom by atom. A
-    per-atom check detects misassignments that could still yield plausible
-    overall distances.
+    Verifies that expansion copies coordinates correctly, atom by atom, even
+    when atom indices have gaps. A per-atom check detects misassignments that
+    could still yield plausible overall distances.
     """
-    mol = _multiconformer("CCCO", (0.0, 1.5, 3.0), "ligA")
+    mol = oechem.OEMol()
+    # Interleaved hydrogens create gaps after suppression
+    oechem.OESmilesToMol(mol, "C([H])([H])([H])C([H])([H])O[H]")
+    oechem.OEGenerate2DCoordinates(mol)
+
+    # Add two more conformers with known shifts
+    base = oechem.OEFloatArray(mol.GetMaxAtomIdx() * 3)
+    mol.GetCoords(base)
+    for shift in [0.5, 1.2]:
+        moved = oechem.OEFloatArray(list(base))
+        for idx in range(0, len(moved), 3):
+            moved[idx] += shift
+        mol.NewConf(moved)
+
+    # Suppress hydrogens to create index gaps
+    oechem.OESuppressHydrogens(mol)
+    assert mol.GetMaxAtomIdx() > mol.NumAtoms()
+
     # Extract source conformer coordinates for comparison
     source_coords = []
     for conf in mol.GetConfs():
-        coords = oechem.OEFloatArray(conf.GetMaxAtomIdx() * 3)
-        conf.GetCoords(coords)
         per_atom = []
         for atom in conf.GetAtoms():
-            idx = atom.GetIdx()
-            per_atom.append((coords[idx * 3], coords[idx * 3 + 1],
-                           coords[idx * 3 + 2]))
+            coords = oechem.OEFloatArray(3)
+            conf.GetCoords(atom, coords)
+            per_atom.append((coords[0], coords[1], coords[2]))
         source_coords.append(per_atom)
 
     # Expand and verify coordinates match
@@ -129,13 +144,11 @@ def test_expanded_poses_have_exact_source_conformer_coordinates():
     assert len(expanded) == 3
 
     for i, pose in enumerate(expanded):
-        pose_coords = oechem.OEFloatArray(pose.GetMaxAtomIdx() * 3)
-        pose.GetCoords(pose_coords)
         for j, atom in enumerate(pose.GetAtoms()):
-            idx = atom.GetIdx()
+            coords = oechem.OEFloatArray(3)
+            pose.GetCoords(atom, coords)
+            actual = (coords[0], coords[1], coords[2])
             expected = source_coords[i][j]
-            actual = (pose_coords[idx * 3], pose_coords[idx * 3 + 1],
-                     pose_coords[idx * 3 + 2])
             np.testing.assert_allclose(actual, expected, atol=1e-8,
                 err_msg=f"Pose {i}, atom {j}: coordinates mismatch")
 
