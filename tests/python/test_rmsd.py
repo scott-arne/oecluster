@@ -160,24 +160,18 @@ def test_expansion_with_atom_index_gaps():
     Coordinate mapping must use iteration order, not raw indices, or the
     assignment silently scrambles atoms.
 
-    The conformers differ by a per-atom displacement rather than a rigid
-    translation, because a rigid translation hides the raw-index bug. Under
-    that bug every conformer is misread through the same fixed index mapping,
-    and a translation moves every slot of the coordinate array by the same
-    vector, so the misread poses end up translated by that same vector too and
-    every pairwise distance survives intact. Displacing each atom by its own
-    amount makes the misread pick up another atom's displacement, which the
-    distances do show. Measured: with the bug reinstated this test passed under
-    a rigid translation and fails under the displacement.
+    The conformers here differ by a per-atom displacement rather than a rigid
+    shift, and that is load-bearing rather than decorative. This construction
+    builds the conformers before suppression, so a rigid shift moves the
+    soon-to-be-dead slots along with the live ones; the raw-index misread then
+    comes out translated by that same vector and every pairwise distance
+    survives. Measured on this construction: with the raw-index bug reinstated,
+    a rigid shift passes and the per-atom displacement fails.
 
     A consistent relabelling of the atoms is a different mutation, and this
-    test cannot catch it: RMSD pairs atom k of one pose with atom k of the
-    other, and every pose here comes out of the expansion, so relabelling them
-    all the same way is invisible. Other tests do catch it, among them
-    ``test_expanded_poses_have_exact_source_conformer_coordinates`` by
-    comparing coordinates directly, and
-    ``test_mixing_single_and_multiconformer_molecules`` because its
-    single-conformer molecule bypasses the expansion and so stays unrelabelled.
+    test does not catch it (measured). Others do, among them
+    ``test_expanded_poses_have_exact_source_conformer_coordinates`` and
+    ``test_mixing_single_and_multiconformer_molecules``.
     """
     mol = oechem.OEMol()
     # Interleaved hydrogens force GetMaxAtomIdx=9 when NumAtoms=3 after suppression
@@ -213,13 +207,11 @@ def test_expansion_with_atom_index_gaps():
 def test_mixing_single_and_multiconformer_molecules():
     """Single-conformer inputs pass through; multi-conformer are rebuilt.
 
-    Mixing the two paths is what gives this test its reach. The single-conformer
-    molecule bypasses the expansion, so it is the one item a mistake inside the
-    expansion cannot touch, and every distance measured against it exposes that
-    mistake. A relabelling applied consistently to all three poses would be
-    invisible to a matrix built purely from expanded poses; here it moves the
-    two cross-distances. Measured: reversing the atom pairing in the expansion
-    fails this test.
+    Mixing the two paths is what gives this test its reach: the single-conformer
+    molecule bypasses the expansion, so the distances measured against it can
+    register a mistake made inside it. Measured: reversing the atom pairing in
+    the expansion fails this test, and the raw-index bug that
+    ``test_expansion_with_atom_index_gaps`` covers does not.
     """
     single = _pose("CCCO", 0.5, "single")
     multi = _multiconformer("CCCO", (0.0, 2.0), "multi")

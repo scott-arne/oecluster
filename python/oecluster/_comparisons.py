@@ -161,9 +161,11 @@ def validate_request(comparison, similarity, kwargs):
     :param kwargs: Comparison keyword options, read but never consumed.
     :raises ValueError: If the comparison name is unknown, or a validator
                         rejects an argument it owns outright.
-    :raises TypeError: If a validator refuses a keyword name it does not know,
-                       or an option value whose type the comparison's options
-                       object will not take.
+    :raises TypeError: If a validator refuses a keyword. Among the reasons: a
+                       name it does not know; a value whose type the
+                       comparison's options object will not take; and a
+                       Python-only option, one that never reaches an options
+                       object, given a value of the wrong type.
     :raises RuntimeError: If a validator hands an option value to C++ and C++
                           refuses it.
     """
