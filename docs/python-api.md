@@ -35,9 +35,11 @@ dm.to_file("distances.npz")
 ```
 
 `pdist()` returns a `SymmetricDistanceMatrix`. The supported comparison names
-are `"fingerprint"`, `"rocs"`, `"superpose"`, and `"sitehopper"` (the last is a
-superpose mode). See [Comparison Methods](#comparison-methods) for the keyword
-arguments each one accepts.
+are `"descriptor"`, `"fingerprint"`, `"rmsd"`, `"rocs"`, `"sitehopper"`, and
+`"superpose"` (`"sitehopper"` is a superpose mode). See
+[Comparison Methods](#comparison-methods) for the keyword arguments each one
+accepts, and [Metric requirements](#metric-requirements) for which of them
+produce a matrix the clustering algorithms will accept.
 
 Storage is chosen by keyword:
 
@@ -237,6 +239,87 @@ separately; `treat_noise_as_singletons=True` (the default) folds noise into the
 singleton interpretation. The report requires complete pairwise distances
 (dense or memory-mapped storage); a sparse (`cutoff`) matrix raises.
 
+## Metric requirements
+
+`butina()`, `dbscan()`, `hdbscan()`, `agglomerative()`, and `cluster_report()`
+assume their input is a metric: an item's distance to itself is zero, and the
+triangle inequality holds. Those five are the entry points that check.
+`representative()`, `rank_representatives()`, and `select_representatives()`
+also take a distance matrix, and consult none of these facts. Not every
+comparison produces a metric, so each matrix records what its comparison
+actually guarantees:
+
+```python
+dm = oecluster.pdist(mols, "fingerprint", metric="dice")
+dm.is_distance           # True
+dm.metric_capabilities   # {'zero_self': True, 'triangle': False}
+dm.data_integrity        # 'complete'
+dm.metric_probe          # 'not_run'
+```
+
+`is_distance` is kept separate from the capabilities because it answers a
+different question: not whether the numbers form a metric, but which direction
+they run. A similarity is not a distance however its diagonal behaves.
+
+Three refusals cannot be overridden, because the algorithms would return
+plausible-looking wrong answers rather than fail: a matrix of similarities, a
+matrix whose measure does not score an item as identical to itself, and a
+matrix stamped `data_integrity == 'nan_present'` or holding a non-finite
+distance. The remedies are, respectively, to recompute with
+`similarity=False`; to choose a comparison or configuration whose measured
+diagonal vanishes; and to recompute with `missing='complete_case'` if the
+values came from descriptors, or otherwise to remove the offending items. The
+third check does not trust the stamp alone -- it also scans the stored
+distances, so a matrix edited through `.condensed` after it was stamped is
+still caught.
+
+`zero_self` is measured rather than assumed. A ROCS comparison scores every
+molecule against itself at construction and stamps the capability from what it
+finds, so the same `score_type` can pass over one molecule set and refuse over
+another. `score_type="shape"` vanishes on the diagonal for any molecule
+whatever its colour features; `combo_norm` (the default), `combo` and `color`
+vanish for molecules that carry colour features, and stamp `zero_self` false
+over a set containing one that does not.
+
+The remaining checks are soundness warnings that `allow_nonmetric=True`
+overrides: a measure known to violate the triangle inequality, distances
+scored on a per-pair feature subset (`missing='ignore'`), and violations found
+by the ingress probe.
+
+```python
+oecluster.butina(dm, 0.4, allow_nonmetric=True)
+```
+
+A matrix built with `SymmetricDistanceMatrix.from_condensed()` is checked at
+ingress: values must be finite and non-negative, a square input must
+additionally be symmetric to within `rtol=1e-5, atol=1e-8` and have a diagonal
+zero to within `3e-2` of the largest distance, and a sample of triples is
+tested against the triangle inequality. The probe can only disprove -- finding
+no violation leaves `triangle` unknown, and the gate stays out of the way.
+
+```python
+dm = oecluster.SymmetricDistanceMatrix.from_condensed(scipy_condensed)
+dm.metric_probe      # 'no_violations_found'
+dm.is_distance       # 'unknown'
+```
+
+The three capability facts -- `is_distance`, `zero_self` and `triangle` --
+stay `'unknown'` on that path. There is no comparison to interrogate, and a
+caller's assurance is not evidence, so the probe result is the only claim made.
+What the checks do record is `data_integrity`, stamped `'complete'`, and the
+probe's own `metric_probe`, `probe_violations` and `probe_sampled`. Pass
+`probe_triples=0` to skip the probe alone, or `check=False` to skip the value
+checks and the probe together, which also leaves `data_integrity` at
+`'unknown'` since nothing measured it. The refusals that do not read the
+numbers still run either way, among them the shape and length arithmetic, the
+label count, the masked-array refusal and the complex-dtype refusal.
+
+Distance matrices written before 5.0.0 record no facts at all and load with
+`is_distance`, `zero_self`, `triangle` and `data_integrity` every one
+`'unknown'`. An unknown fact never refuses on its own, so those files cluster
+as they always did -- except for the non-finite scan, which reads the numbers
+rather than the stamp and so applies to them too.
+
 ## Comparison Methods
 
 The comparison keyword arguments are forwarded by `pdist()` and `cdist()` to the
@@ -246,15 +329,73 @@ selected method.
 
 | Parameter | Values | Default |
 |-----------|--------|---------|
-| `fp_type` | `morgan`, `atom_pair` | `morgan` |
-| `metric` | `tanimoto`, `dice`, `manhattan` | `tanimoto` |
-| `numbits` | Fingerprint size | `2048` |
-| `min_distance` | Minimum Atom Pair graph distance | `0` |
-| `max_distance` | Morgan radius or maximum Atom Pair graph distance | `2` |
+| `fp_type` | `morgan`, `atom_pair`, `topological_atom_pair`, `topological_torsions` | `morgan` |
+| `storage` | `binary`, `count`, `sparse`, `sparse_count` | `binary` |
+| `metric` | `jaccard`, `tanimoto`, `dice`, `sokal_sneath`, `matching`, `rogers_tanimoto`, `russell_rao`, `kulsinski`, `sokal_michener`, `euclidean`, `manhattan`, `chebyshev`, `hamming`, `canberra`, `bray_curtis`, `minkowski`, `tversky` | `tanimoto` |
+| `numbits` | Fingerprint size in bits | `2048` |
+| `radius` | Morgan radius | `2` |
+| `min_distance` | Minimum atom-pair graph distance | `1` |
+| `max_distance` | Maximum atom-pair graph distance | `30` |
+| `torsion_atom_count` | Torsion path length | `4` |
+| `use_chirality` | Distinguish stereocenters | `False` |
+| `p` | Minkowski order | `2.0` |
+| `tversky_alpha` | Tversky reference weight | `0.5` |
+| `tversky_beta` | Tversky fit weight | `0.5` |
 
-Distance mode maps Tanimoto to Jaccard distance, uses OEFP's Dice distance for
-Dice, and returns raw Manhattan distance. Similarity mode is supported for
-Tanimoto.
+Family, storage and metric names are matched case-insensitively.
+`topological_atom_pair` is an alias of `atom_pair`: OEFP has one atom-pair
+generator and it is the 2D graph-distance model. Every family and storage
+combination works except `topological_torsions` with `sparse_count`, for which
+OEFP provides no batch kernel.
+
+Binary and sparse storage record which features are present; count and
+sparse-count storage record how many times each occurs. The seven numeric
+metrics -- `euclidean`, `manhattan`, `chebyshev`, `hamming`, `canberra`,
+`bray_curtis` and `minkowski` -- read those counts. The other ten are bit-set
+coefficients that would binarize their input first, so a counted storage
+refuses them and names the numeric alternatives. Counts matter when molecules
+differ mainly in how often a feature repeats: binary Morgan fingerprints of
+hexadecane and triacontane are identical, putting their Tanimoto distance at
+`0.0`, while count fingerprints under `bray_curtis` put them `0.313` apart.
+
+Similarity mode (`similarity=True`) is available for `tanimoto` and `tversky`,
+the two metrics with a similarity form. That is the only place `jaccard` and
+`tanimoto` differ: their distances are equal to the bit, but only `tanimoto`
+can be asked for a similarity. A similarity is not a distance, and the
+clustering entry points refuse one outright; see
+[Metric requirements](#metric-requirements).
+
+Naming an option that the rest of the configuration would ignore raises
+`TypeError` naming the option that replaces it, rather than accepting a value
+that has no effect:
+
+```python
+oecluster.pdist(mols, "fingerprint", max_distance=2)
+# TypeError: max_distance does not apply to fp_type='morgan'; it belongs to
+# 'atom_pair'. Use radius instead, or select one of those families.
+```
+
+The rule covers `radius`, `min_distance`, `max_distance` and
+`torsion_atom_count` against the selected `fp_type`; `numbits` against a
+sparse `storage`; and `p`, `tversky_alpha` and `tversky_beta` against the
+selected `metric`. `use_chirality` reaches every family and is never rejected.
+The C++ `FingerprintOptions` struct applies none of these rules: it receives
+values rather than argument names and cannot tell a default from a choice.
+C++ still speaks first either way -- a family, storage or metric it refuses
+outright raises before any of these rules run, so the message names the
+problem that has to be fixed first.
+
+**Changed in 5.0.0.** `max_distance` no longer sets the Morgan radius. It is
+the atom-pair window only, the Morgan radius is `radius`, and passing
+`max_distance` with `fp_type="morgan"` now raises rather than quietly doing
+something else. The atom-pair window itself now defaults to OEFP's `1`-`30`
+instead of the previous `0`-`2`. That old window discarded every pair more
+than two bonds apart, at a cost that grows with the molecule: it leaves
+ethanol's three on-bits untouched, but takes aspirin from 68 on-bits to 27,
+caffeine from 79 to 30, and hexadecane from 70 to 12. Code that passed
+`max_distance=2` for Morgan must pass `radius=2`; code that wanted the old
+atom-pair window must ask for it with
+`fp_type="atom_pair", min_distance=0, max_distance=2`.
 
 ### ROCS
 
@@ -279,6 +420,76 @@ Accepts molecules directly or design units; design units are converted to their
 protein components automatically. Use `method="sitehopper"` for binding-site
 patch-score comparison.
 
+### Descriptor
+
+| Parameter | Values | Default |
+|-----------|--------|---------|
+| `sources` | `openeye`, `mordred`, `rdkit` | `["openeye"]` |
+| `columns` | Explicit column names | every numeric column of the selected sources |
+| `groups` | Descriptor group names | none |
+| `metric` | `euclidean`, `manhattan`, `chebyshev`, `hamming`, `canberra`, `bray_curtis`, `minkowski`, `standardized_euclidean`, `seuclidean`, `mahalanobis` | `standardized_euclidean` |
+| `variances` | Explicit per-column variances | fitted from the input |
+| `inverse_covariance` | Explicit inverse covariance for `mahalanobis` | fitted from the input |
+| `missing` | `complete_case`, `propagate`, `ignore` | `complete_case` |
+| `p` | Minkowski order | `2.0` |
+
+`seuclidean` is an alias of `standardized_euclidean`. Non-numeric columns are
+dropped from any selection, as are columns whose variance over the input is
+zero: over `["CCO", "CCC"]` the openeye source loses `HeavyAtomCount`,
+`FractionCsp3`, `AromaticRingCount` and `RotatableBondCount` that way. The
+drops are readable as `(name, reason)` pairs from `descriptor_statistics()`
+under its `dropped` key, and from a prebuilt `DescriptorComparison` through
+`DroppedColumns()` and `DroppedReasons()`; `pdist()` does not carry them in
+`params`.
+
+Descriptor columns span wildly different scales, so the default metric
+standardizes each by the variance fitted over the molecules passed in. That
+fit is data-dependent: the same pair of molecules gets a different distance in
+a different set. Pass `columns=` and `variances=` from
+`descriptor_statistics()` to fix the scaling across runs. Both have to travel
+together, because the values are matched to columns by position, and so does
+the same `sources=` the statistics were fitted over.
+
+```python
+stats = oecluster.descriptor_statistics(mols)
+dm = oecluster.pdist(mols, "descriptor",
+                     columns=stats["columns"], variances=stats["variance"])
+```
+
+`missing` controls what happens to a molecule whose descriptor value is
+absent. `complete_case` (the default) drops those molecules before computing
+anything and records them in `params["excluded_items"]` as
+`[index, "missing-descriptor"]` pairs. `propagate` keeps every molecule and
+lets the absence flow into the distances as NaN; it stamps `data_integrity`
+as `'nan_present'` on the strength of the policy, whether or not a NaN
+actually reached the matrix, and the clustering entry points refuse that with
+no override available. `ignore` scores each pair over the features both
+molecules have, which produces distances that are not mutually comparable; it
+stamps `'subset_scored'`, which the clustering entry points refuse unless
+`allow_nonmetric=True`. An observed NaN outranks that stamp: a value that is
+present but not finite is not skipped, and takes `data_integrity` to
+`'nan_present'` under `ignore` too. `ignore` is not available with
+`standardized_euclidean` or `mahalanobis` at all, since their fitted
+transforms mix columns and a per-pair subset of them is incoherent.
+
+### RMSD
+
+| Parameter | Values | Default |
+|-----------|--------|---------|
+| `overlay` | Superpose before measuring | `False` |
+| `automorph` | Minimize over graph automorphisms | `True` |
+| `heavy_only` | Ignore hydrogens | `True` |
+| `expand_conformers` | Expand multi-conformer inputs into one item per pose | `True` |
+
+Compares poses of one molecule. Every input must share a topology and carry
+coordinates, and a mismatch raises rather than returning the `-1.0` that
+`OERMSD` reports for it. Use `rocs` to compare different molecules by shape.
+With `expand_conformers` left on, a multi-conformer `OEMol` becomes one item
+per conformer, labeled `"<title>:conf<n>"` with `mol_<index>` standing in for
+an empty title; the caller's molecules are never modified.
+`expand_conformers` is a `pdist()`/`cdist()` keyword only -- the
+`RMSDComparison` factory takes the molecules exactly as passed.
+
 ## Storage Backends
 
 `pdist()` selects the backend from its keywords: dense by default, sparse when
@@ -298,10 +509,13 @@ All backends use scipy-compatible condensed distance-matrix indexing.
 
 Most users do not need this section. The generated SWIG wrapper is available as
 `oecluster.oecluster` and the compiled extension as `oecluster._oecluster` for
-users who need direct access to the C++ options and classes. The
-`FingerprintComparison`, `ROCSComparison`, and `SuperposeComparison` Python
-wrappers, and the option structs (`PDistOptions`, `ButinaOptions`, and the
-rest), are re-exported on the top-level package.
+users who need direct access to the C++ options and classes. The comparison
+wrappers -- `DescriptorComparison`, `FingerprintComparison`, `RMSDComparison`,
+`ROCSComparison` and `SuperposeComparison` -- are on the top-level package, as
+are most of the option structs (`PDistOptions`, `ButinaOptions`,
+`FingerprintOptions` and the rest). `DescriptorOptions` and `RMSDOptions` are
+the exceptions: reach them through `oecluster.oecluster`, or let the wrapper
+build them from keywords.
 
 ## Exceptions
 

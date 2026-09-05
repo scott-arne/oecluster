@@ -537,15 +537,25 @@ required neighbors.
 
 | Parameter | Values | Default |
 |-----------|--------|---------|
-| `fp_type` | `morgan`, `atom_pair` | `morgan` |
-| `metric` | `tanimoto`, `dice`, `manhattan` | `tanimoto` |
-| `numbits` | Fingerprint size | `2048` |
-| `min_distance` | Minimum Atom Pair graph distance | `0` |
-| `max_distance` | Morgan radius or maximum Atom Pair graph distance | `2` |
+| `fp_type` | `morgan`, `atom_pair`, `topological_atom_pair`, `topological_torsions` | `morgan` |
+| `storage` | `binary`, `count`, `sparse`, `sparse_count` | `binary` |
+| `metric` | 17 OEFP scalar metrics, from `jaccard` to `tversky` | `tanimoto` |
+| `numbits` | Fingerprint size in bits | `2048` |
+| `radius` | Morgan radius | `2` |
+| `min_distance` | Minimum atom-pair graph distance | `1` |
+| `max_distance` | Maximum atom-pair graph distance | `30` |
+| `torsion_atom_count` | Torsion path length | `4` |
+| `use_chirality` | Distinguish stereocenters | `False` |
+| `p` | Minkowski order | `2.0` |
+| `tversky_alpha`, `tversky_beta` | Tversky weights | `0.5` |
 
-Distance mode maps Tanimoto to Jaccard distance, uses OEFP's Dice distance for
-Dice, and returns raw Manhattan distance. Similarity mode is supported for
-Tanimoto.
+Similarity mode is supported for `tanimoto` and `tversky`. A counted storage
+needs a metric defined on counts, such as `bray_curtis` or `manhattan`, and
+naming an option the rest of the configuration would ignore raises rather than
+accepting a value that has no effect. **Changed in 5.0.0:** `max_distance` no
+longer sets the Morgan radius; use `radius` for that. See
+[docs/python-api.md](docs/python-api.md#fingerprint) for the full metric list
+and the migration notes.
 
 ### ROCS
 
@@ -657,7 +667,7 @@ for (size_t i = 0; i < mols.size(); ++i) {
 |---------|--------------|-----|
 | `ImportError` for `_oecluster` | Python extension was not built or cannot find runtime libraries | Rebuild with `scripts/build_python.py` or ensure the wheel matches your Python and platform. |
 | OpenEye import or license failure | OpenEye Toolkits or license is missing at runtime | Install OpenEye Toolkits and configure your OpenEye license before importing or running examples. |
-| `Unknown comparison` | The comparison string is misspelled | Use `fingerprint`, `rocs`, `superpose`, or `sitehopper` where supported. |
+| `Unknown comparison` | The comparison string is misspelled | Use one of `descriptor`, `fingerprint`, `rmsd`, `rocs`, `sitehopper`, or `superpose`; the message itself lists the valid names. |
 | `Unknown representative method` | Representative method name is misspelled | Use `medoid`, `minimax`, `highest_neighborhood`, or `weighted_medoid`. |
 | `highest_neighborhood representative requires a threshold` | The method needs a neighbor cutoff | Pass `threshold=<distance>`. |
 | Sparse storage cutoff error | `cutoff` is lower than the clustering threshold | Recompute distances with a cutoff at least as large as the clustering threshold, or use dense/mmap storage. |
