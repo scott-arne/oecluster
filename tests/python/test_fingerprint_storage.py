@@ -108,19 +108,77 @@ def test_max_distance_no_longer_aliases_the_morgan_radius():
 
 
 def test_the_factory_class_accepts_the_new_options():
-    comparison = oecluster.FingerprintComparison(
-        _mols(), fp_type="topological_torsions", storage="count",
-        metric="bray_curtis", torsion_atom_count=4)
-    dist = oecluster.pdist(_mols(), comparison)
-    assert dist.num_samples == 6
+    """Every option named here reaches the comparison the factory builds.
+
+    ``dist.num_samples == 6`` was the old assertion, and it holds just as well
+    for ``FingerprintComparison(_mols())`` with no options at all, so it could
+    not tell a forwarded option from a discarded one. Equality with the keyword
+    path is what pins the forwarding.
+
+    ``torsion_atom_count=3`` rather than the default 4 is deliberate. At 4 the
+    option is indistinguishable from leaving it off -- the condensed vector is
+    the same either way -- so the equality above would survive the factory
+    dropping it. At 3 it moves four entries. The probes below establish that
+    the other three named options are live on this fixture too, so the equality
+    is over a configuration none of them is inert in.
+    """
+    options = {'fp_type': "topological_torsions", 'storage': "count",
+               'metric': "bray_curtis", 'torsion_atom_count': 3}
+    comparison = oecluster.FingerprintComparison(_mols(), **options)
+    factory = oecluster.pdist(_mols(), comparison).condensed
+    np.testing.assert_array_equal(
+        factory, oecluster.pdist(_mols(), "fingerprint", **options).condensed)
+
+    # One probe per named option, dropping or moving only that one.
+    def without(key):
+        return {k: v for k, v in options.items() if k != key}
+
+    with pytest.raises(TypeError, match="torsion_atom_count does not apply"):
+        oecluster.pdist(_mols(), "fingerprint", **without("fp_type"))
+    with pytest.raises(RuntimeError, match="bit-set metric"):
+        oecluster.pdist(_mols(), "fingerprint", **without("metric"))
+    assert not np.allclose(factory, oecluster.pdist(
+        _mols(), "fingerprint", **{**options, 'storage': "binary"}).condensed)
+    assert not np.allclose(factory, oecluster.pdist(
+        _mols(), "fingerprint",
+        **{**options, 'torsion_atom_count': 4}).condensed)
 
 
 def test_the_factory_class_enforces_the_same_explicitness_rules():
-    """The prebuilt-object path must not be the way around the rules."""
-    with pytest.raises(TypeError, match="radius"):
+    """The prebuilt-object path must not be the way around the rules.
+
+    All eight advisory rules, so that no single one of them can be lost to the
+    factory path unnoticed: ``numbits`` against sparse storage, the four
+    family-only options against a family that ignores them, and the three
+    metric-only options against a metric that ignores them.
+    """
+    with pytest.raises(TypeError,
+                       match="max_distance does not apply.*Use radius instead"):
         oecluster.FingerprintComparison(_mols(), max_distance=2)
+    with pytest.raises(TypeError, match="min_distance does not apply"):
+        oecluster.FingerprintComparison(_mols(), min_distance=2)
+    with pytest.raises(TypeError, match="radius does not apply"):
+        oecluster.FingerprintComparison(_mols(), fp_type="atom_pair", radius=3)
+    with pytest.raises(TypeError, match="torsion_atom_count does not apply"):
+        oecluster.FingerprintComparison(_mols(), torsion_atom_count=4)
     with pytest.raises(TypeError, match="numbits does not apply"):
         oecluster.FingerprintComparison(_mols(), storage="sparse",
                                         numbits=4096)
     with pytest.raises(TypeError, match="p does not apply"):
         oecluster.FingerprintComparison(_mols(), p=3.0)
+    with pytest.raises(TypeError, match="tversky_alpha does not apply"):
+        oecluster.FingerprintComparison(_mols(), tversky_alpha=0.5)
+    with pytest.raises(TypeError, match="tversky_beta does not apply"):
+        oecluster.FingerprintComparison(_mols(), tversky_beta=0.5)
+
+
+@pytest.mark.parametrize("family", FAMILIES)
+def test_use_chirality_is_accepted_by_every_family(family):
+    """Not an over-refusal: ``use_chirality`` is the one option every family reads.
+
+    A rule table that swept it in with the family-only options would refuse a
+    call the C++ layer honours, which the explicitness rules exist to prevent
+    rather than to cause.
+    """
+    oecluster.FingerprintComparison(_mols(), fp_type=family,
+                                    use_chirality=True)

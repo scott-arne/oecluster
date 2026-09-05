@@ -447,15 +447,44 @@ def test_default_fingerprint_path_is_unchanged_by_the_5_0_0_rewrite():
     """Golden values for the untouched default: morgan/binary/tanimoto.
 
     The literals are the Jaccard distances over OEFP's own radius-2, 2048-bit
-    binary Morgan fingerprints, so a change to any of the defaults the second
-    call spells out moves them. The second call is not the oracle -- both sides
-    would move together -- it only pins that spelling the defaults out is the
-    same request as leaving them off.
+    binary Morgan fingerprints. They were checked against an independent
+    oracle -- ``oefp.api.morgan_fingerprint`` called directly, with the
+    intersection and union popcounted from ``np.array(f.words, np.uint64)`` --
+    rather than against a second ``oecluster`` call, which would move with the
+    thing it is meant to check.
+
+    Which of the six defaults the second call spells out this fixture actually
+    pins, measured by moving each one in turn:
+
+    * ``fp_type`` and ``similarity`` are pinned: each of the other three
+      families moves six entries, and ``similarity=True`` moves eight.
+    * ``radius`` is pinned in both directions, and hexane is in the fixture to
+      make that true. Over the four molecules that preceded it, radius 3, 4
+      and 5 each reproduced the radius-2 vector exactly, leaving the default
+      unpinned upward. With hexane in, radius 1 moves five entries and radius
+      3 moves three.
+    * ``metric`` is pinned against fifteen of the sixteen other metrics the
+      keyword accepts; every one of them moves this vector. The exception is
+      ``'jaccard'``, which is the same measure under another name and yields
+      an identical vector.
+    * ``storage`` is pinned only by accident. ``'count'`` and
+      ``'sparse_count'`` cannot reach this vector because the default
+      ``tanimoto`` is a bit-set metric they refuse outright, while ``'sparse'``
+      yields an identical vector and would go unnoticed.
+    * ``numbits`` is not pinned. 4096, 1024 and 512 all reproduce this vector;
+      only 256 and below move it, because five small saturated molecules do
+      not collide at a plausible width. Making 2048-vs-1024 observable needs a
+      forced collision and a much larger, more brittle fixture, so a
+      ``numbits`` regression is outside what this test can catch.
+
+    The second call is not the oracle -- both sides would move together -- it
+    only pins that spelling the defaults out is the same request as leaving
+    them off.
     """
     import oecluster
     from openeye import oechem
 
-    smiles = ["CCO", "CCC", "CCCC", "c1ccccc1"]
+    smiles = ["CCO", "CCC", "CCCC", "c1ccccc1", "CCCCCC"]
     mols = []
     for smi in smiles:
         mol = oechem.OEGraphMol()
@@ -465,7 +494,8 @@ def test_default_fingerprint_path_is_unchanged_by_the_5_0_0_rewrite():
     dist = oecluster.pdist(mols, "fingerprint")
     np.testing.assert_allclose(
         dist.condensed,
-        [4.0 / 7.0, 5.0 / 8.0, 1.0, 0.5, 1.0, 1.0],
+        [4.0 / 7.0, 5.0 / 8.0, 1.0, 7.0 / 10.0, 0.5, 1.0, 5.0 / 8.0, 1.0, 0.5,
+         1.0],
         rtol=0.0, atol=1e-12)
 
     reference = oecluster.pdist(
