@@ -873,15 +873,24 @@ def test_an_empty_sequence_still_wins_against_a_name_resolved_downstream():
 
     ``validate_descriptor_options`` builds a schema only when an override is
     supplied, and so resolves ``sources`` on no other request; the unknown name
-    is reported further down by code that reads molecules. The guard sits at
-    the end of the argument-level band, which puts it ahead of that report --
-    and the same bad source with nothing empty alongside still reaches it.
+    is reported further down instead. Not for want of molecules -- an empty
+    item list still draws the name verdict, ahead of the refusal it draws with
+    a valid source -- but because nothing in the argument-level band resolves a
+    schema to check the name against. The guard sits at the end of that band,
+    which puts it ahead of the report -- and the same bad source with nothing
+    empty alongside still reaches it.
     """
     with pytest.raises(ValueError, match="columns= was given as an empty"):
         oecluster.pdist(_mols(), "descriptor", sources=["nope"], columns=[])
 
     with pytest.raises(RuntimeError, match="Unknown descriptor source: nope"):
         oecluster.pdist(_mols(), "descriptor", sources=["nope"])
+
+    with pytest.raises(RuntimeError, match="Unknown descriptor source: nope"):
+        oecluster.pdist([], "descriptor", sources=["nope"])
+
+    with pytest.raises(RuntimeError, match="fits variances from"):
+        oecluster.pdist([], "descriptor")
 
 
 def test_descriptor_statistics_refuses_an_empty_sequence_before_it_computes():
