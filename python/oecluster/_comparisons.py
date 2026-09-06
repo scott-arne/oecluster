@@ -543,17 +543,39 @@ def _double_vector(values):
     return vector
 
 
-def _nonempty_vector(name, vector):
+def _empty_option_error(name):
     """
-    Refuse a descriptor option that was supplied as an empty sequence.
+    Build the refusal for a descriptor option supplied as an empty sequence.
 
     Emptiness is the native layer's own encoding of "no override":
     ``DescriptorComparison.cpp`` keys ``has_override`` and the
     ``variances``/``inverse_covariance`` pairing rules off ``.empty()``, and a
     selection option left empty resolves to the same default schema as one
     never set. An empty sequence therefore arrives in C++ indistinguishable
-    from an omitted option, so the only place the two can still be told apart
-    is here, before the conversion is handed over.
+    from an omitted option, so Python is the only place the two can still be
+    told apart.
+
+    Returned rather than raised so the caller chooses *when* it fires. This is
+    an advisory rule of this layer's own and it ranks last among the checks
+    that need no molecules, so a caller with an authoritative verdict to run
+    first has to be able to hold it back.
+
+    :param name: The keyword option name, used in the message.
+    :returns: The ``ValueError`` to raise.
+    """
+    return ValueError(
+        f"{name}= was given as an empty sequence, which the descriptor "
+        f"layer cannot tell apart from never passing it. Pass the values "
+        f"you want, or omit {name}= to take the default.")
+
+
+def _nonempty_vector(name, vector):
+    """
+    Refuse a descriptor option that was supplied as an empty sequence.
+
+    For callers that convert their own options and have no argument-level
+    verdict to give precedence to. :func:`descriptor_options` and its callers
+    use :func:`_descriptor_options_and_empties` instead.
 
     :param name: The keyword option name, used in the message.
     :param vector: The converted native vector.
@@ -561,10 +583,7 @@ def _nonempty_vector(name, vector):
     :raises ValueError: If the converted sequence is empty.
     """
     if len(vector) == 0:
-        raise ValueError(
-            f"{name}= was given as an empty sequence, which the descriptor "
-            f"layer cannot tell apart from never passing it. Pass the values "
-            f"you want, or omit {name}= to take the default.")
+        raise _empty_option_error(name)
     return vector
 
 
@@ -579,6 +598,62 @@ _DESCRIPTOR_KEYS = (
     'p',
 )
 
+# The subset carrying a sequence, which is the subset an empty value can be
+# passed to. Each name is also the ``DescriptorOptions`` field name.
+_DESCRIPTOR_SEQUENCE_KEYS = (
+    'sources',
+    'columns',
+    'groups',
+    'variances',
+    'inverse_covariance',
+)
+
+
+def _descriptor_options_and_empties(kwargs):
+    """
+    Build a :class:`DescriptorOptions` and report its empty sequence options.
+
+    Conversion is separated from the refusal because deciding a sequence is
+    empty requires converting it, while the refusal itself must wait: it ranks
+    last among the checks that read no molecules, and raising during the
+    conversion would put it ahead of every one of them. Callers with a verdict
+    to give precedence to run it against the returned options and raise
+    afterwards; callers with none use :func:`descriptor_options`.
+
+    An empty vector is assigned rather than skipped. Every sequence field of
+    ``DescriptorOptions`` default-constructs empty, so the two leave the object
+    in the same state, and the validator therefore rules on exactly the request
+    the caller made.
+
+    :param kwargs: Comparison keyword options, read but never consumed.
+    :returns: A ``(options, empty)`` pair, where ``empty`` names the sequence
+        options that were supplied as empty sequences, in signature order.
+    """
+    opts = DescriptorOptions()
+    if kwargs.get('sources') is not None:
+        opts.sources = _string_vector(kwargs['sources'])
+    if kwargs.get('columns') is not None:
+        opts.columns = _string_vector(kwargs['columns'])
+    if kwargs.get('groups') is not None:
+        opts.groups = _string_vector(kwargs['groups'])
+    if kwargs.get('metric') is not None:
+        opts.metric = str(kwargs['metric'])
+    if kwargs.get('variances') is not None:
+        opts.variances = _double_vector(kwargs['variances'])
+    if kwargs.get('inverse_covariance') is not None:
+        opts.inverse_covariance = _double_vector(
+            np.asarray(kwargs['inverse_covariance'], dtype=np.float64).ravel())
+    if kwargs.get('missing') is not None:
+        opts.missing = str(kwargs['missing']).lower()
+    if kwargs.get('p') is not None:
+        opts.p = float(kwargs['p'])
+
+    # Read back off the options rather than off kwargs, so that the 2-D
+    # inverse_covariance form is judged by what the ravel produced.
+    empty = [name for name in _DESCRIPTOR_SEQUENCE_KEYS
+             if kwargs.get(name) is not None and len(getattr(opts, name)) == 0]
+    return opts, empty
+
 
 def descriptor_options(kwargs):
     """
@@ -587,36 +662,20 @@ def descriptor_options(kwargs):
     Reads ``kwargs`` without consuming it, because the normalizer runs before
     the builder and both need the same options.
 
+    Refuses an empty sequence option on the spot, which is correct only for a
+    caller that has no argument-level verdict of its own left to give. The
+    callers that do -- ``_validate_descriptor``, and the prebuilt
+    ``DescriptorComparison`` -- use
+    :func:`_descriptor_options_and_empties` and raise after that verdict.
+
     :param kwargs: Comparison keyword options.
     :returns: A populated ``DescriptorOptions``.
     :raises ValueError: If any sequence-valued option was passed as an empty
         sequence, which C++ cannot distinguish from an omitted option.
     """
-    opts = DescriptorOptions()
-    if kwargs.get('sources') is not None:
-        opts.sources = _nonempty_vector(
-            'sources', _string_vector(kwargs['sources']))
-    if kwargs.get('columns') is not None:
-        opts.columns = _nonempty_vector(
-            'columns', _string_vector(kwargs['columns']))
-    if kwargs.get('groups') is not None:
-        opts.groups = _nonempty_vector(
-            'groups', _string_vector(kwargs['groups']))
-    if kwargs.get('metric') is not None:
-        opts.metric = str(kwargs['metric'])
-    if kwargs.get('variances') is not None:
-        opts.variances = _nonempty_vector(
-            'variances', _double_vector(kwargs['variances']))
-    if kwargs.get('inverse_covariance') is not None:
-        opts.inverse_covariance = _nonempty_vector(
-            'inverse_covariance',
-            _double_vector(
-                np.asarray(kwargs['inverse_covariance'],
-                           dtype=np.float64).ravel()))
-    if kwargs.get('missing') is not None:
-        opts.missing = str(kwargs['missing']).lower()
-    if kwargs.get('p') is not None:
-        opts.p = float(kwargs['p'])
+    opts, empty = _descriptor_options_and_empties(kwargs)
+    if empty:
+        raise _empty_option_error(empty[0])
     return opts
 
 
@@ -645,12 +704,22 @@ def _normalize_descriptor(items, kwargs):
 def _validate_descriptor(similarity, kwargs):
     """Reject descriptor arguments before any molecule is read.
 
-    Two of the rules are this layer's own -- no similarity form, no unknown
-    keyword. The option values go to ``validate_descriptor_options``, which
-    does not answer for every mistake C++ can decide without molecules; the
-    comment on that call says which it leaves downstream.
+    Three of the rules are this layer's own -- no similarity form, no unknown
+    keyword, no empty sequence option. The option values go to
+    ``validate_descriptor_options``, which does not answer for every mistake
+    C++ can decide without molecules; the comment on that call says which it
+    leaves downstream.
 
-    Registered as the comparison's validator so it also runs before
+    The rules run in the order the caller has to fix them. The two names come
+    first because neither depends on a value being readable at all. The
+    emptiness refusal comes last, after the C++ verdicts: it is this layer's
+    own advisory rule, and a caller who also misspelled the metric must be told
+    about the metric, which no edit to the empty sequence would resolve. What
+    that ordering does not reach is a source, column or group name on a request
+    with no override, which the validator resolves no schema for and so leaves
+    downstream; the guard therefore does precede *that* report.
+
+    Registered as the comparison's validator so the whole band also runs before
     ``_normalize_descriptor``, whose complete-case filter can empty the item
     list and have ``pdist`` refuse the shape instead of the argument. Reads
     ``kwargs`` without popping: the normalizer and then the builder still need
@@ -689,7 +758,14 @@ def _validate_descriptor(similarity, kwargs):
     # downstream reads the input; among those, the minimum input size, the
     # complete-case row check, the refusal when every selected column is
     # constant. None of it can be decided here.
-    _oecluster.validate_descriptor_options(descriptor_options(kwargs))
+    opts, empty = _descriptor_options_and_empties(kwargs)
+    _oecluster.validate_descriptor_options(opts)
+
+    # Last in the band, so none of the verdicts above is pre-empted. Building
+    # the options is what discovers the emptiness, which is why the refusal is
+    # carried this far rather than raised where it was found.
+    if empty:
+        raise _empty_option_error(empty[0])
 
 
 def _build_descriptor(items, similarity, kwargs, symmetric):

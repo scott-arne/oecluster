@@ -3398,8 +3398,18 @@ class DescriptorComparison:
             'missing': missing,
             'p': p,
         }
-        return _DescriptorComparison(mols,
-                                     _comparisons.descriptor_options(kwargs))
+        opts, empty = _comparisons._descriptor_options_and_empties(kwargs)
+        if empty:
+            # The C++ constructor gives the verdicts on option values itself,
+            # but it is never reached on a call about to be refused. Running
+            # the same check here is what keeps the emptiness refusal last,
+            # so a caller who also misspelled the metric is told about the
+            # metric first. Only on this path, so the common case does not pay
+            # for a validation the constructor is about to repeat.
+            _oecluster.validate_descriptor_options(opts)
+            raise _comparisons._empty_option_error(empty[0])
+
+        return _DescriptorComparison(mols, opts)
 
 
 class RMSDComparison:

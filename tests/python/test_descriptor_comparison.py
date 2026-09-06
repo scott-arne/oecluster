@@ -807,6 +807,99 @@ def test_an_empty_sequence_never_pre_empts_an_authoritative_refusal():
         oecluster.pdist(_mols(), "descriptor", bogus=1, variances=[])
 
 
+@pytest.mark.parametrize("option", SEQUENCE_OPTIONS)
+def test_an_empty_sequence_loses_to_a_value_verdict_from_cpp(option):
+    """``validate_descriptor_options`` rules on the values before the guard.
+
+    An unknown metric and an unknown missing policy are verdicts on values the
+    caller has to fix whatever they do about the empty sequence, so they
+    outrank it. Both entry points reach the validator first: ``pdist`` through
+    ``_validate_descriptor``, and the prebuilt constructor through a validation
+    call of its own, because the C++ constructor that would otherwise give the
+    verdict is never reached on a call about to be refused.
+    """
+    for fault, match in (({"metric": "bogus"}, "Unknown metric 'bogus'"),
+                         ({"missing": "bogus"},
+                          "Unknown missing-value policy: bogus")):
+        with pytest.raises(RuntimeError, match=match):
+            oecluster.pdist(_mols(), "descriptor", **{option: []}, **fault)
+        with pytest.raises(RuntimeError, match=match):
+            oecluster.DescriptorComparison(_mols(), **{option: []}, **fault)
+
+
+def test_cdist_orders_the_guard_through_the_same_validator_as_pdist():
+    """One case covers ``cdist``, because the ordering is not its own code.
+
+    ``pdist`` and ``cdist`` both reach the descriptor rules through
+    ``validate_request``, which dispatches to the single registered validator;
+    the identity assertion is what makes one case representative.
+    """
+    assert (_comparisons._VALIDATORS["descriptor"]
+            is _comparisons._validate_descriptor)
+
+    with pytest.raises(RuntimeError, match="Unknown metric 'bogus'"):
+        oecluster.cdist(_mols(), _mols(), "descriptor", metric="bogus",
+                        variances=[])
+
+
+@pytest.mark.parametrize("metric,option", [
+    ("mahalanobis", "variances"),
+    ("standardized_euclidean", "inverse_covariance"),
+])
+def test_an_empty_override_is_refused_rather_than_paired_with_its_metric(
+        metric, option):
+    """An empty override is no override, so no pairing rule fires against it.
+
+    Supplied non-empty to the metric it does not belong to, each of these is
+    refused by ``validate_descriptor_options``. Empty, neither sets
+    ``has_override``, so the validator returns before it resolves a schema and
+    the caller sees the emptiness refusal rather than a mismatch against a
+    metric they never overrode.
+    """
+    match = rf"{option}= was given as an empty sequence"
+
+    with pytest.raises(ValueError, match=match):
+        oecluster.pdist(_mols(), "descriptor", metric=metric, **{option: []})
+    with pytest.raises(ValueError, match=match):
+        oecluster.DescriptorComparison(_mols(), metric=metric,
+                                       **{option: []})
+
+
+def test_an_empty_sequence_still_wins_against_a_name_resolved_downstream():
+    """A source name is not an argument-level verdict, so the guard precedes it.
+
+    ``validate_descriptor_options`` builds a schema only when an override is
+    supplied, and so resolves ``sources`` on no other request; the unknown name
+    is reported further down by code that reads molecules. The guard sits at
+    the end of the argument-level band, which puts it ahead of that report --
+    and the same bad source with nothing empty alongside still reaches it.
+    """
+    with pytest.raises(ValueError, match="columns= was given as an empty"):
+        oecluster.pdist(_mols(), "descriptor", sources=["nope"], columns=[])
+
+    with pytest.raises(RuntimeError, match="Unknown descriptor source: nope"):
+        oecluster.pdist(_mols(), "descriptor", sources=["nope"])
+
+
+def test_descriptor_statistics_refuses_an_empty_sequence_before_it_computes():
+    """Its only name verdict comes out of the computing call, so the guard leads.
+
+    ``descriptor_statistics`` has no argument-level validator to run first:
+    ``validate_descriptor_options`` takes a ``DescriptorOptions`` and not the
+    statistics options type, and ``Unknown descriptor source`` is raised by the
+    call that reads the molecules. Ordering that verdict ahead of the guard
+    would mean computing and discarding a full descriptor table on a call about
+    to be refused, so the guard keeps the end of the argument-level band --
+    which is the same place, and the same outcome, as ``pdist`` given a bad
+    source and an empty option.
+    """
+    with pytest.raises(ValueError, match="columns= was given as an empty"):
+        oecluster.descriptor_statistics(_mols(), sources=["nope"], columns=[])
+
+    with pytest.raises(RuntimeError, match="Unknown descriptor source: nope"):
+        oecluster.descriptor_statistics(_mols(), sources=["nope"])
+
+
 @pytest.mark.parametrize("option", ("sources", "columns", "groups"))
 def test_descriptor_statistics_refuses_an_empty_sequence_option(option):
     """It builds its own options object, so it needs the guard of its own.
