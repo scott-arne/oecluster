@@ -3170,6 +3170,11 @@ def descriptor_statistics(mols, *, sources=None, columns=None, groups=None,
         ``num_rows``.
     :raises ValueError: If ``sources``, ``columns`` or ``groups`` is passed as
         an empty sequence, which C++ cannot tell apart from an omitted option.
+        Decided before the request is computed, so it precedes the refusals
+        below rather than following them: there is no argument-level validator
+        for these options -- the name verdicts come out of the computing call
+        itself -- and ordering one of them first would mean computing and
+        discarding a full descriptor table on a call about to be refused.
     :raises RuntimeError: If the descriptor layer refuses the request. Among
         the reasons: an unknown source, column, or group name; and fewer than
         two molecules, which is too few to fit a variance.
@@ -3382,6 +3387,8 @@ class DescriptorComparison:
         :raises ValueError: If ``sources``, ``columns``, ``groups``,
             ``variances`` or ``inverse_covariance`` is passed as an empty
             sequence, which C++ cannot tell apart from an omitted option.
+            Reported after a rejected option value, which the caller has to fix
+            whatever they do about the empty sequence.
         :raises RuntimeError: If the C++ layer refuses the request. Among the
             reasons: a rejected option value; a molecule with an absent or
             non-finite value for a selected descriptor under the

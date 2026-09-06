@@ -765,8 +765,8 @@ def test_an_empty_sequence_option_is_not_the_same_as_omitting_it(option):
     passing nothing does.
 
     The keyword path and the prebuilt path are separate code in the package --
-    ``pdist`` and ``cdist`` reach ``descriptor_options`` through the validator
-    and the builder, while ``DescriptorComparison`` calls it directly -- so
+    ``pdist`` and ``cdist`` are refused by ``_validate_descriptor``, while
+    ``DescriptorComparison`` converts and refuses in its own ``__new__`` -- so
     both are checked. The message has to name the option, since a caller who
     passed several has no other way to tell which one was empty.
     """
@@ -792,12 +792,15 @@ def test_an_empty_inverse_covariance_array_is_refused_once_flattened():
                         inverse_covariance=np.zeros((0, 0)))
 
 
-def test_an_empty_sequence_never_pre_empts_an_authoritative_refusal():
-    """The emptiness guard runs inside the options builder, after both names.
+def test_an_empty_sequence_loses_to_the_two_rules_settled_without_a_value():
+    """``similarity=True`` and an unknown keyword open the argument-level band.
 
-    ``similarity=True`` and an unknown keyword are decided by
-    ``_validate_descriptor`` before it builds any options, so a caller who has
-    made two mistakes is still told about the one that outranks the other.
+    The guard closes that band -- the rules that need no molecules -- and these
+    two open it: ``_validate_descriptor`` decides both before it converts
+    anything, neither depending on a value being readable at all. Between them
+    sit the C++ verdicts on the option values, which outrank the guard as well.
+    What the guard does precede is everything past the band, the source, column
+    and group names among it, since no rule in the band resolves those.
     """
     with pytest.raises(ValueError, match="no similarity form"):
         oecluster.pdist(_mols(), "descriptor", similarity=True, variances=[])
