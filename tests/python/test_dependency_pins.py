@@ -123,3 +123,8 @@ class TestVersionPins:
         match = re.search(r'__version__ = "(\d+\.\d+\.\d+)"', text)
         assert match is not None, "no __version__ assignment in swig/oecluster.i"
         assert match.group(1) == oecluster.__version__
+
+    def test_changelog_documents_this_version(self):
+        """The release notes name the version being released."""
+        text = (REPO_ROOT / "CHANGELOG.md").read_text()
+        assert f"## [{oecluster.__version__}]" in text
