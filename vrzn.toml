@@ -39,3 +39,9 @@ file = "tests/python/test_oecluster.py"
 type = "custom"
 template = 'oecluster\.__version_info__ == \({info_tuple}\)'
 label = "test-version-info"
+
+[[locations]]
+file = "swig/oecluster.i"
+type = "custom"
+template = '__version__ = "{version}"'
+label = "swig-module-dunder"
