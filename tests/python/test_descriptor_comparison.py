@@ -912,6 +912,30 @@ def test_descriptor_statistics_refuses_an_empty_sequence_before_it_computes():
         oecluster.descriptor_statistics(_mols(), sources=["nope"])
 
 
+def test_a_conversion_failure_outranks_the_emptiness_guard():
+    """Every sequence option is converted before any of them is judged empty.
+
+    An empty sequence is refused by an advisory rule this layer owns alone; a
+    value that cannot be converted at all is a verdict about what was passed,
+    and it outranks the advisory one. Converting the whole set first is what
+    makes the ranking hold whichever option carries which fault, rather than
+    only when the unconvertible one happens to come first in the signature.
+
+    ``descriptor_statistics`` converted and refused one option at a time, so
+    ``sources=[]`` stopped ``columns=1`` from ever reaching the conversion and
+    the empty sequence answered for it -- disagreeing with the two comparison
+    paths, which have converted the whole set since the guard was reordered.
+    """
+    for faults in ({'sources': [], 'columns': 1},
+                   {'columns': [], 'groups': 1}):
+        for call in (oecluster.descriptor_statistics,
+                     oecluster.DescriptorComparison):
+            with pytest.raises(TypeError, match="'int' object is not iterable"):
+                call(_mols(), **faults)
+        with pytest.raises(TypeError, match="'int' object is not iterable"):
+            oecluster.pdist(_mols(), "descriptor", **faults)
+
+
 @pytest.mark.parametrize("option", ("sources", "columns", "groups"))
 def test_descriptor_statistics_refuses_an_empty_sequence_option(option):
     """It builds its own options object, so it needs the guard of its own.

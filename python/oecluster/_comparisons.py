@@ -569,24 +569,6 @@ def _empty_option_error(name):
         f"you want, or omit {name}= to take the default.")
 
 
-def _nonempty_vector(name, vector):
-    """
-    Refuse a descriptor option that was supplied as an empty sequence.
-
-    For callers that convert their own options and have no argument-level
-    verdict to give precedence to. :func:`descriptor_options` and its callers
-    use :func:`_descriptor_options_and_empties` instead.
-
-    :param name: The keyword option name, used in the message.
-    :param vector: The converted native vector.
-    :returns: ``vector`` unchanged.
-    :raises ValueError: If the converted sequence is empty.
-    """
-    if len(vector) == 0:
-        raise _empty_option_error(name)
-    return vector
-
-
 _DESCRIPTOR_KEYS = (
     'sources',
     'columns',

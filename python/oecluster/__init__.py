@@ -3168,28 +3168,49 @@ def descriptor_statistics(mols, *, sources=None, columns=None, groups=None,
         ``inverse_covariance_rows``. The last is the number of rows behind the
         fitted matrix: ``0`` when no matrix was requested, and not always
         ``num_rows``.
+    :raises TypeError: Among the reasons: ``sources``, ``columns`` or
+        ``groups`` given a value that cannot be iterated. All three are
+        converted before any of them is judged empty, so a conversion failure
+        precedes the empty-sequence refusal whichever option carries which
+        fault.
     :raises ValueError: If ``sources``, ``columns`` or ``groups`` is passed as
         an empty sequence, which C++ cannot tell apart from an omitted option.
-        Decided before the request is computed, so it precedes the refusals
-        below rather than following them: there is no argument-level validator
-        for these options -- the name verdicts come out of the computing call
-        itself -- and ordering one of them first would mean computing and
-        discarding a full descriptor table on a call about to be refused.
+        Decided before the request is computed, so it still precedes the
+        refusals below rather than following them: there is no argument-level
+        validator for these options -- the name verdicts come out of the
+        computing call itself -- and ordering one of them first would mean
+        computing and discarding a full descriptor table on a call about to be
+        refused.
     :raises RuntimeError: If the descriptor layer refuses the request. Among
         the reasons: an unknown source, column, or group name; and fewer than
         two molecules, which is too few to fit a variance.
     """
     options = _oecluster.DescriptorStatisticsOptions()
-    if sources is not None:
-        options.sources = _comparisons._nonempty_vector(
-            'sources', _comparisons._string_vector(sources))
-    if columns is not None:
-        options.columns = _comparisons._nonempty_vector(
-            'columns', _comparisons._string_vector(columns))
-    if groups is not None:
-        options.groups = _comparisons._nonempty_vector(
-            'groups', _comparisons._string_vector(groups))
+    # Convert every sequence option before judging any of them, so that an
+    # early empty one cannot stop a later one from being converted at all. The
+    # emptiness rule is this layer's own advisory rule and a conversion failure
+    # is a verdict on what was passed, so the second has to be able to win.
+    # ``_descriptor_options_and_empties`` gives the comparison paths the same
+    # shape; only the vector conversion and the message are shared with it,
+    # because it fills a ``DescriptorOptions`` from a kwargs dict of five
+    # sequence options and these are three explicit keyword parameters on a
+    # ``DescriptorStatisticsOptions``.
+    empty = []
+    for name, value in (('sources', sources), ('columns', columns),
+                        ('groups', groups)):
+        if value is None:
+            continue
+        vector = _comparisons._string_vector(value)
+        setattr(options, name, vector)
+        if len(vector) == 0:
+            empty.append(name)
     options.inverse_covariance = bool(inverse_covariance)
+
+    # Still ahead of every name verdict, which only the computing call below
+    # can give: ordering one of those first would compute and discard a full
+    # descriptor table on a call about to be refused.
+    if empty:
+        raise _comparisons._empty_option_error(empty[0])
 
     native = _oecluster.descriptor_statistics(mols, options)
 
