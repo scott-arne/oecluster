@@ -1,8 +1,9 @@
 """Release-gate checks for the version strings and the OEFP dependency pin.
 
 ``vrzn`` keeps the version locations in sync during a bump; these assertions
-catch a hand-edit that bypassed it, and the SWIG module dunder in particular,
-which drifted to 4.2.0 while the package was at 4.2.3. The OEFP pin is not
+catch a hand-edit that bypassed it, the SWIG module dunder in particular, which
+drifted to 4.2.0 while the package was at 4.2.3. ``TestVersionPins`` records
+which locations it checks and which are covered elsewhere. The OEFP pin is not
 managed by ``vrzn`` at all, so the pin sites are checked against one literal.
 """
 
@@ -41,6 +42,18 @@ def _pyproject_oefp_requirement(relative_path: str) -> str:
     matches = [dep.strip() for dep in dependencies if dep.strip().startswith("oefp")]
     assert len(matches) == 1, f"{relative_path} declares {len(matches)} oefp deps"
     return matches[0]
+
+
+def _pyproject_version(relative_path: str) -> str:
+    """Return a pyproject's declared ``project.version``.
+
+    :param relative_path: Path to the pyproject file, relative to the
+        repository root.
+    :returns: The version string as written in the file.
+    """
+    with (REPO_ROOT / relative_path).open("rb") as handle:
+        data = tomllib.load(handle)
+    return data["project"]["version"]
 
 
 def _c_macro_version(relative_path: str) -> str:
@@ -89,12 +102,31 @@ class TestOEFPPin:
 
 
 class TestVersionPins:
-    """Every version location must agree with ``oecluster.__version__``."""
+    """Each version location checked here agrees with ``oecluster.__version__``.
+
+    Not every ``vrzn`` location is covered directly. ``oecluster.__version__``
+    is the reference the rest are compared against, so a hand-edit there fails
+    these tests from the other side rather than being asserted on its own, and
+    the two ``tests/python/test_oecluster.py`` locations are asserted by that
+    file's own ``TestVersion``.
+    """
 
     def test_version_info_tuple(self):
         """The tuple form spells the same version as the string form."""
         expected = tuple(int(part) for part in oecluster.__version__.split("."))
         assert oecluster.__version_info__ == expected
+
+    def test_root_pyproject_version(self):
+        """The distribution metadata declares the package version."""
+        assert _pyproject_version("pyproject.toml") == oecluster.__version__
+
+    def test_python_pyproject_version(self):
+        """The wheel metadata declares the package version.
+
+        ``python/pyproject.toml`` is what a consumer resolves against, so a
+        hand-edit here ships a wrong version without touching any other site.
+        """
+        assert _pyproject_version("python/pyproject.toml") == oecluster.__version__
 
     def test_cmake_project_version(self):
         """The CMake project version matches the package version."""
@@ -112,7 +144,7 @@ class TestVersionPins:
         assert _c_macro_version("swig/oecluster.i") == oecluster.__version__
 
     def test_swig_module_dunder(self):
-        """The generated extension module reports the package version.
+        """The version literal in the SWIG interface matches the package version.
 
         This location drifted to 4.2.0 while the package was at 4.2.3 because it
         was registered with ``vrzn`` only as a C macro block, which does not see
