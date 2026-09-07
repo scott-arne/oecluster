@@ -31,10 +31,9 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   construction: `ComparisonError` in C++, which the bindings render as
   `RuntimeError`. 4.2.3 had no such check and ran on 2D input. Separately, the
   constructor now measures the diagonal, and linear species such as N#N, O=C=O
-  and C#N score nonzero against themselves under the
-  default `combo_norm` (0.500, 0.507 and 0.0067), so they stamp
-  `zero_self = No` and the metric gate refuses to cluster them with no override
-  available.
+  and C#N score nonzero against themselves under the default `combo_norm`
+  (0.500, 0.507 and 0.0067), so they stamp `zero_self = No` and the metric gate
+  refuses to cluster them with no override available.
 - ROCS scores changed, silently. 4.2.3 named a color force field on the overlay
   options but never assigned color atoms to the molecules, so
   `GetColorTanimoto()` answered 0.0 for every pair -- a molecule against itself

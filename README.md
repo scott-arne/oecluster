@@ -554,11 +554,11 @@ required neighbors.
 | `tversky_alpha`, `tversky_beta` | Tversky weights | `0.5` |
 
 Similarity mode is supported for `tanimoto` and required by `tversky`, which
-has no distance form and refuses the default `similarity=False`. A counted storage
-needs a metric defined on counts, such as `bray_curtis` or `manhattan`, and
-naming an option the rest of the configuration would ignore raises rather than
-accepting a value that has no effect. **Changed in 5.0.0:** `max_distance` no
-longer sets the Morgan radius; use `radius` for that. See
+has no distance form and refuses the default `similarity=False`. A counted
+storage needs a metric defined on counts, such as `bray_curtis` or `manhattan`,
+and naming an option the rest of the configuration would ignore raises rather
+than accepting a value that has no effect. **Changed in 5.0.0:** `max_distance`
+no longer sets the Morgan radius; use `radius` for that. See
 [docs/python-api.md](docs/python-api.md#fingerprint) for the full metric list
 and the migration notes.
 

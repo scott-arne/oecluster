@@ -272,10 +272,9 @@ distance. The remedies are, respectively, to recompute with
 `tversky` does not, and refuses `similarity=False`; to choose a comparison or
 configuration whose measured diagonal vanishes; and to recompute with
 `missing='complete_case'` if the values came from descriptors, or otherwise to
-remove the offending items. The
-third check does not trust the stamp alone -- it also scans the stored
-distances, so a matrix edited through `.condensed` after it was stamped is
-still caught.
+remove the offending items. The third check does not trust the stamp alone --
+it also scans the stored distances, so a matrix edited through `.condensed`
+after it was stamped is still caught.
 
 `zero_self` is measured rather than assumed. A ROCS comparison scores every
 molecule against itself at construction and stamps the capability from what it
@@ -371,8 +370,8 @@ selected method.
 | `tversky_alpha` | Tversky reference weight | `0.5` |
 | `tversky_beta` | Tversky fit weight | `0.5` |
 
-Every metric above takes the default `similarity=False` except `tversky`, which
-has no distance form and requires `similarity=True`.
+Every metric in that list works under the default `similarity=False` except
+`tversky`, which has no distance form and requires `similarity=True`.
 
 Family, storage and metric names are matched case-insensitively.
 `topological_atom_pair` is an alias of `atom_pair`: OEFP has one atom-pair
