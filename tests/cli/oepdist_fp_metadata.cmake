@@ -45,21 +45,34 @@ expect_param("${defaults}" defaults metric tanimoto)
 expect_param("${defaults}" defaults similarity OFF)
 
 # Move every field except similarity off its default, so a hard-coded sidecar
-# field passes the defaults block and fails here.
-run_fp(overrides overrides
-       --fp-type topological_torsions --storage count --numbits 1024
-       --radius 3 --min-distance 2 --max-distance 12
-       --torsion-atom-count 5 --use-chirality --metric manhattan)
-expect_param("${overrides}" overrides fp_type topological_torsions)
-expect_param("${overrides}" overrides storage count)
-expect_param("${overrides}" overrides numbits 1024)
-expect_param("${overrides}" overrides radius 3)
-expect_param("${overrides}" overrides min_distance 2)
-expect_param("${overrides}" overrides max_distance 12)
-expect_param("${overrides}" overrides torsion_atom_count 5)
-expect_param("${overrides}" overrides use_chirality ON)
-expect_param("${overrides}" overrides metric manhattan)
-expect_param("${overrides}" overrides similarity OFF)
+# field passes the defaults block and fails here. It takes three runs rather
+# than one: the per-family options cannot be named together, because oepdist
+# now refuses an option the selected family does not read. The fields that are
+# not family-specific ride along with whichever run can carry them, and the
+# assertions below still cover every field the defaults block covers.
+run_fp(morgan morgan
+       --fp-type morgan --storage count --numbits 1024
+       --radius 3 --use-chirality --metric manhattan)
+expect_param("${morgan}" morgan fp_type morgan)
+expect_param("${morgan}" morgan storage count)
+expect_param("${morgan}" morgan numbits 1024)
+expect_param("${morgan}" morgan radius 3)
+expect_param("${morgan}" morgan use_chirality ON)
+expect_param("${morgan}" morgan metric manhattan)
+expect_param("${morgan}" morgan similarity OFF)
+
+run_fp(atom_pair atom_pair
+       --fp-type atom_pair --storage count --metric manhattan
+       --min-distance 2 --max-distance 12)
+expect_param("${atom_pair}" atom_pair fp_type atom_pair)
+expect_param("${atom_pair}" atom_pair min_distance 2)
+expect_param("${atom_pair}" atom_pair max_distance 12)
+
+run_fp(torsions torsions
+       --fp-type topological_torsions --storage count --metric manhattan
+       --torsion-atom-count 5)
+expect_param("${torsions}" torsions fp_type topological_torsions)
+expect_param("${torsions}" torsions torsion_atom_count 5)
 
 # --sim needs its own run: it cannot ride along with the overrides above,
 # because --storage count rejects tanimoto and --sim rejects manhattan. Without

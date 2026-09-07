@@ -55,6 +55,15 @@ Note: The `topological_torsions` / `sparse_count` combination is not supported.
 The `count` and `sparse_count` storages require numeric metrics such as
 `manhattan`, `euclidean`, `canberra`, or `bray_curtis`.
 
+An option only one family reads is refused by the others rather than ignored:
+`--radius` belongs to `morgan`, `--min-distance` and `--max-distance` to
+`atom_pair`, and `--torsion-atom-count` to `topological_torsions`. `--numbits`
+is refused under `--storage sparse` and `--storage sparse_count`, which keep the
+family's own domain instead of folding to a chosen width. `--use-chirality` is
+never refused; all three generators read it. These are the same rules the Python
+surface applies, and they turn on whether the option was written on the command
+line, not on the value it was given.
+
 ## ROCS Distance
 
 ```bash

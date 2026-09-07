@@ -3,7 +3,10 @@
 #include "MolReader.h"
 #include "OutputWriter.h"
 
+#include <algorithm>
+#include <cctype>
 #include <iostream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -382,6 +385,116 @@ static OEPDist::DesignUnitSet ReadDUsProgress(const std::string& path,
 }
 
 // ---------------------------------------------------------------------------
+// fp explicitness rules
+// ---------------------------------------------------------------------------
+
+static std::string lowercased(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return s;
+}
+
+/// Fold user-facing family spellings onto the three OEFP generators.
+///
+/// A third copy of the table in ``normalize_family``
+/// (``src/comparisons/FingerprintComparison.cpp``) and ``_FAMILY_ALIASES``
+/// (``python/oecluster/_comparisons.py``). Returning an empty string for an
+/// unrecognized spelling is what makes the duplication safe: the rules below
+/// stand aside on a family this function cannot name, so a spelling the library
+/// learns before this table does loses its advisory checks and nothing else,
+/// and the constructor's "Unknown OEFP fingerprint type" still speaks.
+static std::string canonical_fingerprint_family(const std::string& fp_type) {
+    const std::string lower = lowercased(fp_type);
+    if (lower == "morgan") {
+        return "morgan";
+    }
+    if (lower == "atom_pair" || lower == "atompair" || lower == "topological_atom_pair") {
+        return "atom_pair";
+    }
+    if (lower == "topological_torsions" || lower == "topological_torsion") {
+        return "topological_torsions";
+    }
+    return "";
+}
+
+/// Report whether the caller wrote this option on the command line.
+///
+/// CLI11 counts occurrences per option, which is what distinguishes an
+/// explicit request from a default. Comparing the parsed value against the
+/// default would also refuse a caller who spelled the default out, and an
+/// over-refusal is no better than the silent no-op it replaces.
+static bool option_was_given(const CLI::App* cmd, const char* name) {
+    const CLI::Option* opt = cmd->get_option_no_throw(name);
+    return opt != nullptr && opt->count() > 0;
+}
+
+/// Refuse an explicitly named ``fp`` option the rest of the configuration ignores.
+///
+/// ``FingerprintOptions`` carries every per-family field at once and a
+/// default-constructed struct must stay a working Morgan configuration, so the
+/// library cannot tell a deliberate value from a default and ignores the fields
+/// the selected family does not read. Before this check, ``--max-distance 4
+/// --fp-type morgan`` produced a matrix and a sidecar byte-identical to a run
+/// without the flag. The Python surface has applied the same rules in
+/// ``reject_inapplicable_fingerprint_kwargs``
+/// (``python/oecluster/_comparisons.py``) since they were introduced.
+///
+/// Both rules stand aside on a family or storage they do not recognize, which
+/// is what keeps an advisory message from pre-empting the constructor's
+/// authoritative one for an invalid spelling.
+///
+/// :raises std::runtime_error: If a named option does not apply here.
+static void reject_inapplicable_fp_options(const CLI::App* cmd, const std::string& fp_type,
+                                           const std::string& storage) {
+    const std::string store = lowercased(storage);
+    if (option_was_given(cmd, "--numbits") && (store == "sparse" || store == "sparse_count")) {
+        throw std::runtime_error(
+            "--numbits does not apply to --storage " + storage +
+            ": a sparse fingerprint keeps its family's own domain rather than folding to a "
+            "chosen width. Drop --numbits, or use --storage binary. --storage count folds to "
+            "a width too, but only together with a numeric metric such as --metric manhattan: "
+            "the default tanimoto is a bit-set metric and counted storage refuses it.");
+    }
+
+    const std::string family = canonical_fingerprint_family(fp_type);
+    if (family.empty()) {
+        return;
+    }
+
+    struct FamilyRule {
+        const char* option;  ///< Flag that exactly one family reads.
+        const char* owner;   ///< Canonical family that reads it.
+    };
+    static const FamilyRule FAMILY_RULES[] = {
+        {"--radius", "morgan"},
+        {"--min-distance", "atom_pair"},
+        {"--max-distance", "atom_pair"},
+        {"--torsion-atom-count", "topological_torsions"},
+    };
+
+    // What the selected family offers in place of the refused option. Every
+    // rule above names a single owning family, so the way out is a single
+    // --fp-type value rather than a choice among several.
+    std::string replacement;
+    if (family == "morgan") {
+        replacement = "--radius";
+    } else if (family == "atom_pair") {
+        replacement = "--min-distance/--max-distance";
+    } else {
+        replacement = "--torsion-atom-count";
+    }
+
+    for (const FamilyRule& rule : FAMILY_RULES) {
+        if (option_was_given(cmd, rule.option) && family != rule.owner) {
+            throw std::runtime_error(std::string(rule.option) + " does not apply to --fp-type " +
+                                     fp_type + "; it belongs to " + rule.owner + ". Use " +
+                                     replacement + " instead, or select --fp-type " + rule.owner +
+                                     ".");
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
 
@@ -424,6 +537,11 @@ int main(int argc, char** argv) {
     fp_cmd->add_flag("--sim", fp_sim, "Return similarity instead of distance");
 
     fp_cmd->callback([&]() {
+        // Before the molecules are read: the refusal depends only on what was
+        // typed, and making the caller wait through a file read for it would be
+        // gratuitous.
+        reject_inapplicable_fp_options(fp_cmd, fp_type, fp_storage);
+
         OECluster::FingerprintOptions opts;
         opts.fp_type = fp_type;
         opts.storage = fp_storage;

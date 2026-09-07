@@ -58,6 +58,16 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   nonexistent sample identical to itself on a three-sample matrix. All five
   comparison classes now throw `ComparisonError` and all three storage backends
   `std::out_of_range`, both of which the bindings render as `RuntimeError`.
+- `oepdist fp` refuses an option the selected family or storage does not read,
+  where it used to accept and discard it. `--max-distance 4 --fp-type morgan`
+  produced a matrix and a JSON sidecar byte-identical to the same run without
+  the flag; 4.2.3 had no `--radius` and documented `--max-distance` as "Morgan
+  radius or maximum Atom Pair graph distance", so a 4.x script carried straight
+  over gets a different fingerprint than it asks for. `--radius`,
+  `--min-distance`, `--max-distance`, `--torsion-atom-count`, and `--numbits`
+  under `--storage sparse` or `--storage sparse_count` now exit 1 with a message
+  naming the replacement. These are the rules the Python surface has applied
+  since they were introduced; the CLI never ran them.
 - `butina`, `dbscan`, `hdbscan`, `agglomerative` and `cluster_report` refuse
   matrices they used to accept. Each now calls the metric gate described under
   Added, so a similarity matrix -- which 4.2.3 clustered without complaint --

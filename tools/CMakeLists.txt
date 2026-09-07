@@ -58,4 +58,9 @@ if(OECLUSTER_BUILD_TESTS)
                      -DOEPDIST=$<TARGET_FILE:oepdist>
                      -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/oepdist_fp_behavior
                      -P ${CMAKE_SOURCE_DIR}/tests/cli/oepdist_fp_behavior.cmake)
+    add_test(NAME oepdist_fp_explicitness
+             COMMAND ${CMAKE_COMMAND}
+                     -DOEPDIST=$<TARGET_FILE:oepdist>
+                     -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/oepdist_fp_explicitness
+                     -P ${CMAKE_SOURCE_DIR}/tests/cli/oepdist_fp_explicitness.cmake)
 endif()
