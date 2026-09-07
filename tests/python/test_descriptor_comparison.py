@@ -799,8 +799,14 @@ def test_an_empty_sequence_loses_to_the_two_rules_settled_without_a_value():
     two open it: ``_validate_descriptor`` decides both before it converts
     anything, neither depending on a value being readable at all. Between them
     sit the C++ verdicts on the option values, which outrank the guard as well.
-    What the guard does precede is everything past the band, the source, column
-    and group names among it, since no rule in the band resolves those.
+
+    What the guard does precede is everything past the band -- but which
+    reports lie past it depends on the request. The source, column and group
+    names are among them only while no non-empty override is passed, because
+    that is when nothing in the band resolves a schema to check a name
+    against. Pass one and ``validate_descriptor_options`` resolves the schema
+    and rules on all three from inside the band, ahead of the guard. Both
+    halves are asserted below.
     """
     with pytest.raises(ValueError, match="no similarity form"):
         oecluster.pdist(_mols(), "descriptor", similarity=True, variances=[])
@@ -808,6 +814,23 @@ def test_an_empty_sequence_loses_to_the_two_rules_settled_without_a_value():
             TypeError,
             match=r"Unknown kwargs for descriptor comparison: \['bogus'\]"):
         oecluster.pdist(_mols(), "descriptor", bogus=1, variances=[])
+
+    # A non-empty override is what makes the validator resolve a schema, which
+    # moves all three name verdicts into the band and ahead of the guard.
+    for names, match in (
+            ({"sources": ["nope"], "columns": []},
+             "Unknown descriptor source: nope"),
+            ({"columns": ["nope"], "groups": []},
+             "Unknown descriptor column: nope"),
+            ({"groups": ["nope"], "columns": []},
+             "Unknown or empty descriptor group: nope")):
+        with pytest.raises(RuntimeError, match=match):
+            oecluster.pdist(_mols(), "descriptor", variances=[1.0], **names)
+
+    # The same request without the override: no schema is resolved, so the bad
+    # source falls past the band and the guard reports first.
+    with pytest.raises(ValueError, match="columns= was given as an empty"):
+        oecluster.pdist(_mols(), "descriptor", sources=["nope"], columns=[])
 
 
 @pytest.mark.parametrize("option", SEQUENCE_OPTIONS)
@@ -831,11 +854,13 @@ def test_an_empty_sequence_loses_to_a_value_verdict_from_cpp(option):
 
 
 def test_cdist_orders_the_guard_through_the_same_validator_as_pdist():
-    """One case covers ``cdist``, because the ordering is not its own code.
+    """One case covers the ordering, because that much is not ``cdist``'s code.
 
     ``pdist`` and ``cdist`` both reach the descriptor rules through
     ``validate_request``, which dispatches to the single registered validator;
-    the identity assertion is what makes one case representative.
+    the identity assertion is what makes one case representative. Where the
+    band as a whole lands among ``cdist``'s own guards *is* its own code, and
+    is covered by the test below.
     """
     assert (_comparisons._VALIDATORS["descriptor"]
             is _comparisons._validate_descriptor)
@@ -843,6 +868,37 @@ def test_cdist_orders_the_guard_through_the_same_validator_as_pdist():
     with pytest.raises(RuntimeError, match="Unknown metric 'bogus'"):
         oecluster.cdist(_mols(), _mols(), "descriptor", metric="bogus",
                         variances=[])
+
+
+def test_the_validator_holds_a_copy_of_the_guard_and_cdist_needs_it():
+    """The refusal in ``_validate_descriptor`` is load-bearing, not a repeat.
+
+    ``descriptor_options`` refuses inside the builder, and the descriptor
+    normalizer reaches that same copy before the builder does, which answers
+    almost every route to an empty option whether or not the validator repeats
+    the check. ``cdist`` is the exception: it refuses an input set that
+    arrived empty in between, so with only the builder's copy
+    ``cdist([], mols, "descriptor", columns=[])`` reports the shape and names
+    a remedy that would leave the option still empty. One case takes both
+    sides, because one ``if not a or not b`` answers for both.
+
+    ``pdist`` cannot stand in for it. It leaves an input that arrived empty
+    for the comparison to answer -- refusing only when normalization is what
+    emptied the list -- so nothing of its own sits between ``validate_request``
+    and the builder's copy. Its case below is the contrast that shows why,
+    not coverage: it holds with the validator's copy deleted.
+    """
+    match = "columns= was given as an empty sequence"
+
+    with pytest.raises(ValueError, match=match):
+        _comparisons.validate_request("descriptor", False, {"columns": []})
+
+    for a, b in (([], _mols()), (_mols(), [])):
+        with pytest.raises(ValueError, match=match):
+            oecluster.cdist(a, b, "descriptor", columns=[])
+
+    with pytest.raises(ValueError, match=match):
+        oecluster.pdist([], "descriptor", columns=[])
 
 
 @pytest.mark.parametrize("metric,option", [

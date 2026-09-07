@@ -746,6 +746,10 @@ def _validate_descriptor(similarity, kwargs):
     # Last in the band, so none of the verdicts above is pre-empted. Building
     # the options is what discovers the emptiness, which is why the refusal is
     # carried this far rather than raised where it was found.
+    #
+    # Not a repeat of the builder's copy. ``cdist`` refuses an input set that
+    # arrived empty between here and the builder, so deleting this raise makes
+    # ``cdist([], b, "descriptor", columns=[])`` report the shape instead.
     if empty:
         raise _empty_option_error(empty[0])
 
