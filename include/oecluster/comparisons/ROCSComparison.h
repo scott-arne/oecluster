@@ -84,8 +84,10 @@ public:
      *
      * :param mols: Shared pointers to molecules.
      * :param opts: Scoring options.
-     * :raises ComparisonError: If any molecule pointer is null, or if any
-     *     molecule's recomputed dimension attribute is below three.
+     * :raises ComparisonError: Among the reasons: a molecule pointer is null;
+     *     a molecule's recomputed dimension attribute is below three; a
+     *     molecule's coordinates cannot be read; a coordinate is NaN or
+     *     infinite; or a conformer spans more than 1e4 angstroms on one axis.
      */
     explicit ROCSComparison(const std::vector<std::shared_ptr<OEChem::OEMol>>& mols,
                         const Options& opts = Options());

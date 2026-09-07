@@ -679,6 +679,26 @@ def test_a_sparse_numbits_of_zero_reports_the_inapplicable_kwarg():
         oecluster.pdist(mols, "fingerprint", storage="sparse", numbits=0)
 
 
+def test_every_remedy_the_sparse_numbits_message_names_is_reachable():
+    """The message offers three ways out, and one of them is conditional.
+
+    ``storage='count'`` used to be offered flat, which sent the caller into a
+    second refusal: counted storage rejects the default bit-set metric. The
+    message now says so, and this asserts both halves of that -- the bare
+    switch still fails, and the switch the message describes works.
+    """
+    mols = _mols(["CCO", "CCC", "c1ccccc1"])
+    with pytest.raises(TypeError, match=r"numeric metric such as 'manhattan'"):
+        oecluster.pdist(mols, "fingerprint", storage="sparse", numbits=4096)
+
+    oecluster.pdist(mols, "fingerprint", storage="sparse")
+    oecluster.pdist(mols, "fingerprint", storage="binary", numbits=4096)
+    with pytest.raises(RuntimeError, match=r"is a bit-set metric"):
+        oecluster.pdist(mols, "fingerprint", storage="count", numbits=4096)
+    oecluster.pdist(mols, "fingerprint", storage="count", numbits=4096,
+                    metric="manhattan")
+
+
 def test_a_sparse_count_numbits_of_zero_reports_the_inapplicable_kwarg():
     """The same hole exists under sparse_count storage."""
     mols = _mols(["CCO", "CCC", "c1ccccc1"])

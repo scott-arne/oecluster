@@ -362,8 +362,10 @@ def reject_inapplicable_fingerprint_kwargs(named, *, fp_type, storage, metric):
         raise TypeError(
             f"numbits does not apply to storage={store!r}: a sparse "
             f"fingerprint keeps its family's own domain rather than folding to "
-            f"a chosen width. Drop numbits, or use storage='binary' or "
-            f"storage='count'.")
+            f"a chosen width. Drop numbits, or use storage='binary'. "
+            f"storage='count' folds to a width too, but only together with a "
+            f"numeric metric such as 'manhattan': the default 'tanimoto' is a "
+            f"bit-set metric and counted storage refuses it.")
 
     # A family C++ accepted but this module does not know yields family=None.
     # Standing aside then makes the alias table's staleness benign in both

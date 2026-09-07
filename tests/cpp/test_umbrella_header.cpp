@@ -1,13 +1,33 @@
 /**
  * @file test_umbrella_header.cpp
  * @brief The umbrella header must reach every public surface it advertises.
+ *
+ * One symbol is named per header included by ``include/oecluster/oecluster.h``,
+ * always in a form that needs the definition rather than a declaration. The
+ * limit of the technique is transitive reach: a header dropped from the
+ * umbrella that some remaining umbrella header includes on its own -- GateFacts.h
+ * through PairwiseComparison.h, for one -- still arrives, and nothing here
+ * notices. What is caught is a surface that becomes unreachable through the
+ * umbrella entirely.
  */
 
 #include <gtest/gtest.h>
 #include <oecluster/oecluster.h>
 
-// No other OECluster include: naming these types is the assertion. A header
-// missing from the umbrella fails this at compile time, not at run time.
+namespace {
+
+/// Instantiate to force a complete type. A forward declaration does not satisfy
+/// ``sizeof``, so this compiles only where the umbrella header carried the
+/// definition in; the value it returns is incidental.
+template <typename T>
+size_t definition_size() {
+    return sizeof(T);
+}
+
+}  // namespace
+
+// No other OECluster include: naming these types is the assertion, and it is
+// made when this file compiles rather than when the tests run.
 TEST(UmbrellaHeaderTest, ReachesDescriptorStatistics) {
     const OECluster::DescriptorStatisticsOptions options;
     EXPECT_TRUE(options.sources.empty());
@@ -38,4 +58,38 @@ TEST(UmbrellaHeaderTest, ReachesRMSDComparison) {
     // The type name is the assertion; cannot construct without molecules.
     const OECluster::RMSDComparison* ptr = nullptr;
     EXPECT_EQ(ptr, nullptr);
+}
+
+TEST(UmbrellaHeaderTest, ReachesTheCoreHeaders) {
+    EXPECT_NE(definition_size<OECluster::ComparisonError>(), 0u);
+    EXPECT_NE(definition_size<OECluster::GateFacts>(), 0u);
+    EXPECT_NE(definition_size<OECluster::PairwiseComparison>(), 0u);
+    EXPECT_NE(definition_size<OECluster::DenseStorage>(), 0u);
+    EXPECT_NE(definition_size<OECluster::ThreadPool>(), 0u);
+    EXPECT_NE(definition_size<OECluster::PDistOptions>(), 0u);
+    EXPECT_NE(definition_size<OECluster::CDistOptions>(), 0u);
+    EXPECT_NE(definition_size<OECluster::DistanceMatrix>(), 0u);
+
+    // CondensedIndex.h publishes free functions rather than a type, so calling
+    // one is what needs the header.
+    EXPECT_EQ(OECluster::pair_to_condensed(0, 1, 3), 0u);
+}
+
+TEST(UmbrellaHeaderTest, ReachesTheRemainingComparisons) {
+    EXPECT_NE(definition_size<OECluster::FingerprintOptions>(), 0u);
+    EXPECT_NE(definition_size<OECluster::ROCSOptions>(), 0u);
+    EXPECT_NE(definition_size<OECluster::SuperposeOptions>(), 0u);
+}
+
+TEST(UmbrellaHeaderTest, ReachesTheClusteringHeaders) {
+    EXPECT_NE(definition_size<OECluster::ButinaOptions>(), 0u);
+    EXPECT_NE(definition_size<OECluster::RepresentativeOptions>(), 0u);
+    EXPECT_NE(definition_size<OECluster::DBSCANOptions>(), 0u);
+    EXPECT_NE(definition_size<OECluster::HDBSCANOptions>(), 0u);
+    EXPECT_NE(definition_size<OECluster::AgglomerativeOptions>(), 0u);
+    EXPECT_NE(definition_size<OECluster::BitBirchOptions>(), 0u);
+
+    // ClusterTypes.h is reached through the free function rather than through
+    // ClusteringResult, which every header above would drag in anyway.
+    EXPECT_TRUE(OECluster::labels_to_clusters({}).empty());
 }

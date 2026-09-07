@@ -375,7 +375,23 @@ TEST_F(DescriptorComparisonTest, OverridePathDropsNothingAndReproducesTheFit) {
 }
 
 TEST_F(DescriptorComparisonTest, DropReportIsParallel) {
-    DescriptorComparison comparison(mols_);
+    // Not written against mols_: all eleven columns have positive variance over
+    // that fixture, so the two sizes would both be zero and the assertion would
+    // hold against an implementation that never populates either vector. These
+    // four are each a single aromatic ring with no rotatable bonds, which
+    // collapses three columns to zero variance under the fitted default metric.
+    std::vector<OEChem::OEGraphMol> ring_mols(4);
+    OEChem::OESmilesToMol(ring_mols[0], "c1ccccc1");
+    OEChem::OESmilesToMol(ring_mols[1], "c1ccc(O)cc1");
+    OEChem::OESmilesToMol(ring_mols[2], "Cc1ccccc1");
+    OEChem::OESmilesToMol(ring_mols[3], "Nc1ccccc1");
+    std::vector<OEChem::OEMolBase*> rings;
+    for (auto& gm : ring_mols) {
+        rings.push_back(&static_cast<OEChem::OEMolBase&>(gm));
+    }
+
+    DescriptorComparison comparison(rings);
+    ASSERT_FALSE(comparison.DroppedColumns().empty());
     EXPECT_EQ(comparison.DroppedColumns().size(), comparison.DroppedReasons().size());
 }
 

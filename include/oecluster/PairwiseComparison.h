@@ -47,8 +47,9 @@ public:
     /**
      * @brief Report the metric facts the capability gate checks.
      *
-     * The base implementation reports ``Capability::Unknown`` for both metric
-     * properties and ``DataIntegrity::Complete``. Subclasses that can prove a
+     * The base implementation reports ``Capability::Unknown`` for all three
+     * capability facts -- ``is_distance``, ``zero_self`` and ``triangle`` --
+     * and ``DataIntegrity::Complete``. Subclasses that can prove a
      * property should override this; the gate reads facts off the comparison
      * object rather than off the Python builder so that directly constructed
      * objects cannot bypass it.
