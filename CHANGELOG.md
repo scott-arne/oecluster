@@ -27,17 +27,37 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   defaults (`min_distance` 0 to 1, `max_distance` 2 to 30). A fingerprint built
   with the defaults is therefore not comparable to one built under 4.x.
 - `ROCSComparison` refuses input it used to accept. A molecule whose dimension
-  attribute, recomputed from its coordinates, is below three now raises
-  `ComparisonError` at construction; 4.2.3 had no such check and ran on 2D
-  input. Separately, the constructor now measures the diagonal, and linear
-  species such as N#N, O=C=O and C#N score nonzero against themselves under the
+  attribute, recomputed from its coordinates, is below three now raises at
+  construction: `ComparisonError` in C++, which the bindings render as
+  `RuntimeError`. 4.2.3 had no such check and ran on 2D input. Separately, the
+  constructor now measures the diagonal, and linear species such as N#N, O=C=O
+  and C#N score nonzero against themselves under the
   default `combo_norm` (0.500, 0.507 and 0.0067), so they stamp
   `zero_self = No` and the metric gate refuses to cluster them with no override
   available.
+- ROCS scores changed, silently. 4.2.3 named a color force field on the overlay
+  options but never assigned color atoms to the molecules, so
+  `GetColorTanimoto()` answered 0.0 for every pair -- a molecule against itself
+  included, which put a floor of 0.5 under every `combo_norm` self-distance. The
+  constructor now runs `OEOverlapPrep` over its copies. On Omega-embedded phenol
+  against catechol the `color` distance moves from 1.0 to 0.400135 and
+  `combo_norm` from 0.519059 to 0.220440; `shape` is not exempt, moving from
+  0.038117 to 0.040745 on that same pair. Phenol's own `combo_norm`
+  self-distance falls from 0.500 to 0.000. A 4.2.3 script produces different
+  numbers here with no error and no warning.
 - `ROCSComparison` no longer mutates the caller's molecules. It deep-copies each
-  input, so the color-atom preparation and the dimension refresh, which write
-  into the molecule, act on the copies rather than on objects the caller still
-  owns.
+  input, so the dimension refresh and the newly added color-atom preparation,
+  both of which write into the molecule, act on the copies rather than on
+  objects the caller still owns.
+- An index past the end is refused rather than answered. Neither
+  `PairwiseComparison::Compare` nor `StorageBackend::Get` range-checked its
+  arguments in 4.2.3: `Compare` read off the end of its container, quietly
+  returning 0.0 from the descriptor comparison and crashing the process in
+  others, and `Get` returned 0.0 for any `i == j` because the diagonal shortcut
+  ran before anything looked at the bounds -- `Get(1000, 1000)` called a
+  nonexistent sample identical to itself on a three-sample matrix. All five
+  comparison classes now throw `ComparisonError` and all three storage backends
+  `std::out_of_range`, both of which the bindings render as `RuntimeError`.
 - `butina`, `dbscan`, `hdbscan`, `agglomerative` and `cluster_report` refuse
   matrices they used to accept. Each now calls the metric gate described under
   Added, so a similarity matrix -- which 4.2.3 clustered without complaint --
