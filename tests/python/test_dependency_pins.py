@@ -15,16 +15,18 @@ import oecluster
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# Not a bare floor: oecluster compiles OEFP's core into its own extension and
-# exchanges batch pointers with the installed wheel, so the two must share a
-# minor series and the upper bound is part of the contract.
-OEFP_REQUIREMENT = "oefp>=0.3.0,<0.4"
-OEFP_SERIES = "0.3"
+# An exact pin, not a range: oecluster compiles OEFP's core into its own
+# extension and exchanges raw fingerprint-batch pointers with the separately
+# compiled wheel, so the compiled-against and installed versions must be
+# identical. The extension enforces that itself the first time such a pointer
+# crosses -- see tests/python/test_oefp_abi_guard.py -- and a range pin would
+# admit a wheel that check then refuses.
+OEFP_REQUIREMENT = "oefp==0.3.0"
 
-# The floor of the requirement is the tag that gets compiled in, and its minor
-# series is what the README documents. Deriving both from the one requirement
-# string keeps the four sites from drifting apart.
-OEFP_FLOOR = OEFP_REQUIREMENT.split(">=", 1)[1].split(",", 1)[0]
+# The pinned version is the tag that gets compiled in and the version the
+# README names. Deriving it from the one requirement string keeps the four
+# sites from drifting apart.
+OEFP_VERSION = OEFP_REQUIREMENT.split("==", 1)[1]
 
 
 def _pyproject_oefp_requirement(relative_path: str) -> str:
@@ -84,21 +86,20 @@ class TestOEFPPin:
         assert _pyproject_oefp_requirement("python/pyproject.toml") == OEFP_REQUIREMENT
 
     def test_cmake_fetchcontent_tag(self):
-        """The vendored OEFP source is fetched at the pinned floor."""
+        """The vendored OEFP source is fetched at the pinned version."""
         text = (REPO_ROOT / "CMakeLists.txt").read_text()
         match = re.search(
             r"GIT_REPOSITORY\s+\S*oefp\.git\s+GIT_TAG\s+v(\d+\.\d+\.\d+)", text
         )
         assert match is not None, "no oefp FetchContent_Declare in CMakeLists.txt"
-        assert match.group(1) == OEFP_FLOOR
+        assert match.group(1) == OEFP_VERSION
 
     def test_readme_requirements_line(self):
-        """The documented OEFP series matches the pinned minor series."""
-        assert OEFP_SERIES == OEFP_FLOOR.rsplit(".", 1)[0]
+        """The README names the pinned version, all three components of it."""
         text = (REPO_ROOT / "README.md").read_text()
-        match = re.search(r"\*\*OEFP\*\* (\d+\.\d+)\.x", text)
+        match = re.search(r"\*\*OEFP\*\* (\d+\.\d+\.\d+)", text)
         assert match is not None, "no OEFP requirements line in README.md"
-        assert match.group(1) == OEFP_SERIES
+        assert match.group(1) == OEFP_VERSION
 
 
 class TestVersionPins:

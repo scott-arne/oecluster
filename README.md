@@ -51,9 +51,13 @@ cluster summaries as well as lower-level control over distance computation.
 - **Python** 3.11+ with NumPy 1.20 or later.
 - **OpenEye Toolkits** 2026.1 or later.
 - **A valid OpenEye license** at build time and runtime.
-- **OEFP** 0.3.x for fingerprint generation and comparison. oecluster compiles
-  OEFP's core into its own extension and exchanges batch pointers with the
-  installed `oefp` wheel, so the two must share a minor series.
+- **OEFP** 0.3.0 exactly, for fingerprint generation and comparison. oecluster
+  compiles OEFP's core into its own extension and exchanges raw
+  fingerprint-batch pointers with the separately compiled `oefp` wheel, so the
+  compiled-against and installed versions must be identical. The extension
+  compares the two the first time such a pointer crosses -- passing an
+  `oefp.OEFPBatch` to `bitbirch`, for instance -- and raises `ImportError` on
+  any difference.
 - **C++17**, **CMake** 3.21+, and **SWIG** 4.0+ when building from source.
 
 ---

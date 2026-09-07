@@ -6,11 +6,17 @@ This file starts at 5.0.0; earlier releases are not recorded here.
 
 ### Changed
 
-- The OEFP requirement moved from `oefp>=0.2.4` to `oefp>=0.3.0,<0.4`, and the
-  vendored source tag from `v0.2.4` to `v0.3.0`. An 0.2.x wheel no longer
-  satisfies the install, and 0.4 is excluded ahead of its release: oecluster
-  compiles OEFP's core into its own extension and exchanges batch pointers with
-  the installed wheel, so the two must share a minor series.
+- The OEFP requirement moved from `oefp>=0.2.4` to `oefp==0.3.0`, and the
+  vendored source tag from `v0.2.4` to `v0.3.0`. The pin is exact rather than a
+  range: oecluster compiles OEFP's core into its own extension and exchanges
+  raw fingerprint-batch pointers with the separately compiled wheel, so the
+  compiled-against and installed versions must be identical. The extension
+  compares all three version components the first time such a pointer crosses
+  -- passing an `oefp.OEFPBatch` to `bitbirch`, for instance -- and raises
+  `ImportError` on any difference. That check does not run on `import
+  oecluster`, and the fingerprint comparisons never reach it because they build
+  their own fingerprints, so a range pin left a mismatched wheel working right
+  up to the first batch call.
 - `max_distance` no longer sets the Morgan radius. It previously meant both the
   Morgan radius and the atom-pair maximum graph distance. A separate `radius=`
   now carries the Morgan meaning, `max_distance=` applies to the atom-pair
