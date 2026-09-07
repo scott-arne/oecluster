@@ -373,6 +373,36 @@ def test_a_nan_written_through_storage_set_is_refused():
         oecluster.dbscan(dist, eps=0.4, min_samples=2)
 
 
+def test_the_nan_refusal_names_only_a_remedy_the_caller_can_take():
+    """``missing`` is a descriptor-only keyword.
+
+    Every route the scan above exists for -- ``.condensed``, ``storage.Set``,
+    a trusted file -- can deliver a NaN into any comparison's matrix, and
+    offering ``missing='complete_case'`` to the ones that never took the
+    keyword costs a second refusal. Removing the offending items needs no
+    option, so that is the remedy both branches keep.
+    """
+    mols = _mols()
+
+    descriptor = oecluster.pdist(mols, "descriptor")
+    descriptor.condensed[0] = float('nan')
+    with pytest.raises(ValueError, match=r"missing='complete_case'"):
+        oecluster.butina(descriptor, threshold=0.4)
+
+    fingerprint = oecluster.pdist(mols, "fingerprint")
+    fingerprint.condensed[0] = float('nan')
+    with pytest.raises(ValueError, match=r"Remove the offending items\.") as excinfo:
+        oecluster.butina(fingerprint, threshold=0.4)
+    assert "missing=" not in str(excinfo.value)
+
+    # The named remedy has to be a keyword its own path accepts, and the
+    # withheld one has to be a keyword the other path refuses. Neither half
+    # holds by inspection of the gate alone.
+    oecluster.pdist(mols, "descriptor", missing="complete_case")
+    with pytest.raises(TypeError, match=r"Unknown kwargs for fingerprint"):
+        oecluster.pdist(mols, "fingerprint", missing="complete_case")
+
+
 def test_a_nan_bearing_file_is_refused_though_its_stamp_says_complete(tmp_path):
     """The file route needs no deliberate mutation of the loaded matrix.
 

@@ -189,12 +189,21 @@ def require_metric(distance_matrix, caller, *, allow_nonmetric=False):
     # matrix, including the common ``complete`` one, pays for the scan.
     if (facts['data_integrity'] == "nan_present"
             or _has_nonfinite(distance_matrix)):
+        # ``missing`` is a descriptor-only option. Offering it to anyone else
+        # sends them into a second refusal -- "Unknown kwargs for <name>
+        # comparison: ['missing']" -- over a keyword their comparison never
+        # took. The population this scan exists for, per the comment above, is
+        # the one least likely to have a recompute available at all, so the
+        # remedy that always holds is the one always named.
+        remedy = ("Recompute with missing='complete_case', or remove the "
+                  "offending items."
+                  if name == "descriptor"
+                  else "Remove the offending items.")
         raise ValueError(
             f"{caller} requires a complete distance matrix, but this matrix "
-            f"contains non-finite entries. Recompute with "
-            f"missing='complete_case', or remove the offending items. This "
-            f"cannot be overridden: every comparison against NaN is false, "
-            f"so the clusters would depend on iteration order.")
+            f"contains non-finite entries. {remedy} This cannot be "
+            f"overridden: every comparison against NaN is false, so the "
+            f"clusters would depend on iteration order.")
 
     if allow_nonmetric:
         return
