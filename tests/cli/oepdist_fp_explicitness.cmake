@@ -110,9 +110,10 @@ expect_accepted(sparse_without_numbits --storage sparse)
 
 # --- An unrecognized value gets the library's message, not an advisory one ---
 
-# Both rules stand aside on a family or storage they cannot name, so the
-# constructor speaks first about the thing that is actually wrong. Without
-# that, "--fp-type morgna --radius 3" would be refused for the radius.
+# These rules run only after the constructor has accepted the configuration,
+# which is what makes a misspelled selector get its own error. Standing aside
+# on a family or storage the CLI cannot name is not enough by itself: each rule
+# consults one selector and fires straight past the others.
 expect_refused(unknown_family_outranks_the_radius_rule
                "Unknown OEFP fingerprint type"
                --fp-type morgna --radius 3)
@@ -120,9 +121,35 @@ expect_refused(unknown_storage_outranks_the_numbits_rule
                "Unknown fingerprint storage"
                --storage sparse_binary --numbits 1024)
 
-# --- The refusal comes before any work ---
+# Each of these was answered by an advisory message before the call moved after
+# the constructor: the numbits rule never reads --fp-type, the family rules
+# never read --storage, and neither reads --metric at all.
+expect_refused(unknown_family_outranks_the_numbits_rule
+               "Unknown OEFP fingerprint type"
+               --fp-type bogus --storage sparse --numbits 2048)
+expect_refused(unknown_metric_outranks_the_numbits_rule
+               "Unknown metric"
+               --metric bogus --storage sparse --numbits 2048)
+expect_refused(unknown_metric_outranks_the_family_rule
+               "Unknown metric"
+               --metric bogus --fp-type morgan --max-distance 4)
 
-# The rules read only what was typed, so nothing should have been written.
+# --- A width the family will not read is never judged by the family ---
+
+# Morgan's sparse generator validates a num_bits it never uses, so reaching the
+# constructor with --numbits 0 draws "Morgan num_bits must be greater than
+# zero" -- whose only remedy, a positive width, this very rule refuses. The
+# callback resets the field first so the caller hears the reason that has a way
+# out.
+expect_refused(zero_numbits_on_sparse_names_numbits
+               "--numbits does not apply to --storage sparse"
+               --storage sparse --numbits 0)
+
+# --- A refused run leaves no output behind ---
+
+# The refusal now lands after the molecules are read and the comparison is
+# built, so this pins the output rather than the work: an advisory raise must
+# still write no matrix.
 if(EXISTS "${WORK_DIR}/max_distance_on_morgan.npy")
     message(FATAL_ERROR
             "max_distance_on_morgan: a matrix was written for a refused invocation")

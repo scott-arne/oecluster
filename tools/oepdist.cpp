@@ -428,6 +428,19 @@ static bool option_was_given(const CLI::App* cmd, const char* name) {
     return opt != nullptr && opt->count() > 0;
 }
 
+/// Report whether an explicitly named ``--numbits`` has no meaning here.
+///
+/// One predicate serves both call sites -- the pre-construction reset in the
+/// ``fp`` callback and the post-construction rejection below -- and they must
+/// agree exactly. If the reset could fire where the rejection does not, a
+/// caller's ``--numbits`` would be silently discarded on a run that succeeds,
+/// which is the one outcome these rules exist to prevent. Mirrors
+/// ``numbits_is_inapplicable`` (``python/oecluster/_comparisons.py``).
+static bool numbits_is_inapplicable(const CLI::App* cmd, const std::string& storage) {
+    const std::string store = lowercased(storage);
+    return option_was_given(cmd, "--numbits") && (store == "sparse" || store == "sparse_count");
+}
+
 /// Refuse an explicitly named ``fp`` option the rest of the configuration ignores.
 ///
 /// ``FingerprintOptions`` carries every per-family field at once and a
@@ -439,15 +452,19 @@ static bool option_was_given(const CLI::App* cmd, const char* name) {
 /// ``reject_inapplicable_fingerprint_kwargs``
 /// (``python/oecluster/_comparisons.py``) since they were introduced.
 ///
-/// Both rules stand aside on a family or storage they do not recognize, which
-/// is what keeps an advisory message from pre-empting the constructor's
-/// authoritative one for an invalid spelling.
+/// Every rule here is advisory: it reports an option the library accepts and
+/// silently ignores. Standing aside on a family or storage this file cannot
+/// name is not what keeps an advisory message from pre-empting an authoritative
+/// one -- each rule reads one selector and fires straight past the ones it does
+/// not consult, and neither rule consults ``--metric`` at all. Ordering is what
+/// settles it: call this only once ``OECluster::FingerprintComparison`` has
+/// accepted the configuration, so every invalid spelling has already had its
+/// own error.
 ///
 /// :raises std::runtime_error: If a named option does not apply here.
 static void reject_inapplicable_fp_options(const CLI::App* cmd, const std::string& fp_type,
                                            const std::string& storage) {
-    const std::string store = lowercased(storage);
-    if (option_was_given(cmd, "--numbits") && (store == "sparse" || store == "sparse_count")) {
+    if (numbits_is_inapplicable(cmd, storage)) {
         throw std::runtime_error(
             "--numbits does not apply to --storage " + storage +
             ": a sparse fingerprint keeps its family's own domain rather than folding to a "
@@ -537,11 +554,6 @@ int main(int argc, char** argv) {
     fp_cmd->add_flag("--sim", fp_sim, "Return similarity instead of distance");
 
     fp_cmd->callback([&]() {
-        // Before the molecules are read: the refusal depends only on what was
-        // typed, and making the caller wait through a file read for it would be
-        // gratuitous.
-        reject_inapplicable_fp_options(fp_cmd, fp_type, fp_storage);
-
         OECluster::FingerprintOptions opts;
         opts.fp_type = fp_type;
         opts.storage = fp_storage;
@@ -553,6 +565,18 @@ int main(int argc, char** argv) {
         opts.use_chirality = fp_use_chirality;
         opts.metric = fp_metric;
         opts.similarity = fp_sim;
+
+        // Morgan's sparse generators validate a num_bits they never read: with
+        // --storage sparse --numbits 0 the constructor raises "Morgan num_bits
+        // must be greater than zero", naming the one remedy that cannot work --
+        // a positive --numbits is refused below, and only dropping it succeeds.
+        // Reset the field so the constructor never judges a value it will not
+        // use. Nothing the caller typed is discarded silently: the same
+        // predicate guards this reset and the refusal, so every run that
+        // reaches here goes on to name --numbits.
+        if (numbits_is_inapplicable(fp_cmd, fp_storage)) {
+            opts.numbits = OECluster::FingerprintOptions().numbits;
+        }
 
         std::string params = "{" + JsonStr("fp_type", fp_type) + ","
             + JsonStr("storage", fp_storage) + ","
@@ -573,6 +597,14 @@ int main(int argc, char** argv) {
                 exit_code = 1; return;
             }
             OECluster::FingerprintComparison comparison(ms.ptrs, opts);
+            // After the constructor and before any output: the constructor is
+            // what validates --fp-type, --storage and --metric, so letting it
+            // speak first is what stops an advisory refusal from answering a
+            // caller whose real mistake is a misspelled selector. The price is
+            // a file read and one fingerprint pass before an advisory raise,
+            // which the Python surface pays for the same reason in
+            // ``_build_fingerprint``.
+            reject_inapplicable_fp_options(fp_cmd, fp_type, fp_storage);
             OEPDist::OutputMetadata meta{
                 "pdist", "fingerprint", params, ms.labels, ms.labels};
             exit_code = run_pdist(comparison, fp_co.output, meta,
@@ -595,6 +627,8 @@ int main(int argc, char** argv) {
             all.insert(all.end(), sa.ptrs.begin(), sa.ptrs.end());
             all.insert(all.end(), sb.ptrs.begin(), sb.ptrs.end());
             OECluster::FingerprintComparison comparison(all, opts);
+            // Ordered as in the pdist branch above, and for the same reason.
+            reject_inapplicable_fp_options(fp_cmd, fp_type, fp_storage);
             OEPDist::OutputMetadata meta{
                 "cdist", "fingerprint", params, sa.labels, sb.labels};
             exit_code = run_cdist(comparison, sa.ptrs.size(), fp_co.output, meta,
