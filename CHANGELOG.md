@@ -6,6 +6,11 @@ This file starts at 5.0.0; earlier releases are not recorded here.
 
 ### Changed
 
+- The OEFP requirement moved from `oefp>=0.2.4` to `oefp>=0.3.0,<0.4`, and the
+  vendored source tag from `v0.2.4` to `v0.3.0`. An 0.2.x wheel no longer
+  satisfies the install, and 0.4 is excluded ahead of its release: oecluster
+  compiles OEFP's core into its own extension and exchanges batch pointers with
+  the installed wheel, so the two must share a minor series.
 - `max_distance` no longer sets the Morgan radius. It previously meant both the
   Morgan radius and the atom-pair maximum graph distance. A separate `radius=`
   now carries the Morgan meaning, `max_distance=` applies to the atom-pair
@@ -15,17 +20,32 @@ This file starts at 5.0.0; earlier releases are not recorded here.
 - The atom-pair window defaults changed from 0-2 to 1-30, matching OEFP's own
   defaults (`min_distance` 0 to 1, `max_distance` 2 to 30). A fingerprint built
   with the defaults is therefore not comparable to one built under 4.x.
-- A descriptor sequence option supplied as an empty sequence now raises
-  `ValueError` instead of being accepted. This applies at eight sites: `sources`,
-  `columns`, `groups`, `variances` and `inverse_covariance` on the comparison
-  paths, and `sources`, `columns` and `groups` on `descriptor_statistics`. An
-  empty sequence was previously silently equivalent to omitting the option,
-  which the C++ layer cannot tell apart from a real request.
+- `ROCSComparison` refuses input it used to accept. A molecule whose dimension
+  attribute, recomputed from its coordinates, is below three now raises
+  `ComparisonError` at construction; 4.2.3 had no such check and ran on 2D
+  input. Separately, the constructor now measures the diagonal, and linear
+  species such as N#N, O=C=O and C#N score nonzero against themselves under the
+  default `combo_norm` (0.500, 0.507 and 0.0067), so they stamp
+  `zero_self = No` and the metric gate refuses to cluster them with no override
+  available.
+- `ROCSComparison` no longer mutates the caller's molecules. It deep-copies each
+  input, so the color-atom preparation and the dimension refresh, which write
+  into the molecule, act on the copies rather than on objects the caller still
+  owns.
+- `butina`, `dbscan`, `hdbscan`, `agglomerative` and `cluster_report` refuse
+  matrices they used to accept. Each now calls the metric gate described under
+  Added, so a similarity matrix -- which 4.2.3 clustered without complaint --
+  and any matrix whose recorded facts fail the gate raise `ValueError`.
 
 ### Added
 
 - Descriptor comparisons (`DescriptorComparison`, `descriptor_statistics`) and
   coordinate RMSD comparisons (`RMSDComparison`).
+- The descriptor options that take a sequence -- `sources`, `columns`, `groups`,
+  `variances` and `inverse_covariance` on the comparison paths, and `sources`,
+  `columns` and `groups` on `descriptor_statistics` -- refuse an empty sequence
+  with `ValueError`. The C++ layer cannot tell an empty sequence from an omitted
+  option, so accepting one would silently resolve to the default.
 - A metric-capability gate. Comparisons record what their distances guarantee,
   and the clustering entry points raise `ValueError` on a matrix whose recorded
   facts violate their assumptions. `allow_nonmetric=True` overrides the second
