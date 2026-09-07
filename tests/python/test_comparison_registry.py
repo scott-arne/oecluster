@@ -248,9 +248,10 @@ def test_an_unknown_family_outranks_the_pdist_tversky_guard():
     unsupported family valid.
     """
     mols = _mols(["CCO", "CCC"])
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match="Unknown OEFP fingerprint type"):
         oecluster.pdist(mols, "fingerprint", fp_type="nonsense",
-                        metric="tversky", tversky_alpha=0.9, tversky_beta=0.1)
+                        metric="tversky", similarity=True,
+                        tversky_alpha=0.9, tversky_beta=0.1)
 
 
 def test_a_recognized_family_still_gets_the_pdist_tversky_guard():
@@ -262,7 +263,7 @@ def test_a_recognized_family_still_gets_the_pdist_tversky_guard():
     """
     mols = _mols(["CCO", "CCC"])
     with pytest.raises(ValueError, match="pdist requires a symmetric metric"):
-        oecluster.pdist(mols, "fingerprint", metric="tversky",
+        oecluster.pdist(mols, "fingerprint", metric="tversky", similarity=True,
                         tversky_alpha=0.9, tversky_beta=0.1)
 
 
@@ -535,7 +536,7 @@ def test_an_unknown_storage_outranks_the_pdist_tversky_guard():
     with pytest.raises(RuntimeError, match="Unknown fingerprint storage"):
         oecluster.pdist(
             mols, "fingerprint", storage="nonsense", metric="tversky",
-            tversky_alpha=0.9, tversky_beta=0.1)
+            similarity=True, tversky_alpha=0.9, tversky_beta=0.1)
 
 
 def test_a_recognized_storage_still_gets_the_pdist_tversky_guard():
@@ -544,7 +545,7 @@ def test_a_recognized_storage_still_gets_the_pdist_tversky_guard():
     with pytest.raises(ValueError, match="pdist requires a symmetric metric"):
         oecluster.pdist(
             mols, "fingerprint", storage="binary", metric="tversky",
-            tversky_alpha=0.9, tversky_beta=0.1)
+            similarity=True, tversky_alpha=0.9, tversky_beta=0.1)
 
 
 def test_a_descriptor_only_metric_is_unrecognized_on_the_fingerprint_surface():
@@ -566,7 +567,7 @@ def test_an_out_of_range_tversky_weight_outranks_the_symmetry_guard():
     mols = _mols(["CCO", "CCC", "c1ccccc1"])
     with pytest.raises(RuntimeError, match=r"Tversky alpha and beta must be in"):
         oecluster.pdist(
-            mols, "fingerprint", metric="tversky",
+            mols, "fingerprint", metric="tversky", similarity=True,
             tversky_alpha=5.0, tversky_beta=0.1)
 
 
@@ -575,7 +576,7 @@ def test_an_in_range_asymmetric_tversky_still_hits_the_symmetry_guard():
     mols = _mols(["CCO", "CCC", "c1ccccc1"])
     with pytest.raises(ValueError, match="pdist requires a symmetric metric"):
         oecluster.pdist(
-            mols, "fingerprint", metric="tversky",
+            mols, "fingerprint", metric="tversky", similarity=True,
             tversky_alpha=0.9, tversky_beta=0.1)
 
 
@@ -608,7 +609,7 @@ def test_an_out_of_range_tversky_weight_outranks_the_numbits_rule():
     """Round 7 covered the symmetry guard; the rejector needed it too."""
     mols = _mols(["CCO", "CCC", "c1ccccc1"])
     with pytest.raises(RuntimeError, match="Tversky alpha and beta must be in"):
-        oecluster.pdist(mols, "fingerprint", metric="tversky",
+        oecluster.pdist(mols, "fingerprint", metric="tversky", similarity=True,
                         tversky_alpha=5.0, tversky_beta=0.5,
                         storage="sparse", numbits=4096)
 
@@ -619,6 +620,27 @@ def test_a_missing_similarity_form_outranks_the_metric_only_rules():
     with pytest.raises(RuntimeError, match="has no similarity form"):
         oecluster.pdist(mols, "fingerprint", similarity=True,
                         metric="bray_curtis", p=3.0)
+
+
+def test_a_missing_distance_form_is_refused_rather_than_ignored():
+    """The mirror rule, and the one that changes a default.
+
+    ``similarity`` defaults to False, so plain ``metric='tversky'`` used to
+    build a similarity matrix while the caller had asked for nothing of the
+    sort. Both spellings of the request are refused, which is what makes the
+    flag mean something for this metric.
+    """
+    mols = _mols(["CCO", "CCC", "c1ccccc1"])
+    with pytest.raises(RuntimeError, match="has no distance form"):
+        oecluster.pdist(mols, "fingerprint", metric="tversky")
+    with pytest.raises(RuntimeError, match="has no distance form"):
+        oecluster.pdist(mols, "fingerprint", metric="tversky", similarity=False)
+    with pytest.raises(RuntimeError, match="has no distance form"):
+        oecluster.cdist(mols, mols, "fingerprint", metric="tversky")
+
+    matrix = oecluster.pdist(mols, "fingerprint", metric="tversky",
+                             similarity=True)
+    assert matrix.is_distance is False
 
 
 def test_an_unsupported_storage_for_a_family_outranks_the_numbits_rule():

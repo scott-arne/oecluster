@@ -229,21 +229,23 @@ TEST_F(FingerprintComparisonTest, DiceFactsFailTierTwoOnly) {
     EXPECT_EQ(facts.triangle, Capability::No);
 }
 
-TEST_F(FingerprintComparisonTest, TverskyIsStampedASimilarityInBothDirections) {
-    // The metric table builds OEFP's Tversky for tversky whatever the
-    // similarity flag says (src/comparisons/MetricTable.cpp), because Tversky
-    // has no distance form. The flag is therefore ignored here, and both
-    // directions must report the same orientation rather than one of them
-    // quietly claiming to be a distance.
-    for (bool similarity : {false, true}) {
-        FingerprintOptions opts;
-        opts.metric = "tversky";
-        opts.similarity = similarity;
-        FingerprintComparison comparison(mols_, opts);
-        const GateFacts facts = comparison.Facts();
-        EXPECT_EQ(facts.is_distance, Capability::No) << similarity;
-        EXPECT_EQ(facts.zero_self, Capability::No) << similarity;
-    }
+TEST_F(FingerprintComparisonTest, TverskyRefusesTheDistanceItCannotProduce) {
+    // Tversky has no distance form in OEFP, so similarity=false used to build
+    // the identical metric and hand back a similarity under a similarity
+    // stamp: the flag made no difference to any byte of the result. Refusing
+    // is what keeps an explicit value from meaning the same as its opposite.
+    FingerprintOptions distance_request;
+    distance_request.metric = "tversky";
+    distance_request.similarity = false;
+    EXPECT_THROW(FingerprintComparison(mols_, distance_request), ComparisonError);
+
+    FingerprintOptions opts;
+    opts.metric = "tversky";
+    opts.similarity = true;
+    FingerprintComparison comparison(mols_, opts);
+    const GateFacts facts = comparison.Facts();
+    EXPECT_EQ(facts.is_distance, Capability::No);
+    EXPECT_EQ(facts.zero_self, Capability::No);
 }
 
 TEST_F(FingerprintComparisonTest, MorganRadiusIsSeparateFromAtomPairWindow) {
@@ -357,6 +359,7 @@ TEST_F(FingerprintComparisonTest, MinkowskiExponentIsHonored) {
 TEST_F(FingerprintComparisonTest, AsymmetricTverskyIsRefusedByPDist) {
     FingerprintOptions opts;
     opts.metric = "tversky";
+    opts.similarity = true;  // tversky has no distance form to request.
     opts.tversky_alpha = 0.2;
     opts.tversky_beta = 0.8;
     FingerprintComparison comparison(mols_, opts);
@@ -382,6 +385,7 @@ TEST_F(FingerprintComparisonTest, AsymmetricTverskyGuardRunsBeforeSizeCheck) {
     // metric error even when storage size is wrong.
     FingerprintOptions opts;
     opts.metric = "tversky";
+    opts.similarity = true;  // tversky has no distance form to request.
     opts.tversky_alpha = 0.2;
     opts.tversky_beta = 0.8;
     FingerprintComparison comparison(mols_, opts);

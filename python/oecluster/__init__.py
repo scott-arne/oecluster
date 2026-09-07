@@ -3256,7 +3256,9 @@ class FingerprintComparison:
         :param storage: Fingerprint storage: "binary" (the default), "count",
             "sparse", or "sparse_count". A counted storage needs a metric
             defined on counts, such as "bray_curtis" or "manhattan".
-        :param metric: OEFP scalar metric name. Defaults to "tanimoto".
+        :param metric: OEFP scalar metric name. Defaults to "tanimoto". Every
+            metric but "tversky" has a distance form; "tversky" has only a
+            similarity form and requires ``similarity=True``.
         :param numbits: Fingerprint size in bits. Defaults to 2048. A sparse
             storage keeps its family's own domain rather than folding to a
             width, and naming this alongside one raises.
@@ -3283,9 +3285,10 @@ class FingerprintComparison:
             family, storage, or metric.
         :raises RuntimeError: If the C++ layer refuses the request. Among the
             reasons: an unknown family, storage, or metric; a metric with no
-            similarity form under ``similarity=True``; the one family and
-            storage combination OEFP provides no batch type for; and a bit-set
-            metric on a counted storage.
+            similarity form under ``similarity=True``, or none with a distance
+            form under ``similarity=False``; the one family and storage
+            combination OEFP provides no batch type for; and a bit-set metric
+            on a counted storage.
         """
         # Delegated to the keyword surface's own builder rather than
         # reimplemented, so this path cannot become the way around the

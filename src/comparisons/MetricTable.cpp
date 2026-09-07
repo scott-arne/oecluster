@@ -23,63 +23,74 @@ std::string to_lower(const std::string& value) {
 }
 
 /// One row of the metric table.
+///
+/// The two form flags are independent, and both are needed. A metric with only
+/// one form must refuse the other rather than resolve to the form it has: a
+/// silently ignored ``similarity`` flag returns the wrong orientation under a
+/// stamp the capability gate then believes.
 struct MetricEntry {
     const char* name;
     bool on_fingerprint;
     bool on_descriptor;
     bool has_similarity_form;
+    bool has_distance_form;
     OEFP::Metric (*make)(bool similarity, const MetricParams& params);
 };
 
 // Capture-less lambdas convert to plain function pointers, which keeps the
 // table a constant array with no per-call allocation.
 const MetricEntry METRIC_TABLE[] = {
-    {"jaccard", true, false, false,
+    {"jaccard", true, false, false, true,
      [](bool, const MetricParams&) { return OEFP::Metric::Jaccard(); }},
-    {"tanimoto", true, false, true,
+    {"tanimoto", true, false, true, true,
      [](bool similarity, const MetricParams&) {
          return similarity ? OEFP::Metric::Tanimoto() : OEFP::Metric::Jaccard();
      }},
-    {"dice", true, false, false, [](bool, const MetricParams&) { return OEFP::Metric::Dice(); }},
-    {"sokal_sneath", true, false, false,
+    {"dice", true, false, false, true,
+     [](bool, const MetricParams&) { return OEFP::Metric::Dice(); }},
+    {"sokal_sneath", true, false, false, true,
      [](bool, const MetricParams&) { return OEFP::Metric::SokalSneath(); }},
-    {"matching", true, false, false,
+    {"matching", true, false, false, true,
      [](bool, const MetricParams&) { return OEFP::Metric::Matching(); }},
-    {"rogers_tanimoto", true, false, false,
+    {"rogers_tanimoto", true, false, false, true,
      [](bool, const MetricParams&) { return OEFP::Metric::RogersTanimoto(); }},
-    {"russell_rao", true, false, false,
+    {"russell_rao", true, false, false, true,
      [](bool, const MetricParams&) { return OEFP::Metric::RussellRao(); }},
-    {"kulsinski", true, false, false,
+    {"kulsinski", true, false, false, true,
      [](bool, const MetricParams&) { return OEFP::Metric::Kulsinski(); }},
-    {"sokal_michener", true, false, false,
+    {"sokal_michener", true, false, false, true,
      [](bool, const MetricParams&) { return OEFP::Metric::SokalMichener(); }},
-    {"euclidean", true, true, false,
+    {"euclidean", true, true, false, true,
      [](bool, const MetricParams&) { return OEFP::Metric::Euclidean(); }},
-    {"manhattan", true, true, false,
+    {"manhattan", true, true, false, true,
      [](bool, const MetricParams&) { return OEFP::Metric::Manhattan(); }},
-    {"chebyshev", true, true, false,
+    {"chebyshev", true, true, false, true,
      [](bool, const MetricParams&) { return OEFP::Metric::Chebyshev(); }},
-    {"hamming", true, true, false,
+    {"hamming", true, true, false, true,
      [](bool, const MetricParams&) { return OEFP::Metric::Hamming(); }},
-    {"canberra", true, true, false,
+    {"canberra", true, true, false, true,
      [](bool, const MetricParams&) { return OEFP::Metric::Canberra(); }},
-    {"bray_curtis", true, true, false,
+    {"bray_curtis", true, true, false, true,
      [](bool, const MetricParams&) { return OEFP::Metric::BrayCurtis(); }},
-    {"minkowski", true, true, false,
+    {"minkowski", true, true, false, true,
      [](bool, const MetricParams& params) { return OEFP::Metric::Minkowski(params.p); }},
-    {"tversky", true, false, true,
+    // The one similarity-only row. OEFP hands back a similarity for every
+    // alpha and beta, and there is no distance counterpart to resolve to, so
+    // the lambda has no ``similarity`` parameter to honor and the flag is
+    // checked against the row instead.
+    {"tversky", true, false, true, false,
      [](bool, const MetricParams& params) {
          return OEFP::Metric::Tversky(params.tversky_alpha, params.tversky_beta);
      }},
-    {"standardized_euclidean", false, true, false,
+    {"standardized_euclidean", false, true, false, true,
      [](bool, const MetricParams& params) {
          return OEFP::Metric::StandardizedEuclidean(params.variances);
      }},
-    {"seuclidean", false, true, false,
+    {"seuclidean", false, true, false, true,
      [](bool, const MetricParams& params) {
          return OEFP::Metric::StandardizedEuclidean(params.variances);
      }},
-    {"mahalanobis", false, true, false,
+    {"mahalanobis", false, true, false, true,
      [](bool, const MetricParams& params) {
          return OEFP::Metric::Mahalanobis(params.inverse_covariance);
      }},
@@ -148,10 +159,22 @@ const MetricEntry& require_metric_entry(const std::string& name, bool similarity
                               "' is a fingerprint bit-set metric; use comparison=\"fingerprint\"");
     }
 
+    // Both directions are refused rather than quietly resolved to the form the
+    // metric does have. Naming what each of the two-form and one-form metrics
+    // supports is the point: "only 'tanimoto' and 'tversky' support
+    // similarity=True" was true of the flag and wrong about tversky, which
+    // accepts nothing else.
     if (similarity && !found->has_similarity_form) {
         throw ComparisonError("Metric '" + key +
-                              "' has no similarity form; only 'tanimoto' and 'tversky' support "
-                              "similarity=True");
+                              "' has no similarity form; it is scored as a distance. Use "
+                              "similarity=False, or select 'tanimoto', which has both forms. "
+                              "'tversky' has a similarity form only");
+    }
+
+    if (!similarity && !found->has_distance_form) {
+        throw ComparisonError("Metric '" + key +
+                              "' has no distance form; it is scored as a similarity. Use "
+                              "similarity=True, or select 'tanimoto', which has both forms");
     }
 
     validate_params(key, params);

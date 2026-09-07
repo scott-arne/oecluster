@@ -84,6 +84,14 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   `sparse` and `sparse_count`, and a `topological_torsions` fingerprint family
   alongside `morgan` and `atom_pair`. `topological_atom_pair` is accepted as a
   further spelling of `atom_pair`.
+- A shared metric table behind both comparison surfaces. The fingerprint surface
+  resolves 17 scalar metric names where 4.2.3 recognized four -- `tanimoto`,
+  `jaccard`, `dice` and `manhattan` -- and refused `euclidean` outright; the
+  descriptor surface resolves 10, seven of them shared with fingerprints.
+  `tversky` is the one similarity-only entry: it has no distance form, so it
+  requires `similarity=True` and refuses `similarity=False` rather than
+  answering a distance request with a similarity. That is the mirror of the
+  refusal `jaccard` gives `similarity=True`.
 - `SymmetricDistanceMatrix.from_file` reads sparse-storage matrices, and both
   matrix classes read the recorded facts payload. A file with no `storage_kind`
   key is read as dense, so matrices written before sparse serialization existed

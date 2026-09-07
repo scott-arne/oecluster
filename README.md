@@ -553,7 +553,8 @@ required neighbors.
 | `p` | Minkowski order | `2.0` |
 | `tversky_alpha`, `tversky_beta` | Tversky weights | `0.5` |
 
-Similarity mode is supported for `tanimoto` and `tversky`. A counted storage
+Similarity mode is supported for `tanimoto` and required by `tversky`, which
+has no distance form and refuses the default `similarity=False`. A counted storage
 needs a metric defined on counts, such as `bray_curtis` or `manhattan`, and
 naming an option the rest of the configuration would ignore raises rather than
 accepting a value that has no effect. **Changed in 5.0.0:** `max_distance` no

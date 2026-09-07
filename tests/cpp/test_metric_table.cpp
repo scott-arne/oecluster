@@ -79,7 +79,7 @@ TEST(MetricTableTest, EuclideanIsNowSupportedOnFingerprints) {
 
 TEST(MetricTableTest, EveryTableRowResolvesToItsOwnMetric) {
     // One shared params object with every field populated to a valid value, so a
-    // single params satisfies all 29 rows.
+    // single params satisfies all 28 rows.
     MetricParams params;
     params.p = 2.0;
     params.tversky_alpha = 0.5;
@@ -95,7 +95,8 @@ TEST(MetricTableTest, EveryTableRowResolvesToItsOwnMetric) {
     };
 
     const std::vector<Row> rows{
-        // Fingerprint surface, similarity=false (17 rows)
+        // Fingerprint surface, similarity=false (16 rows). tversky is absent:
+        // it is similarity-only, and TverskyHasNoDistanceForm covers its refusal.
         {"jaccard", MetricSurface::Fingerprint, false, OEFP::MetricName::Jaccard},
         {"tanimoto", MetricSurface::Fingerprint, false, OEFP::MetricName::Jaccard},
         {"dice", MetricSurface::Fingerprint, false, OEFP::MetricName::Dice},
@@ -112,7 +113,6 @@ TEST(MetricTableTest, EveryTableRowResolvesToItsOwnMetric) {
         {"canberra", MetricSurface::Fingerprint, false, OEFP::MetricName::Canberra},
         {"bray_curtis", MetricSurface::Fingerprint, false, OEFP::MetricName::BrayCurtis},
         {"minkowski", MetricSurface::Fingerprint, false, OEFP::MetricName::Minkowski},
-        {"tversky", MetricSurface::Fingerprint, false, OEFP::MetricName::Tversky},
         // Fingerprint surface, similarity=true (2 rows)
         {"tanimoto", MetricSurface::Fingerprint, true, OEFP::MetricName::Tanimoto},
         {"tversky", MetricSurface::Fingerprint, true, OEFP::MetricName::Tversky},
@@ -129,7 +129,7 @@ TEST(MetricTableTest, EveryTableRowResolvesToItsOwnMetric) {
         {"mahalanobis", MetricSurface::Descriptor, false, OEFP::MetricName::Mahalanobis},
     };
 
-    ASSERT_EQ(rows.size(), 29u);
+    ASSERT_EQ(rows.size(), 28u);
     for (const Row& row : rows) {
         SCOPED_TRACE(std::string(row.name) + " on " +
                      (row.surface == MetricSurface::Fingerprint ? "Fingerprint" : "Descriptor"));
@@ -177,7 +177,7 @@ TEST(MetricTableTest, TverskyIsNotAMetricSpace) {
     MetricParams params;
     params.tversky_alpha = 0.3;
     params.tversky_beta = 0.7;
-    const OEFP::Metric metric = resolve_metric("tversky", false, params, MetricSurface::Fingerprint);
+    const OEFP::Metric metric = resolve_metric("tversky", true, params, MetricSurface::Fingerprint);
     EXPECT_EQ(metric.Name(), OEFP::MetricName::Tversky);
     EXPECT_FALSE(metric.HasZeroSelfDistance());
     // Tversky is asymmetric. Swapping the weights changes which side of the
@@ -201,7 +201,7 @@ TEST(MetricTableTest, TverskyRejectsWeightsOutsideTheUnitInterval) {
         MetricParams params;
         params.tversky_alpha = weights.first;
         params.tversky_beta = weights.second;
-        EXPECT_THROW(resolve_metric("tversky", false, params, MetricSurface::Fingerprint),
+        EXPECT_THROW(resolve_metric("tversky", true, params, MetricSurface::Fingerprint),
                      ComparisonError)
             << "alpha=" << weights.first << " beta=" << weights.second;
     }
@@ -210,7 +210,7 @@ TEST(MetricTableTest, TverskyRejectsWeightsOutsideTheUnitInterval) {
     MetricParams bounds;
     bounds.tversky_alpha = 0.0;
     bounds.tversky_beta = 1.0;
-    EXPECT_NO_THROW(resolve_metric("tversky", false, bounds, MetricSurface::Fingerprint));
+    EXPECT_NO_THROW(resolve_metric("tversky", true, bounds, MetricSurface::Fingerprint));
 }
 
 TEST(MetricTableTest, SeuclideanIsAnAliasOfStandardizedEuclidean) {
@@ -269,9 +269,43 @@ TEST(MetricTableTest, SimilarityOnAMetricWithoutASimilarityFormIsRejected) {
         FAIL() << "expected ComparisonError";
     } catch (const ComparisonError& error) {
         const std::string message(error.what());
-        EXPECT_NE(message.find("'tanimoto'"), std::string::npos);
-        EXPECT_NE(message.find("'tversky'"), std::string::npos);
+        // Both special metrics are named, and each with what it actually
+        // supports. Naming them as a pair -- "only 'tanimoto' and 'tversky'
+        // support similarity=True" -- reads as an invitation to try tversky
+        // either way, which is the one thing tversky does not allow.
+        EXPECT_NE(message.find("similarity=False"), std::string::npos) << message;
+        EXPECT_NE(message.find("'tanimoto', which has both forms"), std::string::npos) << message;
+        EXPECT_NE(message.find("'tversky' has a similarity form only"), std::string::npos)
+            << message;
     }
+}
+
+TEST(MetricTableTest, TverskyHasNoDistanceForm) {
+    // The mirror of the rule above. Before this, similarity=False resolved to
+    // the same OEFP::Metric as similarity=True and the flag vanished: the
+    // matrix was a similarity either way, and only the stamp knew.
+    MetricParams params;
+    try {
+        resolve_metric("tversky", false, params, MetricSurface::Fingerprint);
+        FAIL() << "expected ComparisonError";
+    } catch (const ComparisonError& error) {
+        const std::string message(error.what());
+        EXPECT_NE(message.find("no distance form"), std::string::npos) << message;
+        EXPECT_NE(message.find("similarity=True"), std::string::npos) << message;
+    }
+
+    // The form check precedes the weight check, so an invalid alpha does not
+    // change which refusal a distance request gets.
+    MetricParams bad_weights;
+    bad_weights.tversky_alpha = 42.0;
+    try {
+        resolve_metric("tversky", false, bad_weights, MetricSurface::Fingerprint);
+        FAIL() << "expected ComparisonError";
+    } catch (const ComparisonError& error) {
+        EXPECT_NE(std::string(error.what()).find("no distance form"), std::string::npos);
+    }
+
+    EXPECT_NO_THROW(resolve_metric("tversky", true, params, MetricSurface::Fingerprint));
 }
 
 TEST(MetricTableTest, HaversineIsRejectedWithItsOwnRationale) {

@@ -268,9 +268,11 @@ plausible-looking wrong answers rather than fail: a matrix of similarities, a
 matrix whose measure does not score an item as identical to itself, and a
 matrix stamped `data_integrity == 'nan_present'` or holding a non-finite
 distance. The remedies are, respectively, to recompute with
-`similarity=False`; to choose a comparison or configuration whose measured
-diagonal vanishes; and to recompute with `missing='complete_case'` if the
-values came from descriptors, or otherwise to remove the offending items. The
+`similarity=False`, or to choose a metric that has a distance form at all --
+`tversky` does not, and refuses `similarity=False`; to choose a comparison or
+configuration whose measured diagonal vanishes; and to recompute with
+`missing='complete_case'` if the values came from descriptors, or otherwise to
+remove the offending items. The
 third check does not trust the stamp alone -- it also scans the stored
 distances, so a matrix edited through `.condensed` after it was stamped is
 still caught.
@@ -369,6 +371,9 @@ selected method.
 | `tversky_alpha` | Tversky reference weight | `0.5` |
 | `tversky_beta` | Tversky fit weight | `0.5` |
 
+Every metric above takes the default `similarity=False` except `tversky`, which
+has no distance form and requires `similarity=True`.
+
 Family, storage and metric names are matched case-insensitively.
 `topological_atom_pair` is an alias of `atom_pair`: OEFP has one atom-pair
 generator and it is the 2D graph-distance model. Every family and storage
@@ -388,9 +393,11 @@ hexadecane and triacontane are identical, putting their Tanimoto distance at
 Similarity mode (`similarity=True`) is available for `tanimoto` and `tversky`,
 the two metrics with a similarity form. That is the only place `jaccard` and
 `tanimoto` differ: their distances are equal to the bit, but only `tanimoto`
-can be asked for a similarity. A similarity is not a distance, and the
-clustering entry points refuse one outright; see
-[Metric Requirements](#metric-requirements).
+can be asked for a similarity. `tversky` goes the other way -- it has no
+distance form, so it requires `similarity=True` and refuses the default
+`similarity=False` rather than quietly returning a similarity anyway. A
+similarity is not a distance, and the clustering entry points refuse one
+outright; see [Metric Requirements](#metric-requirements).
 
 Naming an option that the rest of the configuration would ignore raises
 `TypeError` naming the ignored option and a way out -- a replacement option
