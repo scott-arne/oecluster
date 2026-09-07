@@ -40,10 +40,10 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   included, which put a floor of 0.5 under every `combo_norm` self-distance. The
   constructor now runs `OEOverlapPrep` over its copies. On Omega-embedded phenol
   against catechol the `color` distance moves from 1.0 to 0.400135 and
-  `combo_norm` from 0.519059 to 0.220440; `shape` is not exempt, moving from
-  0.038117 to 0.040745 on that same pair. Phenol's own `combo_norm`
-  self-distance falls from 0.500 to 0.000. A 4.2.3 script produces different
-  numbers here with no error and no warning.
+  `combo_norm` from 0.519059 to 0.220440. `shape` is exempt: keeping hydrogens
+  reproduces the shape numbers this comparison returned before color prep
+  existed. Phenol's own `combo_norm` self-distance falls from 0.500 to 0.000. A
+  4.2.3 script produces different numbers here with no error and no warning.
 - `ROCSComparison` no longer mutates the caller's molecules. It deep-copies each
   input, so the dimension refresh and the newly added color-atom preparation,
   both of which write into the molecule, act on the copies rather than on
