@@ -50,12 +50,15 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   objects the caller still owns.
 - An index past the end is refused rather than answered. Neither
   `PairwiseComparison::Compare` nor `StorageBackend::Get` range-checked its
-  arguments in 4.2.3: `Compare` read off the end of its container, quietly
-  returning 0.0 from the descriptor comparison and crashing the process in
-  others, and `Get` returned 0.0 for any `i == j` because the diagonal shortcut
-  ran before anything looked at the bounds -- `Get(1000, 1000)` called a
-  nonexistent sample identical to itself on a three-sample matrix. All five
-  comparison classes now throw `ComparisonError` and all three storage backends
+  arguments in 4.2.3. `Compare` read off the end of its container, and what it
+  did next varied with how far past the end the index landed rather than with
+  which comparison class was in use: a two-molecule fingerprint comparison
+  quietly returned 0.0 for `Compare(1000000, 1000001)`, and that same class took
+  the process down with SIGSEGV once the index was far enough out to leave the
+  mapping. `Get` returned 0.0 for any `i == j` because the diagonal shortcut ran
+  before anything looked at the bounds -- `Get(1000, 1000)` called a nonexistent
+  sample identical to itself on a three-sample matrix. All five comparison
+  classes now throw `ComparisonError` and all three storage backends
   `std::out_of_range`, both of which the bindings render as `RuntimeError`.
 - `oepdist fp` refuses an option the selected family or storage does not read,
   where it used to accept and discard it. `--max-distance 4 --fp-type morgan`
