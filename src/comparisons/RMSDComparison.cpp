@@ -10,6 +10,7 @@
 #include <map>
 #include <utility>
 #include <oechem.h>
+#include "IndexRange.h"
 #include "oecluster/Error.h"
 
 namespace OECluster {
@@ -254,6 +255,8 @@ RMSDComparison::RMSDComparison(std::shared_ptr<const SharedData> shared, const O
     : shared_(std::move(shared)), opts_(opts) {}
 
 double RMSDComparison::Compare(size_t i, size_t j) {
+    detail::check_compare_index_range("RMSDComparison", i, j, shared_->mols.size());
+
     const double value = OEChem::OERMSD(*shared_->mols[i], *shared_->mols[j],
                                         opts_.automorph, opts_.heavy_only, opts_.overlay);
     if (!std::isfinite(value)) {

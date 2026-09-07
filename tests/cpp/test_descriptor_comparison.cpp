@@ -176,6 +176,22 @@ TEST_F(DescriptorComparisonTest, SelfDistanceIsZero) {
     }
 }
 
+TEST_F(DescriptorComparisonTest, CompareRefusesAnIndexPastTheEnd) {
+    // The row offset ``i * columns`` is read straight out of the descriptor
+    // matrix, so an out-of-range index answers about a nonexistent molecule.
+    DescriptorComparison comparison(mols_);
+    try {
+        comparison.Compare(0, 1000000);
+        FAIL() << "expected ComparisonError";
+    } catch (const ComparisonError& error) {
+        const std::string message(error.what());
+        EXPECT_NE(message.find("1000000"), std::string::npos) << message;
+        EXPECT_NE(message.find("5 items"), std::string::npos) << message;
+    }
+    EXPECT_THROW(comparison.Compare(1000000, 0), ComparisonError);
+    EXPECT_THROW(comparison.Compare(mols_.size(), mols_.size()), ComparisonError);
+}
+
 TEST_F(DescriptorComparisonTest, PDistAgreesWithCompare) {
     DescriptorComparison comparison(mols_);
     DenseStorage storage(mols_.size());

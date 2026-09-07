@@ -7,6 +7,7 @@
 #include "oecluster/Error.h"
 #include <oechem.h>
 #include <cmath>
+#include <string>
 
 using namespace OECluster;
 
@@ -37,6 +38,25 @@ TEST_F(FingerprintComparisonTest, ConstructAndSize) {
     FingerprintComparison comparison(mols_);
     EXPECT_EQ(comparison.Size(), 3);
     EXPECT_EQ(comparison.ComparisonName(), "fingerprint");
+}
+
+TEST_F(FingerprintComparisonTest, CompareRefusesAnIndexPastTheEnd) {
+    // Compare is the one index-taking method on this class that SWIG exports,
+    // so the unchecked read was reachable from Python. Measured before the
+    // guard: Compare(1000000, 1000001) on a two-molecule comparison returned
+    // 0.0, which reads as "identical" rather than as a failure.
+    FingerprintComparison comparison(mols_);
+    try {
+        comparison.Compare(0, 1000000);
+        FAIL() << "expected ComparisonError";
+    } catch (const ComparisonError& error) {
+        const std::string message(error.what());
+        EXPECT_NE(message.find("1000000"), std::string::npos) << message;
+        EXPECT_NE(message.find("3 items"), std::string::npos) << message;
+    }
+    EXPECT_THROW(comparison.Compare(1000000, 0), ComparisonError);
+    // One past the end, where the read would have stayed inside the allocation.
+    EXPECT_THROW(comparison.Compare(3, 3), ComparisonError);
 }
 
 TEST_F(FingerprintComparisonTest, SimilarMoleculesCloser) {

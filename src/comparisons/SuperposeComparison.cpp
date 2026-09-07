@@ -9,6 +9,7 @@
 #include <oebio.h>
 #include <oespruce.h>
 #include <oeselect/oeselect.h>
+#include "IndexRange.h"
 #include "oecluster/Error.h"
 
 namespace OECluster {
@@ -223,6 +224,13 @@ SuperposeComparison::~SuperposeComparison() = default;
 // ---------------------------------------------------------------------------
 
 double SuperposeComparison::Compare(size_t i, size_t j) {
+    // Bounded on whichever container this comparison was built over: the two
+    // are never both populated, so bounding on the wrong one would admit every
+    // index.
+    detail::check_compare_index_range(
+        "SuperposeComparison", i, j,
+        shared_->use_dus ? shared_->dus.size() : shared_->mols.size());
+
     // SetupRef with predicate
     // When predicates are used with design units, extract the protein and use
     // the molecule-based API so OESelect is bound to the same molecule instance

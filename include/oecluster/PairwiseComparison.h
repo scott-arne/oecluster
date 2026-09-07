@@ -34,6 +34,10 @@ public:
      * The returned scalar follows the comparison's configured output mode,
      * usually distance or similarity.
      *
+     * Both indices must name items the comparison holds. Every concrete
+     * comparison in this library refuses an index at or beyond ``Size()`` with
+     * ``ComparisonError`` rather than reading past its container.
+     *
      * :param i: Index of first item.
      * :param j: Index of second item.
      * :returns: Comparison value between items i and j.

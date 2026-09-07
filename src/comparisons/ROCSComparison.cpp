@@ -10,6 +10,7 @@
 #include <cmath>
 #include <oechem.h>
 #include <oeshape.h>
+#include "IndexRange.h"
 #include "oecluster/Error.h"
 
 namespace OECluster {
@@ -321,6 +322,8 @@ void ROCSComparison::MeasureDiagonal(SharedData& target) {
 }
 
 double ROCSComparison::Compare(size_t i, size_t j) {
+    detail::check_compare_index_range("ROCSComparison", i, j, shared_->mols.size());
+
     local_->overlay.SetupRef(*shared_->mols[i]);
 
     OEShape::OEBestOverlayScore score;

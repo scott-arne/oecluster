@@ -4,6 +4,7 @@
  */
 
 #include <cmath>
+#include <string>
 #include <gtest/gtest.h>
 #include "oecluster/oecluster.h"
 #include "oecluster/comparisons/SuperposeComparison.h"
@@ -46,6 +47,23 @@ TEST_F(SuperposeComparisonDUTest, GlobalCarbonAlpha_RMSD) {
     double d = comparison.Compare(0, 1);
     EXPECT_GT(d, 0.0);
     EXPECT_TRUE(std::isfinite(d));
+}
+
+TEST_F(SuperposeComparisonDUTest, CompareRefusesAnIndexPastTheEnd) {
+    // Bounded on the design-unit vector here, and on the molecule vector when
+    // the comparison was built from molecules; only one of the two is ever
+    // populated.
+    SuperposeComparison comparison(dus_);
+    try {
+        comparison.Compare(0, 1000000);
+        FAIL() << "expected ComparisonError";
+    } catch (const ComparisonError& error) {
+        const std::string message(error.what());
+        EXPECT_NE(message.find("1000000"), std::string::npos) << message;
+        EXPECT_NE(message.find("2 items"), std::string::npos) << message;
+    }
+    EXPECT_THROW(comparison.Compare(1000000, 0), ComparisonError);
+    EXPECT_THROW(comparison.Compare(dus_.size(), dus_.size()), ComparisonError);
 }
 
 TEST_F(SuperposeComparisonDUTest, Global_RMSD) {

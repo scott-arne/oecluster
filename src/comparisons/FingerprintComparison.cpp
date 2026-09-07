@@ -15,6 +15,7 @@
 #include "oecluster/Error.h"
 #include "oecluster/PDist.h"
 #include "oecluster/StorageBackend.h"
+#include "IndexRange.h"
 #include "KernelOptions.h"
 #include "MetricTable.h"
 
@@ -341,6 +342,8 @@ FingerprintComparison::FingerprintComparison(std::shared_ptr<const Impl> impl)
 // ---------------------------------------------------------------------------
 
 double FingerprintComparison::Compare(size_t i, size_t j) {
+    detail::check_compare_index_range("FingerprintComparison", i, j, pimpl_->holder->Size());
+
     return pimpl_->holder->ComparePair(i, j, pimpl_->metric);
 }
 

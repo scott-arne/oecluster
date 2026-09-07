@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <string>
 #include <utility>
 #include <gtest/gtest.h>
 #include <oechem.h>
@@ -229,6 +230,22 @@ TEST_F(RMSDComparisonTest, SelfDistanceIsZero) {
     for (size_t i = 0; i < mols_.size(); ++i) {
         EXPECT_NEAR(comparison.Compare(i, i), 0.0, 1e-6);
     }
+}
+
+TEST_F(RMSDComparisonTest, CompareRefusesAnIndexPastTheEnd) {
+    // OERMSD is handed ``*shared_->mols[i]``, so an out-of-range index
+    // dereferences whatever the vector's storage runs into.
+    RMSDComparison comparison(mols_);
+    try {
+        comparison.Compare(0, 1000000);
+        FAIL() << "expected ComparisonError";
+    } catch (const ComparisonError& error) {
+        const std::string message(error.what());
+        EXPECT_NE(message.find("1000000"), std::string::npos) << message;
+        EXPECT_NE(message.find("4 items"), std::string::npos) << message;
+    }
+    EXPECT_THROW(comparison.Compare(1000000, 0), ComparisonError);
+    EXPECT_THROW(comparison.Compare(mols_.size(), mols_.size()), ComparisonError);
 }
 
 TEST_F(RMSDComparisonTest, InFrameRMSDIsTheTranslation) {

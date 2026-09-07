@@ -101,6 +101,22 @@ TEST_F(ROCSComparisonTest, ConstructAndSize) {
     EXPECT_EQ(comparison.ComparisonName(), "rocs");
 }
 
+TEST_F(ROCSComparisonTest, CompareRefusesAnIndexPastTheEnd) {
+    // SetupRef dereferences ``*shared_->mols[i]`` before the overlay runs, so
+    // an out-of-range index is an out-of-bounds read on the molecule vector.
+    ROCSComparison comparison(mols_);
+    try {
+        comparison.Compare(0, 1000000);
+        FAIL() << "expected ComparisonError";
+    } catch (const ComparisonError& error) {
+        const std::string message(error.what());
+        EXPECT_NE(message.find("1000000"), std::string::npos) << message;
+        EXPECT_NE(message.find("3 items"), std::string::npos) << message;
+    }
+    EXPECT_THROW(comparison.Compare(1000000, 0), ComparisonError);
+    EXPECT_THROW(comparison.Compare(mols_.size(), mols_.size()), ComparisonError);
+}
+
 TEST_F(ROCSComparisonTest, DistanceRange) {
     ROCSComparison comparison(mols_);
     for (size_t i = 0; i < 3; ++i) {

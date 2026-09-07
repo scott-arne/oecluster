@@ -14,6 +14,7 @@
 #include <oechem.h>
 #include <oefp/oefp.h>
 #include "../DescriptorBuild.h"
+#include "IndexRange.h"
 #include "KernelOptions.h"
 #include "MetricTable.h"
 #include "oecluster/CDist.h"
@@ -427,6 +428,8 @@ void note_non_finite(const double* values, size_t count, std::atomic<bool>& flag
 }  // namespace
 
 double DescriptorComparison::Compare(size_t i, size_t j) {
+    detail::check_compare_index_range("DescriptorComparison", i, j, pimpl_->matrix.rows);
+
     const size_t columns = pimpl_->matrix.columns;
     std::vector<double> values(2 * columns);
     std::vector<std::uint8_t> validity(2 * columns);
