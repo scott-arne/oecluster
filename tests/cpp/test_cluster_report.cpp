@@ -400,3 +400,28 @@ TEST(ClusterReportTest, FusionEquivalenceMinimaxBaseline) {
     EXPECT_EQ(r.coverage_at[1], 0.5);
     EXPECT_EQ(r.coverage_at[2], 0.5);
 }
+
+// The new surface defaults to "nobody asked for anything", so an existing
+// caller who never mentions the flags gets an empty table and a requested
+// struct that says so. Section 4.3: the struct records the request, not the
+// outcome.
+TEST(ClusterReportTest, NewSurfaceDefaultsToUnrequested) {
+    const ClusterReportOptions options;
+    EXPECT_FALSE(options.compute_pair_rank_indices);
+    EXPECT_FALSE(options.compute_per_cluster_records);
+
+    const DenseStorage storage = MakeSixPointStorage();
+    const ClusteringResult result = MakeResult({0, 0, 0, 1, 1, 1});
+    const ClusterReport r = cluster_report(result, storage, options);
+
+    EXPECT_TRUE(r.records.empty());
+    EXPECT_FALSE(r.requested.pair_rank_indices);
+    EXPECT_FALSE(r.requested.per_cluster_records);
+    EXPECT_EQ(NO_NEAREST_CLUSTER, -1);
+
+    // A default-constructed record carries the section 4.4 initialisers.
+    const ClusterRecord record;
+    EXPECT_EQ(record.label, 0);
+    EXPECT_EQ(record.size, 0u);
+    EXPECT_EQ(record.nearest_cluster, NO_NEAREST_CLUSTER);
+}

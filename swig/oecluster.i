@@ -810,6 +810,12 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, _oecluster_is_oereceptor, "
     } catch (const OECluster::OEClusterError& e) {
         Py_BLOCK_THREADS
         SWIG_exception(SWIG_RuntimeError, e.what());
+    } catch (const std::bad_alloc&) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_MemoryError, "cluster_report: out of memory");
+    } catch (const std::length_error& e) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_MemoryError, e.what());
     } catch (const std::exception& e) {
         Py_BLOCK_THREADS
         SWIG_exception(SWIG_RuntimeError, e.what());
@@ -1180,6 +1186,7 @@ public:
 %include "oecluster/clustering/Butina.h"
 %include "oecluster/clustering/Representative.h"
 %template(ClusterRepresentativeVector) std::vector<OECluster::ClusterRepresentative>;
+%template(ClusterRecordVector) std::vector<OECluster::ClusterRecord>;
 %include "oecluster/clustering/ClusterReport.h"
 %include "oecluster/clustering/DBSCAN.h"
 %include "oecluster/clustering/HDBSCAN.h"
