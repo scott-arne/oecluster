@@ -912,7 +912,8 @@ detail::PairRankIndices BruteForcePairRank(
 // Section 7.1 items 2 and 4. The brute-force reference is the whole point: it
 // recomputes gamma by the O(P_w * P_b) definition and c_index by explicitly
 // sorting all pooled pairs, so it shares no code path with the run-at-a-time
-// walk it checks. Item 4 asks for exactly this on c_index.
+// walk it checks. Item 4 asks for exactly this on c_index. The oracle shares
+// the naive three-sum formulation, so it cannot be used on near-tied inputs.
 TEST(InternalIndicesTest, PairRankMatchesBruteForce) {
     const std::vector<double> within{0.2, 0.35, 0.5, 0.1};
     const std::vector<double> between{0.6, 0.15, 0.9, 0.45, 0.7};
@@ -921,16 +922,16 @@ TEST(InternalIndicesTest, PairRankMatchesBruteForce) {
     // Gamma is a ratio of two exactly-represented integer counts, so both
     // routes land on the identical double and exact equality is honest.
     EXPECT_DOUBLE_EQ(got.baker_hubert_gamma, want.baker_hubert_gamma);
-    // C-index is not, and must not be compared that way. The reference sums
-    // `within` in its original order while pair_rank_indices sums it after
-    // sorting; on this fixture the two sums differ by one ULP, which the
-    // division amplifies to five -- past EXPECT_DOUBLE_EQ's four-ULP budget.
-    // Measured, not estimated: 0.18421052631578951897 against
-    // 0.18421052631578938019 under clang -O2. The tolerance is absolute, and
-    // the nearest real disagreement is nowhere near it: the smallest
-    // single-element misselection this fixture admits -- taking 0.45 rather
-    // than 0.5 into S_max -- moves c_index to 0.18918918918918914, a shift of
-    // 5e-3, some ten orders of magnitude above 1e-12.
+    // C-index is not, and must not be compared that way. The two routes
+    // accumulate different sequences of differences, and the divergence is a
+    // property of this particular fixture's summation orders rather than a
+    // bound that holds for every input. Measured: 0.18421052631578946 against
+    // 0.18421052631578952, two ULP apart and comfortably inside the tolerance.
+    // The tolerance is absolute, and the nearest real disagreement is nowhere
+    // near it: the smallest single-element misselection this fixture admits --
+    // taking 0.45 rather than 0.5 into S_max -- moves c_index to
+    // 0.18918918918918914, a shift of 5e-3, some ten orders of magnitude above
+    // 1e-12.
     EXPECT_NEAR(got.c_index, want.c_index, 1e-12);
 }
 
@@ -983,6 +984,38 @@ TEST(InternalIndicesTest, PairRankCIndexExhaustsBetweenInBothWalks) {
     // S_w = 2.0, S_min = 1.6, S_max = 2.4, so the index is one half.
     EXPECT_NEAR(got.c_index, 0.5, 1e-12);
     EXPECT_NEAR(got.c_index, want.c_index, 1e-12);
+}
+
+// Section 5.4, near-tied arm. S_w, S_min and S_max agree to within one ULP
+// here, so a c_index built by differencing them afterwards loses the entire
+// quantity it is trying to measure: exact S_min is 2 - 2^-53, which is the
+// midpoint between two doubles and rounds to the same 2.0 as S_max, and the
+// index came out NaN instead of 1. Fingerprint distances are frequently
+// near-constant, so this is the shape of a real dataset and not only of an
+// adversarial one. BruteForcePairRank is deliberately not the oracle: it sums
+// the same way and returns NaN on this input too.
+TEST(InternalIndicesTest, PairRankCIndexSurvivesNearTiedDistances) {
+    const double just_below_one = std::nextafter(1.0, 0.0);
+    const std::vector<double> within{1.0, 1.0};
+    const std::vector<double> between{just_below_one, 1.0, 1.0, 1.0};
+    const detail::PairRankIndices got = detail::pair_rank_indices(within, between);
+    // Every within-distance is at the top of the pooled range, so the index is
+    // at its worst-case value, and the gap formulation reaches it exactly.
+    EXPECT_DOUBLE_EQ(got.c_index, 1.0);
+}
+
+// Section 5.4, lower endpoint. Every within-distance is below every
+// between-distance, so the within-pairs already are the smallest pooled pairs
+// and the index is 0 -- a real, defined, best-case score. It is the only
+// fixture that separates "the denominator is zero" from "the numerator is
+// zero", and reporting NaN for a perfectly separated clustering would be
+// exactly the over-refusal this branch treats as a defect.
+TEST(InternalIndicesTest, PairRankCIndexIsZeroForPerfectSeparation) {
+    const std::vector<double> within{0.1, 0.2};
+    const std::vector<double> between{0.8, 0.9};
+    const detail::PairRankIndices got = detail::pair_rank_indices(within, between);
+    EXPECT_FALSE(std::isnan(got.c_index));
+    EXPECT_DOUBLE_EQ(got.c_index, 0.0);
 }
 
 // Section 7.1 item 3. A couple whose two distances are equal contributes to
@@ -1087,6 +1120,53 @@ TEST(InternalIndicesTest, PopulationStddevIsZeroBelowTwoValues) {
     detail::DistanceMoments one;
     one.Add(0.42);
     EXPECT_DOUBLE_EQ(detail::population_stddev(one), 0.0);
+}
+
+// Section 5.3, the reason DistanceMoments is Welford at all. On a
+// near-constant stream -- the common case for fingerprint distances -- the
+// naive sqrt(sum_sq/n - mean^2) subtracts two quantities that agree to more
+// digits than a double carries. Measured on this fixture its radicand comes out
+// at -6.25e-18 and the result is NaN, where Welford lands on the right answer.
+// WelfordMergeMatchesSinglePass cannot see that: its fixture is well
+// conditioned enough that both formulations agree to 5.6e-17.
+TEST(InternalIndicesTest, PopulationStddevSurvivesNearConstantValues) {
+    detail::DistanceMoments moments;
+    for (const double value : {1.0 - 1e-8, 1.0, 1.0, 1.0}) {
+        moments.Add(value);
+    }
+    // The closed form is sqrt(3)/4 * 1e-8 = 4.330127018922193e-09; the computed
+    // value differs from it at 1.8e-17 because 1 - 1e-8 is not exact in binary,
+    // so the assertion is against the measured double. The tolerance is far
+    // above any reassociation or FMA-contraction difference and far below the
+    // gap to any wrong answer -- the naive form does not miss by a little here,
+    // it returns NaN.
+    EXPECT_NEAR(detail::population_stddev(moments), 4.3301270006183164e-09, 1e-16);
+}
+
+// Section 5.3. The short-circuits exist because Chan's update divides by the
+// combined count and would produce NaN on an empty operand, and cluster_report
+// merges per-cluster streams of which some can legitimately be empty. Both
+// orders are checked: returning the wrong operand is the natural way to write
+// this wrong, and it is invisible unless one side is empty.
+TEST(InternalIndicesTest, MergeMomentsPassesThroughEmptyStreams) {
+    detail::DistanceMoments filled;
+    filled.Add(0.25);
+    filled.Add(0.75);
+    const detail::DistanceMoments empty;
+
+    const detail::DistanceMoments left = detail::merge_moments(empty, filled);
+    EXPECT_EQ(left.count, 2u);
+    EXPECT_DOUBLE_EQ(left.mean, 0.5);
+    EXPECT_DOUBLE_EQ(left.m2, 0.125);
+
+    const detail::DistanceMoments right = detail::merge_moments(filled, empty);
+    EXPECT_EQ(right.count, 2u);
+    EXPECT_DOUBLE_EQ(right.mean, 0.5);
+    EXPECT_DOUBLE_EQ(right.m2, 0.125);
+
+    const detail::DistanceMoments neither = detail::merge_moments(empty, empty);
+    EXPECT_EQ(neither.count, 0u);
+    EXPECT_DOUBLE_EQ(detail::population_stddev(neither), 0.0);
 }
 
 // Section 5.2. The refusal is the precondition every later index depends on:

@@ -136,47 +136,65 @@ inline PairRankIndices pair_rank_indices(
 
     PairRankIndices result;
 
-    // With no between-pairs the pooled set is `within` itself, so S_min and
-    // S_max are equal by construction and the index is undefined; the existing
-    // `sum_max != sum_min` test below cannot be trusted to notice because the
-    // two sums are only equal in exact arithmetic.
+    // With no within-pairs or no between-pairs the index is undefined by
+    // definition. Naming both here tells the reader which input to fix rather
+    // than making them derive it from a zero denominator two screens down.
     if (within_count > 0 && between_count > 0) {
-        double sum_within = 0.0;
-        for (const double distance : within) {
-            sum_within += distance;
-        }
-
-        // S_min and S_max are the sums of the within_count smallest and largest
-        // of all P distances, obtained by merge-walking the two sorted arrays
-        // inward from each end rather than materialising a merged third array.
-        double sum_min = 0.0;
+        // The two merge walks pick the within_count smallest and the
+        // within_count largest of the pooled distances, but only their index
+        // splits are needed: what the index is defined from is S_w - S_min and
+        // S_max - S_w, and each of those is a sum of differences between
+        // elements the walk left behind and elements it took in their place.
+        //
+        // Accumulating those differences rather than three separate sums is
+        // what makes this correct on real data. Distances are frequently
+        // near-constant, so S_w, S_min and S_max agree to nearly every digit a
+        // double carries; differencing them afterwards cancels away the very
+        // quantity the index measures, and when the cancellation is total the
+        // function used to report a defined index as undefined.
         size_t low_within = 0;
         size_t low_between = 0;
         for (size_t taken = 0; taken < within_count; ++taken) {
             if (low_within < within_count &&
                 (low_between >= between_count ||
                  within[low_within] <= between[low_between])) {
-                sum_min += within[low_within++];
+                ++low_within;
             } else {
-                sum_min += between[low_between++];
+                ++low_between;
             }
         }
+        // Every element the walk took is <= every element it left, so pairing
+        // the within-elements it left against the between-elements it took in
+        // ascending order gives one non-negative term per swap.
+        double lower_gap = 0.0;
+        for (size_t k = 0; k < low_between; ++k) {
+            lower_gap += within[low_within + k] - between[k];
+        }
 
-        double sum_max = 0.0;
         size_t high_within = within_count;
         size_t high_between = between_count;
         for (size_t taken = 0; taken < within_count; ++taken) {
             if (high_within > 0 &&
                 (high_between == 0 ||
                  within[high_within - 1] >= between[high_between - 1])) {
-                sum_max += within[--high_within];
+                --high_within;
             } else {
-                sum_max += between[--high_between];
+                --high_between;
             }
         }
+        const size_t taken_between = between_count - high_between;
+        double upper_gap = 0.0;
+        for (size_t k = 0; k < taken_between; ++k) {
+            upper_gap +=
+                between[between_count - 1 - k] - within[taken_between - 1 - k];
+        }
 
-        if (sum_max != sum_min) {
-            result.c_index = (sum_within - sum_min) / (sum_max - sum_min);
+        // Both gaps are sums of non-negative terms, so the sum is zero only
+        // when every term is, which is exactly S_max == S_min -- no longer a
+        // floating-point approximation of that question.
+        const double denominator = lower_gap + upper_gap;
+        if (denominator != 0.0) {
+            result.c_index = lower_gap / denominator;
         }
     }
 
