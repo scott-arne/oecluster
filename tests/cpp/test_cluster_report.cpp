@@ -856,6 +856,110 @@ TEST(ClusterReportTest, PreconditionsAcceptEveryShippedAlgorithm) {
     EXPECT_NO_THROW(cluster_report(hdbscan, storage, options));
 }
 
+// Section 5.2 precondition 2. Previously a NaN reached std::sort through
+// median_distance(intra_pairs), which is undefined behaviour, so this removes a
+// hazard rather than a defined result.
+TEST(ClusterReportTest, NonFiniteDistanceIsRefused) {
+    const ClusteringResult result = MakeResult({0, 0, 0, 1, 1, 1});
+
+    // Both cases assert the offending pair, not just "not finite". A refusal
+    // that names the wrong pair, or names none, is the failure this precondition
+    // exists to prevent -- a caller who cannot find the bad cell has been
+    // refused without being helped. INVARIANT 1.
+    DenseStorage nan_storage = MakeSixPointStorage();
+    nan_storage.Set(1, 2, std::numeric_limits<double>::quiet_NaN());
+    try {
+        cluster_report(result, nan_storage, ClusterReportOptions());
+        FAIL() << "expected std::invalid_argument";
+    } catch (const std::invalid_argument& e) {
+        const std::string message(e.what());
+        EXPECT_NE(message.find("not finite"), std::string::npos) << message;
+        // Read by the intra pass, which walks cluster {0,1,2} in ascending
+        // member order, so 1 is named before 2.
+        EXPECT_NE(message.find("samples 1 and 2"), std::string::npos) << message;
+    }
+
+    // A cross-cluster pair, reached by the cross pass rather than the intra one.
+    DenseStorage inf_storage = MakeSixPointStorage();
+    inf_storage.Set(0, 4, std::numeric_limits<double>::infinity());
+    try {
+        cluster_report(result, inf_storage, ClusterReportOptions());
+        FAIL() << "expected std::invalid_argument";
+    } catch (const std::invalid_argument& e) {
+        const std::string message(e.what());
+        EXPECT_NE(message.find("not finite"), std::string::npos) << message;
+        EXPECT_NE(message.find("samples 0 and 4"), std::string::npos) << message;
+    }
+}
+
+// A noise point's distance to a representative is not an intra pair and not a
+// cross pair, but the coverage scan below reads it, so it is covered too.
+// Cluster {0,1,2} has representative 0 and cluster {3,4} has representative 3,
+// so (5, 0) is one of the four reads that scan makes for sample 5.
+TEST(ClusterReportTest, NonFiniteNoiseToRepresentativeDistanceIsRefused) {
+    DenseStorage storage = MakeSixPointStorage();
+    storage.Set(0, 5, std::numeric_limits<double>::quiet_NaN());
+    const ClusteringResult result = MakeResult({0, 0, 0, 1, 1, -1});
+    try {
+        cluster_report(result, storage, ClusterReportOptions());
+        FAIL() << "expected std::invalid_argument";
+    } catch (const std::invalid_argument& e) {
+        const std::string message(e.what());
+        EXPECT_NE(message.find("not finite"), std::string::npos) << message;
+        // checked_distance(storage, point, representative), so the noise point
+        // is named first.
+        EXPECT_NE(message.find("samples 5 and 0"), std::string::npos) << message;
+    }
+}
+
+// The complement, and the boundary of the precondition: sample 1 is a member of
+// cluster {0,1,2} but not its representative, and sample 5 is noise, so no
+// reported value reads d(1, 5). The intra pass covers only within-cluster
+// pairs, the cross pass only clustered-to-clustered, and the coverage scan only
+// sample-to-representative.
+//
+// cluster_representative does read d(1, 5) -- its external-neighbour scan
+// (Representative.cpp:81-92) touches every item outside the candidate's cluster
+// through a raw storage.Get -- but the value it produces cannot reach the
+// report: nearest_external_distance and silhouette_like_score are written into
+// RepresentativeMetrics and then read by nothing. representative_score
+// (Representative.cpp:179-198) consults neither for any of the four methods,
+// rank_representatives sorts on score alone, and cluster_representative returns
+// ranked.front().member and discards the metrics. So the report below is fully
+// determined, and refusing it would be over-refusal. INVARIANT 3.
+//
+// median_medoid_member_distance is the assertion because it is the field a
+// changed representative would move: 0.2 for representatives 0 and 3, but 0.25
+// if the NaN pushed cluster {0,1,2} onto member 1.
+TEST(ClusterReportTest, NonFiniteDistanceNoReportedValueReadsIsAccepted) {
+    DenseStorage storage = MakeSixPointStorage();
+    storage.Set(1, 5, std::numeric_limits<double>::quiet_NaN());
+    const ClusteringResult result = MakeResult({0, 0, 0, 1, 1, -1});
+    const ClusterReport report =
+        cluster_report(result, storage, ClusterReportOptions());
+    EXPECT_EQ(report.num_noise, 1u);
+    EXPECT_DOUBLE_EQ(report.median_medoid_member_distance, 0.2);
+}
+
+// The structural precondition is reported first when a call is wrong for both
+// reasons: a caller fixes the partition before the matrix means anything.
+// INVARIANT 1.
+TEST(ClusterReportTest, PartitionErrorOutranksNonFiniteDistance) {
+    DenseStorage storage = MakeSixPointStorage();
+    storage.Set(1, 2, std::numeric_limits<double>::quiet_NaN());
+    const ClusteringResult result(
+        std::vector<ClusterLabel>{0, 0, 0, 1, 1, 1}, Clusters{{0, 1, 2}, {2, 3, 4}});
+    try {
+        cluster_report(result, storage, ClusterReportOptions());
+        FAIL() << "expected std::invalid_argument";
+    } catch (const std::invalid_argument& e) {
+        EXPECT_NE(std::string(e.what()).find("sample 2"), std::string::npos)
+            << e.what();
+        EXPECT_EQ(std::string(e.what()).find("not finite"), std::string::npos)
+            << e.what();
+    }
+}
+
 // Section 7.1 item 2. The tie-aware merge is the riskiest code in A1, so it is
 // checked against the definition it implements rather than against itself.
 namespace {

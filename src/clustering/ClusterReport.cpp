@@ -13,6 +13,7 @@
 
 #include "ClusterMetrics.h"
 #include "DistanceAccess.h"
+#include "InternalIndices.h"
 
 namespace OECluster {
 
@@ -76,35 +77,6 @@ double size_gini(const std::vector<double>& sizes) {
 
 double nan_value() {
     return std::numeric_limits<double>::quiet_NaN();
-}
-
-// Mean distance from `point` to every member of `cluster` except itself.
-double mean_to_cluster(
-    const size_t point,
-    const Cluster& cluster,
-    const StorageBackend& storage) {
-    double total = 0.0;
-    size_t count = 0;
-    for (const size_t member : cluster) {
-        if (member != point) {
-            total += storage.Get(point, member);
-            ++count;
-        }
-    }
-    return count == 0 ? 0.0 : total / static_cast<double>(count);
-}
-
-double min_inter_cluster_distance(
-    const Cluster& a,
-    const Cluster& b,
-    const StorageBackend& storage) {
-    double smallest = std::numeric_limits<double>::infinity();
-    for (const size_t i : a) {
-        for (const size_t j : b) {
-            smallest = std::min(smallest, storage.Get(i, j));
-        }
-    }
-    return smallest;
 }
 
 double size_entropy(const std::vector<double>& sizes) {
@@ -292,27 +264,107 @@ ClusterReport cluster_report(
     }
 
     if (!members.empty()) {
-        // Intra-cluster pair distances, radii, diameters.
+        const size_t cluster_count = members.size();
+
+        // ---- Intra pass: once per cluster. ----
         std::vector<double> intra_pairs;
         std::vector<double> radii;
         std::vector<double> diameters;
+        std::vector<double> medoid_member_means;
+        radii.reserve(cluster_count);
+        diameters.reserve(cluster_count);
+        medoid_member_means.reserve(cluster_count);
+
+        std::vector<size_t> representatives;
+        std::vector<size_t> true_medoids;
+        representatives.reserve(cluster_count);
+        true_medoids.reserve(cluster_count);
+
+        std::vector<double> cluster_intra_sums(cluster_count, 0.0);
+        std::vector<size_t> cluster_intra_counts(cluster_count, 0);
+        std::vector<double> medoid_scatter(cluster_count, 0.0);
+        std::vector<double> medoid_square_sums(cluster_count, 0.0);
+
+        std::vector<double> own_mean(labels.size(), 0.0);
+        std::vector<double> point_total(labels.size(), 0.0);
+        detail::DistanceMoments within_moments;
+
         double max_diameter = 0.0;
-        for (const Cluster& cluster : members) {
+        for (size_t k = 0; k < cluster_count; ++k) {
+            const Cluster& cluster = members[k];
+            double diameter = 0.0;
             for (size_t i = 0; i < cluster.size(); ++i) {
                 for (size_t j = i + 1; j < cluster.size(); ++j) {
-                    intra_pairs.push_back(storage.Get(cluster[i], cluster[j]));
+                    const double distance =
+                        detail::checked_distance(storage, cluster[i], cluster[j]);
+                    intra_pairs.push_back(distance);
+                    within_moments.Add(distance);
+                    diameter = std::max(diameter, distance);
+                    cluster_intra_sums[k] += distance;
+                    ++cluster_intra_counts[k];
+                    // Accumulated onto both endpoints in ascending partner
+                    // order, which is the order mean_to_cluster used to sum in,
+                    // so the silhouette's a term is bit-identical to 5.0.0's.
+                    own_mean[cluster[i]] += distance;
+                    own_mean[cluster[j]] += distance;
                 }
             }
-            const size_t medoid =
-                cluster_representative(cluster, storage, options.representative_method);
-            double radius = 0.0;
-            for (const size_t member : cluster) {
-                radius = std::max(radius, storage.Get(medoid, member));
-            }
-            radii.push_back(radius);
-            const double diameter = detail::cluster_diameter(cluster, storage);
             diameters.push_back(diameter);
             max_diameter = std::max(max_diameter, diameter);
+
+            const size_t representative =
+                cluster_representative(cluster, storage, options.representative_method);
+            representatives.push_back(representative);
+
+            double radius = 0.0;
+            double representative_total = 0.0;
+            size_t representative_count = 0;
+            for (const size_t member : cluster) {
+                const double distance =
+                    detail::checked_distance(storage, representative, member);
+                radius = std::max(radius, distance);
+                if (member != representative) {
+                    representative_total += distance;
+                    ++representative_count;
+                }
+            }
+            radii.push_back(radius);
+            medoid_member_means.push_back(
+                representative_count == 0
+                    ? 0.0
+                    : representative_total / static_cast<double>(representative_count));
+
+            // The medoid-named indices always use the true medoid, whatever
+            // representative_method selected, because a field called
+            // calinski_harabasz_medoid must not be a minimax number. Under the
+            // default method the two coincide and the second selection is
+            // skipped.
+            const size_t medoid =
+                options.representative_method == RepresentativeMethod::Medoid
+                    ? representative
+                    : cluster_representative(cluster, storage, RepresentativeMethod::Medoid);
+            true_medoids.push_back(medoid);
+
+            double scatter_total = 0.0;
+            for (const size_t member : cluster) {
+                const double distance = detail::checked_distance(storage, medoid, member);
+                scatter_total += distance;
+                medoid_square_sums[k] += distance * distance;
+            }
+            // The n_k denominator, counting the medoid's own zero distance. This
+            // is deliberately not medoid_member_means, which divides by
+            // n_k - 1: reusing that field would inflate both Davies-Bouldin and
+            // the medoid Dunn variant by n_k / (n_k - 1), a factor of two at
+            // n_k == 2.
+            medoid_scatter[k] =
+                cluster.empty() ? 0.0 : scatter_total / static_cast<double>(cluster.size());
+
+            const double own_denominator = static_cast<double>(cluster.size()) - 1.0;
+            for (const size_t member : cluster) {
+                point_total[member] = own_mean[member];
+                own_mean[member] =
+                    cluster.size() > 1 ? own_mean[member] / own_denominator : 0.0;
+            }
         }
 
         report.mean_intra_distance =
@@ -321,54 +373,109 @@ ClusterReport cluster_report(
             intra_pairs.empty() ? nan_value() : detail::median_distance(intra_pairs);
         report.median_radius = detail::median_distance(radii);
         report.p95_diameter = percentile(diameters, 0.95);
+        report.median_medoid_member_distance = detail::median_distance(medoid_member_means);
 
-        // Counts all member pairs across distinct clusters within boundary_threshold;
-        // measures cluster separation quality.
+        // ---- Cross pass: once per unordered cluster pair. ----
+        // Three separate walks -- boundary violations, the silhouette b term and
+        // the Dunn separation -- become one. Every quantity below comes off the
+        // same distance read.
+        std::vector<double> best_other_mean(
+            labels.size(), std::numeric_limits<double>::infinity());
+        std::vector<double> pair_sum(labels.size(), 0.0);
+        // K-length, not K x K. A K x K matrix would be O(N^2) memory whenever
+        // the clusters are near-singletons -- exactly the HDBSCAN and Butina
+        // shapes this report is run on -- and no consumer reads a non-minimal
+        // entry: the record table wants only each cluster's nearest neighbour,
+        // and the Dunn variant wants only the global minimum mean.
+        std::vector<double> nearest_cluster_distance(
+            cluster_count, std::numeric_limits<double>::infinity());
+        std::vector<size_t> nearest_cluster(cluster_count, 0);
+        std::vector<size_t> cluster_violations(cluster_count, 0);
+        double min_mean_separation = std::numeric_limits<double>::infinity();
+        detail::DistanceMoments between_moments;
+
         size_t violations = 0;
-        for (size_t a = 0; a < members.size(); ++a) {
-            for (size_t b = a + 1; b < members.size(); ++b) {
+        double min_inter = std::numeric_limits<double>::infinity();
+        for (size_t a = 0; a < cluster_count; ++a) {
+            for (size_t b = a + 1; b < cluster_count; ++b) {
+                for (const size_t i : members[a]) {
+                    pair_sum[i] = 0.0;
+                }
+                for (const size_t j : members[b]) {
+                    pair_sum[j] = 0.0;
+                }
+
+                double pair_min = std::numeric_limits<double>::infinity();
+                double pair_total = 0.0;
+                size_t pair_violations = 0;
                 for (const size_t i : members[a]) {
                     for (const size_t j : members[b]) {
-                        if (storage.Get(i, j) <= options.boundary_threshold) {
-                            ++violations;
+                        const double distance = detail::checked_distance(storage, i, j);
+                        between_moments.Add(distance);
+                        pair_min = std::min(pair_min, distance);
+                        pair_total += distance;
+                        if (distance <= options.boundary_threshold) {
+                            ++pair_violations;
                         }
+                        pair_sum[i] += distance;
+                        pair_sum[j] += distance;
                     }
+                }
+
+                violations += pair_violations;
+                min_inter = std::min(min_inter, pair_min);
+
+                const double size_a = static_cast<double>(members[a].size());
+                const double size_b = static_cast<double>(members[b].size());
+                const double pair_count = size_a * size_b;
+                const double mean_cross = pair_count > 0.0 ? pair_total / pair_count : 0.0;
+                min_mean_separation = std::min(min_mean_separation, mean_cross);
+
+                // This loop visits cluster k's partners in strictly ascending
+                // ordinal order -- 0..k-1 while k is the inner b, then
+                // k+1..K-1 while k is the outer a -- so a strict < keeps the
+                // lowest-ordinal winner on a tie, matching the documented rule
+                // without a second scan.
+                if (pair_min < nearest_cluster_distance[a]) {
+                    nearest_cluster_distance[a] = pair_min;
+                    nearest_cluster[a] = b;
+                }
+                if (pair_min < nearest_cluster_distance[b]) {
+                    nearest_cluster_distance[b] = pair_min;
+                    nearest_cluster[b] = a;
+                }
+                cluster_violations[a] += pair_violations;
+                cluster_violations[b] += pair_violations;
+
+                for (const size_t i : members[a]) {
+                    best_other_mean[i] = std::min(best_other_mean[i], pair_sum[i] / size_b);
+                    point_total[i] += pair_sum[i];
+                }
+                for (const size_t j : members[b]) {
+                    best_other_mean[j] = std::min(best_other_mean[j], pair_sum[j] / size_a);
+                    point_total[j] += pair_sum[j];
                 }
             }
         }
         report.boundary_violations = violations;
 
-        if (members.size() >= 2) {
-            // True mean per-point silhouette over clustered points.
+        if (cluster_count >= 2) {
             double silhouette_sum = 0.0;
             size_t silhouette_count = 0;
-            for (size_t k = 0; k < members.size(); ++k) {
-                for (const size_t point : members[k]) {
-                    const double a = mean_to_cluster(point, members[k], storage);
-                    double b = std::numeric_limits<double>::infinity();
-                    for (size_t other = 0; other < members.size(); ++other) {
-                        if (other != k) {
-                            b = std::min(b, mean_to_cluster(point, members[other], storage));
-                        }
-                    }
-                    const double denom = std::max(a, b);
-                    silhouette_sum += denom == 0.0 ? 0.0 : (b - a) / denom;
+            for (const Cluster& cluster : members) {
+                for (const size_t point : cluster) {
+                    const double a_term = own_mean[point];
+                    const double b_term = best_other_mean[point];
+                    const double denominator = std::max(a_term, b_term);
+                    silhouette_sum += denominator == 0.0
+                        ? 0.0
+                        : (b_term - a_term) / denominator;
                     ++silhouette_count;
                 }
             }
             report.silhouette = silhouette_count == 0
                 ? nan_value()
                 : silhouette_sum / static_cast<double>(silhouette_count);
-
-            // Dunn index: min inter-cluster distance / max intra diameter.
-            double min_inter = std::numeric_limits<double>::infinity();
-            for (size_t a = 0; a < members.size(); ++a) {
-                for (size_t b = a + 1; b < members.size(); ++b) {
-                    min_inter = std::min(
-                        min_inter,
-                        min_inter_cluster_distance(members[a], members[b], storage));
-                }
-            }
             report.dunn_index =
                 max_diameter == 0.0 ? nan_value() : min_inter / max_diameter;
         } else {
@@ -376,51 +483,48 @@ ClusterReport cluster_report(
             report.dunn_index = nan_value();
         }
 
-        // Representative / coverage.
-        // Medoids are re-selected here (also computed above for radii); kept as a
-        // separate pass for sub-block clarity. The cost is dominated by the O(N^2)
-        // silhouette/coverage work below.
-        std::vector<size_t> medoids;
-        medoids.reserve(members.size());
-        std::vector<double> medoid_member_means;
-        medoid_member_means.reserve(members.size());
-        for (const Cluster& cluster : members) {
-            const size_t medoid =
-                cluster_representative(cluster, storage, options.representative_method);
-            medoids.push_back(medoid);
-            medoid_member_means.push_back(mean_to_cluster(medoid, cluster, storage));
-        }
-        report.median_medoid_member_distance = detail::median_distance(medoid_member_means);
-
-        if (medoids.size() >= 2) {
-            std::vector<double> nearest_medoid;
-            nearest_medoid.reserve(medoids.size());
-            for (size_t i = 0; i < medoids.size(); ++i) {
+        // ---- Finalize. ----
+        if (representatives.size() >= 2) {
+            std::vector<double> nearest_representative_distance;
+            nearest_representative_distance.reserve(representatives.size());
+            for (size_t i = 0; i < representatives.size(); ++i) {
                 double smallest = std::numeric_limits<double>::infinity();
-                for (size_t j = 0; j < medoids.size(); ++j) {
+                for (size_t j = 0; j < representatives.size(); ++j) {
                     if (i != j) {
-                        smallest = std::min(smallest, storage.Get(medoids[i], medoids[j]));
+                        smallest = std::min(
+                            smallest,
+                            detail::checked_distance(
+                                storage, representatives[i], representatives[j]));
                     }
                 }
-                nearest_medoid.push_back(smallest);
+                nearest_representative_distance.push_back(smallest);
             }
-            report.representative_redundancy = detail::median_distance(nearest_medoid);
+            report.representative_redundancy =
+                detail::median_distance(nearest_representative_distance);
         } else {
             report.representative_redundancy = nan_value();
         }
 
-        // Coverage: fraction of ALL samples within threshold of some medoid.
-        if (report.num_samples > 0 && !medoids.empty()) {
+        // Each sample's distance to its nearest configured representative,
+        // computed once. Every coverage threshold is then a scan of this vector,
+        // O(T*N) rather than the O(T*N*K) the per-threshold recomputation cost.
+        std::vector<double> nearest_representative(
+            report.num_samples, std::numeric_limits<double>::infinity());
+        if (report.num_samples > 0 && !representatives.empty()) {
+            for (size_t point = 0; point < report.num_samples; ++point) {
+                for (const size_t representative : representatives) {
+                    nearest_representative[point] = std::min(
+                        nearest_representative[point],
+                        detail::checked_distance(storage, point, representative));
+                }
+            }
+
             report.coverage_at.assign(options.coverage_thresholds.size(), 0.0);
             for (size_t t = 0; t < options.coverage_thresholds.size(); ++t) {
                 const double threshold = options.coverage_thresholds[t];
                 size_t covered = 0;
                 for (size_t point = 0; point < report.num_samples; ++point) {
-                    double nearest = std::numeric_limits<double>::infinity();
-                    for (const size_t medoid : medoids) {
-                        nearest = std::min(nearest, storage.Get(point, medoid));
-                    }
-                    if (nearest <= threshold) {
+                    if (nearest_representative[point] <= threshold) {
                         ++covered;
                     }
                 }

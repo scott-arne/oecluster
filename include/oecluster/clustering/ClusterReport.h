@@ -203,7 +203,8 @@ struct ClusterReportComparison {
  *     two clusters, a member whose Labels() entry disagrees with the cluster
  *     holding it, a clustered sample omitted from every member list, a
  *     non-noise label naming no cluster, or a noise-labelled sample sitting
- *     inside a cluster.
+ *     inside a cluster; or if any distance that reaches a reported value is
+ *     not finite.
  * :raises std::out_of_range: If a cluster member is at or beyond
  *     storage.NumSamples(); if a cluster member is at or beyond Labels().size();
  *     or if result has at least one cluster and labels more samples than storage
