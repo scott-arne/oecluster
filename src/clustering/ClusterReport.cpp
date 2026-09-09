@@ -8,6 +8,8 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <stdexcept>
+#include <string>
 
 #include "ClusterMetrics.h"
 #include "DistanceAccess.h"
@@ -190,16 +192,69 @@ ClusterReport cluster_report(
     report.size_gini = size_gini(sizes);
     report.size_entropy = size_entropy(sizes);
 
-    if (!members.empty()) {
-        // Hoisted above the first storage read. Every cluster is validated
-        // anyway further down, by cluster_representative, but only after the
-        // intra-pair loop has already asked the backend for an out-of-range
-        // pair -- so the caller was told about a storage class instead of the
-        // bad cluster member that is the error they have to fix.
-        for (const Cluster& cluster : members) {
-            detail::validate_cluster_members(cluster, storage.NumSamples());
-        }
+    // Hoisted above the first storage read. Every cluster is validated anyway
+    // further down, by cluster_representative, but only after the intra-pair
+    // loop has already asked the backend for an out-of-range pair -- so the
+    // caller was told about a storage class instead of the bad cluster member
+    // that is the error they have to fix.
+    //
+    // This runs unconditionally rather than under the members-non-empty guard
+    // it used to sit behind: labels = {0} with members = {} is exactly the
+    // disagreement being checked for, and the guard would skip it.
+    //
+    // Checking members against labels alone is not enough. Labels() and
+    // Members() must be two spellings of one partition; a one-directional check
+    // leaves a clustered sample that no cluster lists -- counted in num_samples
+    // and coverage_at, absent from every pair statistic. The owner array is
+    // also the sample-to-ordinal lookup the silhouette and the record table
+    // need later, so the check pays for itself.
+    constexpr size_t NO_OWNER = std::numeric_limits<size_t>::max();
+    std::vector<size_t> owner(labels.size(), NO_OWNER);
 
+    for (size_t k = 0; k < members.size(); ++k) {
+        detail::validate_cluster_members(members[k], storage.NumSamples());
+        for (const size_t member : members[k]) {
+            // A member can be inside the storage range and past the end of a
+            // shorter label vector; without this, reading Labels()[member]
+            // below is undefined.
+            if (member >= labels.size()) {
+                throw std::out_of_range(
+                    "cluster_report: cluster member " + std::to_string(member) +
+                    " is at or beyond the label count " +
+                    std::to_string(labels.size()));
+            }
+            if (owner[member] != NO_OWNER) {
+                throw std::invalid_argument(
+                    "cluster_report: sample " + std::to_string(member) +
+                    " appears in clusters " + std::to_string(owner[member]) +
+                    " and " + std::to_string(k));
+            }
+            owner[member] = k;
+        }
+    }
+
+    for (size_t i = 0; i < labels.size(); ++i) {
+        if (labels[i] >= 0) {
+            if (owner[i] != static_cast<size_t>(labels[i])) {
+                throw std::invalid_argument(
+                    owner[i] == NO_OWNER
+                        ? "cluster_report: sample " + std::to_string(i) +
+                              " has label " + std::to_string(labels[i]) +
+                              " but appears in no cluster"
+                        : "cluster_report: sample " + std::to_string(i) +
+                              " has label " + std::to_string(labels[i]) +
+                              " but appears in cluster " +
+                              std::to_string(owner[i]));
+            }
+        } else if (owner[i] != NO_OWNER) {
+            throw std::invalid_argument(
+                "cluster_report: sample " + std::to_string(i) +
+                " is labelled noise but appears in cluster " +
+                std::to_string(owner[i]));
+        }
+    }
+
+    if (!members.empty()) {
         // Intra-cluster pair distances, radii, diameters.
         std::vector<double> intra_pairs;
         std::vector<double> radii;

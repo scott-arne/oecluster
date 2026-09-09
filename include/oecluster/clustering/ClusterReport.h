@@ -195,13 +195,19 @@ struct ClusterReportComparison {
  * :param storage: Complete pairwise distance storage.
  * :param options: Report options (thresholds, representative method, flags).
  * :returns: A ClusterReport scorecard.
- * :raises std::invalid_argument: If storage cannot provide complete distances,
- *     if a cluster in result is empty or repeats a member, or if result has at
+ * :raises std::invalid_argument: If storage cannot provide complete distances;
+ *     if a cluster in result is empty or repeats a member; if result has at
  *     least one cluster and representative_method is HighestNeighborhood, whose
- *     neighbor threshold ClusterReportOptions has no field to supply.
+ *     neighbor threshold ClusterReportOptions has no field to supply; if
+ *     Labels() and Members() do not describe the same partition -- a sample in
+ *     two clusters, a member whose Labels() entry disagrees with the cluster
+ *     holding it, a clustered sample omitted from every member list, a
+ *     non-noise label naming no cluster, or a noise-labelled sample sitting
+ *     inside a cluster.
  * :raises std::out_of_range: If a cluster member is at or beyond
- *     storage.NumSamples(), or if result has at least one cluster and labels
- *     more samples than storage holds.
+ *     storage.NumSamples(); if a cluster member is at or beyond Labels().size();
+ *     or if result has at least one cluster and labels more samples than storage
+ *     holds.
  */
 ClusterReport cluster_report(
     const ClusteringResult& result,

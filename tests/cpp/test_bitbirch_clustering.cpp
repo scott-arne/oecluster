@@ -439,3 +439,21 @@ TEST(BitBirchFastTest, RefineIgnoresFastModeAndStaysStrict) {
     EXPECT_EQ(strict.Labels(), fast.Labels());
     EXPECT_EQ(strict.Members(), fast.Members());
 }
+
+// Section 7.1 item 9. The cluster_report preconditions must accept every
+// algorithm the library ships; BitBirch is fingerprint-native, so its arm of
+// that test lives here where the batch helpers do.
+TEST(BitBirchClusteringTest, ClusterReportAcceptsBitBirchOutput) {
+    const auto batch = make_random_batch(64, 128);
+    const auto storage = tanimoto_storage(batch);
+
+    OECluster::BitBirchOptions options;
+    options.threshold = 0.5;
+    options.branching_factor = 50;
+    options.merge_criterion = OECluster::BitBirchMergeCriterion::Diameter;
+
+    const auto result = OECluster::bitbirch_cluster(batch, options);
+    ASSERT_GE(result.NumClusters(), 2u);
+    EXPECT_NO_THROW(
+        OECluster::cluster_report(result, storage, OECluster::ClusterReportOptions()));
+}

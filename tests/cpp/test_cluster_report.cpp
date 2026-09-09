@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 #include "oecluster/StorageBackend.h"
@@ -448,4 +450,162 @@ TEST(ClusterReportTest, NewSurfaceDefaultsToUnrequested) {
     // later "consistency" cleanup of the whole struct fails loudly here.
     EXPECT_EQ(blank.silhouette, 0.0);
     EXPECT_EQ(blank.dunn_index, 0.0);
+}
+
+// Section 5.2 precondition 1, new invalid_argument refusals. Each message must
+// name the offending index: a caller with a hand-built result needs to know
+// which sample to fix, not that "something is wrong".
+TEST(ClusterReportTest, SampleInTwoClustersIsRefused) {
+    const DenseStorage storage = MakeSixPointStorage();
+    const ClusteringResult result(
+        std::vector<ClusterLabel>{0, 0, 0, 1, 1, 1}, Clusters{{0, 1, 2}, {2, 3, 4}});
+    try {
+        cluster_report(result, storage, ClusterReportOptions());
+        FAIL() << "expected std::invalid_argument";
+    } catch (const std::invalid_argument& e) {
+        EXPECT_NE(std::string(e.what()).find("sample 2"), std::string::npos)
+            << e.what();
+    }
+}
+
+TEST(ClusterReportTest, LabelDisagreeingWithClusterOrdinalIsRefused) {
+    const DenseStorage storage = MakeSixPointStorage();
+    const ClusteringResult result(
+        std::vector<ClusterLabel>{0, 0, 1, 1, 1, 1}, Clusters{{0, 1, 2}, {3, 4, 5}});
+    try {
+        cluster_report(result, storage, ClusterReportOptions());
+        FAIL() << "expected std::invalid_argument";
+    } catch (const std::invalid_argument& e) {
+        EXPECT_NE(std::string(e.what()).find("sample 2"), std::string::npos)
+            << e.what();
+    }
+}
+
+TEST(ClusterReportTest, ClusteredSampleOmittedFromEveryMemberListIsRefused) {
+    const DenseStorage storage = MakeTwoClusterStorage();
+    const ClusteringResult result(
+        std::vector<ClusterLabel>{0, 0, -1, -1}, Clusters{{0}});
+    try {
+        cluster_report(result, storage, ClusterReportOptions());
+        FAIL() << "expected std::invalid_argument";
+    } catch (const std::invalid_argument& e) {
+        EXPECT_NE(std::string(e.what()).find("sample 1"), std::string::npos)
+            << e.what();
+    }
+}
+
+// The guard at ClusterReport.cpp:193 used to skip the pre-pass entirely when
+// members was empty, so this shape took the empty-clustering branch and
+// returned an all-NaN report instead of refusing.
+TEST(ClusterReportTest, NonNoiseLabelNamingNoClusterIsRefused) {
+    const DenseStorage storage = MakeTwoClusterStorage();
+    const ClusteringResult result(
+        std::vector<ClusterLabel>{0, -1, -1, -1}, Clusters{});
+    try {
+        cluster_report(result, storage, ClusterReportOptions());
+        FAIL() << "expected std::invalid_argument";
+    } catch (const std::invalid_argument& e) {
+        const std::string message(e.what());
+        EXPECT_NE(message.find("sample 0"), std::string::npos) << message;
+        EXPECT_NE(message.find("no cluster"), std::string::npos) << message;
+    }
+}
+
+TEST(ClusterReportTest, NoiseLabelledSampleInsideAClusterIsRefused) {
+    const DenseStorage storage = MakeTwoClusterStorage();
+    const ClusteringResult result(
+        std::vector<ClusterLabel>{0, -1, 1, 1}, Clusters{{0, 1}, {2, 3}});
+    try {
+        cluster_report(result, storage, ClusterReportOptions());
+        FAIL() << "expected std::invalid_argument";
+    } catch (const std::invalid_argument& e) {
+        EXPECT_NE(std::string(e.what()).find("sample 1"), std::string::npos)
+            << e.what();
+    }
+}
+
+// A member index can sit inside storage.NumSamples() and past the end of a
+// shorter label vector. Without this check the label pass reads out of bounds,
+// so the test is the difference between a diagnosis and undefined behaviour.
+TEST(ClusterReportTest, MemberBeyondLabelCountIsOutOfRange) {
+    const DenseStorage storage = MakeSixPointStorage();
+    const ClusteringResult result(
+        std::vector<ClusterLabel>{0, 0}, Clusters{{0, 1, 4}});
+    try {
+        cluster_report(result, storage, ClusterReportOptions());
+        FAIL() << "expected std::out_of_range";
+    } catch (const std::out_of_range& e) {
+        const std::string message(e.what());
+        // 4 is inside storage (six samples) and past the two-entry label
+        // vector, so naming the member is the whole point of the message.
+        EXPECT_NE(message.find("member 4"), std::string::npos) << message;
+        EXPECT_NE(message.find("label count 2"), std::string::npos) << message;
+    }
+}
+
+// The extended pre-pass must not reclassify the three refusals
+// validate_cluster_members already owns.
+TEST(ClusterReportTest, ExistingRefusalsKeepTheirTypes) {
+    const DenseStorage storage = MakeTwoClusterStorage();
+
+    const ClusteringResult empty_cluster(
+        std::vector<ClusterLabel>{-1, -1, -1, -1}, Clusters{{}});
+    EXPECT_THROW(cluster_report(empty_cluster, storage, ClusterReportOptions()),
+                 std::invalid_argument);
+
+    const ClusteringResult duplicate(
+        std::vector<ClusterLabel>{0, -1, -1, -1}, Clusters{{0, 0}});
+    EXPECT_THROW(cluster_report(duplicate, storage, ClusterReportOptions()),
+                 std::invalid_argument);
+
+    const ClusteringResult beyond_storage(
+        std::vector<ClusterLabel>{0, 0, 0, 0}, Clusters{{0, 1, 99}});
+    EXPECT_THROW(cluster_report(beyond_storage, storage, ClusterReportOptions()),
+                 std::out_of_range);
+}
+
+// Section 5.5 defines both of these as answerable, so the bijection check must
+// not turn them into refusals. INVARIANT 3: over-refusal is as severe as the
+// wrong number it was meant to prevent.
+TEST(ClusterReportTest, DegenerateShapesAreStillAccepted) {
+    const DenseStorage storage = MakeTwoClusterStorage();
+    const ClusteringResult all_noise(
+        std::vector<ClusterLabel>{-1, -1, -1, -1}, Clusters{});
+    EXPECT_NO_THROW(cluster_report(all_noise, storage, ClusterReportOptions()));
+
+    const DenseStorage empty_storage(0);
+    const ClusteringResult zero_samples(std::vector<ClusterLabel>{}, Clusters{});
+    EXPECT_NO_THROW(
+        cluster_report(zero_samples, empty_storage, ClusterReportOptions()));
+}
+
+// Section 7.1 item 9. A new refusal that rejects the library's own output is a
+// worse defect than the one it prevents. Options are set explicitly rather than
+// defaulted: on six points the default min_samples of 5 and Butina's default
+// threshold of 0.0 both degenerate, and a shape with no clusters would not
+// exercise the check.
+TEST(ClusterReportTest, PreconditionsAcceptEveryShippedAlgorithm) {
+    const DenseStorage storage = MakeSixPointStorage();
+    const ClusterReportOptions options;
+
+    ButinaOptions butina_options;
+    butina_options.distance_threshold = 0.5;
+    EXPECT_NO_THROW(
+        cluster_report(butina_cluster(storage, butina_options), storage, options));
+
+    AgglomerativeOptions agglomerative_options;
+    agglomerative_options.n_clusters = 2;
+    EXPECT_NO_THROW(cluster_report(
+        agglomerative_cluster(storage, agglomerative_options), storage, options));
+
+    DBSCANOptions dbscan_options;
+    dbscan_options.eps = 0.5;
+    dbscan_options.min_samples = 2;
+    EXPECT_NO_THROW(
+        cluster_report(dbscan_cluster(storage, dbscan_options), storage, options));
+
+    HDBSCANOptions hdbscan_options;
+    hdbscan_options.min_cluster_size = 2;
+    EXPECT_NO_THROW(
+        cluster_report(hdbscan_cluster(storage, hdbscan_options), storage, options));
 }
