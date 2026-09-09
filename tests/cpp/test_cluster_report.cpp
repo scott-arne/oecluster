@@ -61,18 +61,29 @@ DenseStorage MakeSixPointStorage() {
 // Task 6 reuses it to show the medoid-named indices ignore the method.
 DenseStorage MakeDivergentRepresentativeStorage() {
     DenseStorage storage(8);
-    // Cluster {0,1,2,3}: totals tie at 1.1 for 0, 1 and 2, so the medoid is the
-    // earliest of them, 0. Maxima are 0.9, 0.5, 0.5, 0.9, so minimax is 1.
+    // Cluster {0,1,2,3}: totals are 0.9, 1.1, 1.1, 1.7, so the medoid is 0
+    // outright. Maxima are 0.7, 0.5, 0.5, 0.7, so minimax is 1 -- it ties with
+    // 2 and wins on the earliest-member rule.
+    //
+    // The winners must differ in TOTAL, not only in maximum. Section 3.7 makes
+    // median_medoid_member_distance the one legacy scalar keyed to the
+    // configured representative, and it is the mean of that winner's total. If
+    // 0 and 1 tied at 1.1 the field would read the same under both methods, and
+    // no baseline could catch a later task computing it from the true-medoid
+    // vector instead -- exactly the identity mix-up section 3.7 warns about.
+    // At 0.7 the means separate: 0.3 for the medoid, 1.1/3 for the minimax.
     storage.Set(0, 1, 0.1);
     storage.Set(0, 2, 0.1);
-    storage.Set(0, 3, 0.9);
+    storage.Set(0, 3, 0.7);
     storage.Set(1, 2, 0.5);
     storage.Set(1, 3, 0.5);
     storage.Set(2, 3, 0.5);
-    // Cluster {4,5,6,7}: the same shape, shifted. Medoid 4, minimax 5.
+    // Cluster {4,5,6,7}: the same shape, shifted. Medoid 4, minimax 5. The
+    // symmetry is what keeps median_radius and median_medoid_member_distance
+    // single-valued rather than an average of two unequal cluster values.
     storage.Set(4, 5, 0.1);
     storage.Set(4, 6, 0.1);
-    storage.Set(4, 7, 0.9);
+    storage.Set(4, 7, 0.7);
     storage.Set(5, 6, 0.5);
     storage.Set(5, 7, 0.5);
     storage.Set(6, 7, 0.5);
@@ -312,6 +323,9 @@ TEST(ClusterReportTest, ResultMethodNames) {
 // before the passes of section 5.1 were fused. Collapsing three cross-cluster
 // walks into one must not move a single existing number, and a test that
 // recomputed the expectation with the new code could not tell if it did.
+//
+// EXPECT_EQ on doubles is intentional: EXPECT_DOUBLE_EQ tolerates four ULPs,
+// which is exactly the drift a reassociating fusion would introduce.
 TEST(ClusterReportTest, FusionEquivalenceMedoidBaseline) {
     const DenseStorage storage = MakeSixPointStorage();
     const ClusteringResult result = MakeResult({0, 0, 0, 1, 1, 1});
@@ -324,25 +338,25 @@ TEST(ClusterReportTest, FusionEquivalenceMedoidBaseline) {
     EXPECT_EQ(r.num_noise, 0u);
     EXPECT_EQ(r.num_singletons, 0u);
     EXPECT_EQ(r.boundary_violations, 0u);
-    EXPECT_DOUBLE_EQ(r.noise_fraction, 0);
-    EXPECT_DOUBLE_EQ(r.largest_cluster_fraction, 0.5);
-    EXPECT_DOUBLE_EQ(r.singleton_fraction, 0);
-    EXPECT_DOUBLE_EQ(r.cluster_size_median, 3);
-    EXPECT_DOUBLE_EQ(r.cluster_size_p90, 3);
-    EXPECT_DOUBLE_EQ(r.size_gini, 0);
-    EXPECT_DOUBLE_EQ(r.size_entropy, 1);
-    EXPECT_DOUBLE_EQ(r.mean_intra_distance, 0.26666666666666666);
-    EXPECT_DOUBLE_EQ(r.median_intra_distance, 0.20000000000000001);
-    EXPECT_DOUBLE_EQ(r.median_radius, 0.20000000000000001);
-    EXPECT_DOUBLE_EQ(r.p95_diameter, 0.40000000000000002);
-    EXPECT_DOUBLE_EQ(r.silhouette, 0.66666666666666663);
-    EXPECT_DOUBLE_EQ(r.dunn_index, 2);
-    EXPECT_DOUBLE_EQ(r.median_medoid_member_distance, 0.20000000000000001);
-    EXPECT_DOUBLE_EQ(r.representative_redundancy, 0.80000000000000004);
+    EXPECT_EQ(r.noise_fraction, 0);
+    EXPECT_EQ(r.largest_cluster_fraction, 0.5);
+    EXPECT_EQ(r.singleton_fraction, 0);
+    EXPECT_EQ(r.cluster_size_median, 3);
+    EXPECT_EQ(r.cluster_size_p90, 3);
+    EXPECT_EQ(r.size_gini, 0);
+    EXPECT_EQ(r.size_entropy, 1);
+    EXPECT_EQ(r.mean_intra_distance, 0.26666666666666666);
+    EXPECT_EQ(r.median_intra_distance, 0.20000000000000001);
+    EXPECT_EQ(r.median_radius, 0.20000000000000001);
+    EXPECT_EQ(r.p95_diameter, 0.40000000000000002);
+    EXPECT_EQ(r.silhouette, 0.66666666666666663);
+    EXPECT_EQ(r.dunn_index, 2);
+    EXPECT_EQ(r.median_medoid_member_distance, 0.20000000000000001);
+    EXPECT_EQ(r.representative_redundancy, 0.80000000000000004);
     ASSERT_EQ(r.coverage_at.size(), 3u);
-    EXPECT_DOUBLE_EQ(r.coverage_at[0], 1);
-    EXPECT_DOUBLE_EQ(r.coverage_at[1], 1);
-    EXPECT_DOUBLE_EQ(r.coverage_at[2], 1);
+    EXPECT_EQ(r.coverage_at[0], 1);
+    EXPECT_EQ(r.coverage_at[1], 1);
+    EXPECT_EQ(r.coverage_at[2], 1);
 }
 
 // The divergent fixture, not MakeSixPointStorage. There Minimax and Medoid
@@ -351,6 +365,9 @@ TEST(ClusterReportTest, FusionEquivalenceMedoidBaseline) {
 // untested. Here Minimax picks 1 and 5 where Medoid picks 0 and 4, so
 // median_radius, median_medoid_member_distance, representative_redundancy and
 // coverage_at all take values the Medoid baseline never sees.
+//
+// EXPECT_EQ on doubles is intentional: EXPECT_DOUBLE_EQ tolerates four ULPs,
+// which is exactly the drift a reassociating fusion would introduce.
 TEST(ClusterReportTest, FusionEquivalenceMinimaxBaseline) {
     const DenseStorage storage = MakeDivergentRepresentativeStorage();
     const ClusteringResult result = MakeResult({0, 0, 0, 0, 1, 1, 1, 1});
@@ -363,23 +380,23 @@ TEST(ClusterReportTest, FusionEquivalenceMinimaxBaseline) {
     EXPECT_EQ(r.num_noise, 0u);
     EXPECT_EQ(r.num_singletons, 0u);
     EXPECT_EQ(r.boundary_violations, 0u);
-    EXPECT_DOUBLE_EQ(r.noise_fraction, 0);
-    EXPECT_DOUBLE_EQ(r.largest_cluster_fraction, 0.5);
-    EXPECT_DOUBLE_EQ(r.singleton_fraction, 0);
-    EXPECT_DOUBLE_EQ(r.cluster_size_median, 4);
-    EXPECT_DOUBLE_EQ(r.cluster_size_p90, 4);
-    EXPECT_DOUBLE_EQ(r.size_gini, 0);
-    EXPECT_DOUBLE_EQ(r.size_entropy, 1);
-    EXPECT_DOUBLE_EQ(r.mean_intra_distance, 0.43333333333333335);
-    EXPECT_DOUBLE_EQ(r.median_intra_distance, 0.5);
-    EXPECT_DOUBLE_EQ(r.median_radius, 0.5);
-    EXPECT_DOUBLE_EQ(r.p95_diameter, 0.90000000000000002);
-    EXPECT_DOUBLE_EQ(r.silhouette, 0.54125177809388325);
-    EXPECT_DOUBLE_EQ(r.dunn_index, 0.94444444444444442);
-    EXPECT_DOUBLE_EQ(r.median_medoid_member_distance, 0.3666666666666667);
-    EXPECT_DOUBLE_EQ(r.representative_redundancy, 0.84999999999999998);
+    EXPECT_EQ(r.noise_fraction, 0);
+    EXPECT_EQ(r.largest_cluster_fraction, 0.5);
+    EXPECT_EQ(r.singleton_fraction, 0);
+    EXPECT_EQ(r.cluster_size_median, 4);
+    EXPECT_EQ(r.cluster_size_p90, 4);
+    EXPECT_EQ(r.size_gini, 0);
+    EXPECT_EQ(r.size_entropy, 1);
+    EXPECT_EQ(r.mean_intra_distance, 0.39999999999999997);
+    EXPECT_EQ(r.median_intra_distance, 0.5);
+    EXPECT_EQ(r.median_radius, 0.5);
+    EXPECT_EQ(r.p95_diameter, 0.69999999999999996);
+    EXPECT_EQ(r.silhouette, 0.57633949739212897);
+    EXPECT_EQ(r.dunn_index, 1.2142857142857144);
+    EXPECT_EQ(r.median_medoid_member_distance, 0.3666666666666667);
+    EXPECT_EQ(r.representative_redundancy, 0.84999999999999998);
     ASSERT_EQ(r.coverage_at.size(), 3u);
-    EXPECT_DOUBLE_EQ(r.coverage_at[0], 0.5);
-    EXPECT_DOUBLE_EQ(r.coverage_at[1], 0.5);
-    EXPECT_DOUBLE_EQ(r.coverage_at[2], 0.5);
+    EXPECT_EQ(r.coverage_at[0], 0.5);
+    EXPECT_EQ(r.coverage_at[1], 0.5);
+    EXPECT_EQ(r.coverage_at[2], 0.5);
 }
