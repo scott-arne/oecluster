@@ -115,8 +115,9 @@ struct PairRankIndices {
  *
  * Both arrays must contain only finite values -- read them through
  * checked_distance. A NaN element does not merely give a meaningless index: the
- * run scans below advance on `== value`, which is false for a NaN against
- * itself, so the walk would not terminate.
+ * sorts below have no strict weak ordering over such a range, which is already
+ * undefined behaviour, and even past them the run scans advance on `== value`,
+ * which is false for a NaN against itself, so the walk would not terminate.
  *
  * :param within: every pairwise distance inside a cluster.
  * :param between: every pairwise distance across two distinct clusters.

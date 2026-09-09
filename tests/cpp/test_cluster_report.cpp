@@ -964,6 +964,27 @@ TEST(InternalIndicesTest, PairRankMatchesBruteForceWithTies) {
     EXPECT_NEAR(got.c_index, want.c_index, 1e-12);
 }
 
+// Section 7.1 item 4, exhaustion arm. Both merge walks take within_count
+// elements from the pooled set, and each needs a guard for the case where
+// `between` runs out first -- without the descending one, the comparison
+// `between[high_between - 1]` at zero underflows to SIZE_MAX and reads out of
+// bounds. No other fixture reaches either guard, but not for one reason: those
+// that assert a c_index all have at least as many between-pairs as
+// within-pairs, and the one with no between-pairs at all is turned away by the
+// between_count > 0 gate before either walk runs. Here the single
+// between-distance sits in the middle of the pooled range with `within` the
+// larger array, so the ascending walk exhausts `between` from the bottom and
+// the descending walk exhausts it from the top.
+TEST(InternalIndicesTest, PairRankCIndexExhaustsBetweenInBothWalks) {
+    const std::vector<double> within{0.1, 0.2, 0.8, 0.9};
+    const std::vector<double> between{0.5};
+    const detail::PairRankIndices got = detail::pair_rank_indices(within, between);
+    const detail::PairRankIndices want = BruteForcePairRank(within, between);
+    // S_w = 2.0, S_min = 1.6, S_max = 2.4, so the index is one half.
+    EXPECT_NEAR(got.c_index, 0.5, 1e-12);
+    EXPECT_NEAR(got.c_index, want.c_index, 1e-12);
+}
+
 // Section 7.1 item 3. A couple whose two distances are equal contributes to
 // neither counter; the run-at-a-time walk is what makes that true. The fixture
 // needs a discordant couple as well as a concordant one -- with none, scoring
@@ -973,7 +994,8 @@ TEST(InternalIndicesTest, PairRankExcludesTiedCouples) {
     const std::vector<double> between{0.5, 0.9, 0.1};
     const detail::PairRankIndices got = detail::pair_rank_indices(within, between);
     // Three concordant couples, two discordant, and one tie that scores as
-    // neither; counting the tie would give 4/6 instead.
+    // neither, giving (3 - 2) / 5. Counting the tie as concordant would make it
+    // (4 - 2) / 6 = 1/3 instead.
     EXPECT_DOUBLE_EQ(got.baker_hubert_gamma, 0.2);
     EXPECT_DOUBLE_EQ(got.baker_hubert_gamma,
                      BruteForcePairRank(within, between).baker_hubert_gamma);
