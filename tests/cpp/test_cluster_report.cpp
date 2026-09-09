@@ -33,6 +33,64 @@ ClusteringResult MakeResult(std::vector<ClusterLabel> labels) {
     return ClusteringResult(std::move(labels), std::move(members));
 }
 
+// Six points, clusters {0,1,2} and {3,4,5}. Every cross pair is 0.8, so each
+// new index in section 5.3 has a closed form worked out by hand; see
+// ClusterReportTest.HandComputedInternalIndices.
+//
+// Note that Medoid and Minimax pick the SAME representative here -- sample 0
+// has both the lowest total (0.4 against 0.6) and the lowest maximum (0.2
+// against 0.4). That is why the Minimax baseline below uses the other fixture.
+DenseStorage MakeSixPointStorage() {
+    DenseStorage storage(6);
+    storage.Set(0, 1, 0.2);
+    storage.Set(0, 2, 0.2);
+    storage.Set(1, 2, 0.4);
+    storage.Set(3, 4, 0.2);
+    storage.Set(3, 5, 0.2);
+    storage.Set(4, 5, 0.4);
+    for (size_t i = 0; i < 3; ++i) {
+        for (size_t j = 3; j < 6; ++j) {
+            storage.Set(i, j, 0.8);
+        }
+    }
+    return storage;
+}
+
+// Eight points, clusters {0,1,2,3} and {4,5,6,7}, built so the two
+// representative methods disagree: Medoid picks 0 and 4, Minimax picks 1 and 5.
+// Task 6 reuses it to show the medoid-named indices ignore the method.
+DenseStorage MakeDivergentRepresentativeStorage() {
+    DenseStorage storage(8);
+    // Cluster {0,1,2,3}: totals tie at 1.1 for 0, 1 and 2, so the medoid is the
+    // earliest of them, 0. Maxima are 0.9, 0.5, 0.5, 0.9, so minimax is 1.
+    storage.Set(0, 1, 0.1);
+    storage.Set(0, 2, 0.1);
+    storage.Set(0, 3, 0.9);
+    storage.Set(1, 2, 0.5);
+    storage.Set(1, 3, 0.5);
+    storage.Set(2, 3, 0.5);
+    // Cluster {4,5,6,7}: the same shape, shifted. Medoid 4, minimax 5.
+    storage.Set(4, 5, 0.1);
+    storage.Set(4, 6, 0.1);
+    storage.Set(4, 7, 0.9);
+    storage.Set(5, 6, 0.5);
+    storage.Set(5, 7, 0.5);
+    storage.Set(6, 7, 0.5);
+    for (size_t i = 0; i < 4; ++i) {
+        for (size_t j = 4; j < 8; ++j) {
+            storage.Set(i, j, 0.95);
+        }
+    }
+    // The one asymmetric cross distance, and it is load-bearing. With every
+    // cross distance at 0.95, representative_redundancy is the median of
+    // {0.95, 0.95} whichever pair of representatives is chosen -- so the
+    // baseline would record the same number for both methods and Task 6's
+    // EXPECT_NE could never fire. 1 and 5 are the minimax representatives, so
+    // only the minimax run sees it.
+    storage.Set(1, 5, 0.85);
+    return storage;
+}
+
 }  // namespace
 
 TEST(ClusterReportOptionsTest, PresetsSeedDocumentedThresholds) {
@@ -248,4 +306,80 @@ TEST(ClusterReportTest, ResultMethodNames) {
     EXPECT_EQ(DBSCANResult().Method(), "dbscan");
     EXPECT_EQ(HDBSCANResult().Method(), "hdbscan");
     EXPECT_EQ(AgglomerativeResult().Method(), "agglomerative");
+}
+
+// Spec section 7.1 item 5. These literals were captured from the 5.0.0 build
+// before the passes of section 5.1 were fused. Collapsing three cross-cluster
+// walks into one must not move a single existing number, and a test that
+// recomputed the expectation with the new code could not tell if it did.
+TEST(ClusterReportTest, FusionEquivalenceMedoidBaseline) {
+    const DenseStorage storage = MakeSixPointStorage();
+    const ClusteringResult result = MakeResult({0, 0, 0, 1, 1, 1});
+    ClusterReportOptions options;
+    options.representative_method = RepresentativeMethod::Medoid;
+    const ClusterReport r = cluster_report(result, storage, options);
+
+    EXPECT_EQ(r.num_samples, 6u);
+    EXPECT_EQ(r.num_clusters, 2u);
+    EXPECT_EQ(r.num_noise, 0u);
+    EXPECT_EQ(r.num_singletons, 0u);
+    EXPECT_EQ(r.boundary_violations, 0u);
+    EXPECT_DOUBLE_EQ(r.noise_fraction, 0);
+    EXPECT_DOUBLE_EQ(r.largest_cluster_fraction, 0.5);
+    EXPECT_DOUBLE_EQ(r.singleton_fraction, 0);
+    EXPECT_DOUBLE_EQ(r.cluster_size_median, 3);
+    EXPECT_DOUBLE_EQ(r.cluster_size_p90, 3);
+    EXPECT_DOUBLE_EQ(r.size_gini, 0);
+    EXPECT_DOUBLE_EQ(r.size_entropy, 1);
+    EXPECT_DOUBLE_EQ(r.mean_intra_distance, 0.26666666666666666);
+    EXPECT_DOUBLE_EQ(r.median_intra_distance, 0.20000000000000001);
+    EXPECT_DOUBLE_EQ(r.median_radius, 0.20000000000000001);
+    EXPECT_DOUBLE_EQ(r.p95_diameter, 0.40000000000000002);
+    EXPECT_DOUBLE_EQ(r.silhouette, 0.66666666666666663);
+    EXPECT_DOUBLE_EQ(r.dunn_index, 2);
+    EXPECT_DOUBLE_EQ(r.median_medoid_member_distance, 0.20000000000000001);
+    EXPECT_DOUBLE_EQ(r.representative_redundancy, 0.80000000000000004);
+    ASSERT_EQ(r.coverage_at.size(), 3u);
+    EXPECT_DOUBLE_EQ(r.coverage_at[0], 1);
+    EXPECT_DOUBLE_EQ(r.coverage_at[1], 1);
+    EXPECT_DOUBLE_EQ(r.coverage_at[2], 1);
+}
+
+// The divergent fixture, not MakeSixPointStorage. There Minimax and Medoid
+// select the same representatives, so a second baseline over it would pin the
+// same twenty numbers twice and leave the minimax path of the fused walk
+// untested. Here Minimax picks 1 and 5 where Medoid picks 0 and 4, so
+// median_radius, median_medoid_member_distance, representative_redundancy and
+// coverage_at all take values the Medoid baseline never sees.
+TEST(ClusterReportTest, FusionEquivalenceMinimaxBaseline) {
+    const DenseStorage storage = MakeDivergentRepresentativeStorage();
+    const ClusteringResult result = MakeResult({0, 0, 0, 0, 1, 1, 1, 1});
+    ClusterReportOptions options;
+    options.representative_method = RepresentativeMethod::Minimax;
+    const ClusterReport r = cluster_report(result, storage, options);
+
+    EXPECT_EQ(r.num_samples, 8u);
+    EXPECT_EQ(r.num_clusters, 2u);
+    EXPECT_EQ(r.num_noise, 0u);
+    EXPECT_EQ(r.num_singletons, 0u);
+    EXPECT_EQ(r.boundary_violations, 0u);
+    EXPECT_DOUBLE_EQ(r.noise_fraction, 0);
+    EXPECT_DOUBLE_EQ(r.largest_cluster_fraction, 0.5);
+    EXPECT_DOUBLE_EQ(r.singleton_fraction, 0);
+    EXPECT_DOUBLE_EQ(r.cluster_size_median, 4);
+    EXPECT_DOUBLE_EQ(r.cluster_size_p90, 4);
+    EXPECT_DOUBLE_EQ(r.size_gini, 0);
+    EXPECT_DOUBLE_EQ(r.size_entropy, 1);
+    EXPECT_DOUBLE_EQ(r.mean_intra_distance, 0.43333333333333335);
+    EXPECT_DOUBLE_EQ(r.median_intra_distance, 0.5);
+    EXPECT_DOUBLE_EQ(r.median_radius, 0.5);
+    EXPECT_DOUBLE_EQ(r.p95_diameter, 0.90000000000000002);
+    EXPECT_DOUBLE_EQ(r.silhouette, 0.54125177809388325);
+    EXPECT_DOUBLE_EQ(r.dunn_index, 0.94444444444444442);
+    EXPECT_DOUBLE_EQ(r.median_medoid_member_distance, 0.3666666666666667);
+    EXPECT_DOUBLE_EQ(r.representative_redundancy, 0.84999999999999998);
+    ASSERT_EQ(r.coverage_at.size(), 3u);
+    EXPECT_DOUBLE_EQ(r.coverage_at[0], 0.5);
+    EXPECT_DOUBLE_EQ(r.coverage_at[1], 0.5);
+    EXPECT_DOUBLE_EQ(r.coverage_at[2], 0.5);
 }
