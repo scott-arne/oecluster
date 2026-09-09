@@ -667,10 +667,13 @@ TEST(ClusterReportTest, ExistingRefusalsKeepTheirTypes) {
     }
 }
 
-// When a result is invalid several ways at once, which refusal fires must be a
-// property of the errors, not of which cluster happens to hold them. INVARIANT
-// 1: name the reason the caller must fix first, and name the same one whichever
-// order the clusters arrive in.
+// When a result is invalid in two different LAYERS at once -- a malformed
+// cluster and a partition that double-counts a sample -- which refusal fires is
+// a property of the errors, not of which cluster happens to hold them.
+// INVARIANT 1: name the reason the caller must fix first, and name the same one
+// whichever order the clusters arrive in. Within a single layer the selection is
+// deliberately not canonicalised; see
+// StructuralErrorSelectionIsNotCanonicalised below.
 TEST(ClusterReportTest, CompoundInvalidResultsRefuseInAStableOrder) {
     const DenseStorage storage = MakeTwoClusterStorage();  // four samples
 
@@ -731,21 +734,55 @@ TEST(ClusterReportTest, CompoundInvalidResultsRefuseInAStableOrder) {
                  std::out_of_range);
 }
 
-// The other half of the same decision, kept visible. Inside one cluster the
-// shared validator short-circuits, so these two shapes -- the same two errors,
-// swapped -- answer differently, and with different exception types. Declined
-// rather than fixed: ordering them from cluster_report would mean duplicating
-// checks that belong in DistanceAccess.h, and neither message misleads the
-// caller, who has a malformed cluster list either way. This test exists so the
-// asymmetry is a recorded decision rather than a surprise, and it flips if
-// anyone canonicalises the validator.
-TEST(ClusterReportTest, StructuralErrorOrderWithinAClusterIsNotCanonicalised) {
+// The other half of the round-3 decision, kept visible. The structural pass
+// short-circuits twice over: it stops at the first malformed cluster, and the
+// shared validator stops at the first bad member inside that cluster. So both
+// the order of the clusters and the order of the members within one change
+// which refusal a caller sees, and the intra-cluster pair changes the exception
+// type too. Declined rather than fixed: ordering these from cluster_report
+// would mean duplicating checks that belong in DistanceAccess.h, and no message
+// misleads the caller, who has a malformed cluster list either way. This test
+// exists so the asymmetry is a recorded decision rather than a surprise.
+//
+// Both pairs flip under canonicalisation, but not through the same arm. The
+// across-cluster pair flips if pass 1 stops halting at the first malformed
+// cluster. The intra-cluster pair flips whichever way the member scan is split
+// into complete passes -- uniqueness first reddens {99, 0, 0}, range first
+// reddens {0, 0, 99} -- so neither arm alone covers it. Note that merely
+// swapping the two checks inside the validator's existing single loop is not a
+// canonicalisation and changes no answer: the first member to fault has by
+// definition no earlier occurrence, so no member reaches either check both out
+// of range and already seen.
+TEST(ClusterReportTest, StructuralErrorSelectionIsNotCanonicalised) {
     const DenseStorage storage = MakeTwoClusterStorage();  // four samples
     const std::vector<ClusterLabel> one_clustered{0, -1, -1, -1};
 
-    const ClusteringResult unique_first(one_clustered, Clusters{{0, 0}, {}});
+    // Same two errors, one per cluster, clusters swapped.
+    const struct {
+        const char* what;
+        Clusters clusters;
+    } across_clusters[] = {
+        {"Cluster members must be unique", Clusters{{0, 0}, {}}},
+        {"Cluster must contain at least one member", Clusters{{}, {0, 0}}},
+    };
+    for (const auto& arm : across_clusters) {
+        const ClusteringResult result(one_clustered, arm.clusters);
+        try {
+            cluster_report(result, storage, ClusterReportOptions());
+            FAIL() << "expected std::invalid_argument for " << arm.what;
+        } catch (const std::invalid_argument& e) {
+            EXPECT_NE(std::string(e.what()).find(arm.what), std::string::npos)
+                << e.what();
+        }
+    }
+
+    // Same two errors inside ONE cluster, members swapped. This is the pair the
+    // across-cluster arms above cannot see: it turns on the validator's own
+    // loop order, and it crosses exception types.
+    const ClusteringResult duplicate_before_out_of_range(
+        one_clustered, Clusters{{0, 0, 99}});
     try {
-        cluster_report(unique_first, storage, ClusterReportOptions());
+        cluster_report(duplicate_before_out_of_range, storage, ClusterReportOptions());
         FAIL() << "expected std::invalid_argument";
     } catch (const std::invalid_argument& e) {
         EXPECT_NE(std::string(e.what()).find("Cluster members must be unique"),
@@ -753,12 +790,14 @@ TEST(ClusterReportTest, StructuralErrorOrderWithinAClusterIsNotCanonicalised) {
             << e.what();
     }
 
-    const ClusteringResult empty_first(one_clustered, Clusters{{}, {0, 0}});
+    const ClusteringResult out_of_range_before_duplicate(
+        one_clustered, Clusters{{99, 0, 0}});
     try {
-        cluster_report(empty_first, storage, ClusterReportOptions());
-        FAIL() << "expected std::invalid_argument";
-    } catch (const std::invalid_argument& e) {
-        EXPECT_NE(std::string(e.what()).find("Cluster must contain at least one member"),
+        cluster_report(out_of_range_before_duplicate, storage, ClusterReportOptions());
+        FAIL() << "expected std::out_of_range";
+    } catch (const std::out_of_range& e) {
+        EXPECT_NE(std::string(e.what())
+                      .find("Cluster member index is outside the storage range"),
                   std::string::npos)
             << e.what();
     }

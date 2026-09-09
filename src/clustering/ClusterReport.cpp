@@ -229,12 +229,15 @@ ClusterReport cluster_report(
     // malformed cluster is always reported ahead of a partition that
     // double-counts a sample, whatever order the two arrive in.
     //
-    // Within a single cluster the shared validator short-circuits, so which of
-    // "empty", "outside the storage range" and "not unique" is named still
-    // depends on cluster order. That is deliberate. All three say the same thing
-    // to the caller -- this cluster list is malformed -- and ordering them here
-    // would mean reimplementing checks that belong in one place. The guarantee
-    // is between layers, not within one.
+    // Inside this first pass nothing is canonicalised. The shared validator
+    // short-circuits on the first fault it meets, so which of "empty", "outside
+    // the storage range" and "not unique" is named depends both on the order of
+    // the clusters and on the order of the members within one, and the two
+    // answers can differ in exception type as well as in message. That is
+    // deliberate: all three tell the caller the same thing -- this cluster list
+    // is malformed -- and ordering them here would mean reimplementing checks
+    // that belong in DistanceAccess.h. The guarantee is between layers, not
+    // inside one.
     for (const Cluster& cluster : members) {
         detail::validate_cluster_members(cluster, storage.NumSamples());
     }
