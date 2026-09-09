@@ -463,8 +463,9 @@ TEST(ClusterReportTest, SampleInTwoClustersIsRefused) {
         cluster_report(result, storage, ClusterReportOptions());
         FAIL() << "expected std::invalid_argument";
     } catch (const std::invalid_argument& e) {
-        EXPECT_NE(std::string(e.what()).find("sample 2"), std::string::npos)
-            << e.what();
+        const std::string message(e.what());
+        EXPECT_NE(message.find("sample 2"), std::string::npos) << message;
+        EXPECT_NE(message.find("appears in clusters"), std::string::npos) << message;
     }
 }
 
@@ -476,8 +477,9 @@ TEST(ClusterReportTest, LabelDisagreeingWithClusterOrdinalIsRefused) {
         cluster_report(result, storage, ClusterReportOptions());
         FAIL() << "expected std::invalid_argument";
     } catch (const std::invalid_argument& e) {
-        EXPECT_NE(std::string(e.what()).find("sample 2"), std::string::npos)
-            << e.what();
+        const std::string message(e.what());
+        EXPECT_NE(message.find("sample 2"), std::string::npos) << message;
+        EXPECT_NE(message.find("but appears in cluster"), std::string::npos) << message;
     }
 }
 
@@ -489,8 +491,9 @@ TEST(ClusterReportTest, ClusteredSampleOmittedFromEveryMemberListIsRefused) {
         cluster_report(result, storage, ClusterReportOptions());
         FAIL() << "expected std::invalid_argument";
     } catch (const std::invalid_argument& e) {
-        EXPECT_NE(std::string(e.what()).find("sample 1"), std::string::npos)
-            << e.what();
+        const std::string message(e.what());
+        EXPECT_NE(message.find("sample 1"), std::string::npos) << message;
+        EXPECT_NE(message.find("appears in no cluster"), std::string::npos) << message;
     }
 }
 
@@ -519,8 +522,9 @@ TEST(ClusterReportTest, NoiseLabelledSampleInsideAClusterIsRefused) {
         cluster_report(result, storage, ClusterReportOptions());
         FAIL() << "expected std::invalid_argument";
     } catch (const std::invalid_argument& e) {
-        EXPECT_NE(std::string(e.what()).find("sample 1"), std::string::npos)
-            << e.what();
+        const std::string message(e.what());
+        EXPECT_NE(message.find("sample 1"), std::string::npos) << message;
+        EXPECT_NE(message.find("labelled noise"), std::string::npos) << message;
     }
 }
 
@@ -543,6 +547,42 @@ TEST(ClusterReportTest, MemberBeyondLabelCountIsOutOfRange) {
     }
 }
 
+// Section 5.2. The header promises out_of_range when a result that has clusters
+// labels more samples than storage holds. Before the bijection pre-pass the
+// backend produced that type incidentally, from deep inside the coverage loop;
+// the pre-pass now reaches the surplus sample first, so without an explicit
+// check the caller is told to fix a cluster list when the real error is a
+// mismatched storage. INVARIANT 1.
+TEST(ClusterReportTest, LabelsLongerThanStorageIsOutOfRange) {
+    const DenseStorage storage = MakeTwoClusterStorage();  // four samples
+
+    const ClusteringResult surplus_clustered(
+        std::vector<ClusterLabel>{0, 0, 1, 1, 0, 1}, Clusters{{0, 1}, {2, 3}});
+    try {
+        cluster_report(surplus_clustered, storage, ClusterReportOptions());
+        FAIL() << "expected std::out_of_range";
+    } catch (const std::out_of_range& e) {
+        const std::string message(e.what());
+        EXPECT_NE(message.find("label count 6"), std::string::npos) << message;
+        EXPECT_NE(message.find("storage sample count 4"), std::string::npos)
+            << message;
+    }
+
+    // Surplus labelled noise: the one subset for which the documented type
+    // survived on its own, so it must keep it.
+    const ClusteringResult surplus_noise(
+        std::vector<ClusterLabel>{0, 0, 1, 1, -1, -1}, Clusters{{0, 1}, {2, 3}});
+    EXPECT_THROW(cluster_report(surplus_noise, storage, ClusterReportOptions()),
+                 std::out_of_range);
+
+    // With no clusters the header's clause does not apply, and a long all-noise
+    // label vector stays accepted. INVARIANT 3: this half is the over-refusal
+    // guard on the new check.
+    const ClusteringResult no_clusters(
+        std::vector<ClusterLabel>{-1, -1, -1, -1, -1, -1}, Clusters{});
+    EXPECT_NO_THROW(cluster_report(no_clusters, storage, ClusterReportOptions()));
+}
+
 // The extended pre-pass must not reclassify the three refusals
 // validate_cluster_members already owns.
 TEST(ClusterReportTest, ExistingRefusalsKeepTheirTypes) {
@@ -550,18 +590,37 @@ TEST(ClusterReportTest, ExistingRefusalsKeepTheirTypes) {
 
     const ClusteringResult empty_cluster(
         std::vector<ClusterLabel>{-1, -1, -1, -1}, Clusters{{}});
-    EXPECT_THROW(cluster_report(empty_cluster, storage, ClusterReportOptions()),
-                 std::invalid_argument);
+    try {
+        cluster_report(empty_cluster, storage, ClusterReportOptions());
+        FAIL() << "expected std::invalid_argument";
+    } catch (const std::invalid_argument& e) {
+        EXPECT_NE(std::string(e.what()).find("Cluster must contain at least one member"),
+                  std::string::npos)
+            << e.what();
+    }
 
     const ClusteringResult duplicate(
         std::vector<ClusterLabel>{0, -1, -1, -1}, Clusters{{0, 0}});
-    EXPECT_THROW(cluster_report(duplicate, storage, ClusterReportOptions()),
-                 std::invalid_argument);
+    try {
+        cluster_report(duplicate, storage, ClusterReportOptions());
+        FAIL() << "expected std::invalid_argument";
+    } catch (const std::invalid_argument& e) {
+        EXPECT_NE(std::string(e.what()).find("Cluster members must be unique"),
+                  std::string::npos)
+            << e.what();
+    }
 
     const ClusteringResult beyond_storage(
         std::vector<ClusterLabel>{0, 0, 0, 0}, Clusters{{0, 1, 99}});
-    EXPECT_THROW(cluster_report(beyond_storage, storage, ClusterReportOptions()),
-                 std::out_of_range);
+    try {
+        cluster_report(beyond_storage, storage, ClusterReportOptions());
+        FAIL() << "expected std::out_of_range";
+    } catch (const std::out_of_range& e) {
+        EXPECT_NE(
+            std::string(e.what()).find("Cluster member index is outside the storage range"),
+            std::string::npos)
+            << e.what();
+    }
 }
 
 // Section 5.5 defines both of these as answerable, so the bijection check must
@@ -590,22 +649,26 @@ TEST(ClusterReportTest, PreconditionsAcceptEveryShippedAlgorithm) {
 
     ButinaOptions butina_options;
     butina_options.distance_threshold = 0.5;
-    EXPECT_NO_THROW(
-        cluster_report(butina_cluster(storage, butina_options), storage, options));
+    const auto butina = butina_cluster(storage, butina_options);
+    ASSERT_GE(butina.NumClusters(), 2u);
+    EXPECT_NO_THROW(cluster_report(butina, storage, options));
 
     AgglomerativeOptions agglomerative_options;
     agglomerative_options.n_clusters = 2;
-    EXPECT_NO_THROW(cluster_report(
-        agglomerative_cluster(storage, agglomerative_options), storage, options));
+    const auto agglomerative = agglomerative_cluster(storage, agglomerative_options);
+    ASSERT_GE(agglomerative.NumClusters(), 2u);
+    EXPECT_NO_THROW(cluster_report(agglomerative, storage, options));
 
     DBSCANOptions dbscan_options;
     dbscan_options.eps = 0.5;
     dbscan_options.min_samples = 2;
-    EXPECT_NO_THROW(
-        cluster_report(dbscan_cluster(storage, dbscan_options), storage, options));
+    const auto dbscan = dbscan_cluster(storage, dbscan_options);
+    ASSERT_GE(dbscan.NumClusters(), 2u);
+    EXPECT_NO_THROW(cluster_report(dbscan, storage, options));
 
     HDBSCANOptions hdbscan_options;
     hdbscan_options.min_cluster_size = 2;
-    EXPECT_NO_THROW(
-        cluster_report(hdbscan_cluster(storage, hdbscan_options), storage, options));
+    const auto hdbscan = hdbscan_cluster(storage, hdbscan_options);
+    ASSERT_GE(hdbscan.NumClusters(), 2u);
+    EXPECT_NO_THROW(cluster_report(hdbscan, storage, options));
 }

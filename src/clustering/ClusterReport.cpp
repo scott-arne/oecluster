@@ -192,6 +192,19 @@ ClusterReport cluster_report(
     report.size_gini = size_gini(sizes);
     report.size_entropy = size_entropy(sizes);
 
+    // The label vector and the storage must describe the same sample set before
+    // any per-sample check runs. Left to the pre-pass below, a surplus
+    // *clustered* sample is reported as "appears in no cluster", which sends the
+    // caller to fix a cluster list when the real error is that they paired a
+    // result with the wrong storage. The members-non-empty conjunct preserves
+    // the documented acceptance of a long all-noise label vector.
+    if (!members.empty() && labels.size() > storage.NumSamples()) {
+        throw std::out_of_range(
+            "cluster_report: label count " + std::to_string(labels.size()) +
+            " exceeds the storage sample count " +
+            std::to_string(storage.NumSamples()));
+    }
+
     // Hoisted above the first storage read. Every cluster is validated anyway
     // further down, by cluster_representative, but only after the intra-pair
     // loop has already asked the backend for an out-of-range pair -- so the
