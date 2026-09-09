@@ -12,6 +12,7 @@
 #include "oecluster/clustering/ClusterTypes.h"
 #include "oecluster/clustering/DBSCAN.h"
 #include "oecluster/clustering/HDBSCAN.h"
+#include "../../src/clustering/InternalIndices.h"
 
 using namespace OECluster;
 
@@ -851,4 +852,170 @@ TEST(ClusterReportTest, PreconditionsAcceptEveryShippedAlgorithm) {
     const auto hdbscan = hdbscan_cluster(storage, hdbscan_options);
     ASSERT_GE(hdbscan.NumClusters(), 2u);
     EXPECT_NO_THROW(cluster_report(hdbscan, storage, options));
+}
+
+// Section 7.1 item 2. The tie-aware merge is the riskiest code in A1, so it is
+// checked against the definition it implements rather than against itself.
+namespace {
+
+detail::PairRankIndices BruteForcePairRank(
+    std::vector<double> within,
+    std::vector<double> between) {
+    unsigned long long s_plus = 0;
+    unsigned long long s_minus = 0;
+    for (const double w : within) {
+        for (const double b : between) {
+            if (w < b) {
+                ++s_plus;
+            } else if (b < w) {
+                ++s_minus;
+            }
+        }
+    }
+    detail::PairRankIndices out{
+        std::numeric_limits<double>::quiet_NaN(),
+        std::numeric_limits<double>::quiet_NaN()};
+    const double denominator =
+        static_cast<double>(s_plus) + static_cast<double>(s_minus);
+    if (denominator > 0.0) {
+        out.baker_hubert_gamma =
+            (static_cast<double>(s_plus) - static_cast<double>(s_minus)) / denominator;
+    }
+
+    // C-index by direct summation of the w smallest and w largest of all P.
+    std::vector<double> all = within;
+    all.insert(all.end(), between.begin(), between.end());
+    std::sort(all.begin(), all.end());
+    const size_t w_count = within.size();
+    if (w_count > 0) {
+        double s_w = 0.0;
+        for (const double d : within) {
+            s_w += d;
+        }
+        double s_min = 0.0;
+        double s_max = 0.0;
+        for (size_t i = 0; i < w_count; ++i) {
+            s_min += all[i];
+            s_max += all[all.size() - 1 - i];
+        }
+        if (s_max != s_min) {
+            out.c_index = (s_w - s_min) / (s_max - s_min);
+        }
+    }
+    return out;
+}
+
+}  // namespace
+
+// Section 7.1 items 2 and 4. The brute-force reference is the whole point: it
+// recomputes gamma by the O(P_w * P_b) definition and c_index by explicitly
+// sorting all pooled pairs, so it shares no code path with the run-at-a-time
+// walk it checks. Item 4 asks for exactly this on c_index.
+TEST(InternalIndicesTest, PairRankMatchesBruteForce) {
+    const std::vector<double> within{0.2, 0.35, 0.5, 0.1};
+    const std::vector<double> between{0.6, 0.15, 0.9, 0.45, 0.7};
+    const detail::PairRankIndices got = detail::pair_rank_indices(within, between);
+    const detail::PairRankIndices want = BruteForcePairRank(within, between);
+    // Gamma is a ratio of two exactly-represented integer counts, so both
+    // routes land on the identical double and exact equality is honest.
+    EXPECT_DOUBLE_EQ(got.baker_hubert_gamma, want.baker_hubert_gamma);
+    // C-index is not, and must not be compared that way. The reference sums
+    // `within` in its original order while pair_rank_indices sums it after
+    // sorting; on this fixture the two sums differ by one ULP, which the
+    // division amplifies to five -- past EXPECT_DOUBLE_EQ's four-ULP budget.
+    // Measured, not estimated: 0.18421052631578951897 against
+    // 0.18421052631578938019 under clang -O2. The tolerance is absolute and
+    // still four orders of magnitude tighter than any real disagreement the
+    // merge-walk could produce, since taking a wrong element shifts S_min or
+    // S_max by at least 0.05.
+    EXPECT_NEAR(got.c_index, want.c_index, 1e-12);
+}
+
+// Section 7.1 item 3. A couple whose two distances are equal contributes to
+// neither counter; the run-at-a-time walk is what makes that true.
+TEST(InternalIndicesTest, PairRankExcludesTiedCouples) {
+    const std::vector<double> within{0.5};
+    const std::vector<double> between{0.5, 0.9};
+    const detail::PairRankIndices got = detail::pair_rank_indices(within, between);
+    // One concordant couple (0.5 < 0.9), one tie, no discordant couples.
+    EXPECT_DOUBLE_EQ(got.baker_hubert_gamma, 1.0);
+    EXPECT_DOUBLE_EQ(got.baker_hubert_gamma,
+                     BruteForcePairRank(within, between).baker_hubert_gamma);
+}
+
+// Section 7.1 item 16. An unsigned subtraction wraps here and returns a value
+// near +1, scoring the worst clustering as the best one.
+TEST(InternalIndicesTest, PairRankGammaGoesNegative) {
+    const std::vector<double> within{0.9, 0.9};
+    const std::vector<double> between{0.1, 0.1, 0.1, 0.1};
+    const detail::PairRankIndices got = detail::pair_rank_indices(within, between);
+    EXPECT_LT(got.baker_hubert_gamma, 0.0);
+    EXPECT_DOUBLE_EQ(got.baker_hubert_gamma, -1.0);
+    EXPECT_DOUBLE_EQ(got.baker_hubert_gamma,
+                     BruteForcePairRank(within, between).baker_hubert_gamma);
+}
+
+TEST(InternalIndicesTest, PairRankAllTiedIsNaNNotARefusal) {
+    const std::vector<double> within{0.5, 0.5};
+    const std::vector<double> between{0.5, 0.5, 0.5, 0.5};
+    detail::PairRankIndices got{0.0, 0.0};
+    EXPECT_NO_THROW(got = detail::pair_rank_indices(within, between));
+    EXPECT_TRUE(std::isnan(got.baker_hubert_gamma));
+}
+
+// Section 7.1 item 17. The refusal's real-scale trigger needs about 69 GB and
+// is untestable; the arithmetic that decides it is not, which is why the guard
+// is a named function rather than an inline condition.
+TEST(InternalIndicesTest, AddCouplesRefusesRatherThanWrapping) {
+    constexpr unsigned long long MAXIMUM =
+        std::numeric_limits<unsigned long long>::max();
+
+    unsigned long long counter = MAXIMUM - 5;
+    EXPECT_NO_THROW(detail::add_couples(counter, 5));
+    EXPECT_EQ(counter, MAXIMUM);
+
+    EXPECT_THROW(detail::add_couples(counter, 1), std::length_error);
+    EXPECT_EQ(counter, MAXIMUM);
+
+    EXPECT_NO_THROW(detail::add_couples(counter, 0));
+    EXPECT_EQ(counter, MAXIMUM);
+}
+
+// Section 5.3. The naive sum-of-squares form cancels on near-constant
+// fingerprint distances; Welford does not.
+TEST(InternalIndicesTest, WelfordMergeMatchesSinglePass) {
+    const std::vector<double> left{0.2, 0.2, 0.4};
+    const std::vector<double> right{0.8, 0.8, 0.8, 0.8};
+
+    detail::DistanceMoments a;
+    for (const double d : left) {
+        a.Add(d);
+    }
+    detail::DistanceMoments b;
+    for (const double d : right) {
+        b.Add(d);
+    }
+    const detail::DistanceMoments merged = detail::merge_moments(a, b);
+
+    detail::DistanceMoments single;
+    for (const double d : left) {
+        single.Add(d);
+    }
+    for (const double d : right) {
+        single.Add(d);
+    }
+
+    EXPECT_EQ(merged.count, single.count);
+    EXPECT_NEAR(merged.mean, single.mean, 1e-15);
+    EXPECT_NEAR(detail::population_stddev(merged),
+                detail::population_stddev(single), 1e-15);
+}
+
+TEST(InternalIndicesTest, PopulationStddevIsZeroBelowTwoValues) {
+    const detail::DistanceMoments empty;
+    EXPECT_DOUBLE_EQ(detail::population_stddev(empty), 0.0);
+
+    detail::DistanceMoments one;
+    one.Add(0.42);
+    EXPECT_DOUBLE_EQ(detail::population_stddev(one), 0.0);
 }
