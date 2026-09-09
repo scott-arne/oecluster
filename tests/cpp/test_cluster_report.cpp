@@ -674,18 +674,47 @@ TEST(ClusterReportTest, ExistingRefusalsKeepTheirTypes) {
 TEST(ClusterReportTest, CompoundInvalidResultsRefuseInAStableOrder) {
     const DenseStorage storage = MakeTwoClusterStorage();  // four samples
 
-    // Structural validity of every cluster is checked before ownership, so the
-    // empty cluster wins over the duplicate -- the precedence that held before
-    // the bijection pre-pass existed.
-    const ClusteringResult duplicate_and_empty(
-        std::vector<ClusterLabel>{0, -1, -1, -1}, Clusters{{0}, {0}, {}});
-    try {
-        cluster_report(duplicate_and_empty, storage, ClusterReportOptions());
-        FAIL() << "expected std::invalid_argument";
-    } catch (const std::invalid_argument& e) {
-        EXPECT_NE(std::string(e.what()).find("Cluster must contain at least one member"),
-                  std::string::npos)
-            << e.what();
+    // A malformed cluster outranks a partition that double-counts a sample, and
+    // it does so whichever cluster holds which. Each pair below is the same two
+    // errors with the cluster order swapped; both halves must answer the same
+    // way. This is the boundary the staged passes exist to guarantee -- see the
+    // comment in ClusterReport.cpp for what is deliberately NOT guaranteed
+    // inside a single cluster.
+    const std::vector<ClusterLabel> one_clustered{0, -1, -1, -1};
+    const struct {
+        const char* what;
+        Clusters clusters;
+    } structural_beats_ownership[] = {
+        {"Cluster must contain at least one member", Clusters{{0}, {0}, {}}},
+        {"Cluster must contain at least one member", Clusters{{}, {0}, {0}}},
+        {"Cluster members must be unique", Clusters{{0}, {0}, {2, 2}}},
+        {"Cluster members must be unique", Clusters{{2, 2}, {0}, {0}}},
+    };
+    for (const auto& arm : structural_beats_ownership) {
+        const ClusteringResult result(one_clustered, arm.clusters);
+        try {
+            cluster_report(result, storage, ClusterReportOptions());
+            FAIL() << "expected std::invalid_argument for " << arm.what;
+        } catch (const std::invalid_argument& e) {
+            EXPECT_NE(std::string(e.what()).find(arm.what), std::string::npos)
+                << e.what();
+        }
+    }
+
+    // The storage-range half of the same boundary. Its type is out_of_range, so
+    // it cannot share the loop above.
+    for (const Clusters& clusters :
+         {Clusters{{0}, {0}, {99}}, Clusters{{99}, {0}, {0}}}) {
+        const ClusteringResult result(one_clustered, clusters);
+        try {
+            cluster_report(result, storage, ClusterReportOptions());
+            FAIL() << "expected std::out_of_range";
+        } catch (const std::out_of_range& e) {
+            EXPECT_NE(std::string(e.what())
+                          .find("Cluster member index is outside the storage range"),
+                      std::string::npos)
+                << e.what();
+        }
     }
 
     // A member past the label vector beats a duplicate regardless of which
@@ -700,6 +729,39 @@ TEST(ClusterReportTest, CompoundInvalidResultsRefuseInAStableOrder) {
         std::vector<ClusterLabel>{0, 0}, Clusters{{0}, {0, 3}});
     EXPECT_THROW(cluster_report(duplicate_first, storage, ClusterReportOptions()),
                  std::out_of_range);
+}
+
+// The other half of the same decision, kept visible. Inside one cluster the
+// shared validator short-circuits, so these two shapes -- the same two errors,
+// swapped -- answer differently, and with different exception types. Declined
+// rather than fixed: ordering them from cluster_report would mean duplicating
+// checks that belong in DistanceAccess.h, and neither message misleads the
+// caller, who has a malformed cluster list either way. This test exists so the
+// asymmetry is a recorded decision rather than a surprise, and it flips if
+// anyone canonicalises the validator.
+TEST(ClusterReportTest, StructuralErrorOrderWithinAClusterIsNotCanonicalised) {
+    const DenseStorage storage = MakeTwoClusterStorage();  // four samples
+    const std::vector<ClusterLabel> one_clustered{0, -1, -1, -1};
+
+    const ClusteringResult unique_first(one_clustered, Clusters{{0, 0}, {}});
+    try {
+        cluster_report(unique_first, storage, ClusterReportOptions());
+        FAIL() << "expected std::invalid_argument";
+    } catch (const std::invalid_argument& e) {
+        EXPECT_NE(std::string(e.what()).find("Cluster members must be unique"),
+                  std::string::npos)
+            << e.what();
+    }
+
+    const ClusteringResult empty_first(one_clustered, Clusters{{}, {0, 0}});
+    try {
+        cluster_report(empty_first, storage, ClusterReportOptions());
+        FAIL() << "expected std::invalid_argument";
+    } catch (const std::invalid_argument& e) {
+        EXPECT_NE(std::string(e.what()).find("Cluster must contain at least one member"),
+                  std::string::npos)
+            << e.what();
+    }
 }
 
 // Section 5.5 defines both of these as answerable, so the bijection check must

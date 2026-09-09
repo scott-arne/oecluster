@@ -224,10 +224,17 @@ ClusterReport cluster_report(
     constexpr size_t NO_OWNER = std::numeric_limits<size_t>::max();
     std::vector<size_t> owner(labels.size(), NO_OWNER);
 
-    // Three staged passes rather than one interleaved loop. Precedence between
-    // two different errors must not depend on which cluster each happens to sit
-    // in, and structural validity of every cluster is a precondition for
-    // reasoning about ownership at all.
+    // Three staged passes rather than one interleaved loop, so that the layer a
+    // refusal comes from does not depend on which cluster holds which error: a
+    // malformed cluster is always reported ahead of a partition that
+    // double-counts a sample, whatever order the two arrive in.
+    //
+    // Within a single cluster the shared validator short-circuits, so which of
+    // "empty", "outside the storage range" and "not unique" is named still
+    // depends on cluster order. That is deliberate. All three say the same thing
+    // to the caller -- this cluster list is malformed -- and ordering them here
+    // would mean reimplementing checks that belong in one place. The guarantee
+    // is between layers, not within one.
     for (const Cluster& cluster : members) {
         detail::validate_cluster_members(cluster, storage.NumSamples());
     }
