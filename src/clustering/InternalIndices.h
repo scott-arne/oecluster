@@ -113,10 +113,16 @@ struct PairRankIndices {
  * is P doubles rather than P 16-byte structs, and both indices come off the
  * same two sorted arrays.
  *
+ * Both arrays must contain only finite values -- read them through
+ * checked_distance. A NaN element does not merely give a meaningless index: the
+ * run scans below advance on `== value`, which is false for a NaN against
+ * itself, so the walk would not terminate.
+ *
  * :param within: every pairwise distance inside a cluster.
  * :param between: every pairwise distance across two distinct clusters.
- * :returns: c_index NaN when S_max == S_min or there are no within-pairs;
- *     baker_hubert_gamma NaN when no couple is concordant or discordant.
+ * :returns: c_index NaN when S_max == S_min, there are no within-pairs, or
+ *     there are no between-pairs; baker_hubert_gamma NaN when no couple is
+ *     concordant or discordant.
  * :raises std::length_error: if a couple counter would wrap (see add_couples).
  */
 inline PairRankIndices pair_rank_indices(
@@ -129,7 +135,11 @@ inline PairRankIndices pair_rank_indices(
 
     PairRankIndices result;
 
-    if (within_count > 0) {
+    // With no between-pairs the pooled set is `within` itself, so S_min and
+    // S_max are equal by construction and the index is undefined; the existing
+    // `sum_max != sum_min` test below cannot be trusted to notice because the
+    // two sums are only equal in exact arithmetic.
+    if (within_count > 0 && between_count > 0) {
         double sum_within = 0.0;
         for (const double distance : within) {
             sum_within += distance;

@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -924,33 +926,71 @@ TEST(InternalIndicesTest, PairRankMatchesBruteForce) {
     // sorting; on this fixture the two sums differ by one ULP, which the
     // division amplifies to five -- past EXPECT_DOUBLE_EQ's four-ULP budget.
     // Measured, not estimated: 0.18421052631578951897 against
-    // 0.18421052631578938019 under clang -O2. The tolerance is absolute and
-    // still four orders of magnitude tighter than any real disagreement the
-    // merge-walk could produce, since taking a wrong element shifts S_min or
-    // S_max by at least 0.05.
+    // 0.18421052631578938019 under clang -O2. The tolerance is absolute, and
+    // the nearest real disagreement is nowhere near it: the smallest
+    // single-element misselection this fixture admits -- taking 0.45 rather
+    // than 0.5 into S_max -- moves c_index to 0.18918918918918914, a shift of
+    // 5e-3, some ten orders of magnitude above 1e-12.
+    EXPECT_NEAR(got.c_index, want.c_index, 1e-12);
+}
+
+// Section 5.4. With no between-pairs the pooled set is `within` itself, so
+// S_min and S_max are the same sum in two different orders. They agree only in
+// exact arithmetic: the `sum_max != sum_min` test alone lets a rounding
+// difference through and reports 0.0 -- the best possible compactness -- for an
+// index that is not defined at all.
+TEST(InternalIndicesTest, PairRankCIndexIsNaNWithoutBetweenPairs) {
+    const std::vector<double> within{0.2, 0.35, 0.5, 0.1};
+    const std::vector<double> between;
+    const detail::PairRankIndices got = detail::pair_rank_indices(within, between);
+    EXPECT_TRUE(std::isnan(got.c_index));
+    // No couples exist either, so Gamma is undefined for the same input.
+    EXPECT_TRUE(std::isnan(got.baker_hubert_gamma));
+}
+
+// Section 7.1 item 2, second fixture. The first one is tie-free, so every run
+// has length one and the per-element accumulation is indistinguishable from a
+// single addition per run. Here `within` holds a duplicate at 0.3 and `between`
+// a duplicate at 0.5, and both runs fall where the opposite array's seen-count
+// is already non-zero -- which is what makes the repetition observable.
+TEST(InternalIndicesTest, PairRankMatchesBruteForceWithTies) {
+    const std::vector<double> within{0.3, 0.3, 0.9};
+    const std::vector<double> between{0.1, 0.5, 0.5};
+    const detail::PairRankIndices got = detail::pair_rank_indices(within, between);
+    const detail::PairRankIndices want = BruteForcePairRank(within, between);
+    // Four concordant couples against five discordant.
+    EXPECT_DOUBLE_EQ(got.baker_hubert_gamma, -1.0 / 9.0);
+    EXPECT_DOUBLE_EQ(got.baker_hubert_gamma, want.baker_hubert_gamma);
     EXPECT_NEAR(got.c_index, want.c_index, 1e-12);
 }
 
 // Section 7.1 item 3. A couple whose two distances are equal contributes to
-// neither counter; the run-at-a-time walk is what makes that true.
+// neither counter; the run-at-a-time walk is what makes that true. The fixture
+// needs a discordant couple as well as a concordant one -- with none, scoring
+// the tie as concordant leaves the ratio at 1.0 and the test observes nothing.
 TEST(InternalIndicesTest, PairRankExcludesTiedCouples) {
-    const std::vector<double> within{0.5};
-    const std::vector<double> between{0.5, 0.9};
+    const std::vector<double> within{0.5, 0.2};
+    const std::vector<double> between{0.5, 0.9, 0.1};
     const detail::PairRankIndices got = detail::pair_rank_indices(within, between);
-    // One concordant couple (0.5 < 0.9), one tie, no discordant couples.
-    EXPECT_DOUBLE_EQ(got.baker_hubert_gamma, 1.0);
+    // Three concordant couples, two discordant, and one tie that scores as
+    // neither; counting the tie would give 4/6 instead.
+    EXPECT_DOUBLE_EQ(got.baker_hubert_gamma, 0.2);
     EXPECT_DOUBLE_EQ(got.baker_hubert_gamma,
                      BruteForcePairRank(within, between).baker_hubert_gamma);
 }
 
 // Section 7.1 item 16. An unsigned subtraction wraps here and returns a value
-// near +1, scoring the worst clustering as the best one.
+// near +1, scoring the worst clustering as the best one. The fixture is
+// deliberately interior rather than saturated: at -1.0 the concordant count is
+// zero, and a test sitting at the end of the range cannot see an error that
+// pushes it further that way.
 TEST(InternalIndicesTest, PairRankGammaGoesNegative) {
-    const std::vector<double> within{0.9, 0.9};
-    const std::vector<double> between{0.1, 0.1, 0.1, 0.1};
+    const std::vector<double> within{0.9, 0.4};
+    const std::vector<double> between{0.1, 0.1, 0.5, 0.8};
     const detail::PairRankIndices got = detail::pair_rank_indices(within, between);
+    // Two concordant couples against six discordant.
     EXPECT_LT(got.baker_hubert_gamma, 0.0);
-    EXPECT_DOUBLE_EQ(got.baker_hubert_gamma, -1.0);
+    EXPECT_DOUBLE_EQ(got.baker_hubert_gamma, -0.5);
     EXPECT_DOUBLE_EQ(got.baker_hubert_gamma,
                      BruteForcePairRank(within, between).baker_hubert_gamma);
 }
@@ -961,6 +1001,7 @@ TEST(InternalIndicesTest, PairRankAllTiedIsNaNNotARefusal) {
     detail::PairRankIndices got{0.0, 0.0};
     EXPECT_NO_THROW(got = detail::pair_rank_indices(within, between));
     EXPECT_TRUE(std::isnan(got.baker_hubert_gamma));
+    EXPECT_TRUE(std::isnan(got.c_index));
 }
 
 // Section 7.1 item 17. The refusal's real-scale trigger needs about 69 GB and
@@ -981,8 +1022,9 @@ TEST(InternalIndicesTest, AddCouplesRefusesRatherThanWrapping) {
     EXPECT_EQ(counter, MAXIMUM);
 }
 
-// Section 5.3. The naive sum-of-squares form cancels on near-constant
-// fingerprint distances; Welford does not.
+// Section 5.3. Pins that a merged pair of streams and one accumulated stream
+// reach the same count, mean and standard deviation, and that both match values
+// computed independently.
 TEST(InternalIndicesTest, WelfordMergeMatchesSinglePass) {
     const std::vector<double> left{0.2, 0.2, 0.4};
     const std::vector<double> right{0.8, 0.8, 0.8, 0.8};
@@ -1009,6 +1051,11 @@ TEST(InternalIndicesTest, WelfordMergeMatchesSinglePass) {
     EXPECT_NEAR(merged.mean, single.mean, 1e-15);
     EXPECT_NEAR(detail::population_stddev(merged),
                 detail::population_stddev(single), 1e-15);
+    // Both routes are also checked against the values themselves, not only
+    // against each other: a self-comparison stays green if the shared
+    // implementation is wrong in the same way on both sides.
+    EXPECT_DOUBLE_EQ(single.mean, 4.0 / 7.0);
+    EXPECT_NEAR(detail::population_stddev(single), 0.27105237087157541, 1e-12);
 }
 
 TEST(InternalIndicesTest, PopulationStddevIsZeroBelowTwoValues) {
@@ -1018,4 +1065,18 @@ TEST(InternalIndicesTest, PopulationStddevIsZeroBelowTwoValues) {
     detail::DistanceMoments one;
     one.Add(0.42);
     EXPECT_DOUBLE_EQ(detail::population_stddev(one), 0.0);
+}
+
+// Section 5.2. The refusal is the precondition every later index depends on:
+// a NaN distance gives std::sort no strict weak ordering, so the pair-rank
+// sorts would be undefined behaviour rather than merely wrong.
+TEST(InternalIndicesTest, CheckedDistanceRefusesNonFinite) {
+    DenseStorage storage(3);
+    storage.Set(0, 1, 0.25);
+    storage.Set(0, 2, std::numeric_limits<double>::quiet_NaN());
+    storage.Set(1, 2, std::numeric_limits<double>::infinity());
+
+    EXPECT_DOUBLE_EQ(detail::checked_distance(storage, 0, 1), 0.25);
+    EXPECT_THROW(detail::checked_distance(storage, 0, 2), std::invalid_argument);
+    EXPECT_THROW(detail::checked_distance(storage, 1, 2), std::invalid_argument);
 }
