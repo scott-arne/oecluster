@@ -7,6 +7,7 @@
 #define OECLUSTER_CLUSTERING_CLUSTERREPORT_H
 
 #include <cstddef>
+#include <limits>
 #include <vector>
 
 #include "oecluster/StorageBackend.h"
@@ -60,8 +61,10 @@ struct ClusterRecord {
     ClusterLabel label = 0;     ///< Ordinal in Members(); equals the Labels() value.
     size_t size = 0;            ///< Member count.
     size_t representative = 0;  ///< Sample index of the CONFIGURED representative.
-    double mean_intra_distance = 0.0;    ///< Mean within-pair distance; NaN for a singleton.
-    double median_intra_distance = 0.0;  ///< Median within-pair distance; NaN for a singleton.
+    /// Mean within-pair distance; NaN for a singleton.
+    double mean_intra_distance = std::numeric_limits<double>::quiet_NaN();
+    /// Median within-pair distance; NaN for a singleton.
+    double median_intra_distance = std::numeric_limits<double>::quiet_NaN();
     double radius = 0.0;    ///< Max representative-to-member distance; 0.0 for a singleton.
     double diameter = 0.0;  ///< Max pairwise distance within the cluster; 0.0 for a singleton.
     /// Mean distance from the representative to the OTHER n_k - 1 members. This
@@ -74,8 +77,9 @@ struct ClusterRecord {
     ClusterLabel nearest_cluster = NO_NEAREST_CLUSTER;
     /// Min single-linkage distance to nearest_cluster; NaN when K < 2. Not 0.0,
     /// which would read as another cluster sitting at zero distance.
-    double nearest_cluster_distance = 0.0;
-    double silhouette = 0.0;         ///< Mean over this cluster's members; NaN when K < 2.
+    double nearest_cluster_distance = std::numeric_limits<double>::quiet_NaN();
+    /// Mean over this cluster's members; NaN when K < 2.
+    double silhouette = std::numeric_limits<double>::quiet_NaN();
     /// Pairs involving this cluster within boundary_threshold. Each violating
     /// pair is counted by both of its endpoints, so the sum over records is
     /// twice ClusterReport::boundary_violations, which counts each pair once.
@@ -139,20 +143,33 @@ struct ClusterReport {
     // representative_method. The pre-existing median_medoid_member_distance is
     // medoid-named but keeps its configured-representative meaning; see the
     // class comment on cluster_report below.
-    double calinski_harabasz_medoid = 0.0;   ///< Higher is better. NaN when K < 2, Nc == K, or the denominator is zero.
-    double davies_bouldin_medoid = 0.0;      ///< Lower is better. NaN when K < 2; inf when two medoids coincide.
-    double dunn_mean_separation_mean_diameter = 0.0;    ///< Higher is better. NaN when K < 2 or the max mean within-pair distance is 0.
-    double dunn_medoid_separation_medoid_spread = 0.0;  ///< Higher is better. NaN when K < 2 or the max medoid spread is 0.
+    //
+    // These seven default to NaN, unlike the 0.0 of every field above them in
+    // this struct. The split is deliberate and is not to be tidied away: the
+    // fields above predate this branch and ship in 5.0.0 with 0.0 defaults,
+    // and changing an established default is a behaviour change nobody asked
+    // for. New fields get the honest default -- an unpopulated metric reads as
+    // undefined rather than as a measurement of zero.
+    /// Higher is better. NaN when K < 2, Nc == K, or the denominator is zero.
+    double calinski_harabasz_medoid = std::numeric_limits<double>::quiet_NaN();
+    /// Lower is better. NaN when K < 2; inf when two medoids coincide.
+    double davies_bouldin_medoid = std::numeric_limits<double>::quiet_NaN();
+    /// Higher is better. NaN when K < 2 or the max mean within-pair distance is 0.
+    double dunn_mean_separation_mean_diameter = std::numeric_limits<double>::quiet_NaN();
+    /// Higher is better. NaN when K < 2 or the max medoid spread is 0.
+    double dunn_medoid_separation_medoid_spread = std::numeric_limits<double>::quiet_NaN();
     /// Higher is better: positive means between-cluster distances exceed
     /// within-cluster ones. The sign convention is stated because published
     /// sources differ on it. NaN when there are no within-pairs, no
     /// between-pairs, or zero distance spread.
-    double point_biserial = 0.0;
+    double point_biserial = std::numeric_limits<double>::quiet_NaN();
 
-    // Pair-rank indices, computed only under compute_pair_rank_indices. NaN
-    // when not requested; read `requested` to tell that apart from undefined.
-    double c_index = 0.0;             ///< Lower is better.
-    double baker_hubert_gamma = 0.0;  ///< Higher is better.
+    // Pair-rank indices, computed only under compute_pair_rank_indices. Read
+    // `requested` to tell "nobody asked" apart from "asked and undefined".
+    /// Lower is better. NaN when not requested, or when S_max == S_min.
+    double c_index = std::numeric_limits<double>::quiet_NaN();
+    /// Higher is better. NaN when not requested, or when s+ + s- == 0.
+    double baker_hubert_gamma = std::numeric_limits<double>::quiet_NaN();
 
     /// Coverage over noise points only, against the configured representatives.
     /// Same length as coverage_at: coverage_thresholds.size() when K >= 1 and 0

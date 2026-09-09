@@ -424,4 +424,28 @@ TEST(ClusterReportTest, NewSurfaceDefaultsToUnrequested) {
     EXPECT_EQ(record.label, 0);
     EXPECT_EQ(record.size, 0u);
     EXPECT_EQ(record.nearest_cluster, NO_NEAREST_CLUSTER);
+    EXPECT_EQ(record.radius, 0.0);    // 0.0 IS the singleton value here
+    EXPECT_EQ(record.diameter, 0.0);  // likewise
+    // The four undefined-valued fields default to NaN. The SWIG surface
+    // exports ClusterRecord's default constructor, so these defaults are
+    // reachable from Python and must not read as measurements.
+    EXPECT_TRUE(std::isnan(record.mean_intra_distance));
+    EXPECT_TRUE(std::isnan(record.median_intra_distance));
+    EXPECT_TRUE(std::isnan(record.nearest_cluster_distance));
+    EXPECT_TRUE(std::isnan(record.silhouette));
+
+    // A default-constructed report likewise: the seven new scalars are NaN
+    // before anything populates them.
+    const ClusterReport blank;
+    EXPECT_TRUE(std::isnan(blank.calinski_harabasz_medoid));
+    EXPECT_TRUE(std::isnan(blank.davies_bouldin_medoid));
+    EXPECT_TRUE(std::isnan(blank.dunn_mean_separation_mean_diameter));
+    EXPECT_TRUE(std::isnan(blank.dunn_medoid_separation_medoid_spread));
+    EXPECT_TRUE(std::isnan(blank.point_biserial));
+    EXPECT_TRUE(std::isnan(blank.c_index));
+    EXPECT_TRUE(std::isnan(blank.baker_hubert_gamma));
+    // The pre-existing fields keep their 0.0 defaults -- pinned so that a
+    // later "consistency" cleanup of the whole struct fails loudly here.
+    EXPECT_EQ(blank.silhouette, 0.0);
+    EXPECT_EQ(blank.dunn_index, 0.0);
 }
