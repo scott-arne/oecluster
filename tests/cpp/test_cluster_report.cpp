@@ -479,7 +479,9 @@ TEST(ClusterReportTest, LabelDisagreeingWithClusterOrdinalIsRefused) {
     } catch (const std::invalid_argument& e) {
         const std::string message(e.what());
         EXPECT_NE(message.find("sample 2"), std::string::npos) << message;
-        EXPECT_NE(message.find("but appears in cluster"), std::string::npos) << message;
+        EXPECT_NE(message.find("has label 1 but appears in cluster 0"),
+                  std::string::npos)
+            << message;
     }
 }
 
@@ -545,6 +547,21 @@ TEST(ClusterReportTest, MemberBeyondLabelCountIsOutOfRange) {
         EXPECT_NE(message.find("member 4"), std::string::npos) << message;
         EXPECT_NE(message.find("label count 2"), std::string::npos) << message;
     }
+
+    // The boundary itself. member == labels.size() is the first index that
+    // reads past the end, so `>=` rather than `>` is the whole guard; without
+    // this arm a weakened comparison stays green while owner[2] runs off a
+    // two-element vector.
+    const ClusteringResult at_boundary(
+        std::vector<ClusterLabel>{0, 0}, Clusters{{0, 1, 2}});
+    try {
+        cluster_report(at_boundary, storage, ClusterReportOptions());
+        FAIL() << "expected std::out_of_range";
+    } catch (const std::out_of_range& e) {
+        const std::string message(e.what());
+        EXPECT_NE(message.find("member 2"), std::string::npos) << message;
+        EXPECT_NE(message.find("label count 2"), std::string::npos) << message;
+    }
 }
 
 // Section 5.2. The header promises out_of_range when a result that has clusters
@@ -569,11 +586,20 @@ TEST(ClusterReportTest, LabelsLongerThanStorageIsOutOfRange) {
     }
 
     // Surplus labelled noise: the one subset for which the documented type
-    // survived on its own, so it must keep it.
+    // survived on its own. Asserting the type alone would also pass on the old
+    // downstream DenseStorage refusal, so assert the message that only the new
+    // check can produce.
     const ClusteringResult surplus_noise(
         std::vector<ClusterLabel>{0, 0, 1, 1, -1, -1}, Clusters{{0, 1}, {2, 3}});
-    EXPECT_THROW(cluster_report(surplus_noise, storage, ClusterReportOptions()),
-                 std::out_of_range);
+    try {
+        cluster_report(surplus_noise, storage, ClusterReportOptions());
+        FAIL() << "expected std::out_of_range";
+    } catch (const std::out_of_range& e) {
+        const std::string message(e.what());
+        EXPECT_NE(message.find("label count 6"), std::string::npos) << message;
+        EXPECT_NE(message.find("storage sample count 4"), std::string::npos)
+            << message;
+    }
 
     // With no clusters the header's clause does not apply, and a long all-noise
     // label vector stays accepted. INVARIANT 3: this half is the over-refusal
@@ -581,6 +607,24 @@ TEST(ClusterReportTest, LabelsLongerThanStorageIsOutOfRange) {
     const ClusteringResult no_clusters(
         std::vector<ClusterLabel>{-1, -1, -1, -1, -1, -1}, Clusters{});
     EXPECT_NO_THROW(cluster_report(no_clusters, storage, ClusterReportOptions()));
+
+    // Both invalid at once. INVARIANT 1: the caller paired a result with the
+    // wrong storage, and the out-of-range member is a symptom of that, so the
+    // mismatch has to be named first. This arm is what makes the ordering of
+    // the guard against validate_cluster_members a tested property rather than
+    // a comment.
+    const ClusteringResult mismatched_and_bad_member(
+        std::vector<ClusterLabel>{0, 0, 1, 1, 0, 1},
+        Clusters{{0, 1}, {2, 99}});
+    try {
+        cluster_report(mismatched_and_bad_member, storage, ClusterReportOptions());
+        FAIL() << "expected std::out_of_range";
+    } catch (const std::out_of_range& e) {
+        const std::string message(e.what());
+        EXPECT_NE(message.find("label count 6"), std::string::npos) << message;
+        EXPECT_NE(message.find("storage sample count 4"), std::string::npos)
+            << message;
+    }
 }
 
 // The extended pre-pass must not reclassify the three refusals
@@ -621,6 +665,41 @@ TEST(ClusterReportTest, ExistingRefusalsKeepTheirTypes) {
             std::string::npos)
             << e.what();
     }
+}
+
+// When a result is invalid several ways at once, which refusal fires must be a
+// property of the errors, not of which cluster happens to hold them. INVARIANT
+// 1: name the reason the caller must fix first, and name the same one whichever
+// order the clusters arrive in.
+TEST(ClusterReportTest, CompoundInvalidResultsRefuseInAStableOrder) {
+    const DenseStorage storage = MakeTwoClusterStorage();  // four samples
+
+    // Structural validity of every cluster is checked before ownership, so the
+    // empty cluster wins over the duplicate -- the precedence that held before
+    // the bijection pre-pass existed.
+    const ClusteringResult duplicate_and_empty(
+        std::vector<ClusterLabel>{0, -1, -1, -1}, Clusters{{0}, {0}, {}});
+    try {
+        cluster_report(duplicate_and_empty, storage, ClusterReportOptions());
+        FAIL() << "expected std::invalid_argument";
+    } catch (const std::invalid_argument& e) {
+        EXPECT_NE(std::string(e.what()).find("Cluster must contain at least one member"),
+                  std::string::npos)
+            << e.what();
+    }
+
+    // A member past the label vector beats a duplicate regardless of which
+    // cluster holds which. Before the passes were staged these two shapes
+    // disagreed with each other.
+    const ClusteringResult bad_index_first(
+        std::vector<ClusterLabel>{0, 0}, Clusters{{0, 3}, {0}});
+    EXPECT_THROW(cluster_report(bad_index_first, storage, ClusterReportOptions()),
+                 std::out_of_range);
+
+    const ClusteringResult duplicate_first(
+        std::vector<ClusterLabel>{0, 0}, Clusters{{0}, {0, 3}});
+    EXPECT_THROW(cluster_report(duplicate_first, storage, ClusterReportOptions()),
+                 std::out_of_range);
 }
 
 // Section 5.5 defines both of these as answerable, so the bijection check must

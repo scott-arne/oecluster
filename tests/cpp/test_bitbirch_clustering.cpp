@@ -440,9 +440,9 @@ TEST(BitBirchFastTest, RefineIgnoresFastModeAndStaysStrict) {
     EXPECT_EQ(strict.Members(), fast.Members());
 }
 
-// Section 7.1 item 9. The cluster_report preconditions must accept every
-// algorithm the library ships; BitBirch is fingerprint-native, so its arm of
-// that test lives here where the batch helpers do.
+// Section 7.1 item 9. The cluster_report preconditions accept bitbirch_cluster
+// output; BitBirch is fingerprint-native, so its arm of that test lives here
+// where the batch helpers do.
 TEST(BitBirchClusteringTest, ClusterReportAcceptsBitBirchOutput) {
     const auto batch = make_random_batch(64, 128);
     const auto storage = tanimoto_storage(batch);
@@ -456,4 +456,44 @@ TEST(BitBirchClusteringTest, ClusterReportAcceptsBitBirchOutput) {
     ASSERT_GE(result.NumClusters(), 2u);
     EXPECT_NO_THROW(
         OECluster::cluster_report(result, storage, OECluster::ClusterReportOptions()));
+}
+
+// Known gap, pinned deliberately rather than left latent. bitbirch_refine can
+// return an emptied leaf subcluster as an empty member list -- see
+// RefinePruneMatchesZeroSampleReferenceCentroid above, which fixes that shape as
+// reference-parity behaviour -- and cluster_report's long-standing
+// validate_cluster_members refuses it. The refusal predates the bijection
+// pre-pass; what is new is only that a sibling test now claims the preconditions
+// accept everything the library ships. This test makes the disagreement visible,
+// so whichever way it is resolved -- BitBirch compacting its output, or
+// cluster_report accepting an empty cluster -- the change is deliberate and this
+// test flips with it.
+TEST(BitBirchClusteringTest, ClusterReportRefusesEmptiedRefinementSubclusters) {
+    const auto batch = make_batch({
+        make_fp(3, {0, 1, 2}),
+        make_fp(3, {1, 2}),
+        make_fp(3, {0}),
+        make_fp(3, {0, 1}),
+    });
+    const auto storage = tanimoto_storage(batch);
+
+    OECluster::BitBirchRefinementOptions options;
+    options.fit_options.threshold = 0.8;
+    options.fit_options.branching_factor = 2;
+    options.fit_options.merge_criterion = OECluster::BitBirchMergeCriterion::Diameter;
+    options.fit_options.singly = false;
+    options.redistribute_largest_cluster = true;
+
+    const auto result = OECluster::bitbirch_refine(batch, options);
+    ASSERT_EQ(result.Members().size(), 5u);
+    ASSERT_TRUE(result.Members()[4].empty());
+
+    try {
+        OECluster::cluster_report(result, storage, OECluster::ClusterReportOptions());
+        FAIL() << "expected std::invalid_argument";
+    } catch (const std::invalid_argument& e) {
+        EXPECT_NE(std::string(e.what()).find("Cluster must contain at least one member"),
+                  std::string::npos)
+            << e.what();
+    }
 }

@@ -224,18 +224,32 @@ ClusterReport cluster_report(
     constexpr size_t NO_OWNER = std::numeric_limits<size_t>::max();
     std::vector<size_t> owner(labels.size(), NO_OWNER);
 
-    for (size_t k = 0; k < members.size(); ++k) {
-        detail::validate_cluster_members(members[k], storage.NumSamples());
-        for (const size_t member : members[k]) {
-            // A member can be inside the storage range and past the end of a
-            // shorter label vector; without this, reading Labels()[member]
-            // below is undefined.
+    // Three staged passes rather than one interleaved loop. Precedence between
+    // two different errors must not depend on which cluster each happens to sit
+    // in, and structural validity of every cluster is a precondition for
+    // reasoning about ownership at all.
+    for (const Cluster& cluster : members) {
+        detail::validate_cluster_members(cluster, storage.NumSamples());
+    }
+
+    // A member can be inside the storage range and past the end of a shorter
+    // label vector; without this, reading Labels()[member] below is undefined.
+    // It runs to completion before ownership so that a bad index -- another
+    // symptom of a result paired with the wrong labels -- is never masked by a
+    // duplicate found in an earlier cluster.
+    for (const Cluster& cluster : members) {
+        for (const size_t member : cluster) {
             if (member >= labels.size()) {
                 throw std::out_of_range(
                     "cluster_report: cluster member " + std::to_string(member) +
                     " is at or beyond the label count " +
                     std::to_string(labels.size()));
             }
+        }
+    }
+
+    for (size_t k = 0; k < members.size(); ++k) {
+        for (const size_t member : members[k]) {
             if (owner[member] != NO_OWNER) {
                 throw std::invalid_argument(
                     "cluster_report: sample " + std::to_string(member) +
