@@ -107,6 +107,63 @@ DenseStorage MakeDivergentRepresentativeStorage() {
     return storage;
 }
 
+// Nine samples in three clusters of unequal size -- A = {0,1}, B = {2,3,4},
+// C = {5,6,7,8} -- and the only fixture in this file with K >= 3. Every other
+// partition here is K <= 2, which leaves a report that aggregates only the
+// first cluster indistinguishable from one that aggregates all of them, and a
+// cross pass that stops after pair (0,1) indistinguishable from one that walks
+// all three pairs.
+//
+// Three properties are load-bearing and none of them is incidental:
+//
+//   * The three intra multisets differ, so dropping any one cluster moves the
+//     intra median as well as the mean.
+//   * Each cluster pair has its own separation -- A-B 0.80, A-C 0.90,
+//     B-C 0.60 -- so the Dunn numerator has a unique minimum and the third
+//     pair is not a repeat of the first two. Within a pair the separation is
+//     flat, which makes every cross mean equal to the separation itself and
+//     the silhouette b terms exact by inspection.
+//   * The clusters have distinct radii (0.32, 0.24, 0.08) and distinct
+//     medoid-member means (0.32, 0.18, 0.06), so neither median sits on the
+//     first cluster's value.
+//
+// Medoid representatives, by lowest mean distance to the rest of the cluster:
+//   A: both members are at 0.32, and the earliest-member tie rule picks 0.
+//   B: 0.18, 0.24, 0.30      -> 2
+//   C: 0.06, 0.18, 0.30, 0.42 -> 5
+DenseStorage MakeThreeClusterStorage() {
+    DenseStorage storage(9);
+    // Cluster A = {0,1}: a single intra pair.
+    storage.Set(0, 1, 0.32);
+    // Cluster B = {2,3,4}: member means 0.18, 0.24, 0.30.
+    storage.Set(2, 3, 0.12);
+    storage.Set(2, 4, 0.24);
+    storage.Set(3, 4, 0.36);
+    // Cluster C = {5,6,7,8}: member means 0.06, 0.18, 0.30, 0.42. Sample 5 sits
+    // very close to all three others while 7 and 8 are far apart, so C is the
+    // only cluster whose radius and diameter diverge sharply.
+    storage.Set(5, 6, 0.04);
+    storage.Set(5, 7, 0.06);
+    storage.Set(5, 8, 0.08);
+    storage.Set(6, 7, 0.08);
+    storage.Set(6, 8, 0.42);
+    storage.Set(7, 8, 0.76);
+    for (size_t i = 0; i < 2; ++i) {
+        for (size_t j = 2; j < 5; ++j) {
+            storage.Set(i, j, 0.80);
+        }
+        for (size_t j = 5; j < 9; ++j) {
+            storage.Set(i, j, 0.90);
+        }
+    }
+    for (size_t i = 2; i < 5; ++i) {
+        for (size_t j = 5; j < 9; ++j) {
+            storage.Set(i, j, 0.60);
+        }
+    }
+    return storage;
+}
+
 }  // namespace
 
 TEST(ClusterReportOptionsTest, PresetsSeedDocumentedThresholds) {
@@ -328,6 +385,73 @@ TEST(ClusterReportTest, CoverageCountsNoiseInDenominator) {
     ASSERT_EQ(r.coverage_at.size(), 1u);
     // Only points 0,1 are within 0.3 of the single medoid; 2,3 (0.8) are not.
     EXPECT_DOUBLE_EQ(r.coverage_at[0], 0.5);
+}
+
+// Every distance-derived legacy scalar over three unequal clusters, hand
+// derived from MakeThreeClusterStorage. This is the only assertion in the file
+// that can tell whole-partition aggregation apart from first-cluster-only
+// aggregation, or a complete cross pass apart from one that stops after the
+// first cluster pair.
+TEST(ClusterReportTest, HandComputedThreeClusterReport) {
+    const DenseStorage storage = MakeThreeClusterStorage();
+    const ClusteringResult result = MakeResult({0, 0, 1, 1, 1, 2, 2, 2, 2});
+
+    ClusterReportOptions options;
+    // 0.80 and 0.60 fall inside, 0.90 does not, so the count spans two of the
+    // three cluster pairs rather than resting on a single one.
+    options.boundary_threshold = 0.85;
+    const ClusterReport r = cluster_report(result, storage, options);
+
+    // The ten intra pairs are 0.32 | 0.12 0.24 0.36 | 0.04 0.06 0.08 0.08 0.42
+    // 0.76, summing to 2.48.
+    EXPECT_DOUBLE_EQ(r.mean_intra_distance, 0.248);
+    // Sorted they are 0.04 0.06 0.08 0.08 0.12 0.24 0.32 0.36 0.42 0.76, and
+    // the even-count median averages the fifth and sixth: (0.12 + 0.24) / 2.
+    EXPECT_DOUBLE_EQ(r.median_intra_distance, 0.18);
+    // Radii, each the medoid's farthest member: 0.32, max(0.12, 0.24) = 0.24,
+    // max(0.04, 0.06, 0.08) = 0.08. The median of three is the middle one.
+    EXPECT_DOUBLE_EQ(r.median_radius, 0.24);
+    // Diameters 0.32, 0.36, 0.76. Fractional-rank p95 over three values lands
+    // at rank 0.95 * 2 = 1.9, i.e. 0.36 + 0.9 * (0.76 - 0.36).
+    EXPECT_DOUBLE_EQ(r.p95_diameter, 0.72);
+    // Each cross group is flat, so b is 0.80 for A and 0.60 for B and C, and
+    // every a term is the member mean listed on the fixture. Per point:
+    //   A: (0.80 - 0.32) / 0.80 = 0.60, twice                       -> 1.20
+    //   B: 0.70, 0.60, 0.50 from a = 0.18, 0.24, 0.30               -> 1.80
+    //   C: 0.90, 0.70, 0.50, 0.30 from a = 0.06, 0.18, 0.30, 0.42   -> 2.40
+    // 5.40 over nine points.
+    EXPECT_DOUBLE_EQ(r.silhouette, 0.6);
+    // Closest cross pair is B-C at 0.60; largest diameter is C's 0.76.
+    EXPECT_DOUBLE_EQ(r.dunn_index, 0.6 / 0.76);
+    // A-B contributes 2 * 3 = 6 pairs at 0.80 and B-C contributes 3 * 4 = 12 at
+    // 0.60; A-C's 0.90 is outside the threshold.
+    EXPECT_EQ(r.boundary_violations, 18u);
+    // Medoid-to-member means: 0.32, (0.12 + 0.24) / 2, (0.04 + 0.06 + 0.08) / 3.
+    EXPECT_DOUBLE_EQ(r.median_medoid_member_distance, 0.18);
+    // Representatives 0, 2 and 5, whose nearest-other distances are 0.80, 0.60
+    // and 0.60. Dropping cluster C would leave only 0 and 2 and read 0.80.
+    EXPECT_DOUBLE_EQ(r.representative_redundancy, 0.6);
+}
+
+// A coverage curve that actually rises. Every other multi-threshold coverage
+// assertion in this file is flat, which cannot distinguish indexing
+// coverage_thresholds[t] from reading the same entry on every iteration.
+TEST(ClusterReportTest, CoverageCurveRisesWithEachThreshold) {
+    const DenseStorage storage = MakeThreeClusterStorage();
+    const ClusteringResult result = MakeResult({0, 0, 1, 1, 1, 2, 2, 2, 2});
+
+    ClusterReportOptions options;
+    options.coverage_thresholds = {0.05, 0.10, 0.15};
+    const ClusterReport r = cluster_report(result, storage, options);
+
+    // Distance from each sample to its nearest representative (0, 2 or 5), in
+    // sample order: 0, 0.32, 0, 0.12, 0.24, 0, 0.04, 0.06, 0.08. Sorted that is
+    // 0, 0, 0, 0.04, 0.06, 0.08, 0.12, 0.24, 0.32, so each threshold admits a
+    // different number of samples out of nine.
+    ASSERT_EQ(r.coverage_at.size(), 3u);
+    EXPECT_DOUBLE_EQ(r.coverage_at[0], 4.0 / 9.0);
+    EXPECT_DOUBLE_EQ(r.coverage_at[1], 6.0 / 9.0);
+    EXPECT_DOUBLE_EQ(r.coverage_at[2], 7.0 / 9.0);
 }
 
 TEST(ClusterReportTest, CompareReportsHoldsBothScorecards) {
