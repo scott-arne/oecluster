@@ -20,7 +20,7 @@ import sys
 import warnings
 from importlib import metadata
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import numpy as np
 
@@ -42,8 +42,10 @@ __all__ = [
     "CrossDistanceMatrix",
     "load_distance_matrix",
     "ClusteringResult",
+    "ClusterRecord",
     "ClusterReport",
     "ClusterReportComparison",
+    "ClusterReportRequested",
     "cluster_report",
     "compare_reports",
     "ButinaResult",
@@ -2865,10 +2867,57 @@ def _native_clustering_result(result):
     return _oecluster.ClusteringResult(label_vec, member_vec)
 
 
+class ClusterRecord(NamedTuple):
+    """One row of a :class:`ClusterReport`'s per-cluster table.
+
+    ``label`` and ``nearest_cluster`` are ordinals into the clustering's member
+    lists, not values read out of its label vector. The two are the same integer
+    under ``cluster_report``'s partition precondition; naming which one is
+    authoritative removes the ambiguity rather than relying on the coincidence.
+
+    A ``NamedTuple`` rather than a plain class so the table is immutable without
+    a hand-written ``__setattr__`` and feeds ``pandas.DataFrame(report.records)``
+    directly, which is what a per-cluster table is for. pandas is not a
+    dependency.
+
+    Every field defaults, mirroring the C++ struct value for value, so that a
+    default-constructed record reads the same from either side. The four
+    undefined-valued fields default to NaN rather than 0.0: a zero
+    ``nearest_cluster_distance`` would say another cluster sits at zero
+    distance, and 0.0 is the real singleton value only for ``radius`` and
+    ``diameter``.
+    """
+
+    label: int = 0
+    size: int = 0
+    representative: int = 0
+    mean_intra_distance: float = float("nan")
+    median_intra_distance: float = float("nan")
+    radius: float = 0.0
+    diameter: float = 0.0
+    mean_representative_distance: float = 0.0
+    nearest_cluster: int = -1
+    nearest_cluster_distance: float = float("nan")
+    silhouette: float = float("nan")
+    boundary_violations: int = 0
+
+
+class ClusterReportRequested(NamedTuple):
+    """Which optional computations a :class:`ClusterReport`'s caller asked for.
+
+    Records the request, not the outcome. A requested metric whose value is
+    undefined still reports ``True`` here, so a NaN can be read unambiguously:
+    ``False`` means nobody asked, ``True`` with NaN means asked and undefined.
+    """
+
+    pair_rank_indices: bool
+    per_cluster_records: bool
+
+
 class ClusterReport:
     """Read-only clustering-quality scorecard.
 
-    Provides 20 scalar quality metrics plus threshold-coverage curves for
+    Provides 27 scalar quality metrics plus threshold-coverage curves for
     evaluating clustering results. Key metrics include silhouette (separation),
     Dunn index (compactness vs. isolation), size Gini coefficient (imbalance),
     median radius/diameter, and coverage fractions at user-specified thresholds.
@@ -2877,7 +2926,8 @@ class ClusterReport:
     not by calling ``__init__`` directly.
 
     All metrics are exposed as read-only properties. Undefined metrics are NaN.
-    Vector metrics (``coverage_thresholds``, ``coverage_at``) are tuples.
+    Vector metrics (``coverage_thresholds``, ``coverage_at``,
+    ``noise_coverage_at``, ``records``) are tuples.
     """
 
     _SCALAR_FIELDS = (
@@ -2887,6 +2937,13 @@ class ClusterReport:
         "mean_intra_distance", "median_intra_distance", "median_radius",
         "p95_diameter", "silhouette", "dunn_index", "boundary_violations",
         "median_medoid_member_distance", "representative_redundancy",
+        "calinski_harabasz_medoid",
+        "davies_bouldin_medoid",
+        "dunn_mean_separation_mean_diameter",
+        "dunn_medoid_separation_medoid_spread",
+        "point_biserial",
+        "c_index",
+        "baker_hubert_gamma",
     )
 
     def __init__(self, native_report, method=""):
@@ -2905,6 +2962,37 @@ class ClusterReport:
         object.__setattr__(
             self, "_coverage_at",
             tuple(float(v) for v in native_report.coverage_at))
+        object.__setattr__(
+            self, "_noise_coverage_at",
+            tuple(float(v) for v in native_report.noise_coverage_at))
+        object.__setattr__(
+            self, "_records",
+            tuple(
+                ClusterRecord(
+                    label=record.label,
+                    size=record.size,
+                    representative=record.representative,
+                    mean_intra_distance=record.mean_intra_distance,
+                    median_intra_distance=record.median_intra_distance,
+                    radius=record.radius,
+                    diameter=record.diameter,
+                    mean_representative_distance=(
+                        record.mean_representative_distance),
+                    nearest_cluster=record.nearest_cluster,
+                    nearest_cluster_distance=record.nearest_cluster_distance,
+                    silhouette=record.silhouette,
+                    boundary_violations=record.boundary_violations,
+                )
+                for record in native_report.records
+            ))
+        object.__setattr__(
+            self, "_requested",
+            ClusterReportRequested(
+                pair_rank_indices=bool(
+                    native_report.requested.pair_rank_indices),
+                per_cluster_records=bool(
+                    native_report.requested.per_cluster_records),
+            ))
         object.__setattr__(self, "_method", str(method))
 
     def __setattr__(self, name, value):
@@ -2931,6 +3019,38 @@ class ClusterReport:
     def coverage_at(self):
         """Coverage fraction at each threshold (tuple, aligned with coverage_thresholds)."""
         return self._coverage_at
+
+    @property
+    def noise_coverage_at(self) -> tuple[float, ...]:
+        """Coverage over noise points only, parallel to ``coverage_thresholds``.
+
+        Same length as :attr:`coverage_at`: the threshold count when the
+        clustering has at least one cluster, and empty when it has none. Every
+        entry is NaN when the clustering has no noise -- not 0.0, which would
+        read as "no noise point is covered".
+
+        :returns: One fraction per coverage threshold.
+        """
+        return self._noise_coverage_at
+
+    @property
+    def records(self) -> tuple["ClusterRecord", ...]:
+        """The per-cluster table, in member-list order.
+
+        Empty unless ``compute_per_cluster_records`` was set. Read
+        :attr:`requested` to tell "nobody asked" apart from "no clusters".
+
+        :returns: One :class:`ClusterRecord` per cluster.
+        """
+        return self._records
+
+    @property
+    def requested(self) -> "ClusterReportRequested":
+        """What the caller asked for, independent of what was computable.
+
+        :returns: The two opt-in flags as passed.
+        """
+        return self._requested
 
     def __repr__(self):
         return (f"ClusterReport(method={self.method!r}, "
@@ -3020,6 +3140,8 @@ def cluster_report(result, distance_matrix, *, preset="default",
                    coverage_thresholds=None, boundary_threshold=None,
                    representative_method="medoid",
                    treat_noise_as_singletons=True, num_threads=0,
+                   compute_pair_rank_indices=False,
+                   compute_per_cluster_records=False,
                    allow_nonmetric=False):
     """
     Compute a method-agnostic clustering-quality report.
@@ -3034,16 +3156,30 @@ def cluster_report(result, distance_matrix, *, preset="default",
         "highest_neighborhood" method is not supported.
     :param treat_noise_as_singletons: Fold noise into singleton accounting.
     :param num_threads: Reserved for parallel-safe computation.
+    :param compute_pair_rank_indices: Compute ``c_index`` and
+        ``baker_hubert_gamma``. Off by default: the stage materialises every
+        pairwise distance among clustered points as two sortable arrays,
+        ``Nc * (Nc - 1) / 2`` doubles in total -- roughly 400 MB at
+        ``Nc = 10,000`` and 10 GB at ``Nc = 50,000``. Raises ``MemoryError`` if
+        the allocation fails.
+    :param compute_per_cluster_records: Populate :attr:`ClusterReport.records`.
     :param allow_nonmetric: Score anyway when the distances are known not to
         satisfy the triangle inequality. Does not override the refusals for
         similarity-valued or non-finite matrices.
     :returns: A ClusterReport.
     :raises TypeError: If result/distance_matrix have the wrong type, or
+        compute_pair_rank_indices, compute_per_cluster_records or
         allow_nonmetric is not a bool.
     :raises ValueError: If a preset/method/threshold is invalid, the result and
         the matrix cover different numbers of samples, the matrix uses sparse
-        storage, or the matrix is not a metric.
-    :raises RuntimeError: If the distance matrix cannot provide complete distances.
+        storage, or the matrix is not a metric -- and additionally: any
+        non-finite entry anywhere in the matrix is refused before the report is
+        computed, whether or not that pair reaches a reported value.
+    :raises RuntimeError: If the distance matrix cannot provide complete
+        distances, or if the result's labels and members describe different
+        partitions.
+    :raises MemoryError: If the pair-rank stage cannot allocate its distance
+        arrays, or would exceed its couple counter.
     """
     if not isinstance(result, ClusteringResult):
         raise TypeError("cluster_report() expects a ClusteringResult")
@@ -3084,6 +3220,17 @@ def cluster_report(result, distance_matrix, *, preset="default",
     if num_threads_int < 0:
         raise ValueError("num_threads must be non-negative")
 
+    if not isinstance(compute_pair_rank_indices, bool):
+        raise TypeError(
+            "compute_pair_rank_indices must be a bool, got "
+            f"{type(compute_pair_rank_indices).__name__}"
+        )
+    if not isinstance(compute_per_cluster_records, bool):
+        raise TypeError(
+            "compute_per_cluster_records must be a bool, got "
+            f"{type(compute_per_cluster_records).__name__}"
+        )
+
     # Nothing else ties the result to the matrix: the native reporter reads
     # cluster members as storage indices, so a result scored against a larger
     # unrelated matrix stays in range and returns a confident, wrong scorecard.
@@ -3117,6 +3264,8 @@ def cluster_report(result, distance_matrix, *, preset="default",
     options.representative_method = native_method
     options.treat_noise_as_singletons = bool(treat_noise_as_singletons)
     options.num_threads = num_threads_int
+    options.compute_pair_rank_indices = compute_pair_rank_indices
+    options.compute_per_cluster_records = compute_per_cluster_records
 
     native = _cluster_report(
         _native_clustering_result(result), distance_matrix.storage, options)
