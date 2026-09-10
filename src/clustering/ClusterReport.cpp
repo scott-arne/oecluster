@@ -292,6 +292,16 @@ ClusterReport cluster_report(
         double max_diameter = 0.0;
         for (size_t k = 0; k < cluster_count; ++k) {
             const Cluster& cluster = members[k];
+
+            // Selected before the first checked read. An unsupported
+            // representative_method is a configuration error the caller must
+            // fix before the distance matrix means anything, so it outranks the
+            // finiteness refusal below rather than losing a race to whichever
+            // cell happens to be poisoned. INVARIANT 1.
+            const size_t representative =
+                cluster_representative(cluster, storage, options.representative_method);
+            representatives.push_back(representative);
+
             double diameter = 0.0;
             for (size_t i = 0; i < cluster.size(); ++i) {
                 for (size_t j = i + 1; j < cluster.size(); ++j) {
@@ -311,10 +321,6 @@ ClusterReport cluster_report(
             }
             diameters.push_back(diameter);
             max_diameter = std::max(max_diameter, diameter);
-
-            const size_t representative =
-                cluster_representative(cluster, storage, options.representative_method);
-            representatives.push_back(representative);
 
             double radius = 0.0;
             double representative_total = 0.0;
@@ -389,6 +395,12 @@ ClusterReport cluster_report(
         // and the Dunn variant wants only the global minimum mean.
         std::vector<double> nearest_cluster_distance(
             cluster_count, std::numeric_limits<double>::infinity());
+        // An entry is meaningful only where nearest_cluster_distance[k] is
+        // finite. size_t has no natural sentinel here, so a cluster with no
+        // neighbour keeps the 0 it was built with, which is indistinguishable
+        // from a genuine answer of "ordinal 0" -- at K == 1 the loop below never
+        // runs and cluster 0 would name itself. The consumer maps the infinite
+        // distance to NO_NEAREST_CLUSTER rather than reading this vector alone.
         std::vector<size_t> nearest_cluster(cluster_count, 0);
         std::vector<size_t> cluster_violations(cluster_count, 0);
         double min_mean_separation = std::numeric_limits<double>::infinity();

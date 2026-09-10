@@ -1004,6 +1004,31 @@ TEST(ClusterReportTest, PartitionErrorOutranksNonFiniteDistance) {
     }
 }
 
+// A representative method ClusterReportOptions cannot configure is a
+// configuration error, and no repair of the distance matrix rescues it, so it
+// is named ahead of the finiteness refusal. INVARIANT 1, same precedence
+// argument as the partition check above. The clean case pins the refusal the
+// header documents at ClusterReport.h:198-202, which no other test covers.
+TEST(ClusterReportTest, UnsupportedRepresentativeMethodOutranksNonFiniteDistance) {
+    const ClusteringResult result = MakeResult({0, 0, 0, 1, 1, 1});
+    ClusterReportOptions options;
+    options.representative_method = RepresentativeMethod::HighestNeighborhood;
+
+    const DenseStorage clean_storage = MakeSixPointStorage();
+    EXPECT_THROW(cluster_report(result, clean_storage, options), std::invalid_argument);
+
+    DenseStorage nan_storage = MakeSixPointStorage();
+    nan_storage.Set(1, 2, std::numeric_limits<double>::quiet_NaN());
+    try {
+        cluster_report(result, nan_storage, options);
+        FAIL() << "expected std::invalid_argument";
+    } catch (const std::invalid_argument& e) {
+        const std::string message(e.what());
+        EXPECT_NE(message.find("neighbor threshold"), std::string::npos) << message;
+        EXPECT_EQ(message.find("not finite"), std::string::npos) << message;
+    }
+}
+
 // Section 7.1 item 2. The tie-aware merge is the riskiest code in A1, so it is
 // checked against the definition it implements rather than against itself.
 namespace {
