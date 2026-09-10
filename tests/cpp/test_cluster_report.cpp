@@ -2752,3 +2752,38 @@ TEST(ClusterReportTest, ReportPairRankCountsSingletonClusterPairs) {
     // s+ = 12 and s- = 4, giving (12 - 4) / 16 = 0.5.
     EXPECT_NEAR(r.baker_hubert_gamma, 0.5, 1e-12);
 }
+
+// The singleton fixture above has a single singleton, so every one of its
+// cross pairs touches a cluster of size two or more. That leaves the
+// singleton-to-singleton pair unreached: a rule collecting a cross pair when
+// either side is a non-singleton would drop only those pairs, satisfy every
+// other pair-rank assertion, and still violate the section 5.4 partition. A
+// {2,1,1} shape is the smallest clustering that contains such a pair, and both
+// metrics here move when it goes missing.
+TEST(ClusterReportTest, ReportPairRankCountsPairsBetweenTwoSingletons) {
+    DenseStorage storage(4);
+    storage.Set(0, 1, 0.4);
+    storage.Set(0, 2, 0.1);
+    storage.Set(1, 2, 0.5);
+    storage.Set(0, 3, 0.6);
+    storage.Set(1, 3, 0.7);
+    storage.Set(2, 3, 0.9);
+
+    ClusterReportOptions options;
+    options.compute_pair_rank_indices = true;
+    const ClusterReport r =
+        cluster_report(MakeResult({0, 0, 1, 2}), storage, options);
+
+    // Clusters {0,1}, {2} and {3}. One within-distance, 0.4; five between,
+    // {0.1, 0.5, 0.6, 0.7, 0.9}, of which 0.9 is the pair joining the two
+    // singletons. Pooled ascending: 0.1 0.4 0.5 0.6 0.7 0.9. With one
+    // within-pair, S_w = 0.4, S_min = 0.1 and S_max = 0.9, so the index is
+    // (0.4 - 0.1) / (0.9 - 0.1) = 0.375. Dropping 0.9 would make 0.7 the
+    // largest pooled distance and the index 0.5.
+    EXPECT_NEAR(r.c_index, 0.375, 1e-12);
+
+    // The single within-distance loses to 0.1 and beats the other four, so
+    // s+ = 4 and s- = 1, giving (4 - 1) / 5 = 0.6. Dropping 0.9 would leave
+    // s+ = 3 against s- = 1, and 0.5.
+    EXPECT_NEAR(r.baker_hubert_gamma, 0.6, 1e-12);
+}
