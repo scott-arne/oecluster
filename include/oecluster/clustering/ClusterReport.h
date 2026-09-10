@@ -100,7 +100,10 @@ struct ClusterReportOptions {
     /// sortable arrays, Nc(Nc-1)/2 doubles in total -- roughly 400 MB at
     /// Nc = 10,000 and 10 GB at Nc = 50,000.
     bool compute_pair_rank_indices = false;
-    /// Enables ClusterReport::records.
+    /// Enables ClusterReport::records. Off by default: the stage buffers the
+    /// largest cluster's pairwise distances for the median, n(n-1)/2 doubles,
+    /// and detail::median_distance copies it -- roughly 400 MB for the buffer
+    /// and 400 MB again for the copy, transiently, at n = 10,000.
     bool compute_per_cluster_records = false;
 
     /** @brief Seed coverage_thresholds and boundary_threshold from a preset. */

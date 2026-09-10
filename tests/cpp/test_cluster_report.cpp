@@ -2226,11 +2226,11 @@ TEST(InternalIndicesTest, CheckedDistanceRefusesNonFinite) {
 // resemble them.
 //
 // The three-cluster split and the raised boundary_threshold are both
-// deliberate. Under the default 0.30 every cross pair in this fixture sits at
-// 0.8 or 0.2 in a pattern that yields zero violations, so the sum invariant
-// below would read 0 == 0 and hold for any implementation. At 0.5 the three
-// clusters take 2, 3 and 1 violations respectively -- all different, so
-// summing the wrong cluster's total is caught too.
+// deliberate. At the default 0.30 the per-cluster counts are 1/2/1 (d(0,2) and
+// d(3,4) both trip at 0.2), so clusters A and C tie and summing the wrong
+// cluster's total could still pass. At 0.5 the third pair d(1,2) = 0.4 trips
+// as well, giving 2/3/1, all distinct, so summing the wrong cluster's total is
+// caught.
 TEST(ClusterReportTest, RecordsRecomputeTheAggregates) {
     const DenseStorage storage = MakeSixPointStorage();
     ClusterReportOptions options;
@@ -2321,6 +2321,17 @@ TEST(ClusterReportTest, RecordRepresentativeFollowsTheConfiguredMethod) {
     EXPECT_EQ(by_minimax.records[0].representative, 1u);
     EXPECT_EQ(by_minimax.records[1].representative, 5u);
 
+    EXPECT_NEAR(by_medoid.records[0].mean_representative_distance, 0.3, 1e-12);
+    EXPECT_DOUBLE_EQ(by_medoid.records[0].radius, 0.7);
+    EXPECT_NEAR(by_minimax.records[0].mean_representative_distance, 1.1 / 3.0, 1e-12);
+    EXPECT_DOUBLE_EQ(by_minimax.records[0].radius, 0.5);
+
+    // The two fields that must NOT move with the configured representative.
+    EXPECT_NEAR(by_medoid.records[0].mean_intra_distance, 0.4, 1e-12);
+    EXPECT_DOUBLE_EQ(by_medoid.records[0].median_intra_distance, 0.5);
+    EXPECT_NEAR(by_minimax.records[0].mean_intra_distance, 0.4, 1e-12);
+    EXPECT_DOUBLE_EQ(by_minimax.records[0].median_intra_distance, 0.5);
+
     // And the medoid-named scalars still did not move with them.
     EXPECT_DOUBLE_EQ(by_medoid.davies_bouldin_medoid,
                      by_minimax.davies_bouldin_medoid);
@@ -2350,6 +2361,9 @@ TEST(ClusterReportTest, RecordUndefinedCases) {
     EXPECT_DOUBLE_EQ(lone.radius, 0.0);
     EXPECT_DOUBLE_EQ(lone.diameter, 0.0);
     EXPECT_DOUBLE_EQ(lone.mean_representative_distance, 0.0);
+    EXPECT_EQ(lone.nearest_cluster, 0);
+    EXPECT_DOUBLE_EQ(lone.nearest_cluster_distance, 0.8);
+    EXPECT_NEAR(lone.silhouette, 1.0, 1e-12);
 
     // The defined cases, which are what make the NaN assertions above mean
     // anything. Since Task 2's gate these four fields DEFAULT to NaN, so an
@@ -2358,10 +2372,13 @@ TEST(ClusterReportTest, RecordUndefinedCases) {
     // the half that catches a missing assignment.
     const ClusterRecord& populated = with_singleton.records[0];
     EXPECT_EQ(populated.size, 3u);
-    EXPECT_FALSE(std::isnan(populated.mean_intra_distance));
-    EXPECT_FALSE(std::isnan(populated.median_intra_distance));
-    EXPECT_FALSE(std::isnan(populated.nearest_cluster_distance));
-    EXPECT_FALSE(std::isnan(populated.silhouette));
+    EXPECT_NEAR(populated.mean_intra_distance, 0.8 / 3.0, 1e-12);
+    EXPECT_DOUBLE_EQ(populated.median_intra_distance, 0.2);
+    EXPECT_DOUBLE_EQ(populated.radius, 0.2);
+    EXPECT_DOUBLE_EQ(populated.diameter, 0.4);
+    EXPECT_DOUBLE_EQ(populated.mean_representative_distance, 0.2);
+    EXPECT_DOUBLE_EQ(populated.nearest_cluster_distance, 0.8);
+    EXPECT_NEAR(populated.silhouette, 2.0 / 3.0, 1e-12);
     EXPECT_EQ(populated.nearest_cluster, 1);
 }
 
@@ -2383,4 +2400,39 @@ TEST(ClusterReportTest, RecordsHonestyProperty) {
         options);
     EXPECT_TRUE(requested_but_empty.records.empty());
     EXPECT_TRUE(requested_but_empty.requested.per_cluster_records);
+
+    ClusterReportOptions pair_rank_options;
+    pair_rank_options.compute_pair_rank_indices = true;
+    const ClusterReport with_pair_rank =
+        cluster_report(MakeResult({0, 0, 0, 1, 1, 1}), storage, pair_rank_options);
+    EXPECT_TRUE(with_pair_rank.requested.pair_rank_indices);
+}
+
+// The nearest_cluster tiebreak rule ("lowest ordinal", ClusterReport.h:76) and
+// the per-cluster nearest_cluster_distance field (distinct from the global
+// min_inter). MakeSixPointStorage with three clusters A={0,1,2}, B={3,4}, C={5}.
+TEST(ClusterReportTest, RecordNearestClusterTiesAndPerClusterDistance) {
+    const DenseStorage storage = MakeSixPointStorage();
+    ClusterReportOptions options;
+    options.compute_per_cluster_records = true;
+    const ClusterReport r =
+        cluster_report(MakeResult({0, 0, 0, 1, 1, 2}), storage, options);
+
+    ASSERT_EQ(r.records.size(), 3u);
+
+    // A is tied: minima to B and to C are both 0.8, and B is visited first in
+    // the cross loop, so the strict < keeps ordinal 1. Under <= it becomes 2.
+    EXPECT_EQ(r.records[0].nearest_cluster, 1);
+    // A's distance differs from min_inter (0.2). Under the global-min mutation
+    // record 0 would report 0.2 while its own nearest_cluster field names B.
+    EXPECT_DOUBLE_EQ(r.records[0].nearest_cluster_distance, 0.8);
+
+    EXPECT_EQ(r.records[1].nearest_cluster, 2);
+    EXPECT_DOUBLE_EQ(r.records[1].nearest_cluster_distance, 0.2);
+
+    // C is a singleton inside a K == 3 clustering. Under the size-guard mutation
+    // its three guard-controlled fields go undefined.
+    EXPECT_EQ(r.records[2].nearest_cluster, 1);
+    EXPECT_DOUBLE_EQ(r.records[2].nearest_cluster_distance, 0.2);
+    EXPECT_NEAR(r.records[2].silhouette, 1.0, 1e-12);
 }
