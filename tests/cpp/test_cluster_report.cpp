@@ -936,6 +936,26 @@ TEST(ClusterReportTest, NonFiniteNoiseToRepresentativeDistanceIsRefused) {
     }
 }
 
+// The complement of the test above, and the boundary of the coverage
+// precondition. The poisoned cell is the same one -- d(5, 0), a read the
+// coverage scan makes when thresholds exist -- but with the threshold list
+// cleared, coverage_at is empty and no reported value reads it. Refusing here
+// would refuse a report every field of which is defined. INVARIANT 3.
+TEST(ClusterReportTest, EmptyCoverageThresholdsDoNotRefuseUnreadDistances) {
+    DenseStorage storage = MakeSixPointStorage();
+    storage.Set(0, 5, std::numeric_limits<double>::quiet_NaN());
+    const ClusteringResult result = MakeResult({0, 0, 0, 1, 1, -1});
+    ClusterReportOptions options;
+    options.coverage_thresholds.clear();
+
+    const ClusterReport report = cluster_report(result, storage, options);
+
+    EXPECT_TRUE(report.coverage_at.empty());
+    EXPECT_DOUBLE_EQ(report.median_medoid_member_distance, 0.2);
+    EXPECT_DOUBLE_EQ(report.silhouette, 0.7);
+    EXPECT_DOUBLE_EQ(report.dunn_index, 2.0);
+}
+
 // The complement, and the boundary of the precondition: sample 1 is a member of
 // cluster {0,1,2} but not its representative, and sample 5 is noise, so no
 // reported value reads d(1, 5). The intra pass covers only within-cluster

@@ -508,9 +508,16 @@ ClusterReport cluster_report(
         // Each sample's distance to its nearest configured representative,
         // computed once. Every coverage threshold is then a scan of this vector,
         // O(T*N) rather than the O(T*N*K) the per-threshold recomputation cost.
+        //
+        // The threshold list must be non-empty for the scan to run at all. With
+        // no thresholds every distance it reads feeds a coverage_at that stays
+        // empty, so the only thing the scan can still produce is a refusal --
+        // and refusing a report whose every field is already determined is the
+        // over-refusal of INVARIANT 3, not a precondition.
         std::vector<double> nearest_representative(
             report.num_samples, std::numeric_limits<double>::infinity());
-        if (report.num_samples > 0 && !representatives.empty()) {
+        if (report.num_samples > 0 && !representatives.empty() &&
+            !options.coverage_thresholds.empty()) {
             for (size_t point = 0; point < report.num_samples; ++point) {
                 for (const size_t representative : representatives) {
                     nearest_representative[point] = std::min(
