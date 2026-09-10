@@ -2581,3 +2581,69 @@ TEST(ClusterReportTest, RecordNearestClusterTiesAndPerClusterDistance) {
     EXPECT_DOUBLE_EQ(r.records[2].nearest_cluster_distance, 0.2);
     EXPECT_NEAR(r.records[2].silhouette, 1.0, 1e-12);
 }
+
+// The section 7.1 item 1 fixture again: a perfect clustering has C-index 0 and
+// Gamma 1, both exactly.
+TEST(ClusterReportTest, PairRankIndicesOnTheHandComputedFixture) {
+    const DenseStorage storage = MakeSixPointStorage();
+    ClusterReportOptions options;
+    options.compute_pair_rank_indices = true;
+    const ClusterReport r =
+        cluster_report(MakeResult({0, 0, 0, 1, 1, 1}), storage, options);
+    EXPECT_TRUE(r.requested.pair_rank_indices);
+    EXPECT_NEAR(r.c_index, 0.0, 1e-12);
+    EXPECT_NEAR(r.baker_hubert_gamma, 1.0, 1e-12);
+}
+
+// Section 7.1 item 13, the pair_rank half.
+TEST(ClusterReportTest, PairRankHonestyProperty) {
+    const DenseStorage storage = MakeSixPointStorage();
+
+    const ClusterReport unrequested =
+        cluster_report(MakeResult({0, 0, 0, 1, 1, 1}), storage, ClusterReportOptions());
+    EXPECT_TRUE(std::isnan(unrequested.c_index));
+    EXPECT_TRUE(std::isnan(unrequested.baker_hubert_gamma));
+    EXPECT_FALSE(unrequested.requested.pair_rank_indices);
+
+    ClusterReportOptions options;
+    options.compute_pair_rank_indices = true;
+    const ClusterReport single =
+        cluster_report(MakeResult({0, 0, 0, -1, -1, -1}), storage, options);
+    EXPECT_TRUE(std::isnan(single.c_index));
+    EXPECT_TRUE(std::isnan(single.baker_hubert_gamma));
+    EXPECT_TRUE(single.requested.pair_rank_indices);
+}
+
+// Section 7.1 item 18. A tie-heavy clustering is answered, not refused: s+ and
+// s- both stay 0 and Gamma is the section 5.5 NaN. The discarded pre-walk guard
+// on P_w * P_b would have refused this shape at scale, but this fixture cannot
+// discriminate between the two guards -- at any size a test can reach,
+// P_w * P_b sits many orders of magnitude below 2^64.
+TEST(ClusterReportTest, TieHeavyClusteringIsAnsweredNotRefused) {
+    DenseStorage storage(4);
+    for (size_t i = 0; i < 4; ++i) {
+        for (size_t j = i + 1; j < 4; ++j) {
+            storage.Set(i, j, 0.5);
+        }
+    }
+    ClusterReportOptions options;
+    options.compute_pair_rank_indices = true;
+    ClusterReport r;
+    EXPECT_NO_THROW(r = cluster_report(MakeResult({0, 0, 1, 1}), storage, options));
+    EXPECT_TRUE(std::isnan(r.baker_hubert_gamma));
+}
+
+// Section 7.1 item 16 at the report level.
+TEST(ClusterReportTest, ReportGammaGoesNegativeOnABadClustering) {
+    DenseStorage storage(4);
+    storage.Set(0, 1, 0.9);
+    storage.Set(2, 3, 0.9);
+    storage.Set(0, 2, 0.1);
+    storage.Set(0, 3, 0.1);
+    storage.Set(1, 2, 0.1);
+    storage.Set(1, 3, 0.1);
+    ClusterReportOptions options;
+    options.compute_pair_rank_indices = true;
+    const ClusterReport r = cluster_report(MakeResult({0, 0, 1, 1}), storage, options);
+    EXPECT_NEAR(r.baker_hubert_gamma, -1.0, 1e-12);
+}

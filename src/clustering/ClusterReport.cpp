@@ -11,6 +11,7 @@
 #include <numeric>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 #include "ClusterMetrics.h"
 #include "DistanceAccess.h"
@@ -451,6 +452,11 @@ ClusterReport cluster_report(
         double min_mean_separation = std::numeric_limits<double>::infinity();
         detail::DistanceMoments between_moments;
 
+        // Only materialised under the flag: this is the one allocation in A1
+        // that changes the allocation class, to Nc(Nc-1)/2 doubles across the
+        // two arrays -- roughly 400 MB at Nc = 10,000.
+        std::vector<double> between_distances;
+
         size_t violations = 0;
         double min_inter = std::numeric_limits<double>::infinity();
         for (size_t a = 0; a < cluster_count; ++a) {
@@ -469,6 +475,9 @@ ClusterReport cluster_report(
                     for (const size_t j : members[b]) {
                         const double distance = detail::checked_distance(storage, i, j);
                         between_moments.Add(distance);
+                        if (options.compute_pair_rank_indices) {
+                            between_distances.push_back(distance);
+                        }
                         pair_min = std::min(pair_min, distance);
                         pair_total += distance;
                         if (distance <= options.boundary_threshold) {
@@ -839,6 +848,22 @@ ClusterReport cluster_report(
                 report.records.push_back(record);
             }
         }
+
+        // ---- Pair-rank indices (section 5.4), opt-in. ----
+        if (options.compute_pair_rank_indices) {
+            // Both arrays are moved, not copied. pair_rank_indices takes them
+            // by value and sorts in place, so passing lvalues would hold two
+            // full pair-sized copies live at once -- the peak this opt-in
+            // budgets for is P doubles, not 2P. Nothing reads either array
+            // after this point; the moved-from state is never observed.
+            const detail::PairRankIndices pair_rank = detail::pair_rank_indices(
+                std::move(intra_pairs), std::move(between_distances));
+            report.c_index = pair_rank.c_index;
+            report.baker_hubert_gamma = pair_rank.baker_hubert_gamma;
+        } else {
+            report.c_index = nan_value();
+            report.baker_hubert_gamma = nan_value();
+        }
     } else {
         report.mean_intra_distance = nan_value();
         report.median_intra_distance = nan_value();
@@ -853,6 +878,8 @@ ClusterReport cluster_report(
         report.dunn_mean_separation_mean_diameter = nan_value();
         report.dunn_medoid_separation_medoid_spread = nan_value();
         report.point_biserial = nan_value();
+        report.c_index = nan_value();
+        report.baker_hubert_gamma = nan_value();
         // coverage_at and noise_coverage_at stay empty: with no clusters there
         // are no representatives, so no coverage question has an answer.
     }
