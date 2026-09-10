@@ -452,9 +452,11 @@ ClusterReport cluster_report(
         double min_mean_separation = std::numeric_limits<double>::infinity();
         detail::DistanceMoments between_moments;
 
-        // Only materialised under the flag: this is the one allocation in A1
-        // that changes the allocation class, to Nc(Nc-1)/2 doubles across the
-        // two arrays -- roughly 400 MB at Nc = 10,000.
+        // Only materialised under the flag. This is the one allocation here
+        // that changes the allocation class: it completes the pair-array
+        // footprint to Nc(Nc-1)/2 doubles, since intra_pairs above already
+        // holds the within-cluster half unconditionally -- together roughly
+        // 400 MB at Nc = 10,000.
         std::vector<double> between_distances;
 
         size_t violations = 0;
@@ -852,10 +854,12 @@ ClusterReport cluster_report(
         // ---- Pair-rank indices (section 5.4), opt-in. ----
         if (options.compute_pair_rank_indices) {
             // Both arrays are moved, not copied. pair_rank_indices takes them
-            // by value and sorts in place, so passing lvalues would hold two
-            // full pair-sized copies live at once -- the peak this opt-in
-            // budgets for is P doubles, not 2P. Nothing reads either array
-            // after this point; the moved-from state is never observed.
+            // by value and sorts in place, so passing lvalues would hold a
+            // second pair-sized copy alive alongside the originals. The move
+            // bounds the call, not the fill: neither array is reserved, so
+            // push_back growth still peaks above the final size on the way
+            // there. Nothing reads either array after this point; the
+            // moved-from state is never observed.
             const detail::PairRankIndices pair_rank = detail::pair_rank_indices(
                 std::move(intra_pairs), std::move(between_distances));
             report.c_index = pair_rank.c_index;
@@ -864,6 +868,12 @@ ClusterReport cluster_report(
             report.c_index = nan_value();
             report.baker_hubert_gamma = nan_value();
         }
+
+        // Any stage added below this point must not read intra_pairs or
+        // between_distances. Both are moved-from above, so a read returns an
+        // empty array rather than failing, and the metric it feeds would be
+        // a plausible wrong number. A stage that needs either array belongs
+        // above this block.
     } else {
         report.mean_intra_distance = nan_value();
         report.median_intra_distance = nan_value();
