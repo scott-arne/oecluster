@@ -591,10 +591,25 @@ ClusterReport cluster_report(
 
         if (cluster_count >= 2) {
             // The global medoid M: the clustered point with the smallest total
-            // distance to all clustered points. Ties resolve to the lowest
-            // sample index, which is deliberately not m_k's "earliest member"
-            // rule -- Butina emits members in representative-first order, so
-            // the two can name different points.
+            // distance to all clustered points. The lowest-index tiebreak is
+            // deliberately not m_k's "earliest member" rule -- Butina emits
+            // members in representative-first order, so the two can name
+            // different points.
+            //
+            // That tiebreak governs ties in the COMPUTED totals, which is a
+            // weaker guarantee than it reads as. point_total is seeded from
+            // the intra pass and then accumulated once per foreign cluster, so
+            // two points whose exact rational totals are equal can still land
+            // a bit apart and resolve either way; a measured instance put two
+            // such totals one ULP apart, which was enough to move M. Exact or
+            // compensated summation is not the remedy: this is a hot O(N^2)
+            // reduction, and tightening it would relocate the discontinuity
+            // rather than remove it, because two points whose true totals
+            // differ by one ULP flip M just the same. What bounds the
+            // consequence is that any two candidates in contention are
+            // equidistant from the clustered set to within that bit, so every
+            // index derived from M remains meaningful even where the identity
+            // of M is not reproducible across a change in accumulation order.
             size_t global_medoid = 0;
             double smallest_total = std::numeric_limits<double>::infinity();
             for (size_t i = 0; i < labels.size(); ++i) {
