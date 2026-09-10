@@ -2631,6 +2631,8 @@ TEST(ClusterReportTest, TieHeavyClusteringIsAnsweredNotRefused) {
     ClusterReport r;
     EXPECT_NO_THROW(r = cluster_report(MakeResult({0, 0, 1, 1}), storage, options));
     EXPECT_TRUE(std::isnan(r.baker_hubert_gamma));
+    // All ties also put S_max == S_min, so the C-index is the same 0/0.
+    EXPECT_TRUE(std::isnan(r.c_index));
 }
 
 // Section 7.1 item 16 at the report level.
@@ -2646,4 +2648,38 @@ TEST(ClusterReportTest, ReportGammaGoesNegativeOnABadClustering) {
     options.compute_pair_rank_indices = true;
     const ClusterReport r = cluster_report(MakeResult({0, 0, 1, 1}), storage, options);
     EXPECT_NEAR(r.baker_hubert_gamma, -1.0, 1e-12);
+}
+
+// Every other report-level c_index assertion sits at 0.0, the value a perfect
+// clustering takes, and zero is a fixed point of any distortion that maps zero
+// to zero -- squaring the result, scaling it, or clamping it low all leave the
+// perfect fixture and the NaN cases green. Only a fixture whose correct index
+// falls strictly inside (0, 1) pins the wiring to the value the helper
+// returned. This clustering is deliberately a poor one: both within-distances
+// sit inside the between-range, which is what lifts the index off its
+// endpoint.
+TEST(ClusterReportTest, ReportCIndexIsPinnedStrictlyInsideItsRange) {
+    DenseStorage storage(4);
+    storage.Set(0, 1, 0.4);
+    storage.Set(2, 3, 0.6);
+    storage.Set(0, 2, 0.1);
+    storage.Set(0, 3, 0.2);
+    storage.Set(1, 2, 0.8);
+    storage.Set(1, 3, 0.9);
+
+    ClusterReportOptions options;
+    options.compute_pair_rank_indices = true;
+    const ClusterReport r =
+        cluster_report(MakeResult({0, 0, 1, 1}), storage, options);
+
+    // Pooled ascending: 0.1 0.2 0.4 0.6 0.8 0.9. The two within-pairs total
+    // S_w = 1.0, the two smallest pooled pairs S_min = 0.3, the two largest
+    // S_max = 1.7, so the index is (1.0 - 0.3) / (1.7 - 0.3) = 1/2.
+    EXPECT_NEAR(r.c_index, 0.5, 1e-12);
+
+    // Gamma is 0 here for a reason worth separating from the tie-heavy case:
+    // each within-distance beats two between-distances and loses to two, so
+    // s+ and s- are both 4. That is a defined 0.0, not the 0/0 that yields NaN.
+    EXPECT_FALSE(std::isnan(r.baker_hubert_gamma));
+    EXPECT_NEAR(r.baker_hubert_gamma, 0.0, 1e-12);
 }
