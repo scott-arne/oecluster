@@ -600,16 +600,27 @@ ClusterReport cluster_report(
             // weaker guarantee than it reads as. point_total is seeded from
             // the intra pass and then accumulated once per foreign cluster, so
             // two points whose exact rational totals are equal can still land
-            // a bit apart and resolve either way; a measured instance put two
-            // such totals one ULP apart, which was enough to move M. Exact or
-            // compensated summation is not the remedy: this is a hot O(N^2)
-            // reduction, and tightening it would relocate the discontinuity
-            // rather than remove it, because two points whose true totals
-            // differ by one ULP flip M just the same. What bounds the
-            // consequence is that any two candidates in contention are
-            // equidistant from the clustered set to within that bit, so every
-            // index derived from M remains meaningful even where the identity
-            // of M is not reproducible across a change in accumulation order.
+            // a bit apart and resolve either way, and a measured instance put
+            // two such totals one ULP apart -- enough to move M.
+            //
+            // The consequence is not small. Calinski-Harabasz forms a
+            // cluster-size-weighted sum of squared distances to M, and equal
+            // unweighted totals put no constraint on that quantity: two
+            // candidates can tie exactly on the first and sit far apart on the
+            // second. On a measured five-point case whose totals are equal in
+            // exact arithmetic, calinski_harabasz_medoid reads 11.54 for one
+            // choice of M and 16.72 for the other -- a factor of 1.45 between
+            // two selections the tiebreak regards as equally correct. An index
+            // of this family that shifts after a change which only reordered
+            // accumulation should be traced back to here first.
+            //
+            // Exact or compensated summation is not the remedy. It would make
+            // the computed ties coincide with the exact ones, but the tiebreak
+            // still has to choose at an exact tie, and an input perturbed by
+            // one ULP would flip M with the same swing. The instability is
+            // intrinsic to taking an argmin across a near-tie, not to the
+            // summation scheme, so paying for exact summation on this hot
+            // O(N^2) reduction would buy nothing. Hence documented, not fixed.
             size_t global_medoid = 0;
             double smallest_total = std::numeric_limits<double>::infinity();
             for (size_t i = 0; i < labels.size(); ++i) {
