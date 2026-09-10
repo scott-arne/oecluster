@@ -369,6 +369,25 @@ TEST(ClusterReportTest, BoundaryViolationsThreshold) {
     ClusterReportOptions loose;
     loose.boundary_threshold = 0.9;  // all 4 cross pairs <= 0.9
     EXPECT_EQ(cluster_report(result, storage, loose).boundary_violations, 4u);
+
+    // The two cases above bracket 0.8 without ever landing on it, so neither
+    // can tell `distance <= threshold` from `distance <`. Every threshold
+    // elsewhere in this file brackets its distances the same way. A threshold
+    // set to the cross distance exactly is the only input that separates the
+    // two, and it is exact: storage.Set writes the literal 0.8 and this reads
+    // the same literal, so both sides are bit-identical doubles regardless of
+    // 0.8 being inexact in binary.
+    ClusterReportOptions exact;
+    exact.boundary_threshold = 0.8;
+    exact.compute_per_cluster_records = true;
+    const ClusterReport on_boundary = cluster_report(result, storage, exact);
+    EXPECT_EQ(on_boundary.boundary_violations, 4u);
+
+    // The per-record counts too: the single cluster pair contributes all four
+    // to both records, so a strict comparison zeroes all three numbers.
+    ASSERT_EQ(on_boundary.records.size(), 2u);
+    EXPECT_EQ(on_boundary.records[0].boundary_violations, 4u);
+    EXPECT_EQ(on_boundary.records[1].boundary_violations, 4u);
 }
 
 TEST(ClusterReportTest, SeparationMetricsNaNForSingleCluster) {
@@ -478,10 +497,14 @@ TEST(ClusterReportTest, BoundaryCountIncludesTheWidestClusterPair) {
     // the A-C iteration and this 26 breaks; count every cross pair regardless of
     // the threshold and the other test's 18 breaks.
     //
-    // 0.95 rather than 0.90 because the predicate is `distance <=
-    // boundary_threshold`: at 0.90 the A-C pairs would sit exactly on the
-    // boundary, and pinning an exact-double equality is weaker than pinning a
-    // strict inclusion.
+    // 0.95 rather than 0.90 keeps the A-C pairs strictly inside the threshold
+    // instead of exactly on it. That is a free choice here -- either value
+    // admits all eight pairs, so neither is what pins the A-C iteration -- and
+    // it is not a stronger assertion. A distance and a threshold written as
+    // the same decimal literal are bit-identical doubles whatever that literal
+    // rounds to, so an exact-boundary comparison is reliable rather than
+    // fragile. BoundaryViolationsThreshold pins that case directly, and it is
+    // the only shape that separates an inclusive predicate from a strict one.
     EXPECT_EQ(r.boundary_violations, 26u);
 }
 
@@ -770,6 +793,33 @@ TEST(ClusterReportTest, HandComputedInternalIndicesOnUnequalClusterSizes) {
         r.point_biserial,
         (61.0 / 160.0) / std::sqrt(269.0 / 7056.0) * std::sqrt(80.0) / 21.0,
         1e-12);
+
+    // The silhouette b term is looked up per sample, and this is the only
+    // fixture in the file where two members of one cluster disagree about it.
+    // The d(0,3) = 0.75 asymmetry pulls sample 0's mean distance to B down to
+    // 2.5/3 = 5/6 while sample 1 stays at 2.625/3 = 7/8, and both sit below
+    // the 15/16 each sees to C, so A's two b terms are 5/6 and 7/8. Both a
+    // terms are the lone intra distance, 5/8. The per-point silhouettes are
+    // (5/6 - 5/8)/(5/6) = 1/4 and (7/8 - 5/8)/(7/8) = 2/7, so the record
+    // averages them to 15/56.
+    //
+    // Sample 0 is also cluster A's ordinal, and it holds the smaller of the
+    // two b terms. A lookup that reaches for the ordinal's slot rather than
+    // the point's -- either where the record loop reads the b term or where
+    // the cross pass carries its running minimum from one cluster pair to the
+    // next -- therefore gives sample 1 the 5/6 as well, and the record reads
+    // 1/4. Every other multi-cluster fixture here has a flat cross block
+    // within each pair, or puts the larger b term on the first member where
+    // the running minimum discards it; either shape hides the substitution.
+    //
+    // EXPECT_NEAR rather than EXPECT_DOUBLE_EQ because the division by
+    // cluster B's three members is the one quotient on this fixture that
+    // leaves the dyadic rationals.
+    ClusterReportOptions with_records;
+    with_records.compute_per_cluster_records = true;
+    const ClusterReport detailed = cluster_report(result, storage, with_records);
+    ASSERT_EQ(detailed.records.size(), 3u);
+    EXPECT_NEAR(detailed.records[0].silhouette, 15.0 / 56.0, 1e-12);
 }
 
 // Section 7.1 item 7. This is the one arithmetic error in the design that would
@@ -1155,6 +1205,25 @@ TEST(ClusterReportTest, SampleInTwoClustersIsRefused) {
         EXPECT_NE(message.find("sample 2"), std::string::npos) << message;
         EXPECT_NE(message.find("appears in clusters"), std::string::npos) << message;
     }
+
+    // The first ordinal in that message is read out of owner, which is indexed
+    // by sample rather than by cluster. The case above cannot separate the two
+    // index spaces: the duplicated sample is 2 and the scanning cluster's
+    // ordinal is 1, and owner holds 0 at both subscripts, so a lookup keyed on
+    // the ordinal prints the same sentence. Three clusters pull them apart --
+    // sample 1 is the duplicate and belongs to cluster 0, while sample 2, the
+    // index the scanning ordinal would supply, belongs to cluster 1.
+    const ClusteringResult across_three(
+        std::vector<ClusterLabel>{0, 0, 1, 1, 2, 2}, Clusters{{0, 1}, {2, 3}, {1, 4}});
+    try {
+        cluster_report(across_three, storage, ClusterReportOptions());
+        FAIL() << "expected std::invalid_argument";
+    } catch (const std::invalid_argument& e) {
+        const std::string message(e.what());
+        EXPECT_NE(message.find("sample 1 appears in clusters 0 and 2"),
+                  std::string::npos)
+            << message;
+    }
 }
 
 TEST(ClusterReportTest, LabelDisagreeingWithClusterOrdinalIsRefused) {
@@ -1168,6 +1237,25 @@ TEST(ClusterReportTest, LabelDisagreeingWithClusterOrdinalIsRefused) {
         const std::string message(e.what());
         EXPECT_NE(message.find("sample 2"), std::string::npos) << message;
         EXPECT_NE(message.find("has label 1 but appears in cluster 0"),
+                  std::string::npos)
+            << message;
+    }
+
+    // The cluster this message names also comes out of owner at the sample's
+    // own subscript, and the label that triggered the refusal is a cluster
+    // ordinal sitting in scope beside it. Above, the two coincide: sample 2
+    // carries label 1, and owner[1] is 0, exactly what owner[2] holds. The
+    // mismatch has to sit on a sample whose label does not point back at its
+    // own cluster for the reads to diverge -- sample 3 is in cluster 1 and
+    // carries label 0, and owner[0] is 0 rather than 1.
+    const ClusteringResult label_points_elsewhere(
+        std::vector<ClusterLabel>{0, 0, 0, 0, 1, 1}, Clusters{{0, 1, 2}, {3, 4, 5}});
+    try {
+        cluster_report(label_points_elsewhere, storage, ClusterReportOptions());
+        FAIL() << "expected std::invalid_argument";
+    } catch (const std::invalid_argument& e) {
+        const std::string message(e.what());
+        EXPECT_NE(message.find("sample 3 has label 0 but appears in cluster 1"),
                   std::string::npos)
             << message;
     }
