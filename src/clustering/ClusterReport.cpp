@@ -177,11 +177,14 @@ ClusterReport cluster_report(
             std::to_string(storage.NumSamples()));
     }
 
-    // Hoisted above the first storage read. Every cluster is validated anyway
-    // further down, by cluster_representative, but only after the intra-pair
-    // loop has already asked the backend for an out-of-range pair -- so the
-    // caller was told about a storage class instead of the bad cluster member
-    // that is the error they have to fix.
+    // Hoisted above the first storage read. cluster_representative validates
+    // the cluster it is handed, but only when the intra pass reaches that
+    // cluster -- so a malformed cluster k would be named only after some
+    // cluster j < k had already asked the backend for a pair it cannot answer,
+    // and the caller was told about a storage class instead of the bad cluster
+    // member that is the error they have to fix. Checking every cluster before
+    // any of them is processed makes that ordering hold whichever one is
+    // malformed.
     //
     // This runs unconditionally rather than under the members-non-empty guard
     // it used to sit behind: labels = {0} with members = {} is exactly the
