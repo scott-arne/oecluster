@@ -433,6 +433,30 @@ TEST(ClusterReportTest, HandComputedThreeClusterReport) {
     EXPECT_DOUBLE_EQ(r.representative_redundancy, 0.6);
 }
 
+// The same fixture at a threshold wide enough to admit every cross pair, which
+// is the only assertion here that can see the A-C iteration at all.
+TEST(ClusterReportTest, BoundaryCountIncludesTheWidestClusterPair) {
+    const DenseStorage storage = MakeThreeClusterStorage();
+    const ClusteringResult result = MakeResult({0, 0, 1, 1, 1, 2, 2, 2, 2});
+
+    ClusterReportOptions options;
+    options.boundary_threshold = 0.95;
+    const ClusterReport r = cluster_report(result, storage, options);
+
+    // All 26 cross-cluster pairs: A-B 6 at 0.80, A-C 8 at 0.90, B-C 12 at 0.60.
+    // HandComputedThreeClusterReport's 0.85 threshold excludes A-C's eight pairs
+    // entirely, so that assertion alone cannot see the A-C iteration being
+    // skipped. Holding both thresholds pins the count in both directions: drop
+    // the A-C iteration and this 26 breaks; count every cross pair regardless of
+    // the threshold and the other test's 18 breaks.
+    //
+    // 0.95 rather than 0.90 because the predicate is `distance <=
+    // boundary_threshold`: at 0.90 the A-C pairs would sit exactly on the
+    // boundary, and pinning an exact-double equality is weaker than pinning a
+    // strict inclusion.
+    EXPECT_EQ(r.boundary_violations, 26u);
+}
+
 // A coverage curve that actually rises. Every other multi-threshold coverage
 // assertion in this file is flat, which cannot distinguish indexing
 // coverage_thresholds[t] from reading the same entry on every iteration.
