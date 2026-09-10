@@ -567,16 +567,29 @@ ClusterReport cluster_report(
             }
 
             report.coverage_at.assign(options.coverage_thresholds.size(), 0.0);
+            report.noise_coverage_at.assign(
+                options.coverage_thresholds.size(), nan_value());
             for (size_t t = 0; t < options.coverage_thresholds.size(); ++t) {
                 const double threshold = options.coverage_thresholds[t];
                 size_t covered = 0;
+                size_t covered_noise = 0;
                 for (size_t point = 0; point < report.num_samples; ++point) {
                     if (nearest_representative[point] <= threshold) {
                         ++covered;
+                        if (owner[point] == NO_OWNER) {
+                            ++covered_noise;
+                        }
                     }
                 }
                 report.coverage_at[t] =
                     static_cast<double>(covered) / static_cast<double>(report.num_samples);
+                // Left NaN when the clustering has no noise: 0.0 would read as
+                // "no noise point is covered" rather than "no noise point exists".
+                if (num_noise > 0) {
+                    report.noise_coverage_at[t] =
+                        static_cast<double>(covered_noise) /
+                        static_cast<double>(num_noise);
+                }
             }
         }
 
@@ -762,7 +775,8 @@ ClusterReport cluster_report(
         report.dunn_mean_separation_mean_diameter = nan_value();
         report.dunn_medoid_separation_medoid_spread = nan_value();
         report.point_biserial = nan_value();
-        // coverage_at stays empty.
+        // coverage_at and noise_coverage_at stay empty: with no clusters there
+        // are no representatives, so no coverage question has an answer.
     }
 
     return report;

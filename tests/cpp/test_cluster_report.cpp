@@ -1843,6 +1843,81 @@ detail::PairRankIndices BruteForcePairRank(
 
 }  // namespace
 
+// Section 7.1 item 14 and the section 5.5 shape rules. The invariant asserted
+// in every case is noise_coverage_at.size() == coverage_at.size() -- not
+// "always coverage_thresholds.size()", which is false for K == 0.
+TEST(ClusterReportTest, NoiseCoverageCurveShapes) {
+    // A dedicated fixture, not MakeSixPointStorage. There every point sits
+    // within 0.2 of a representative while the smallest default threshold is
+    // 0.25, so both curves would be [1, 1, 1] and the EXPECT_NE below could
+    // never fire. Here the noise point is deliberately placed at 0.4 from its
+    // nearest representative -- outside the first two default thresholds and
+    // inside the third -- so the curve has a visible step.
+    DenseStorage storage(6);
+    storage.Set(0, 1, 0.2);
+    storage.Set(0, 2, 0.2);
+    storage.Set(1, 2, 0.4);
+    storage.Set(3, 4, 0.2);
+    storage.Set(3, 5, 0.4);
+    storage.Set(4, 5, 0.5);
+    for (size_t i = 0; i < 3; ++i) {
+        storage.Set(i, 3, 0.8);
+        storage.Set(i, 4, 0.8);
+        storage.Set(i, 5, 0.9);
+    }
+
+    // Clusters plus noise. Representatives are 0 and 3; sample 5 is noise and
+    // sits 0.4 from representative 3.
+    const ClusterReport with_noise =
+        cluster_report(MakeResult({0, 0, 0, 1, 1, -1}), storage, ClusterReportOptions());
+    ASSERT_EQ(with_noise.coverage_thresholds,
+              (std::vector<double>{0.25, 0.35, 0.45}));
+    EXPECT_EQ(with_noise.noise_coverage_at.size(), with_noise.coverage_at.size());
+    EXPECT_EQ(with_noise.noise_coverage_at.size(),
+              with_noise.coverage_thresholds.size());
+
+    // coverage_at counts all six samples: five are within 0.2 of a
+    // representative, and the noise point joins them only at 0.45.
+    EXPECT_DOUBLE_EQ(with_noise.coverage_at[0], 5.0 / 6.0);
+    EXPECT_DOUBLE_EQ(with_noise.coverage_at[1], 5.0 / 6.0);
+    EXPECT_DOUBLE_EQ(with_noise.coverage_at[2], 1.0);
+    // noise_coverage_at counts only sample 5.
+    EXPECT_DOUBLE_EQ(with_noise.noise_coverage_at[0], 0.0);
+    EXPECT_DOUBLE_EQ(with_noise.noise_coverage_at[1], 0.0);
+    EXPECT_DOUBLE_EQ(with_noise.noise_coverage_at[2], 1.0);
+    EXPECT_NE(with_noise.noise_coverage_at, with_noise.coverage_at);
+
+    // No noise: full length, every entry NaN. Not 0.0, which would read as
+    // "no noise point is covered" rather than "the question does not apply".
+    const ClusterReport noise_free =
+        cluster_report(MakeResult({0, 0, 0, 1, 1, 1}), storage, ClusterReportOptions());
+    EXPECT_EQ(noise_free.noise_coverage_at.size(), noise_free.coverage_at.size());
+    ASSERT_EQ(noise_free.noise_coverage_at.size(), 3u);
+    for (const double value : noise_free.noise_coverage_at) {
+        EXPECT_TRUE(std::isnan(value));
+    }
+
+    // All noise is the K == 0 case: there is no representative to measure
+    // against, so both curves are empty.
+    const ClusterReport all_noise = cluster_report(
+        ClusteringResult(std::vector<ClusterLabel>{-1, -1, -1, -1, -1, -1}, Clusters{}),
+        storage,
+        ClusterReportOptions());
+    EXPECT_TRUE(all_noise.coverage_at.empty());
+    EXPECT_TRUE(all_noise.noise_coverage_at.empty());
+    EXPECT_EQ(all_noise.noise_coverage_at.size(), all_noise.coverage_at.size());
+    // The thresholds are still reported, whatever K is.
+    EXPECT_EQ(all_noise.coverage_thresholds.size(), 3u);
+
+    const DenseStorage empty_storage(0);
+    const ClusterReport zero_samples = cluster_report(
+        ClusteringResult(std::vector<ClusterLabel>{}, Clusters{}),
+        empty_storage,
+        ClusterReportOptions());
+    EXPECT_TRUE(zero_samples.coverage_at.empty());
+    EXPECT_TRUE(zero_samples.noise_coverage_at.empty());
+}
+
 // Section 7.1 items 2 and 4. The brute-force reference is the whole point: it
 // recomputes gamma by the O(P_w * P_b) definition and c_index by explicitly
 // sorting all pooled pairs, so it shares no code path with the run-at-a-time
