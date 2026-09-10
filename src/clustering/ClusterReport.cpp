@@ -802,11 +802,17 @@ ClusterReport cluster_report(
 
                 if (cluster_count >= 2) {
                     // At K >= 2 the cross loop visits every cluster in at least
-                    // one pair, every cluster is non-empty (the validator rejects
-                    // empty clusters before this point), and every distance is
-                    // finite (the precondition rejects non-finite storage), so
-                    // nearest_cluster_distance[k] is finite for every k and the
-                    // count guard and the finiteness guard coincide.
+                    // one pair, every cluster is non-empty (the validator
+                    // rejects empty clusters before this point), and every
+                    // cross distance is finite (detail::checked_distance
+                    // rejects a non-finite read at the cross pass -- the
+                    // storage precondition checks only the backend type, not
+                    // the values). So nearest_cluster_distance[k] is finite for
+                    // every k, and the count guard coincides with the
+                    // producer's finiteness guard. nearest_cluster[k] is
+                    // assigned in the same if bodies as the distance, so a
+                    // finite distance also means the ordinal is a real answer
+                    // rather than the default 0.
                     record.nearest_cluster =
                         static_cast<ClusterLabel>(nearest_cluster[k]);
                     record.nearest_cluster_distance = nearest_cluster_distance[k];
