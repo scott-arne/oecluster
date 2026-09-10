@@ -858,6 +858,10 @@ TEST(ClusterReportTest, GlobalMedoidTieResolvesToTheLowestSampleIndex) {
 // wrong part of the file. And each one is set to 0.5 rather than left on
 // DenseStorage's 0.0 fill, so the mutant reports a thoroughly plausible 20.0
 // rather than a degenerate 0.0 that no reader would mistake for an answer.
+//
+// Those same two properties make this the only fixture here that can pin
+// point-biserial's pair count to clustered pairs, so the test carries a second
+// assertion on that field; both pin the one contract its name states.
 TEST(ClusterReportTest, GlobalMedoidIsChosenAmongClusteredPointsOnly) {
     DenseStorage storage(6);
     storage.Set(0, 1, 0.25);
@@ -885,6 +889,18 @@ TEST(ClusterReportTest, GlobalMedoidIsChosenAmongClusteredPointsOnly) {
     // between-scatter rises to 3*0.25 + 2*0.25 = 1.25 and CH reads 20. Both
     // numbers are entirely plausible, which is the point.
     EXPECT_DOUBLE_EQ(r.calinski_harabasz_medoid, 8.0);
+
+    // The same contract one level down. Four within-pairs (0.25, 0.25, 0.5 and
+    // 0.25, mean 0.3125) and six between-pairs (0.5 each) make ten clustered
+    // pairs, against the fifteen of C(6, 2); the five pairs on noise sample 5
+    // are exactly the difference. Pooled over the ten: mean 0.425, population
+    // variance 0.013125, so the index is
+    // (0.5 - 0.3125)/sqrt(0.013125) * sqrt(4*6)/10 = 1.5*sqrt(2/7). Divide by
+    // fifteen instead and it reads 0.535, an unremarkable correlation. Every
+    // other fixture in this file that reaches this line is noise-free, where
+    // the two denominators coincide, and every noise-bearing one returns NaN
+    // before it -- this is the only place the two can be told apart.
+    EXPECT_NEAR(r.point_biserial, 1.5 * std::sqrt(2.0 / 7.0), 1e-12);
 }
 
 // Section 7.1 item 11 and the section 5.5 table.
