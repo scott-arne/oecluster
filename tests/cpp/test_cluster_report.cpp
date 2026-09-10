@@ -745,6 +745,51 @@ TEST(ClusterReportTest, GlobalMedoidTieResolvesToTheLowestSampleIndex) {
     EXPECT_DOUBLE_EQ(r.calinski_harabasz_medoid, 18.0);
 }
 
+// The companion to the tie test above: that one pins WHICH clustered point
+// wins M, this one pins that only clustered points are eligible. Noise points
+// never have point_total written -- the intra pass writes it for cluster
+// members and the cross pass adds to it for cluster members -- so a noise
+// point keeps its 0.0 initialiser and wins the minimum outright if the
+// owner[i] != NO_OWNER guard is dropped.
+//
+// Two properties of sample 5's row are load-bearing rather than tidy. Every
+// distance on it is finite, which denies the dropped guard the refusal escape
+// hatch: a NaN there would make the mutant throw instead of reporting a
+// number, and that is exactly how this guard was incidentally covered before
+// this test existed -- by an unrelated coverage-threshold fixture that sets
+// d(0, 5) to NaN, whose failure message named finiteness and pointed at the
+// wrong part of the file. And each one is set to 0.5 rather than left on
+// DenseStorage's 0.0 fill, so the mutant reports a thoroughly plausible 20.0
+// rather than a degenerate 0.0 that no reader would mistake for an answer.
+TEST(ClusterReportTest, GlobalMedoidIsChosenAmongClusteredPointsOnly) {
+    DenseStorage storage(6);
+    storage.Set(0, 1, 0.25);
+    storage.Set(0, 2, 0.25);
+    storage.Set(1, 2, 0.5);
+    storage.Set(3, 4, 0.25);
+    for (size_t i = 0; i < 3; ++i) {
+        storage.Set(i, 3, 0.5);
+        storage.Set(i, 4, 0.5);
+    }
+    for (size_t i = 0; i < 5; ++i) {
+        storage.Set(i, 5, 0.5);
+    }
+
+    const ClusteringResult result = MakeResult({0, 0, 0, 1, 1, -1});
+    const ClusterReport r = cluster_report(result, storage, ClusterReportOptions());
+
+    // Totals over clustered points: 0 -> 1.5, 1 -> 1.75, 2 -> 1.75,
+    // 3 -> 1.75, 4 -> 1.75, and noise sample 5 -> 0.0. So M = 0.
+    // Medoids are 0 and 3. Between-scatter = 3*d(0,0)^2 + 2*d(3,0)^2 = 0.5,
+    // within-scatter = (0 + 0.0625 + 0.0625) + (0 + 0.0625) = 0.1875,
+    // CH = (0.5 / 1) / (0.1875 / 3) = 8.
+    //
+    // Drop the guard and M becomes sample 5, whose 0.0 total is unbeatable:
+    // between-scatter rises to 3*0.25 + 2*0.25 = 1.25 and CH reads 20. Both
+    // numbers are entirely plausible, which is the point.
+    EXPECT_DOUBLE_EQ(r.calinski_harabasz_medoid, 8.0);
+}
+
 // Section 7.1 item 11 and the section 5.5 table.
 TEST(ClusterReportTest, InternalIndicesUndefinedCases) {
     const DenseStorage storage = MakeSixPointStorage();
