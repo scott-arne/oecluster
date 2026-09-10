@@ -2302,6 +2302,14 @@ TEST(ClusterReportTest, RecordDiametersRecomputeP95) {
     // source, so this stays NaN under that mutation -- pinned so a future
     // change that folds guard and source together cannot pass silently.
     EXPECT_TRUE(std::isnan(r.records[2].median_intra_distance));
+    // The same discrimination for the mean. A guard-preserving mutation --
+    // replacing only the ternary's defined branch with report.mean_intra_distance
+    // -- keeps every singleton's NaN, so the isnan pin at :2359 cannot see it.
+    // Only a populated cluster whose own mean differs from the global mean can:
+    // here the locals are 0.2 and 0.8 while the pool means 0.5.
+    EXPECT_DOUBLE_EQ(r.records[0].mean_intra_distance, 0.2);  // d(0,1)
+    EXPECT_DOUBLE_EQ(r.records[1].mean_intra_distance, 0.8);  // d(2,3)
+    EXPECT_TRUE(std::isnan(r.records[2].mean_intra_distance));
 
     // Sorted diameters [0.0, 0.2, 0.8]; fractional rank 0.95 * 2 = 1.9, so the
     // result interpolates 90% of the way from 0.2 to 0.8: 0.2 + 0.9 * 0.6.
