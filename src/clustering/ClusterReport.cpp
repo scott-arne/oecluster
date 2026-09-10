@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <numeric>
 #include <stdexcept>
 #include <string>
 
@@ -516,7 +517,16 @@ ClusterReport cluster_report(
         }
 
         // ---- Finalize. ----
-        if (representatives.size() >= 2) {
+        // Under the default representative_method the configured representative
+        // and the true medoid are the same point, and the Davies-Bouldin loop
+        // in the internal-indices block below walks every pair of them anyway.
+        // Redundancy is the median of that walk's row minima, so it is taken
+        // from there and this loop is skipped -- one K^2 matrix, not two.
+        // A different method means genuinely different points, and then this
+        // loop is the only thing that reads them.
+        if (representatives.size() < 2) {
+            report.representative_redundancy = nan_value();
+        } else if (options.representative_method != RepresentativeMethod::Medoid) {
             std::vector<double> nearest_representative_distance;
             nearest_representative_distance.reserve(representatives.size());
             for (size_t i = 0; i < representatives.size(); ++i) {
@@ -533,8 +543,6 @@ ClusterReport cluster_report(
             }
             report.representative_redundancy =
                 detail::median_distance(nearest_representative_distance);
-        } else {
-            report.representative_redundancy = nan_value();
         }
 
         // Each sample's distance to its nearest configured representative,
@@ -571,6 +579,149 @@ ClusterReport cluster_report(
                     static_cast<double>(covered) / static_cast<double>(report.num_samples);
             }
         }
+
+        // ---- Internal indices (section 5.3). ----
+        const size_t clustered_count = std::accumulate(
+            members.begin(),
+            members.end(),
+            size_t{0},
+            [](const size_t total, const Cluster& cluster) {
+                return total + cluster.size();
+            });
+
+        if (cluster_count >= 2) {
+            // The global medoid M: the clustered point with the smallest total
+            // distance to all clustered points. Ties resolve to the lowest
+            // sample index, which is deliberately not m_k's "earliest member"
+            // rule -- Butina emits members in representative-first order, so
+            // the two can name different points.
+            size_t global_medoid = 0;
+            double smallest_total = std::numeric_limits<double>::infinity();
+            for (size_t i = 0; i < labels.size(); ++i) {
+                if (owner[i] != NO_OWNER && point_total[i] < smallest_total) {
+                    smallest_total = point_total[i];
+                    global_medoid = i;
+                }
+            }
+
+            double between_scatter = 0.0;
+            double within_scatter = 0.0;
+            for (size_t k = 0; k < cluster_count; ++k) {
+                const double to_global =
+                    detail::checked_distance(storage, true_medoids[k], global_medoid);
+                between_scatter +=
+                    static_cast<double>(members[k].size()) * to_global * to_global;
+                within_scatter += medoid_square_sums[k];
+            }
+            if (clustered_count > cluster_count) {
+                const double numerator =
+                    between_scatter / static_cast<double>(cluster_count - 1);
+                const double denominator =
+                    within_scatter /
+                    static_cast<double>(clustered_count - cluster_count);
+                report.calinski_harabasz_medoid =
+                    denominator == 0.0 ? nan_value() : numerator / denominator;
+            } else {
+                report.calinski_harabasz_medoid = nan_value();
+            }
+
+            // This is the only K^2 walk over medoid pairs, and three consumers
+            // read it: Davies-Bouldin, the medoid Dunn separation, and -- under
+            // the default representative_method, where the configured
+            // representative and the true medoid are the same point --
+            // representative_redundancy, whose own loop above is switched off in
+            // that case. Section 5.1 promises exactly one such matrix by
+            // default and a second one only when the two identities differ.
+            double davies_bouldin_total = 0.0;
+            std::vector<double> nearest_medoid_distance;
+            nearest_medoid_distance.reserve(cluster_count);
+            for (size_t a = 0; a < cluster_count; ++a) {
+                double worst_ratio = 0.0;
+                double nearest = std::numeric_limits<double>::infinity();
+                for (size_t b = 0; b < cluster_count; ++b) {
+                    if (a == b) {
+                        continue;
+                    }
+                    const double separation =
+                        detail::checked_distance(storage, true_medoids[a], true_medoids[b]);
+                    nearest = std::min(nearest, separation);
+                    // Coincident medoids are reported as inf, and the zero
+                    // separation is branched on rather than divided by. IEEE
+                    // gives 0.0/0.0 == NaN, and std::max(0.0, NaN) returns 0.0
+                    // because 0.0 < NaN is false -- so two coincident
+                    // zero-scatter clusters would silently score a perfect
+                    // Davies-Bouldin of 0 through the division. INVARIANT 3.
+                    const double ratio =
+                        separation == 0.0
+                            ? std::numeric_limits<double>::infinity()
+                            : (medoid_scatter[a] + medoid_scatter[b]) / separation;
+                    worst_ratio = std::max(worst_ratio, ratio);
+                }
+                nearest_medoid_distance.push_back(nearest);
+                davies_bouldin_total += worst_ratio;
+            }
+            report.davies_bouldin_medoid =
+                davies_bouldin_total / static_cast<double>(cluster_count);
+
+            // The smallest medoid-to-medoid distance is the smallest row
+            // minimum: the matrix is symmetric, so scanning ordered pairs and
+            // scanning unordered ones give the same answer, and reusing the
+            // row minima avoids a second condition inside the hot loop.
+            const double min_medoid_separation = *std::min_element(
+                nearest_medoid_distance.begin(), nearest_medoid_distance.end());
+
+            // Same reads, different reduction: the median of the row minima is
+            // exactly what the representative_redundancy loop computes, so
+            // under the default method it is answered here for free. Under any
+            // other method that loop has already answered it against the
+            // configured representatives, which are different points.
+            if (options.representative_method == RepresentativeMethod::Medoid) {
+                report.representative_redundancy =
+                    detail::median_distance(nearest_medoid_distance);
+            }
+
+            double max_mean_within = 0.0;
+            double max_medoid_spread = 0.0;
+            for (size_t k = 0; k < cluster_count; ++k) {
+                // A singleton contributes 0 to both denominators, which cannot
+                // raise a maximum and so cannot move either index.
+                const double mean_within = cluster_intra_counts[k] == 0
+                    ? 0.0
+                    : cluster_intra_sums[k] /
+                          static_cast<double>(cluster_intra_counts[k]);
+                max_mean_within = std::max(max_mean_within, mean_within);
+                max_medoid_spread = std::max(max_medoid_spread, 2.0 * medoid_scatter[k]);
+            }
+            // min_mean_separation was accumulated by the cross pass above.
+            report.dunn_mean_separation_mean_diameter =
+                max_mean_within == 0.0 ? nan_value()
+                                       : min_mean_separation / max_mean_within;
+            report.dunn_medoid_separation_medoid_spread =
+                max_medoid_spread == 0.0 ? nan_value()
+                                         : min_medoid_separation / max_medoid_spread;
+        } else {
+            report.calinski_harabasz_medoid = nan_value();
+            report.davies_bouldin_medoid = nan_value();
+            report.dunn_mean_separation_mean_diameter = nan_value();
+            report.dunn_medoid_separation_medoid_spread = nan_value();
+        }
+
+        // Point-biserial. Positive means between-cluster distances exceed
+        // within-cluster ones; the convention is pinned here because published
+        // sources differ on it.
+        const detail::DistanceMoments all_moments =
+            detail::merge_moments(within_moments, between_moments);
+        const double spread = detail::population_stddev(all_moments);
+        if (within_moments.count == 0 || between_moments.count == 0 || spread == 0.0) {
+            report.point_biserial = nan_value();
+        } else {
+            const double within_pairs = static_cast<double>(within_moments.count);
+            const double between_pairs = static_cast<double>(between_moments.count);
+            const double total_pairs = static_cast<double>(all_moments.count);
+            report.point_biserial =
+                ((between_moments.mean - within_moments.mean) / spread) *
+                std::sqrt(within_pairs * between_pairs) / total_pairs;
+        }
     } else {
         report.mean_intra_distance = nan_value();
         report.median_intra_distance = nan_value();
@@ -580,6 +731,11 @@ ClusterReport cluster_report(
         report.dunn_index = nan_value();
         report.median_medoid_member_distance = nan_value();
         report.representative_redundancy = nan_value();
+        report.calinski_harabasz_medoid = nan_value();
+        report.davies_bouldin_medoid = nan_value();
+        report.dunn_mean_separation_mean_diameter = nan_value();
+        report.dunn_medoid_separation_medoid_spread = nan_value();
+        report.point_biserial = nan_value();
         // coverage_at stays empty.
     }
 

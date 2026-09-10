@@ -627,6 +627,195 @@ TEST(ClusterReportTest, NewSurfaceDefaultsToUnrequested) {
     EXPECT_EQ(blank.dunn_index, 0.0);
 }
 
+// Section 7.1 item 1. Every value below is worked out by hand on
+// MakeSixPointStorage; see the plan's Task 6 for the derivations.
+// Medoids are samples 0 and 3; the global medoid M is sample 0.
+TEST(ClusterReportTest, HandComputedInternalIndices) {
+    const DenseStorage storage = MakeSixPointStorage();
+    const ClusteringResult result = MakeResult({0, 0, 0, 1, 1, 1});
+    const ClusterReport r = cluster_report(result, storage, ClusterReportOptions());
+
+    // CH = [3*0 + 3*0.8^2] / 1  /  [(0.2^2 + 0.2^2)*2 / (6 - 2)] = 1.92 / 0.04.
+    EXPECT_NEAR(r.calinski_harabasz_medoid, 48.0, 1e-9);
+    // S_k = (0 + 0.2 + 0.2)/3 for both; DB = (S_a + S_b)/0.8.
+    EXPECT_NEAR(r.davies_bouldin_medoid, 1.0 / 3.0, 1e-12);
+    // 0.8 / ((0.2 + 0.2 + 0.4)/3).
+    EXPECT_NEAR(r.dunn_mean_separation_mean_diameter, 3.0, 1e-12);
+    // 0.8 / (2 * 0.4/3).
+    EXPECT_NEAR(r.dunn_medoid_separation_medoid_spread, 3.0, 1e-12);
+    // Six within-pairs, nine between-pairs; r_pb^2 = 96/101 exactly.
+    EXPECT_NEAR(r.point_biserial, std::sqrt(96.0 / 101.0), 1e-12);
+}
+
+// Section 7.1 item 7. This is the one arithmetic error in the design that would
+// otherwise produce entirely plausible numbers: S_k divides by n_k, while
+// medoid_member_means divides by n_k - 1, and the two are a factor of two apart
+// at n_k == 2.
+TEST(ClusterReportTest, MedoidScatterUsesTheClusterSizeDenominator) {
+    DenseStorage storage(4);
+    storage.Set(0, 1, 0.4);
+    storage.Set(2, 3, 0.4);
+    storage.Set(0, 2, 0.8);
+    storage.Set(0, 3, 0.8);
+    storage.Set(1, 2, 0.8);
+    storage.Set(1, 3, 0.8);
+    const ClusteringResult result = MakeResult({0, 0, 1, 1});
+    const ClusterReport r = cluster_report(result, storage, ClusterReportOptions());
+
+    // S_k = (0 + 0.4)/2 = 0.2 for both clusters; DB = (0.2 + 0.2)/0.8 = 0.5.
+    // With the n_k - 1 denominator it would be (0.4 + 0.4)/0.8 = 1.0.
+    EXPECT_NEAR(r.davies_bouldin_medoid, 0.5, 1e-12);
+    // The existing field keeps its own denominator and its 5.0.0 value.
+    EXPECT_DOUBLE_EQ(r.median_medoid_member_distance, 0.4);
+}
+
+// Section 7.1 item 6. A fixture where the two representatives coincide would
+// pass whatever the implementation did, so MakeDivergentRepresentativeStorage
+// (Task 1) is built to make them differ, and the test asserts that they differ
+// before asserting anything else.
+TEST(ClusterReportTest, MedoidNamedIndicesIgnoreRepresentativeMethod) {
+    const DenseStorage storage = MakeDivergentRepresentativeStorage();
+    const ClusteringResult result = MakeResult({0, 0, 0, 0, 1, 1, 1, 1});
+
+    ClusterReportOptions medoid_options;
+    medoid_options.representative_method = RepresentativeMethod::Medoid;
+    ClusterReportOptions minimax_options;
+    minimax_options.representative_method = RepresentativeMethod::Minimax;
+
+    const ClusterReport by_medoid = cluster_report(result, storage, medoid_options);
+    const ClusterReport by_minimax = cluster_report(result, storage, minimax_options);
+
+    // The guard that the fixture actually diverged. Radius is measured from the
+    // configured representative, so 0.7 against 0.5 is the two runs naming
+    // different points -- checked here rather than through records[], so that
+    // this test needs nothing from Task 8.
+    ASSERT_DOUBLE_EQ(by_medoid.median_radius, 0.7);
+    ASSERT_DOUBLE_EQ(by_minimax.median_radius, 0.5);
+
+    EXPECT_DOUBLE_EQ(by_medoid.calinski_harabasz_medoid,
+                     by_minimax.calinski_harabasz_medoid);
+    EXPECT_DOUBLE_EQ(by_medoid.davies_bouldin_medoid,
+                     by_minimax.davies_bouldin_medoid);
+    EXPECT_DOUBLE_EQ(by_medoid.dunn_medoid_separation_medoid_spread,
+                     by_minimax.dunn_medoid_separation_medoid_spread);
+
+    // Both configured-representative fields move, and neither medoid-named
+    // field above did.
+    EXPECT_DOUBLE_EQ(by_medoid.representative_redundancy, 0.95);
+    EXPECT_DOUBLE_EQ(by_minimax.representative_redundancy, 0.85);
+}
+
+// Section 7.1 item 15. Ties in M resolve to the lowest sample index, which is
+// not the same rule as the "earliest member" tie-break for m_k: Butina emits
+// members in representative-first order, so the two can differ. This fixture
+// makes them differ, and pins a single Calinski-Harabasz value that only the
+// correct pair of rules produces.
+//
+// Every distance is a dyadic fraction. That is required, not stylistic: the
+// two tied totals are accumulated in different orders (0 sums intra-then-cross
+// over {4,3}; 3 sums one intra then three cross), and with values like 0.2 the
+// two sums land two ULPs apart, so the tie the test depends on would not be a
+// tie at all and the strict < would pick a winner for the wrong reason.
+TEST(ClusterReportTest, GlobalMedoidTieResolvesToTheLowestSampleIndex) {
+    DenseStorage storage(5);
+    storage.Set(0, 1, 0.25);
+    storage.Set(0, 2, 0.25);
+    storage.Set(1, 2, 0.5);
+    storage.Set(3, 4, 0.25);
+    for (size_t i = 0; i < 3; ++i) {
+        storage.Set(i, 3, 0.5);
+        storage.Set(i, 4, 0.75);
+    }
+
+    // Members {4,3} for the second cluster, the order Butina would emit if 4
+    // were its representative. The earliest-member tie-break therefore makes
+    // m_b = 4, not 3.
+    const ClusteringResult result(
+        std::vector<ClusterLabel>{0, 0, 0, 1, 1}, Clusters{{0, 1, 2}, {4, 3}});
+    const ClusterReport r = cluster_report(result, storage, ClusterReportOptions());
+
+    // Totals to all clustered points: 0 -> 1.75, 1 -> 2.0, 2 -> 2.0,
+    // 3 -> 1.75, 4 -> 2.5. Samples 0 and 3 tie at the minimum, so M = 0.
+    // Between-scatter = 3*d(0,0)^2 + 2*d(4,0)^2 = 2 * 0.5625 = 1.125.
+    // Within-scatter  = (0 + 0.0625 + 0.0625) + (0 + 0.0625) = 0.1875.
+    // CH = (1.125 / 1) / (0.1875 / 3) = 18.
+    //
+    // Each wrong rule lands somewhere else and is caught: M = 3 gives 14,
+    // and m_b = 3 (lowest index rather than earliest member) gives 8.
+    EXPECT_DOUBLE_EQ(r.calinski_harabasz_medoid, 18.0);
+}
+
+// Section 7.1 item 11 and the section 5.5 table.
+TEST(ClusterReportTest, InternalIndicesUndefinedCases) {
+    const DenseStorage storage = MakeSixPointStorage();
+
+    const ClusterReport single =
+        cluster_report(MakeResult({0, 0, 0, -1, -1, -1}), storage, ClusterReportOptions());
+    EXPECT_TRUE(std::isnan(single.calinski_harabasz_medoid));
+    EXPECT_TRUE(std::isnan(single.davies_bouldin_medoid));
+    EXPECT_TRUE(std::isnan(single.dunn_mean_separation_mean_diameter));
+    EXPECT_TRUE(std::isnan(single.dunn_medoid_separation_medoid_spread));
+
+    const ClusterReport none = cluster_report(
+        ClusteringResult(std::vector<ClusterLabel>{-1, -1, -1, -1, -1, -1}, Clusters{}),
+        storage,
+        ClusterReportOptions());
+    EXPECT_TRUE(std::isnan(none.calinski_harabasz_medoid));
+    EXPECT_TRUE(std::isnan(none.davies_bouldin_medoid));
+    EXPECT_TRUE(std::isnan(none.dunn_mean_separation_mean_diameter));
+    EXPECT_TRUE(std::isnan(none.dunn_medoid_separation_medoid_spread));
+    EXPECT_TRUE(std::isnan(none.point_biserial));
+
+    // All singletons: Nc == K, so CH's denominator has no degrees of freedom,
+    // and there are no within-pairs for point-biserial.
+    const ClusterReport singletons =
+        cluster_report(MakeResult({0, 1, 2, 3, 4, 5}), storage, ClusterReportOptions());
+    EXPECT_TRUE(std::isnan(singletons.calinski_harabasz_medoid));
+    EXPECT_TRUE(std::isnan(singletons.point_biserial));
+
+    // Constant distances leave point-biserial's s_d at zero.
+    DenseStorage flat(4);
+    for (size_t i = 0; i < 4; ++i) {
+        for (size_t j = i + 1; j < 4; ++j) {
+            flat.Set(i, j, 0.5);
+        }
+    }
+    const ClusterReport constant =
+        cluster_report(MakeResult({0, 0, 1, 1}), flat, ClusterReportOptions());
+    EXPECT_TRUE(std::isnan(constant.point_biserial));
+}
+
+// Coincident medoids give inf, not NaN: "two clusters share a representative"
+// is a real answer, and NaN would hide it.
+TEST(ClusterReportTest, CoincidentMedoidsGiveInfiniteDaviesBouldin) {
+    DenseStorage storage(4);
+    storage.Set(0, 1, 0.4);
+    storage.Set(2, 3, 0.4);
+    storage.Set(0, 2, 0.0);
+    storage.Set(0, 3, 0.8);
+    storage.Set(1, 2, 0.8);
+    storage.Set(1, 3, 0.8);
+    const ClusterReport r =
+        cluster_report(MakeResult({0, 0, 1, 1}), storage, ClusterReportOptions());
+    EXPECT_TRUE(std::isinf(r.davies_bouldin_medoid));
+    EXPECT_FALSE(std::isnan(r.davies_bouldin_medoid));
+}
+
+// The case the explicit separation == 0.0 branch exists for. Both scatters are
+// zero as well, so the arithmetic reads 0.0/0.0 == NaN, and std::max(0.0, NaN)
+// keeps the 0.0 -- the most degenerate clustering possible would otherwise
+// report a perfect Davies-Bouldin. The test above cannot catch this: its
+// scatters are 0.2, so the division already yields inf.
+TEST(ClusterReportTest, CoincidentZeroScatterSingletonsGiveInfiniteDaviesBouldin) {
+    DenseStorage storage(2);
+    storage.Set(0, 1, 0.0);
+    const ClusterReport r =
+        cluster_report(MakeResult({0, 1}), storage, ClusterReportOptions());
+    ASSERT_FALSE(std::isnan(r.davies_bouldin_medoid));
+    EXPECT_TRUE(std::isinf(r.davies_bouldin_medoid));
+    EXPECT_NE(r.davies_bouldin_medoid, 0.0);
+}
+
 // Section 5.2 precondition 1, new invalid_argument refusals. Each message must
 // name the offending index: a caller with a hand-built result needs to know
 // which sample to fix, not that "something is wrong".
