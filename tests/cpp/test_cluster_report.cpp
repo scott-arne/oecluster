@@ -14,6 +14,7 @@
 #include "oecluster/clustering/ClusterTypes.h"
 #include "oecluster/clustering/DBSCAN.h"
 #include "oecluster/clustering/HDBSCAN.h"
+#include "../../src/clustering/ClusterMetrics.h"
 #include "../../src/clustering/InternalIndices.h"
 
 using namespace OECluster;
@@ -2219,4 +2220,167 @@ TEST(InternalIndicesTest, CheckedDistanceRefusesNonFinite) {
     EXPECT_DOUBLE_EQ(detail::checked_distance(storage, 0, 1), 0.25);
     EXPECT_THROW(detail::checked_distance(storage, 0, 2), std::invalid_argument);
     EXPECT_THROW(detail::checked_distance(storage, 1, 2), std::invalid_argument);
+}
+
+// Section 7.1 item 10. The records must decompose the scalars, not merely
+// resemble them.
+//
+// The three-cluster split and the raised boundary_threshold are both
+// deliberate. Under the default 0.30 every cross pair in this fixture sits at
+// 0.8 or 0.2 in a pattern that yields zero violations, so the sum invariant
+// below would read 0 == 0 and hold for any implementation. At 0.5 the three
+// clusters take 2, 3 and 1 violations respectively -- all different, so
+// summing the wrong cluster's total is caught too.
+TEST(ClusterReportTest, RecordsRecomputeTheAggregates) {
+    const DenseStorage storage = MakeSixPointStorage();
+    ClusterReportOptions options;
+    options.compute_per_cluster_records = true;
+    options.boundary_threshold = 0.5;
+    const ClusterReport r =
+        cluster_report(MakeResult({0, 0, 1, 1, 2, -1}), storage, options);
+
+    ASSERT_EQ(r.records.size(), r.num_clusters);
+    ASSERT_EQ(r.records.size(), 3u);
+    EXPECT_TRUE(r.requested.per_cluster_records);
+
+    std::vector<double> radii;
+    std::vector<double> representative_means;
+    size_t record_violations = 0;
+    for (size_t k = 0; k < r.records.size(); ++k) {
+        EXPECT_EQ(r.records[k].label, static_cast<ClusterLabel>(k));
+        radii.push_back(r.records[k].radius);
+        representative_means.push_back(r.records[k].mean_representative_distance);
+        record_violations += r.records[k].boundary_violations;
+    }
+
+    std::sort(radii.begin(), radii.end());
+    std::sort(representative_means.begin(), representative_means.end());
+    EXPECT_DOUBLE_EQ(detail::median_distance(radii), r.median_radius);
+    EXPECT_DOUBLE_EQ(detail::median_distance(representative_means),
+                     r.median_medoid_member_distance);
+
+    // Pinned, not just self-consistent: {0,1}-{2,3} contributes d(0,2)=0.2 and
+    // d(1,2)=0.4; {2,3}-{4} contributes d(3,4)=0.2; {0,1}-{4} contributes
+    // nothing. Three violating pairs in total.
+    ASSERT_EQ(r.boundary_violations, 3u);
+    EXPECT_EQ(r.records[0].boundary_violations, 2u);
+    EXPECT_EQ(r.records[1].boundary_violations, 3u);
+    EXPECT_EQ(r.records[2].boundary_violations, 1u);
+
+    // Each violating pair is counted by both of its endpoints on the records,
+    // and once on the scorecard.
+    EXPECT_EQ(record_violations, 2u * r.boundary_violations);
+}
+
+// Section 7.1 item 10 also names p95_diameter. percentile() is file-local to
+// ClusterReport.cpp and cannot be called from here, so the expected value is
+// worked out by hand instead -- which means the three diameters must differ.
+// A fixture where they are all equal would pass against first, min, median and
+// max alike and would test nothing about the percentile.
+TEST(ClusterReportTest, RecordDiametersRecomputeP95) {
+    const DenseStorage storage = MakeSixPointStorage();
+    ClusterReportOptions options;
+    options.compute_per_cluster_records = true;
+    const ClusterReport r =
+        cluster_report(MakeResult({0, 0, 1, 1, 2, -1}), storage, options);
+
+    ASSERT_EQ(r.records.size(), 3u);
+    EXPECT_DOUBLE_EQ(r.records[0].diameter, 0.2);  // d(0,1)
+    EXPECT_DOUBLE_EQ(r.records[1].diameter, 0.8);  // d(2,3), a cross-group pair
+    EXPECT_DOUBLE_EQ(r.records[2].diameter, 0.0);  // singleton
+
+    // Sorted diameters [0.0, 0.2, 0.8]; fractional rank 0.95 * 2 = 1.9, so the
+    // result interpolates 90% of the way from 0.2 to 0.8: 0.2 + 0.9 * 0.6.
+    // Distinct from the first (0.2), the min (0.0), the median (0.2) and the
+    // max (0.8), so a wrong reduction cannot pass.
+    EXPECT_NEAR(r.p95_diameter, 0.74, 1e-12);
+}
+
+// The record-level half of Task 6's MedoidNamedIndicesIgnoreRepresentativeMethod:
+// ClusterRecord::representative is the CONFIGURED representative, section 3.7,
+// while the medoid-named scalars are not. Task 6 could not assert this because
+// the table did not exist yet.
+TEST(ClusterReportTest, RecordRepresentativeFollowsTheConfiguredMethod) {
+    const DenseStorage storage = MakeDivergentRepresentativeStorage();
+    const ClusteringResult result = MakeResult({0, 0, 0, 0, 1, 1, 1, 1});
+
+    ClusterReportOptions medoid_options;
+    medoid_options.representative_method = RepresentativeMethod::Medoid;
+    medoid_options.compute_per_cluster_records = true;
+    ClusterReportOptions minimax_options;
+    minimax_options.representative_method = RepresentativeMethod::Minimax;
+    minimax_options.compute_per_cluster_records = true;
+
+    const ClusterReport by_medoid = cluster_report(result, storage, medoid_options);
+    const ClusterReport by_minimax = cluster_report(result, storage, minimax_options);
+
+    ASSERT_EQ(by_medoid.records.size(), 2u);
+    ASSERT_EQ(by_minimax.records.size(), 2u);
+    EXPECT_EQ(by_medoid.records[0].representative, 0u);
+    EXPECT_EQ(by_medoid.records[1].representative, 4u);
+    EXPECT_EQ(by_minimax.records[0].representative, 1u);
+    EXPECT_EQ(by_minimax.records[1].representative, 5u);
+
+    // And the medoid-named scalars still did not move with them.
+    EXPECT_DOUBLE_EQ(by_medoid.davies_bouldin_medoid,
+                     by_minimax.davies_bouldin_medoid);
+}
+
+// Section 7.1 item 12, against the section 4.4 table.
+TEST(ClusterReportTest, RecordUndefinedCases) {
+    const DenseStorage storage = MakeSixPointStorage();
+    ClusterReportOptions options;
+    options.compute_per_cluster_records = true;
+
+    const ClusterReport single =
+        cluster_report(MakeResult({0, 0, 0, -1, -1, -1}), storage, options);
+    ASSERT_EQ(single.records.size(), 1u);
+    EXPECT_EQ(single.records[0].nearest_cluster, NO_NEAREST_CLUSTER);
+    EXPECT_TRUE(std::isnan(single.records[0].nearest_cluster_distance));
+    EXPECT_NE(single.records[0].nearest_cluster_distance, 0.0);
+    EXPECT_TRUE(std::isnan(single.records[0].silhouette));
+
+    const ClusterReport with_singleton =
+        cluster_report(MakeResult({0, 0, 0, 1, -1, -1}), storage, options);
+    ASSERT_EQ(with_singleton.records.size(), 2u);
+    const ClusterRecord& lone = with_singleton.records[1];
+    EXPECT_EQ(lone.size, 1u);
+    EXPECT_TRUE(std::isnan(lone.mean_intra_distance));
+    EXPECT_TRUE(std::isnan(lone.median_intra_distance));
+    EXPECT_DOUBLE_EQ(lone.radius, 0.0);
+    EXPECT_DOUBLE_EQ(lone.diameter, 0.0);
+    EXPECT_DOUBLE_EQ(lone.mean_representative_distance, 0.0);
+
+    // The defined cases, which are what make the NaN assertions above mean
+    // anything. Since Task 2's gate these four fields DEFAULT to NaN, so an
+    // isnan() assertion alone passes just as happily when the population path
+    // never touched the field. Asserting a real value on a populated record is
+    // the half that catches a missing assignment.
+    const ClusterRecord& populated = with_singleton.records[0];
+    EXPECT_EQ(populated.size, 3u);
+    EXPECT_FALSE(std::isnan(populated.mean_intra_distance));
+    EXPECT_FALSE(std::isnan(populated.median_intra_distance));
+    EXPECT_FALSE(std::isnan(populated.nearest_cluster_distance));
+    EXPECT_FALSE(std::isnan(populated.silhouette));
+    EXPECT_EQ(populated.nearest_cluster, 1);
+}
+
+// Section 7.1 item 13, the per_cluster_records half. This is what the requested
+// struct exists for: an empty table means two different things.
+TEST(ClusterReportTest, RecordsHonestyProperty) {
+    const DenseStorage storage = MakeSixPointStorage();
+
+    const ClusterReport unrequested =
+        cluster_report(MakeResult({0, 0, 0, 1, 1, 1}), storage, ClusterReportOptions());
+    EXPECT_TRUE(unrequested.records.empty());
+    EXPECT_FALSE(unrequested.requested.per_cluster_records);
+
+    ClusterReportOptions options;
+    options.compute_per_cluster_records = true;
+    const ClusterReport requested_but_empty = cluster_report(
+        ClusteringResult(std::vector<ClusterLabel>{-1, -1, -1, -1, -1, -1}, Clusters{}),
+        storage,
+        options);
+    EXPECT_TRUE(requested_but_empty.records.empty());
+    EXPECT_TRUE(requested_but_empty.requested.per_cluster_records);
 }

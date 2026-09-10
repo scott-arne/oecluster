@@ -80,6 +80,15 @@ double nan_value() {
     return std::numeric_limits<double>::quiet_NaN();
 }
 
+// One definition, called from the scorecard's mean over all points and from the
+// per-cluster records. The two reductions differ -- the scalar averages over
+// every clustered point, a record over its own members -- but the term they
+// average must not.
+double silhouette_term(const double a_term, const double b_term) {
+    const double denominator = std::max(a_term, b_term);
+    return denominator == 0.0 ? 0.0 : (b_term - a_term) / denominator;
+}
+
 double size_entropy(const std::vector<double>& sizes) {
     if (sizes.size() <= 1) {
         return 0.0;
@@ -111,6 +120,11 @@ ClusterReport cluster_report(
 
     ClusterReport report;
     report.coverage_thresholds = options.coverage_thresholds;
+
+    // Set before any branch, so an empty records table on a K == 0 result still
+    // says whether anybody asked for one.
+    report.requested.pair_rank_indices = options.compute_pair_rank_indices;
+    report.requested.per_cluster_records = options.compute_per_cluster_records;
 
     const std::vector<ClusterLabel>& labels = result.Labels();
     const Clusters& members = result.Members();
@@ -304,6 +318,9 @@ ClusterReport cluster_report(
         std::vector<double> medoid_scatter(cluster_count, 0.0);
         std::vector<double> medoid_square_sums(cluster_count, 0.0);
 
+        std::vector<double> cluster_medians(cluster_count, nan_value());
+        std::vector<double> cluster_distances;
+
         std::vector<double> own_mean(labels.size(), 0.0);
         std::vector<double> point_total(labels.size(), 0.0);
         detail::DistanceMoments within_moments;
@@ -311,6 +328,7 @@ ClusterReport cluster_report(
         double max_diameter = 0.0;
         for (size_t k = 0; k < cluster_count; ++k) {
             const Cluster& cluster = members[k];
+            cluster_distances.clear();
 
             double diameter = 0.0;
             for (size_t i = 0; i < cluster.size(); ++i) {
@@ -318,6 +336,9 @@ ClusterReport cluster_report(
                     const double distance =
                         detail::checked_distance(storage, cluster[i], cluster[j]);
                     intra_pairs.push_back(distance);
+                    if (options.compute_per_cluster_records) {
+                        cluster_distances.push_back(distance);
+                    }
                     within_moments.Add(distance);
                     diameter = std::max(diameter, distance);
                     cluster_intra_sums[k] += distance;
@@ -328,6 +349,9 @@ ClusterReport cluster_report(
                     own_mean[cluster[i]] += distance;
                     own_mean[cluster[j]] += distance;
                 }
+            }
+            if (options.compute_per_cluster_records && !cluster_distances.empty()) {
+                cluster_medians[k] = detail::median_distance(cluster_distances);
             }
             diameters.push_back(diameter);
             max_diameter = std::max(max_diameter, diameter);
@@ -499,10 +523,7 @@ ClusterReport cluster_report(
                 for (const size_t point : cluster) {
                     const double a_term = own_mean[point];
                     const double b_term = best_other_mean[point];
-                    const double denominator = std::max(a_term, b_term);
-                    silhouette_sum += denominator == 0.0
-                        ? 0.0
-                        : (b_term - a_term) / denominator;
+                    silhouette_sum += silhouette_term(a_term, b_term);
                     ++silhouette_count;
                 }
             }
@@ -760,6 +781,57 @@ ClusterReport cluster_report(
             report.point_biserial =
                 ((between_moments.mean - within_moments.mean) / spread) *
                 std::sqrt(within_pairs * between_pairs) / total_pairs;
+        }
+
+        // ---- Per-cluster records (section 4.4). ----
+        if (options.compute_per_cluster_records) {
+            report.records.reserve(cluster_count);
+            for (size_t k = 0; k < cluster_count; ++k) {
+                ClusterRecord record;
+                record.label = static_cast<ClusterLabel>(k);
+                record.size = members[k].size();
+                record.representative = representatives[k];
+                record.mean_intra_distance = cluster_intra_counts[k] == 0
+                    ? nan_value()
+                    : cluster_intra_sums[k] /
+                          static_cast<double>(cluster_intra_counts[k]);
+                record.median_intra_distance = cluster_medians[k];
+                record.radius = radii[k];
+                record.diameter = diameters[k];
+                record.mean_representative_distance = medoid_member_means[k];
+
+                if (cluster_count >= 2) {
+                    // At K >= 2 the cross loop visits every cluster in at least
+                    // one pair, every cluster is non-empty (the validator rejects
+                    // empty clusters before this point), and every distance is
+                    // finite (the precondition rejects non-finite storage), so
+                    // nearest_cluster_distance[k] is finite for every k and the
+                    // count guard and the finiteness guard coincide.
+                    record.nearest_cluster =
+                        static_cast<ClusterLabel>(nearest_cluster[k]);
+                    record.nearest_cluster_distance = nearest_cluster_distance[k];
+
+                    double silhouette_total = 0.0;
+                    for (const size_t point : members[k]) {
+                        const double a_term = own_mean[point];
+                        const double b_term = best_other_mean[point];
+                        silhouette_total += silhouette_term(a_term, b_term);
+                    }
+                    record.silhouette = members[k].empty()
+                        ? nan_value()
+                        : silhouette_total / static_cast<double>(members[k].size());
+                } else {
+                    record.nearest_cluster = NO_NEAREST_CLUSTER;
+                    // NaN rather than 0.0: a zero would read as another cluster
+                    // sitting at zero distance.
+                    record.nearest_cluster_distance = nan_value();
+                    record.silhouette = nan_value();
+                }
+
+                record.boundary_violations = cluster_violations[k];
+
+                report.records.push_back(record);
+            }
         }
     } else {
         report.mean_intra_distance = nan_value();
