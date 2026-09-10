@@ -647,6 +647,103 @@ TEST(ClusterReportTest, HandComputedInternalIndices) {
     EXPECT_NEAR(r.point_biserial, std::sqrt(96.0 / 101.0), 1e-12);
 }
 
+// The companion to the test above, and the one that actually separates the
+// five formulas. MakeSixPointStorage is too symmetric to do that: every
+// cluster there has two members and every cross distance is 0.8, so a
+// between-scatter that overwrites instead of accumulating, a Davies-Bouldin
+// row that sums instead of maximising, a mean-within divided by member count
+// instead of pair count, a medoid-Dunn wired to the wrong denominator, and a
+// point-biserial pair count taken from the sample count all produce the
+// correct answer there. Each of those five reads a different wrong number off
+// this fixture.
+//
+// Three properties are load-bearing and none is incidental:
+//
+//   * Cluster B has THREE members and a unique medoid (intra sums 1.4375,
+//     1.0, 1.0625, so sample 3 wins outright rather than by a tiebreak).
+//     Three members is what puts a cluster in the fixture whose pair count
+//     C(3,2) equals its member count, so the pair-versus-member denominator
+//     error has to be separated by A and C, where the two differ.
+//   * d(0,3) = 0.75 is the single asymmetry in the A-B block. It pulls the
+//     minimum mean separation (41/48) off the minimum medoid separation
+//     (3/4), so swapping the two Dunn numerators would fail too.
+//   * d(2,4) = 0.75 rather than 0.875. At 0.875 cluster B's mean-within rises
+//     to exactly A's 5/8, the wrong denominator's maximum coincides with the
+//     right one, and the mutation survives. 0.75 keeps B at 7/12, strictly
+//     below A, while leaving B's medoid unique. Anyone retuning this fixture
+//     has to re-check both of those at once.
+//
+// Every distance is a dyadic multiple of 1/16, so all 21 pairs, both scatters
+// and every quotient below are exact in binary.
+TEST(ClusterReportTest, HandComputedInternalIndicesOnUnequalClusterSizes) {
+    DenseStorage storage(7);
+    // A = {0,1}, B = {2,3,4}, C = {5,6}.
+    storage.Set(0, 1, 0.625);
+    storage.Set(2, 3, 0.6875);
+    storage.Set(2, 4, 0.75);
+    storage.Set(3, 4, 0.3125);
+    storage.Set(5, 6, 0.25);
+    for (size_t i = 0; i < 2; ++i) {
+        for (size_t j = 2; j < 5; ++j) {
+            storage.Set(i, j, 0.875);
+        }
+        for (size_t j = 5; j < 7; ++j) {
+            storage.Set(i, j, 0.9375);
+        }
+    }
+    storage.Set(0, 3, 0.75);  // The one asymmetry; see the note above.
+    for (size_t i = 2; i < 5; ++i) {
+        for (size_t j = 5; j < 7; ++j) {
+            storage.Set(i, j, 0.9375);
+        }
+    }
+
+    const ClusteringResult result = MakeResult({0, 0, 1, 1, 1, 2, 2});
+    const ClusterReport r = cluster_report(result, storage, ClusterReportOptions());
+
+    // True medoids 0, 3 and 5. Totals to all clustered points are 5, 41/8,
+    // 81/16, 9/2, 75/16, 79/16, 79/16, so M = 3 is the unique minimum and no
+    // tiebreak is involved.
+    //
+    // Between-scatter = 2*d(0,3)^2 + 3*0 + 2*d(5,3)^2 = 9/8 + 225/128
+    //                 = 369/128.
+    // Within-scatter  = 25/64 + 73/128 + 1/16 = 131/128.
+    // CH = (369/128 / 2) / (131/128 / 4) = 738/131.
+    EXPECT_NEAR(r.calinski_harabasz_medoid, 738.0 / 131.0, 1e-12);
+
+    // Scatters S = 5/16, 1/3, 1/8; separations d(0,3) = 3/4 and
+    // d(0,5) = d(3,5) = 15/16. Row maxima are 31/36, 31/36 and 22/45, so
+    // DB = (31/36 + 31/36 + 22/45) / 3 = (199/90) / 3 = 199/270. Summing each
+    // row instead of maximising it gives 109/90.
+    EXPECT_NEAR(r.davies_bouldin_medoid, 199.0 / 270.0, 1e-12);
+
+    // Mean separations are 41/48 (A-B), 15/16 and 15/16, so the minimum is
+    // 41/48. Mean within-pair distances are 5/8, 7/12 and 1/4 over PAIR
+    // counts 1, 3 and 1, so the maximum is A's 5/8 and the index is
+    // (41/48)/(5/8) = 41/30. Dividing by member count instead would make B's
+    // 7/12 the maximum and read 41/28.
+    EXPECT_NEAR(r.dunn_mean_separation_mean_diameter, 41.0 / 30.0, 1e-12);
+
+    // The medoid variant takes its numerator from the medoid separations, so
+    // 3/4 rather than 41/48, and its denominator from twice the scatters --
+    // 5/8, 2/3, 1/4 -- so 2/3 rather than the 5/8 the mean variant uses.
+    // (3/4)/(2/3) = 9/8. Wiring it to max_mean_within instead reads 6/5.
+    EXPECT_NEAR(r.dunn_medoid_separation_medoid_spread, 9.0 / 8.0, 1e-12);
+
+    // Five within-pairs against sixteen between-pairs, twenty-one in all.
+    // Mean difference 29/32 - 21/40 = 61/160; population variance 269/7056.
+    // The cluster sizes are unequal, so P_w = 5 is no longer the clustered
+    // sample count the way it was on the six-point fixture: reading the count
+    // from there gives sqrt(112/269) in place of sqrt(80/269) and the index
+    // reads 0.984 instead. EXPECT_NEAR rather than EXPECT_DOUBLE_EQ because
+    // the implementation reaches this through Welford plus merge_moments and
+    // lands two ULP off the closed form.
+    EXPECT_NEAR(
+        r.point_biserial,
+        (61.0 / 160.0) / std::sqrt(269.0 / 7056.0) * std::sqrt(80.0) / 21.0,
+        1e-12);
+}
+
 // Section 7.1 item 7. This is the one arithmetic error in the design that would
 // otherwise produce entirely plausible numbers: S_k divides by n_k, while
 // medoid_member_means divides by n_k - 1, and the two are a factor of two apart
@@ -800,6 +897,15 @@ TEST(ClusterReportTest, InternalIndicesUndefinedCases) {
     EXPECT_TRUE(std::isnan(single.davies_bouldin_medoid));
     EXPECT_TRUE(std::isnan(single.dunn_mean_separation_mean_diameter));
     EXPECT_TRUE(std::isnan(single.dunn_medoid_separation_medoid_spread));
+    // The one scenario here with within-pairs but no between-pairs, and the
+    // only assertion that isolates point-biserial's between-count predicate
+    // from its within-count one. It is not a vacuous NaN check: with the
+    // between predicate removed the mutant does not throw or NaN, because
+    // DistanceMoments::mean is 0.0 at count 0 and merge_moments returns the
+    // non-empty stream untouched, so sqrt(P_w * 0) zeroes the product and the
+    // field reads a finite -0.0 -- a perfectly plausible "no correlation"
+    // answer for a clustering that cannot have one.
+    EXPECT_TRUE(std::isnan(single.point_biserial));
 
     const ClusterReport none = cluster_report(
         ClusteringResult(std::vector<ClusterLabel>{-1, -1, -1, -1, -1, -1}, Clusters{}),
@@ -828,6 +934,57 @@ TEST(ClusterReportTest, InternalIndicesUndefinedCases) {
     const ClusterReport constant =
         cluster_report(MakeResult({0, 0, 1, 1}), flat, ClusterReportOptions());
     EXPECT_TRUE(std::isnan(constant.point_biserial));
+}
+
+// The three zero-denominator guards that no scenario above reaches. The
+// all-singletons case fails the clustered_count > cluster_count test and takes
+// the else-NaN arm before CH's denominator is ever formed, and the flat-0.5
+// case has a medoid scatter of 0.25 per cluster, so neither Dunn denominator
+// is zero there. Two perfectly tight clusters at a positive distance is the
+// shape that drives all three denominators to zero at once while still
+// entering the guarded branch.
+//
+// The two zero distances are set explicitly rather than left to
+// DenseStorage's zero fill because they are the mechanism of the test, not
+// incidental to it: deleting them as redundant would leave every assertion
+// passing and the test toothless about what it is pinning.
+//
+// The two finite values carry as much weight as the three NaNs. They are what
+// show this is a well-formed input the report answers rather than a
+// degenerate one it gives up on, which is what makes the NaNs a deliberate
+// "undefined" rather than a side effect of arithmetic falling over.
+TEST(ClusterReportTest, ZeroWithinScatterLeavesCalinskiHarabaszAndDunnUndefined) {
+    DenseStorage storage(4);
+    storage.Set(0, 1, 0.0);
+    storage.Set(2, 3, 0.0);
+    storage.Set(0, 2, 0.5);
+    storage.Set(0, 3, 0.5);
+    storage.Set(1, 2, 0.5);
+    storage.Set(1, 3, 0.5);
+    const ClusterReport r =
+        cluster_report(MakeResult({0, 0, 1, 1}), storage, ClusterReportOptions());
+
+    // Medoids 0 and 2; every point total is 1.0, so M = 0 by the tiebreak.
+    // Between-scatter = 2 * 0.5^2 = 0.5 and within-scatter = 0, and
+    // clustered_count (4) exceeds cluster_count (2), so CH forms the quotient
+    // and finds 0/(4-2) == 0 underneath it. Unguarded it would read +inf.
+    EXPECT_TRUE(std::isnan(r.calinski_harabasz_medoid));
+    // Both mean within-pair distances are 0, so the maximum is 0 against a
+    // minimum mean separation of 0.5. Unguarded: +inf.
+    EXPECT_TRUE(std::isnan(r.dunn_mean_separation_mean_diameter));
+    // Both medoid spreads are 0 against a minimum medoid separation of 0.5.
+    // Unguarded: +inf, and by a different guard than the line above.
+    EXPECT_TRUE(std::isnan(r.dunn_medoid_separation_medoid_spread));
+
+    // Defined, and genuinely 0: the scatters are zero and the separation is
+    // not, so the ratio is a real best-possible score rather than a missing
+    // one. Contrast CoincidentZeroScatterSingletonsGiveInfiniteDaviesBouldin,
+    // where the separation is zero too and the answer is +inf.
+    EXPECT_DOUBLE_EQ(r.davies_bouldin_medoid, 0.0);
+    // Also defined, and at its ceiling: distance is an exact linear function
+    // of the within/between indicator here, 0.0 inside and 0.5 across, so the
+    // correlation is perfect.
+    EXPECT_DOUBLE_EQ(r.point_biserial, 1.0);
 }
 
 // Coincident medoids give inf, not NaN: "two clusters share a representative"
