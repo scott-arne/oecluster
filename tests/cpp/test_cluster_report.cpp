@@ -2683,3 +2683,72 @@ TEST(ClusterReportTest, ReportCIndexIsPinnedStrictlyInsideItsRange) {
     EXPECT_FALSE(std::isnan(r.baker_hubert_gamma));
     EXPECT_NEAR(r.baker_hubert_gamma, 0.0, 1e-12);
 }
+
+// The report-level Gamma assertions elsewhere all sit on -1, 0 or 1, and each
+// of those is a fixed point of any rounding or sign-preserving snap applied to
+// the wiring at the report boundary. A fixture whose correct Gamma falls
+// strictly between an endpoint and zero is what makes that class of distortion
+// observable. The C-index here is also deliberately count-sensitive: the
+// between-set is asymmetric, so duplicating every between-pair moves S_min and
+// S_max and changes the answer, which a symmetric fixture does not.
+TEST(ClusterReportTest, ReportPairRankPinsInteriorGammaAndPairCounts) {
+    DenseStorage storage(4);
+    storage.Set(0, 1, 0.3);
+    storage.Set(2, 3, 0.4);
+    storage.Set(0, 2, 0.1);
+    storage.Set(0, 3, 0.5);
+    storage.Set(1, 2, 0.6);
+    storage.Set(1, 3, 0.7);
+
+    ClusterReportOptions options;
+    options.compute_pair_rank_indices = true;
+    const ClusterReport r =
+        cluster_report(MakeResult({0, 0, 1, 1}), storage, options);
+
+    // Within {0.3, 0.4}, between {0.1, 0.5, 0.6, 0.7}. Pooled ascending:
+    // 0.1 0.3 0.4 0.5 0.6 0.7. S_w = 0.7, the two smallest pooled sum to
+    // S_min = 0.4 and the two largest to S_max = 1.3, so the index is
+    // (0.7 - 0.4) / (1.3 - 0.4) = 1/3.
+    EXPECT_NEAR(r.c_index, 1.0 / 3.0, 1e-12);
+
+    // Each within-distance beats one between-distance (0.1) and loses to the
+    // other three, so s+ = 6 and s- = 2, giving (6 - 2) / 8 = 0.5. Strictly
+    // interior on both sides: not an endpoint, and not zero.
+    EXPECT_NEAR(r.baker_hubert_gamma, 0.5, 1e-12);
+}
+
+// Section 5.4 requires the within and between arrays to partition every one of
+// the Nc(Nc-1)/2 clustered pairs, and a singleton cluster contributes no
+// within-pair but every one of its cross pairs. No other pair-rank fixture has
+// a cluster smaller than two, so a rule that skipped singletons when collecting
+// between-distances would leave the whole suite green. Both expected values
+// move under such a rule, which is what makes this fixture discriminating
+// rather than merely present.
+TEST(ClusterReportTest, ReportPairRankCountsSingletonClusterPairs) {
+    DenseStorage storage(5);
+    storage.Set(0, 1, 0.3);
+    storage.Set(0, 2, 0.5);
+    storage.Set(0, 3, 0.6);
+    storage.Set(0, 4, 0.1);
+    storage.Set(1, 2, 0.7);
+    storage.Set(1, 3, 0.8);
+    storage.Set(1, 4, 0.2);
+    storage.Set(2, 3, 0.4);
+    storage.Set(2, 4, 0.9);
+    storage.Set(3, 4, 1.0);
+
+    ClusterReportOptions options;
+    options.compute_pair_rank_indices = true;
+    const ClusterReport r =
+        cluster_report(MakeResult({0, 0, 1, 1, 2}), storage, options);
+
+    // Clusters {0,1}, {2,3} and the singleton {4}. Within {0.3, 0.4}; the
+    // eight between-distances are every remaining pair. Pooled ascending:
+    // 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0. S_w = 0.7, S_min = 0.3,
+    // S_max = 1.9, so the index is (0.7 - 0.3) / (1.9 - 0.3) = 0.25.
+    EXPECT_NEAR(r.c_index, 0.25, 1e-12);
+
+    // Each within-distance beats 0.1 and 0.2 and loses to the other six, so
+    // s+ = 12 and s- = 4, giving (12 - 4) / 16 = 0.5.
+    EXPECT_NEAR(r.baker_hubert_gamma, 0.5, 1e-12);
+}
