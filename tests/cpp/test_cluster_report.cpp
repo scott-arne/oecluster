@@ -1185,16 +1185,19 @@ TEST(ClusterReportTest, UnsupportedRepresentativeMethodOutranksNonFiniteDistance
     }
 }
 
-// The finiteness refusal has to fire BEFORE cluster_representative runs, not
-// merely somewhere in the same call. cluster_representative sorts each
-// candidate's intra distances through median_distance and then stable_sorts the
-// candidate scores; a NaN in that range makes operator< a non-strict-weak
-// ordering, which is undefined behaviour rather than a wrong answer. Four
-// members with unequal finite companions is the smallest shape that produces
-// NaN scores alongside two DISTINCT finite ones, so the comparator is actually
-// inconsistent -- three members cannot, which is why NonFiniteDistanceIsRefused
-// stayed green while the selection sat above the checked loop.
-TEST(ClusterReportTest, NonFiniteIntraDistanceIsRefusedBeforeRepresentativeSelection) {
+// The shape that makes the selector's comparator genuinely inconsistent, rather
+// than merely wrong. cluster_representative sorts each candidate's intra
+// distances through median_distance and then stable_sorts the candidate scores;
+// a NaN alongside two DISTINCT finite values makes operator< a non-strict-weak
+// ordering, which is undefined behaviour. Four members with unequal finite
+// companions is the smallest cluster that produces that, which three members
+// cannot -- so this pins that such an input is refused at all.
+//
+// It does NOT pin that the refusal precedes the selection: it asserts only the
+// eventual message, and stays green under the hoisted ordering too.
+// RepresentativeSelectionRunsAfterTheFinitenessCheck is the test that pins the
+// order. Both are needed, and neither substitutes for the other.
+TEST(ClusterReportTest, NonFiniteIntraDistanceWithInconsistentComparatorIsRefused) {
     DenseStorage storage(4);
     storage.Set(0, 1, 0.10);
     storage.Set(0, 2, 0.30);
