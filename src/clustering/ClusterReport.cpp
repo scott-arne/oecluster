@@ -269,6 +269,21 @@ ClusterReport cluster_report(
     if (!members.empty()) {
         const size_t cluster_count = members.size();
 
+        // Refused before a single distance is read, so a method the caller
+        // cannot configure outranks the finiteness refusal below without the
+        // selection itself having to run early -- running it early would feed
+        // an unchecked NaN to the selector's sorts. INVARIANT 1. Naming the
+        // unsupported method here duplicates knowledge validate_options in
+        // Representative.cpp also holds, and the build enables neither -Wall
+        // nor -Wswitch, so a fifth RepresentativeMethod would be flagged at
+        // neither site.
+        if (options.representative_method == RepresentativeMethod::HighestNeighborhood) {
+            throw std::invalid_argument(
+                "cluster_report: representative_method HighestNeighborhood is "
+                "unsupported because ClusterReportOptions carries no neighbor "
+                "threshold to configure it");
+        }
+
         // ---- Intra pass: once per cluster. ----
         std::vector<double> intra_pairs;
         std::vector<double> radii;
@@ -296,15 +311,6 @@ ClusterReport cluster_report(
         for (size_t k = 0; k < cluster_count; ++k) {
             const Cluster& cluster = members[k];
 
-            // Selected before the first checked read. An unsupported
-            // representative_method is a configuration error the caller must
-            // fix before the distance matrix means anything, so it outranks the
-            // finiteness refusal below rather than losing a race to whichever
-            // cell happens to be poisoned. INVARIANT 1.
-            const size_t representative =
-                cluster_representative(cluster, storage, options.representative_method);
-            representatives.push_back(representative);
-
             double diameter = 0.0;
             for (size_t i = 0; i < cluster.size(); ++i) {
                 for (size_t j = i + 1; j < cluster.size(); ++j) {
@@ -324,6 +330,17 @@ ClusterReport cluster_report(
             }
             diameters.push_back(diameter);
             max_diameter = std::max(max_diameter, diameter);
+
+            // Selected only after every intra distance of cluster k has been
+            // through checked_distance. cluster_representative sorts each
+            // candidate's distance vector in median_distance and then
+            // stable_sorts the candidate scores; a NaN in either range makes
+            // operator< a non-strict-weak ordering, which is the undefined
+            // behaviour the finiteness precondition exists to replace with a
+            // named error.
+            const size_t representative =
+                cluster_representative(cluster, storage, options.representative_method);
+            representatives.push_back(representative);
 
             double radius = 0.0;
             double representative_total = 0.0;

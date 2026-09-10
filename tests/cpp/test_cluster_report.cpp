@@ -1024,8 +1024,47 @@ TEST(ClusterReportTest, UnsupportedRepresentativeMethodOutranksNonFiniteDistance
         FAIL() << "expected std::invalid_argument";
     } catch (const std::invalid_argument& e) {
         const std::string message(e.what());
-        EXPECT_NE(message.find("neighbor threshold"), std::string::npos) << message;
+        // Deliberately not "neighbor threshold": Representative.cpp's
+        // validate_options says that too, and matching on it could not tell the
+        // two refusals apart. cluster_report must name the option the caller
+        // can actually act on.
+        EXPECT_NE(
+            message.find(
+                "cluster_report: representative_method HighestNeighborhood is unsupported"),
+            std::string::npos)
+            << message;
         EXPECT_EQ(message.find("not finite"), std::string::npos) << message;
+    }
+}
+
+// The finiteness refusal has to fire BEFORE cluster_representative runs, not
+// merely somewhere in the same call. cluster_representative sorts each
+// candidate's intra distances through median_distance and then stable_sorts the
+// candidate scores; a NaN in that range makes operator< a non-strict-weak
+// ordering, which is undefined behaviour rather than a wrong answer. Four
+// members with unequal finite companions is the smallest shape that produces
+// NaN scores alongside two DISTINCT finite ones, so the comparator is actually
+// inconsistent -- three members cannot, which is why NonFiniteDistanceIsRefused
+// stayed green while the selection sat above the checked loop.
+TEST(ClusterReportTest, NonFiniteIntraDistanceIsRefusedBeforeRepresentativeSelection) {
+    DenseStorage storage(4);
+    storage.Set(0, 1, 0.10);
+    storage.Set(0, 2, 0.30);
+    storage.Set(0, 3, std::numeric_limits<double>::quiet_NaN());
+    storage.Set(1, 2, 0.50);
+    storage.Set(1, 3, 0.20);
+    storage.Set(2, 3, 0.40);
+
+    const ClusteringResult result = MakeResult({0, 0, 0, 0});
+    try {
+        cluster_report(result, storage, ClusterReportOptions());
+        FAIL() << "expected std::invalid_argument";
+    } catch (const std::invalid_argument& e) {
+        const std::string message(e.what());
+        EXPECT_EQ(
+            message,
+            "cluster_report: distance between samples 0 and 3 is not finite")
+            << message;
     }
 }
 
