@@ -249,6 +249,30 @@ TEST(ClusterReportTest, CompactnessTwoClusters) {
     EXPECT_NEAR(r.dunn_index, 4.0, 1e-12);
 }
 
+// The b term's divisor is the size of the OTHER cluster, and the fused cross
+// pass has to supply it by hand -- `size_b` for a point in cluster a and
+// `size_a` for a point in cluster b. Every other fixture that asserts
+// silhouette has equal-sized clusters (2+2, 3+3, 4+4), which makes exchanging
+// the two divisors arithmetically invisible rather than merely undetected.
+// Here the clusters are 3 and 2, and the exchange moves the result to
+// 0.63333333333333341.
+//
+// Points 0, 3 and 4 score 0.75 and points 1 and 2 score 0.625, so the mean
+// over the five clustered points is 3.5 / 5. Sample 5 is noise and is not
+// scored. EXPECT_NEAR rather than an exact literal because the value is
+// hand-derived and each per-point term is a division: the accumulated rounding
+// is around 1e-16, while the defect this pins is 0.067 away.
+TEST(ClusterReportTest, SilhouetteBTermDividesByTheOtherClusterSize) {
+    const DenseStorage storage = MakeSixPointStorage();
+    const ClusteringResult result = MakeResult({0, 0, 0, 1, 1, -1});
+
+    const ClusterReport r = cluster_report(result, storage, ClusterReportOptions());
+
+    EXPECT_EQ(r.num_clusters, 2u);
+    EXPECT_EQ(r.num_noise, 1u);
+    EXPECT_NEAR(r.silhouette, 0.7, 1e-12);
+}
+
 TEST(ClusterReportTest, BoundaryViolationsThreshold) {
     const DenseStorage storage = MakeTwoClusterStorage();
     const ClusteringResult result = MakeResult({0, 0, 1, 1});
