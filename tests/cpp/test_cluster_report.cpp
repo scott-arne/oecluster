@@ -2289,6 +2289,20 @@ TEST(ClusterReportTest, RecordDiametersRecomputeP95) {
     EXPECT_DOUBLE_EQ(r.records[1].diameter, 0.8);  // d(2,3), a cross-group pair
     EXPECT_DOUBLE_EQ(r.records[2].diameter, 0.0);  // singleton
 
+    // Also the only fixture that can catch a per-cluster median sourced from
+    // the cumulative pool. intra_pairs accumulates across clusters while
+    // cluster_distances is cleared per cluster (ClusterReport.cpp:331), so the
+    // two agree on the FIRST cluster and diverge afterwards -- every other
+    // record-median assertion in this file reads records[0] or a singleton.
+    // Reading B's median is what discriminates: its own single pair is 0.8,
+    // while the pool at that point is {0.2, 0.8} and medians to 0.5.
+    EXPECT_DOUBLE_EQ(r.records[0].median_intra_distance, 0.2);  // d(0,1)
+    EXPECT_DOUBLE_EQ(r.records[1].median_intra_distance, 0.8);  // d(2,3)
+    // The guard is !cluster_distances.empty(), independent of the value's
+    // source, so this stays NaN under that mutation -- pinned so a future
+    // change that folds guard and source together cannot pass silently.
+    EXPECT_TRUE(std::isnan(r.records[2].median_intra_distance));
+
     // Sorted diameters [0.0, 0.2, 0.8]; fractional rank 0.95 * 2 = 1.9, so the
     // result interpolates 90% of the way from 0.2 to 0.8: 0.2 + 0.9 * 0.6.
     // Distinct from the first (0.2), the min (0.0), the median (0.2) and the
