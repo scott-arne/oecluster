@@ -2787,3 +2787,36 @@ TEST(ClusterReportTest, ReportPairRankCountsPairsBetweenTwoSingletons) {
     // s+ = 3 against s- = 1, and 0.5.
     EXPECT_NEAR(r.baker_hubert_gamma, 0.6, 1e-12);
 }
+
+// Cluster labels are arbitrary: section 5.4 constrains the partition, not the
+// numbering, so relabelling a clustering must leave every pair-rank value
+// unchanged. This is the fixture above with its clusters renumbered, which
+// makes the member-list sizes ascend rather than descend. Every other pair-rank
+// fixture numbers its clusters in nonincreasing size order, so a collection
+// rule comparing the two sides' sizes would be satisfied everywhere in the
+// suite and would still drop cross pairs here. The expected values are the
+// ones the fixture above asserts, because it is the same partition.
+TEST(ClusterReportTest, ReportPairRankIsUnchangedByClusterRelabelling) {
+    DenseStorage storage(4);
+    storage.Set(0, 1, 0.4);
+    storage.Set(0, 2, 0.1);
+    storage.Set(1, 2, 0.5);
+    storage.Set(0, 3, 0.6);
+    storage.Set(1, 3, 0.7);
+    storage.Set(2, 3, 0.9);
+
+    ClusterReportOptions options;
+    options.compute_pair_rank_indices = true;
+    // Clusters {2}, {3} and {0,1} in that order: sizes 1, 1, 2.
+    const ClusterReport r =
+        cluster_report(MakeResult({2, 2, 0, 1}), storage, options);
+
+    // The partition is unchanged, so the within-distance is still 0.4 and the
+    // five between-distances are still {0.1, 0.5, 0.6, 0.7, 0.9}. Pooled
+    // ascending: 0.1 0.4 0.5 0.6 0.7 0.9, giving S_w = 0.4, S_min = 0.1 and
+    // S_max = 0.9, so the index is (0.4 - 0.1) / (0.9 - 0.1) = 0.375.
+    EXPECT_NEAR(r.c_index, 0.375, 1e-12);
+
+    // Likewise s+ = 4 and s- = 1, giving (4 - 1) / 5 = 0.6.
+    EXPECT_NEAR(r.baker_hubert_gamma, 0.6, 1e-12);
+}
