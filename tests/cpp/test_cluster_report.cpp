@@ -2272,6 +2272,41 @@ TEST(ClusterReportTest, RecordsRecomputeTheAggregates) {
     EXPECT_EQ(record_violations, 2u * r.boundary_violations);
 }
 
+// The per-record violation count of cluster b takes one contribution per
+// lower-ordinal partner, so only a cluster reached by two POSITIVE
+// contributions separates an accumulation from an overwrite.
+// RecordsRecomputeTheAggregates cannot do that: at its 0.5 threshold cluster C
+// is handed 0 and then 1, and discarding a zero changes nothing. Raising the
+// threshold to 0.9 makes every cross pair trip, so C is handed 2 and 2.
+TEST(ClusterReportTest, RecordBoundaryViolationsAccumulateAcrossPartners) {
+    const DenseStorage storage = MakeSixPointStorage();
+    ClusterReportOptions options;
+    options.compute_per_cluster_records = true;
+    options.boundary_threshold = 0.9;
+    const ClusterReport r =
+        cluster_report(MakeResult({0, 0, 1, 1, 2, -1}), storage, options);
+
+    ASSERT_EQ(r.records.size(), 3u);
+
+    // Every cross pair among the clustered points trips at 0.9: A-B has four
+    // (0.2, 0.8, 0.4, 0.8), A-C two (0.8, 0.8) and B-C two (0.8, 0.2).
+    ASSERT_EQ(r.boundary_violations, 8u);
+
+    // C is the only discriminator. It takes 2 from A-C and 2 from B-C, so an
+    // overwrite would leave it at 2. A is never a later partner, and B's two
+    // contributions reach it through different slots, so both land on 6
+    // either way.
+    EXPECT_EQ(r.records[0].boundary_violations, 6u);
+    EXPECT_EQ(r.records[1].boundary_violations, 6u);
+    EXPECT_EQ(r.records[2].boundary_violations, 4u);
+
+    size_t record_violations = 0;
+    for (const ClusterRecord& record : r.records) {
+        record_violations += record.boundary_violations;
+    }
+    EXPECT_EQ(record_violations, 2u * r.boundary_violations);
+}
+
 // Section 7.1 item 10 also names p95_diameter. percentile() is file-local to
 // ClusterReport.cpp and cannot be called from here, so the expected value is
 // worked out by hand instead -- which means the three diameters must differ.
