@@ -164,6 +164,33 @@ DenseStorage MakeThreeClusterStorage() {
     return storage;
 }
 
+// Four points, clusters {0,1} and {2,3}, with the cross block deliberately
+// lopsided: sample 1 sits close to both members of the other cluster while
+// sample 0 sits far from them. Every other multi-cluster fixture in this file
+// has a flat cross block, and that flatness is what hides the two distinctions
+// below.
+//
+//   * Both clusters tie internally, so the earliest-member rule elects medoids
+//     0 and 2, while the smallest total over the clustered set belongs to
+//     sample 1. The global medoid M is therefore a point that no cluster
+//     elected -- the case a search restricted to the elected medoids misses.
+//   * The smallest medoid-to-medoid distance is d(0,2) = 7/8, but the smallest
+//     cross-cluster MEMBER distance is d(1,2) = 1/8. The two Dunn numerators
+//     are a factor of seven apart rather than coincidentally equal.
+//
+// Every distance is a dyadic fraction, so each quantity derived from them is
+// exact in binary floating point and can be asserted with EXPECT_DOUBLE_EQ.
+DenseStorage MakeOffMedoidGlobalStorage() {
+    DenseStorage storage(4);
+    storage.Set(0, 1, 0.5);
+    storage.Set(2, 3, 0.5);
+    storage.Set(0, 2, 0.875);
+    storage.Set(0, 3, 0.875);
+    storage.Set(1, 2, 0.125);
+    storage.Set(1, 3, 0.125);
+    return storage;
+}
+
 }  // namespace
 
 TEST(ClusterReportOptionsTest, PresetsSeedDocumentedThresholds) {
@@ -901,6 +928,84 @@ TEST(ClusterReportTest, GlobalMedoidIsChosenAmongClusteredPointsOnly) {
     // the two denominators coincide, and every noise-bearing one returns NaN
     // before it -- this is the only place the two can be told apart.
     EXPECT_NEAR(r.point_biserial, 1.5 * std::sqrt(2.0 / 7.0), 1e-12);
+}
+
+// The third property of M, after "which point wins a tie" and "which points are
+// eligible": the search runs over every clustered point, not over the K elected
+// medoids. Restricting it to true_medoids reads as a cheap optimisation and no
+// other fixture here refutes it, because on each of them the winner happens to
+// be somebody's medoid as well.
+TEST(ClusterReportTest, GlobalMedoidIsNotRestrictedToClusterMedoids) {
+    const DenseStorage storage = MakeOffMedoidGlobalStorage();
+    const ClusterReport r =
+        cluster_report(MakeResult({0, 0, 1, 1}), storage, ClusterReportOptions());
+
+    // Medoids 0 and 2, by the earliest-member rule on two internal ties.
+    // Totals over the clustered set are 0 -> 9/4, 1 -> 3/4, 2 -> 3/2 and
+    // 3 -> 3/2, so M = 1 outright: the one clustered point that is not a
+    // medoid, and the reason this fixture exists.
+    //
+    // Between-scatter = 2*d(0,1)^2 + 2*d(2,1)^2 = 1/2 + 1/32 = 17/32;
+    // within-scatter = 1/4 + 1/4 = 1/2. With N = 4 and K = 2 the index is
+    // (17/32) / ((1/2)/2) = 17/8.
+    //
+    // Scan only the medoids and 2 wins with 3/2, which puts M on top of a
+    // medoid: between-scatter becomes 2*d(0,2)^2 = 49/32 and the index reads
+    // 49/8. Both are ordinary-looking Calinski-Harabasz scores.
+    EXPECT_DOUBLE_EQ(r.calinski_harabasz_medoid, 17.0 / 8.0);
+}
+
+// The medoid Dunn variant divides the smallest distance between two MEDOIDS by
+// the largest medoid spread. min_inter -- the smallest distance between two
+// members of different clusters -- is in scope at that line and already feeds
+// the other Dunn variant, so substituting it is a one-token slip that a flat
+// cross block cannot detect, since there every member distance is also the
+// medoid distance.
+TEST(ClusterReportTest, MedoidDunnUsesMedoidSeparationNotMemberSeparation) {
+    const DenseStorage storage = MakeOffMedoidGlobalStorage();
+    const ClusterReport r =
+        cluster_report(MakeResult({0, 0, 1, 1}), storage, ClusterReportOptions());
+
+    // Both medoid scatters are (0 + 1/2)/2 = 1/4, so the spread denominator is
+    // 2 * 1/4 = 1/2. The only medoid separation is d(0,2) = 7/8, giving
+    // (7/8)/(1/2) = 7/4.
+    //
+    // The smallest cross-cluster member distance is d(1,2) = 1/8, so a
+    // numerator taken from there reads 1/4 -- a seventh of the right answer,
+    // and still a plausible Dunn score rather than a visible failure.
+    EXPECT_DOUBLE_EQ(r.dunn_medoid_separation_medoid_spread, 7.0 / 4.0);
+}
+
+// point_biserial is a signed correlation, and the sign is the part of it that
+// carries the verdict: a labelling that groups the far pairs together has to
+// score negative. Every other fixture in this file separates its clusters in
+// the expected direction, so none of them would notice the mean difference
+// being wrapped in std::fabs.
+TEST(ClusterReportTest, PointBiserialKeepsTheSignOfTheSeparation) {
+    // The separation inverted: the two within-cluster pairs are the far ones
+    // and all four cross pairs are the near ones.
+    DenseStorage storage(4);
+    storage.Set(0, 1, 0.75);
+    storage.Set(2, 3, 0.75);
+    storage.Set(0, 2, 0.25);
+    storage.Set(0, 3, 0.25);
+    storage.Set(1, 2, 0.25);
+    storage.Set(1, 3, 0.25);
+    const ClusterReport r =
+        cluster_report(MakeResult({0, 0, 1, 1}), storage, ClusterReportOptions());
+
+    // Two within-pairs at 3/4 against four between-pairs at 1/4 pool to a mean
+    // of 5/12 and a population variance of 1/18 over the six clustered pairs,
+    // so the index is ((1/4 - 3/4)/sqrt(1/18)) * sqrt(2*4)/6 = -1. Distance is
+    // a perfect decreasing function of the within/between indicator here, so
+    // the floor of the statistic is the correct answer. Take the absolute
+    // value of the difference and the worst possible clustering reports +1,
+    // the best possible score.
+    //
+    // EXPECT_NEAR rather than EXPECT_DOUBLE_EQ for the reason given above: the
+    // implementation reaches this through Welford updates, merge_moments and a
+    // square root rather than through the closed form.
+    EXPECT_NEAR(r.point_biserial, -1.0, 1e-12);
 }
 
 // Section 7.1 item 11 and the section 5.5 table.
