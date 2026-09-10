@@ -550,10 +550,10 @@ ClusterReport cluster_report(
         // O(T*N) rather than the O(T*N*K) the per-threshold recomputation cost.
         //
         // The threshold list must be non-empty for the scan to run at all. With
-        // no thresholds every distance it reads feeds a coverage_at that stays
-        // empty, so the only thing the scan can still produce is a refusal --
-        // and refusing a report whose every field is already determined is the
-        // over-refusal of INVARIANT 3, not a precondition.
+        // no thresholds every distance it reads feeds coverage_at and
+        // noise_coverage_at that stay empty, so the only thing the scan can
+        // still produce is a refusal -- and refusing a report whose every field
+        // is already determined is the over-refusal of INVARIANT 3, not a precondition.
         std::vector<double> nearest_representative(
             report.num_samples, std::numeric_limits<double>::infinity());
         if (report.num_samples > 0 && !representatives.empty() &&

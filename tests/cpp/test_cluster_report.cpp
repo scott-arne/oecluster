@@ -1850,15 +1850,15 @@ TEST(ClusterReportTest, NoiseCoverageCurveShapes) {
     // A dedicated fixture, not MakeSixPointStorage. There every point sits
     // within 0.2 of a representative while the smallest default threshold is
     // 0.25, so both curves would be [1, 1, 1] and the EXPECT_NE below could
-    // never fire. Here the noise point is deliberately placed at 0.4 from its
-    // nearest representative -- outside the first two default thresholds and
-    // inside the third -- so the curve has a visible step.
+    // never fire. Here the noise point is deliberately placed exactly on the
+    // third threshold (0.45) to make the <= comparison observable and to create
+    // a visible step in the curve.
     DenseStorage storage(6);
     storage.Set(0, 1, 0.2);
     storage.Set(0, 2, 0.2);
     storage.Set(1, 2, 0.4);
     storage.Set(3, 4, 0.2);
-    storage.Set(3, 5, 0.4);
+    storage.Set(3, 5, 0.45);
     storage.Set(4, 5, 0.5);
     for (size_t i = 0; i < 3; ++i) {
         storage.Set(i, 3, 0.8);
@@ -1867,7 +1867,8 @@ TEST(ClusterReportTest, NoiseCoverageCurveShapes) {
     }
 
     // Clusters plus noise. Representatives are 0 and 3; sample 5 is noise and
-    // sits 0.4 from representative 3.
+    // sits exactly 0.45 from representative 3. The equality at the boundary is
+    // exact (same decimal literal, no arithmetic) and pins the <= comparison.
     const ClusterReport with_noise =
         cluster_report(MakeResult({0, 0, 0, 1, 1, -1}), storage, ClusterReportOptions());
     ASSERT_EQ(with_noise.coverage_thresholds,
@@ -1886,6 +1887,24 @@ TEST(ClusterReportTest, NoiseCoverageCurveShapes) {
     EXPECT_DOUBLE_EQ(with_noise.noise_coverage_at[1], 0.0);
     EXPECT_DOUBLE_EQ(with_noise.noise_coverage_at[2], 1.0);
     EXPECT_NE(with_noise.noise_coverage_at, with_noise.coverage_at);
+
+    // Two noise points at different distances. Representatives are 0 and 3;
+    // noise samples 2 and 5 are at 0.2 and 0.45 from their nearest reps. This
+    // pins the denominator (num_noise, not num_samples or clustered_count), the
+    // per-threshold reset (no accumulation across thresholds), and the inclusive
+    // comparison (<= not <, with sample 5 exactly on the 0.45 boundary).
+    const ClusterReport two_noise =
+        cluster_report(MakeResult({0, 0, -1, 1, 1, -1}), storage, ClusterReportOptions());
+    EXPECT_EQ(two_noise.noise_coverage_at.size(), two_noise.coverage_at.size());
+    EXPECT_DOUBLE_EQ(two_noise.coverage_at[0], 5.0 / 6.0);
+    EXPECT_DOUBLE_EQ(two_noise.coverage_at[1], 5.0 / 6.0);
+    EXPECT_DOUBLE_EQ(two_noise.coverage_at[2], 1.0);
+    // noise_coverage_at[0] == 0.5 pins the denominator: num_samples would give
+    // 1/6, clustered_count would give 1/4. noise_coverage_at[1] == 0.5 pins the
+    // per-threshold reset: hoisting covered_noise out of the loop yields 1.0.
+    EXPECT_DOUBLE_EQ(two_noise.noise_coverage_at[0], 0.5);
+    EXPECT_DOUBLE_EQ(two_noise.noise_coverage_at[1], 0.5);
+    EXPECT_DOUBLE_EQ(two_noise.noise_coverage_at[2], 1.0);
 
     // No noise: full length, every entry NaN. Not 0.0, which would read as
     // "no noise point is covered" rather than "the question does not apply".
@@ -1916,6 +1935,16 @@ TEST(ClusterReportTest, NoiseCoverageCurveShapes) {
         ClusterReportOptions());
     EXPECT_TRUE(zero_samples.coverage_at.empty());
     EXPECT_TRUE(zero_samples.noise_coverage_at.empty());
+    EXPECT_EQ(zero_samples.noise_coverage_at.size(), zero_samples.coverage_at.size());
+
+    ClusterReportOptions no_thresholds;
+    no_thresholds.coverage_thresholds.clear();
+    const ClusterReport unthresholded =
+        cluster_report(MakeResult({0, 0, 0, 1, 1, -1}), storage, no_thresholds);
+    EXPECT_TRUE(unthresholded.coverage_at.empty());
+    EXPECT_TRUE(unthresholded.noise_coverage_at.empty());
+    EXPECT_EQ(unthresholded.noise_coverage_at.size(),
+              unthresholded.coverage_at.size());
 }
 
 // Section 7.1 items 2 and 4. The brute-force reference is the whole point: it
