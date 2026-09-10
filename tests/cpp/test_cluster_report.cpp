@@ -1216,6 +1216,65 @@ TEST(ClusterReportTest, NonFiniteIntraDistanceIsRefusedBeforeRepresentativeSelec
     }
 }
 
+namespace {
+
+// Finite everywhere except the FIRST read of edge (0,1), which yields NaN. The
+// poison is consumed by whichever caller reads that edge first, which is what
+// makes the read order observable without a sanitizer: StorageBackend::Get is
+// virtual and detail::checked_distance reads through it, so the checked loop and
+// cluster_representative's raw reads both arrive here.
+class FirstReadPoisonedStorage : public DenseStorage {
+public:
+    explicit FirstReadPoisonedStorage(size_t n) : DenseStorage(n) {}
+
+    double Get(size_t i, size_t j) const override {
+        const bool poisoned_edge = (i == 0 && j == 1) || (i == 1 && j == 0);
+        if (poisoned_edge && !consumed_) {
+            consumed_ = true;
+            return std::numeric_limits<double>::quiet_NaN();
+        }
+        return DenseStorage::Get(i, j);
+    }
+
+    bool PoisonConsumed() const { return consumed_; }
+
+private:
+    mutable bool consumed_ = false;
+};
+
+}  // namespace
+
+// The read ORDER is what this pins, not the refusal itself. Both NaN tests above
+// assert only the eventual message, and both stay green if the representative
+// selection is hoisted above the checked loop -- the selector absorbs the NaN,
+// produces some answer, and the refusal still fires later or not at all. Here
+// the poison exists for exactly one read, so whichever caller reads d(0,1) first
+// is the one that consumes it: with the selection in its current position the
+// checked loop takes the poison and refuses, and with the selection hoisted the
+// call returns normally. Throw versus return is the discriminator, which is why
+// this needs no sanitizer to observe an ordering whose only other symptom is
+// undefined behaviour.
+TEST(ClusterReportTest, RepresentativeSelectionRunsAfterTheFinitenessCheck) {
+    FirstReadPoisonedStorage storage(3);
+    storage.Set(0, 1, 0.10);
+    storage.Set(0, 2, 0.30);
+    storage.Set(1, 2, 0.50);
+
+    const ClusteringResult result = MakeResult({0, 0, 0});
+    try {
+        cluster_report(result, storage, ClusterReportOptions());
+        FAIL() << "expected std::invalid_argument";
+    } catch (const std::invalid_argument& e) {
+        EXPECT_EQ(
+            std::string(e.what()),
+            "cluster_report: distance between samples 0 and 1 is not finite");
+    }
+    // Not the discriminator -- the hoisted ordering consumes the poison too.
+    // This is here so the test cannot pass vacuously if a later change stops
+    // reading that edge at all.
+    EXPECT_TRUE(storage.PoisonConsumed());
+}
+
 // Section 7.1 item 2. The tie-aware merge is the riskiest code in A1, so it is
 // checked against the definition it implements rather than against itself.
 namespace {
