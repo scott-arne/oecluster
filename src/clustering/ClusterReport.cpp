@@ -344,6 +344,14 @@ ClusterReport cluster_report(
         // an error, and indistinguishable from a well-separated clustering.
         // Passing an explicit NaN must not read as passing nothing. INVARIANT 2.
         //
+        // Which of the two refusals a doubly-NaN call gets is deliberately not a
+        // guarantee, and no test pins it. INVARIANT 1 asks for the reason the
+        // caller must fix first, and between two independently malformed
+        // thresholds there is no first: neither one's repair rescues the other,
+        // so either message leaves the caller with the same work. That is not
+        // the method-versus-threshold case above, where the ordering carries
+        // real information and is pinned.
+        //
         // std::isnan, not !std::isfinite. An infinite boundary_threshold asks
         // for every cross pair to count and an infinite coverage threshold for
         // every sample to be covered; both are answered exactly today, so
