@@ -254,11 +254,11 @@ fields. Five of them are always computed:
 | `dunn_medoid_separation_medoid_spread` | higher is better | Smallest medoid-to-medoid distance over the largest medoid spread, the spread being twice a cluster's mean medoid-to-member distance, averaged over all `n_k` members and so counting the medoid's own zero. This field ignores `representative_method` and always uses the true medoid, so a report requested with `representative_method="minimax"` still reports medoid-based values here. |
 | `point_biserial` | higher is better | Correlation between the pairwise distances and the within-versus-between split. Positive means between-cluster pairs are the more distant ones. The sign convention is stated because published sources differ on it. |
 
-> These are **medoid-substituted** indices. The published Calinski-Harabasz and
-> Davies-Bouldin definitions use centroids, which do not exist for a distance
-> matrix; each cluster's medoid stands in for its centroid, and the global
-> medoid stands in for the grand mean. The values are therefore not comparable
-> with published figures or with scikit-learn's. Both ignore
+> Two of these five are **medoid-substituted** indices. The published
+> Calinski-Harabasz and Davies-Bouldin definitions use centroids, which do not
+> exist for a distance matrix; each cluster's medoid stands in for its centroid,
+> and the global medoid stands in for the grand mean. The values are therefore
+> not comparable with published figures or with scikit-learn's. Both ignore
 > `representative_method` and always use the true medoid, so a report requested
 > with `representative_method="minimax"` still reports medoid-based values here.
 
@@ -284,13 +284,13 @@ report = oecluster.cluster_report(
 ```
 
 `compute_pair_rank_indices` is off by default because it is the largest of the
-report's pair-scaled costs, and the only one that scales with all `Nc` clustered
-points rather than with the largest single cluster: it materialises every
-pairwise distance among them as sortable arrays, `Nc * (Nc - 1) / 2` doubles in
-total, which is roughly 400 MB at `Nc = 10,000` and 10 GB at `Nc = 50,000`. A
-failed allocation raises `MemoryError`. One option covers both indices rather
-than two because they come off the same sorted arrays; once those are paid for,
-the second index is nearly free.
+two optional stages' pair-scaled costs, and the only one that scales with all
+`Nc` clustered points rather than with the largest single cluster: it
+materialises every pairwise distance among them as sortable arrays,
+`Nc * (Nc - 1) / 2` doubles in total, which is roughly 400 MB at `Nc = 10,000`
+and 10 GB at `Nc = 50,000`. A failed allocation raises `MemoryError`. One option
+covers both indices rather than two because they come off the same sorted
+arrays; once those are paid for, the second index is nearly free.
 
 `compute_per_cluster_records` populates `report.records`, one `ClusterRecord`
 per cluster in member-list order. Each record carries the cluster's `label`,
