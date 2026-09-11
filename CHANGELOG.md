@@ -22,9 +22,10 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   when the clusters are small, and it is off by default for the second case.
 - The Calinski-Harabasz and Davies-Bouldin indices are **medoid-substituted**:
   the published definitions use centroids, which do not exist for a distance
-  matrix, so each cluster's medoid stands in for its centroid and the global
-  medoid for the grand mean. The values are not comparable with published or
-  scikit-learn figures. These two fields and
+  matrix, so each cluster's medoid stands in for its centroid.
+  Calinski-Harabasz also has a grand-mean term, and the global medoid stands in
+  for that; Davies-Bouldin has no such term. The values are not comparable with
+  published or scikit-learn figures. These two fields and
   `dunn_medoid_separation_medoid_spread` always use the true medoid and ignore
   `representative_method`, so a minimax-configured report still reports
   medoid-based values for them.

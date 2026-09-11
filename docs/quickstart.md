@@ -169,8 +169,9 @@ always uses the true medoid, so a report requested with
 
 > Two of these five are **medoid-substituted** indices. The published
 > Calinski-Harabasz and Davies-Bouldin definitions use centroids, which do not
-> exist for a distance matrix; each cluster's medoid stands in for its centroid,
-> and the global medoid stands in for the grand mean. The values are therefore
+> exist for a distance matrix, so each cluster's medoid stands in for its
+> centroid. Calinski-Harabasz also has a grand-mean term, and the global medoid
+> stands in for that; Davies-Bouldin has no such term. The values are therefore
 > not comparable with published figures or with scikit-learn's. Both ignore
 > `representative_method` and always use the true medoid, so a report requested
 > with `representative_method="minimax"` still reports medoid-based values here.
