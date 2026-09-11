@@ -681,10 +681,17 @@ print([n for n in dir(raw)
 
 Invalid arguments raise standard Python exceptions with a descriptive message.
 Among the causes: an unknown comparison or representative method name and a
-`"highest_neighborhood"` request without a `threshold` raise `ValueError`; a
-sparse matrix passed where complete distances are required raises
-`RuntimeError`, which is also how a refusal from the C++ layer usually
+`"highest_neighborhood"` request without a `threshold` raise `ValueError`. A
+sparse matrix passed where complete distances are required splits by where the
+refusal lives. `hdbscan`, `agglomerative` and `cluster_report` check the storage
+in the Python layer and raise `ValueError`; `rank_representatives` and
+`select_representatives` have no such pre-check and refuse from the C++ layer
+with `RuntimeError`, which is also how a refusal from that layer usually
 surfaces.
+
+`cluster_report` raises `MemoryError` where the C++ layer reports a memory
+condition rather than a bad argument: a failed allocation in the pair-rank
+stage, and a pair or couple count that would exceed the integer holding it.
 
 `TypeError` covers argument misuse, and is the usual outcome of the
 explicitness rules described under [Fingerprint](#fingerprint): an argument

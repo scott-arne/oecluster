@@ -60,9 +60,13 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   empty-cluster, duplicate-within-a-cluster and beyond-`NumSamples()` refusals
   are unchanged and keep their present types and messages. The check now also
   runs when the member list is empty, so a result with a non-noise label and no
-  clusters refuses instead of returning an all-NaN report. Every algorithm the
-  library ships already satisfies all of it, so these can only fire on a
-  hand-built result.
+  clusters refuses instead of returning an all-NaN report. The rules added here
+  are satisfied by every algorithm the library ships, so the new refusals can
+  only fire on a hand-built result. That is not true of the unchanged
+  empty-cluster refusal: `bitbirch_refine` can return an emptied leaf subcluster
+  as an empty member list, and `cluster_report` rejects such a result.
+  `ClusterReportRefusesEmptiedRefinementSubclusters` in
+  `tests/cpp/test_bitbirch_clustering.cpp` pins that gap.
 - `cluster_report` now refuses a non-finite distance that reaches a reported
   value with `std::invalid_argument`. Previously a NaN reached `std::sort` through the
   intra-distance median, which is undefined behaviour, so this removes a hazard
@@ -79,7 +83,9 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   That is a plain scalar row in the table, published as an ordinary `0` -- a
   clean bill of health for a question that was never answerable, with nothing
   marking it as suspect, where the coverage case at least rendered `--`.
-  Infinite thresholds remain accepted and are unaffected.
+  Positive infinity remains accepted for both and is unaffected. Negative
+  infinity is refused, as it always was, by the non-negative check rather than
+  by anything added here.
 - `cluster_report` now raises `TypeError` for a `treat_noise_as_singletons` that
   is not a `bool` or a `numpy.bool_`. **This refuses calls that 5.0.0 accepted.**
   The keyword predates this release and was coerced with a bare `bool(...)`, so
