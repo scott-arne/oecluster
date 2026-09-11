@@ -19,6 +19,32 @@ def _two_cluster_dm():
     return SymmetricDistanceMatrix(s, "test", ["a", "b", "c", "d"], {})
 
 
+def _noise_bearing_dm():
+    """Six points: a mutually close trio {0,1,2}, then 3, 4 and 5 far from all.
+
+    Under DBSCAN at eps 0.2 with min_samples 3, points 0, 1 and 2 lie within
+    eps of one another and each counts three neighbours including itself, so
+    they are core points and form the single cluster; 3, 4 and 5 reach nobody
+    and become noise. Point 0 is the cluster's medoid, its distances to the
+    other two members summing to 0.2 against 0.3 for each of them, so every
+    sample's distance to the nearest representative is simply its distance to
+    point 0: 0.0, 0.1, 0.1, 0.3, 0.4 and 0.5.
+    """
+    from oecluster import DenseStorage, SymmetricDistanceMatrix
+
+    storage = DenseStorage(6)
+    for (left, right), distance in {
+        (0, 1): 0.1, (0, 2): 0.1, (1, 2): 0.2,
+        (0, 3): 0.3, (1, 3): 0.35, (2, 3): 0.35,
+        (0, 4): 0.4, (1, 4): 0.45, (2, 4): 0.45,
+        (0, 5): 0.5, (1, 5): 0.55, (2, 5): 0.55,
+        (3, 4): 0.6, (3, 5): 0.6, (4, 5): 0.6,
+    }.items():
+        storage.Set(left, right, distance)
+    return SymmetricDistanceMatrix(
+        storage, "test", ["a", "b", "c", "d", "e", "f"], {})
+
+
 def test_report_basic_and_compactness():
     import oecluster
 
@@ -207,6 +233,53 @@ def test_comparison_table_pads_a_report_with_no_clusters():
     for threshold in clustered.coverage_thresholds:
         assert math.isnan(values[f"coverage_at[{threshold}]"][1])
         assert math.isnan(values[f"noise_coverage_at[{threshold}]"][1])
+
+
+def test_comparison_table_carries_populated_coverage_curves():
+    """The table looks its coverage values up by threshold index, and the two
+    fixtures the tests above use are palindromes -- (1.0, 1.0, 1.0) beside three
+    NaNs, and a column padded with NaN throughout -- so neither can tell an
+    intact curve from a rearranged one. A report with real noise supplies a pair
+    of curves that rise strictly and differ from each other at every threshold,
+    which makes a rearrangement of either row family visible; pairing it with a
+    report whose coverage is flat and whose noise curve is all NaN keeps the two
+    columns from being confused with one another.
+    """
+    import oecluster
+
+    noise_dm = _noise_bearing_dm()
+    noisy = oecluster.cluster_report(
+        oecluster.dbscan(noise_dm, eps=0.2, min_samples=3), noise_dm)
+    clean_dm = _two_cluster_dm()
+    clean = oecluster.cluster_report(
+        oecluster.butina(clean_dm, threshold=0.5), clean_dm)
+    # Both reports use the default preset, so the union of thresholds is that
+    # preset's own and the row names below are the ones the table emits.
+    assert noisy.coverage_thresholds == (0.25, 0.35, 0.45)
+    assert clean.coverage_thresholds == (0.25, 0.35, 0.45)
+
+    values = {row[0]: row[1:]
+              for row in oecluster.compare_reports(noisy, clean).to_table()}
+
+    # Asserted threshold by threshold rather than as whole tuples so a failure
+    # names the threshold that moved.
+    assert math.isclose(values["coverage_at[0.25]"][0], 3 / 6, rel_tol=1e-9)
+    assert math.isclose(values["coverage_at[0.35]"][0], 4 / 6, rel_tol=1e-9)
+    assert math.isclose(values["coverage_at[0.45]"][0], 5 / 6, rel_tol=1e-9)
+    assert math.isclose(values["coverage_at[0.25]"][1], 1.0, rel_tol=1e-9)
+    assert math.isclose(values["coverage_at[0.35]"][1], 1.0, rel_tol=1e-9)
+    assert math.isclose(values["coverage_at[0.45]"][1], 1.0, rel_tol=1e-9)
+
+    assert math.isclose(values["noise_coverage_at[0.25]"][0], 0.0, rel_tol=1e-9)
+    assert math.isclose(
+        values["noise_coverage_at[0.35]"][0], 1 / 3, rel_tol=1e-9)
+    assert math.isclose(
+        values["noise_coverage_at[0.45]"][0], 2 / 3, rel_tol=1e-9)
+    # The clean report has no noise, so its whole noise curve is NaN. Compared
+    # as reprs rather than through math.isnan so a failure prints the value.
+    assert [repr(v) for v in values["noise_coverage_at[0.25]"][1:]] == ["nan"]
+    assert [repr(v) for v in values["noise_coverage_at[0.35]"][1:]] == ["nan"]
+    assert [repr(v) for v in values["noise_coverage_at[0.45]"][1:]] == ["nan"]
 
 
 def test_scalar_fields_mirror_the_native_struct():
@@ -620,31 +693,15 @@ def test_noise_coverage_climbs_with_distance_from_the_representative():
     reversal of either visible and also makes sourcing either from the other
     visible.
 
-    Derived from the definitions rather than read off a run. Points 0, 1 and 2
-    lie within eps of one another and each counts three neighbours including
-    itself, so they are core points and form the single cluster; 3, 4 and 5
-    reach nobody and become noise. Point 0 is the cluster's medoid, its
-    distances to the other two members summing to 0.2 against 0.3 for each of
-    them, so every sample's distance to the nearest representative is simply
-    its distance to point 0: 0.0, 0.1, 0.1, 0.3, 0.4 and 0.5. Coverage counts
-    the samples at or under each threshold over all six -- three, then four,
-    then five -- while noise coverage counts only points 3, 4 and 5, of which
-    none, then one, then two are covered.
+    Derived from the definitions rather than read off a run. Given the
+    per-sample distances to the nearest representative that the fixture's own
+    docstring works out, coverage counts the samples at or under each threshold
+    over all six -- three, then four, then five -- while noise coverage counts
+    only points 3, 4 and 5, of which none, then one, then two are covered.
     """
     import oecluster
-    from oecluster import DenseStorage, SymmetricDistanceMatrix
 
-    storage = DenseStorage(6)
-    for (left, right), distance in {
-        (0, 1): 0.1, (0, 2): 0.1, (1, 2): 0.2,
-        (0, 3): 0.3, (1, 3): 0.35, (2, 3): 0.35,
-        (0, 4): 0.4, (1, 4): 0.45, (2, 4): 0.45,
-        (0, 5): 0.5, (1, 5): 0.55, (2, 5): 0.55,
-        (3, 4): 0.6, (3, 5): 0.6, (4, 5): 0.6,
-    }.items():
-        storage.Set(left, right, distance)
-    dm = SymmetricDistanceMatrix(
-        storage, "test", ["a", "b", "c", "d", "e", "f"], {})
+    dm = _noise_bearing_dm()
 
     report = oecluster.cluster_report(
         oecluster.dbscan(dm, eps=0.2, min_samples=3), dm)
