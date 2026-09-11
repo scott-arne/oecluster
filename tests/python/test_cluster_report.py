@@ -45,6 +45,14 @@ def _noise_bearing_dm():
         storage, "test", ["a", "b", "c", "d", "e", "f"], {})
 
 
+def _row(table, name):
+    """The value cells of the row named ``name``, without the name itself."""
+    for row in table:
+        if row[0] == name:
+            return row[1:]
+    raise AssertionError(f"no row named {name!r} in {[r[0] for r in table]}")
+
+
 def test_report_basic_and_compactness():
     import oecluster
 
@@ -170,9 +178,9 @@ def test_comparison_table_carries_the_request_flag_and_noise_coverage():
     """The row set is a contract, and nothing pinned it: a comparison checking
     only that two known names appear lets rows be added or dropped in silence.
     The request indicator earns its row because c_index and baker_hubert_gamma
-    are the only rows whose NaN can mean "nobody asked" rather than "asked and
-    undefined", and the comparison path is the one place ClusterReportRequested
-    is otherwise unavailable."""
+    are the only rows that can read None for "nobody asked" rather than NaN for
+    "asked and undefined", and the comparison path is the one place
+    ClusterReportRequested is otherwise unavailable."""
     import oecluster
 
     dm = _two_cluster_dm()
@@ -197,10 +205,12 @@ def test_comparison_table_carries_the_request_flag_and_noise_coverage():
     assert "requested_per_cluster_records" not in values
 
     assert values["requested_pair_rank_indices"] == (True, False)
+    # None rather than NaN in the second column: plain did not ask, so the cell
+    # holds no answer at all. NaN there would be the undefined-value reading.
     assert values["c_index"][0] == 0.0
-    assert math.isnan(values["c_index"][1])
+    assert values["c_index"][1] is None
     assert values["baker_hubert_gamma"][0] == 1.0
-    assert math.isnan(values["baker_hubert_gamma"][1])
+    assert values["baker_hubert_gamma"][1] is None
 
     for threshold in asked.coverage_thresholds:
         assert values[f"coverage_at[{threshold}]"] == (1.0, 1.0)
@@ -230,9 +240,13 @@ def test_comparison_table_pads_a_report_with_no_clusters():
 
     values = {row[0]: row[1:]
               for row in oecluster.compare_reports(clustered, all_noise).to_table()}
+    # None, not NaN: the report carries the threshold but answered nothing at
+    # it, which is the same "never asked" state as a threshold it does not
+    # carry -- and distinct from the NaN of a curve that was computed and came
+    # out undefined.
     for threshold in clustered.coverage_thresholds:
-        assert math.isnan(values[f"coverage_at[{threshold}]"][1])
-        assert math.isnan(values[f"noise_coverage_at[{threshold}]"][1])
+        assert values[f"coverage_at[{threshold}]"][1] is None
+        assert values[f"noise_coverage_at[{threshold}]"][1] is None
 
 
 def test_comparison_table_carries_populated_coverage_curves():
@@ -296,7 +310,7 @@ def test_comparison_table_pads_each_report_against_its_own_thresholds():
     per-sample distances to the nearest representative that the fixture's own
     docstring works out: coverage counts all six samples at or under each
     threshold, noise coverage counts only points 3, 4 and 5, and a threshold a
-    report does not carry pads to NaN in that report's column alone.
+    report does not carry pads to None in that report's column alone.
     """
     import oecluster
 
@@ -315,25 +329,102 @@ def test_comparison_table_pads_each_report_against_its_own_thresholds():
               for row in oecluster.compare_reports(low, high).to_table()}
 
     # Asserted threshold by threshold, both columns together, so a failure
-    # names the cell that moved. The NaN pads are compared as reprs rather than
-    # through math.isnan so a failure prints the value that arrived instead.
+    # names the cell that moved. The pads are None rather than NaN: neither
+    # report was ever asked about the other's threshold, and both curves here
+    # are fully populated, so a NaN in any of these cells would be wrong twice
+    # over.
     assert math.isclose(values["coverage_at[0.15]"][0], 3 / 6, rel_tol=1e-9)
-    assert [repr(v) for v in values["coverage_at[0.15]"][1:]] == ["nan"]
+    assert values["coverage_at[0.15]"][1] is None
     assert math.isclose(values["coverage_at[0.35]"][0], 4 / 6, rel_tol=1e-9)
     assert math.isclose(values["coverage_at[0.35]"][1], 4 / 6, rel_tol=1e-9)
-    assert [repr(v) for v in values["coverage_at[0.45]"][:1]] == ["nan"]
+    assert values["coverage_at[0.45]"][0] is None
     assert math.isclose(values["coverage_at[0.45]"][1], 5 / 6, rel_tol=1e-9)
 
     assert math.isclose(
         values["noise_coverage_at[0.15]"][0], 0.0, rel_tol=1e-9)
-    assert [repr(v) for v in values["noise_coverage_at[0.15]"][1:]] == ["nan"]
+    assert values["noise_coverage_at[0.15]"][1] is None
     assert math.isclose(
         values["noise_coverage_at[0.35]"][0], 1 / 3, rel_tol=1e-9)
     assert math.isclose(
         values["noise_coverage_at[0.35]"][1], 1 / 3, rel_tol=1e-9)
-    assert [repr(v) for v in values["noise_coverage_at[0.45]"][:1]] == ["nan"]
+    assert values["noise_coverage_at[0.45]"][0] is None
     assert math.isclose(
         values["noise_coverage_at[0.45]"][1], 2 / 3, rel_tol=1e-9)
+
+
+def test_pair_rank_cells_distinguish_unasked_from_undefined():
+    import oecluster
+
+    dm = _two_cluster_dm()
+    result = oecluster.butina(dm, threshold=0.5)
+    cheap = oecluster.cluster_report(result, dm)
+    rich = oecluster.cluster_report(result, dm, compute_pair_rank_indices=True)
+
+    cells = _row(oecluster.compare_reports(cheap, rich).to_table(), "c_index")
+    assert cells[0] is None
+    assert isinstance(cells[1], float)
+
+    # One cluster of four: every distance is a within-pair, so S_min == S_max
+    # and no couple is concordant or discordant. Asked, and undefined.
+    single = oecluster.ClusteringResult([0, 0, 0, 0], [[0, 1, 2, 3]])
+    undefined = oecluster.cluster_report(
+        single, dm, compute_pair_rank_indices=True)
+    comparison = oecluster.compare_reports(cheap, undefined)
+    undefined_cells = _row(comparison.to_table(), "c_index")
+    assert undefined_cells[0] is None
+    assert math.isnan(undefined_cells[1])
+
+    rendered = repr(comparison)
+    assert "--" in rendered
+    assert "nan" in rendered
+
+
+def test_coverage_rows_use_none_for_thresholds_a_report_never_used():
+    import oecluster
+
+    dm = _two_cluster_dm()
+    result = oecluster.butina(dm, threshold=0.5)
+    a = oecluster.cluster_report(result, dm, coverage_thresholds=[0.3])
+    b = oecluster.cluster_report(result, dm, coverage_thresholds=[0.7])
+
+    table = oecluster.compare_reports(a, b).to_table()
+    assert _row(table, "coverage_at[0.3]")[1] is None
+    assert _row(table, "coverage_at[0.7]")[0] is None
+    assert _row(table, "coverage_at[0.3]")[0] is not None
+
+
+def test_noise_coverage_rows_are_nan_for_a_noise_free_report():
+    """The preserved half of the distinction, and the reason a blanket sweep of
+    NaN to None would be wrong. This report carries the threshold and its noise
+    curve is full length, so the cell was asked and came back undefined; only a
+    cell nobody asked about may read None."""
+    import oecluster
+
+    dm = _two_cluster_dm()
+    report = oecluster.cluster_report(
+        oecluster.butina(dm, threshold=0.5), dm, coverage_thresholds=[0.3])
+    table = oecluster.compare_reports(report, report).to_table()
+    assert math.isnan(_row(table, "noise_coverage_at[0.3]")[0])
+
+
+def test_all_noise_report_contributes_threshold_rows_that_are_all_none():
+    """ClusterReport copies coverage_thresholds whatever K is, and the row-key
+    union reads that field rather than the curve, so an all-noise report's own
+    threshold becomes a row whose every cell is None -- the honest reading of
+    "no report answered here"."""
+    import oecluster
+
+    dm = _two_cluster_dm()
+    clustered = oecluster.cluster_report(
+        oecluster.butina(dm, threshold=0.5), dm, coverage_thresholds=[0.3])
+    all_noise = oecluster.cluster_report(
+        oecluster.ClusteringResult([-1, -1, -1, -1], []), dm,
+        coverage_thresholds=[0.55])
+
+    table = oecluster.compare_reports(clustered, all_noise).to_table()
+    assert _row(table, "coverage_at[0.55]") == (None, None)
+    assert _row(table, "coverage_at[0.3]")[1] is None
+    assert _row(table, "coverage_at[0.3]")[0] is not None
 
 
 def test_scalar_fields_mirror_the_native_struct():

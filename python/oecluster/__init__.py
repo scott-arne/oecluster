@@ -20,7 +20,7 @@ import sys
 import warnings
 from importlib import metadata
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, ClassVar, NamedTuple
 
 import numpy as np
 
@@ -3081,57 +3081,76 @@ class ClusterReportComparison:
             labels.append(report.method if report.method else f"report{index}")
         return labels
 
+    # Scalar metric -> the ClusterReportRequested flag that gates it. A metric
+    # named here reads as None when its flag is False, which is what keeps
+    # "nobody asked" apart from the NaN of "asked and undefined".
+    _OPT_IN_SCALARS: ClassVar[dict[str, str]] = {
+        "c_index": "pair_rank_indices",
+        "baker_hubert_gamma": "pair_rank_indices",
+    }
+
     def to_table(self):
         """Return rows ``(metric_name, *values)`` -- one value per report.
 
         Scalar-metric rows come first, then ``requested_pair_rank_indices``,
-        then coverage and noise-coverage rows aligned by threshold value across
-        all reports; a report lacking a given threshold shows NaN.
+        then coverage rows aligned by threshold value across all reports, then
+        the matching noise-coverage rows.
+
+        A cell is ``None`` when that report never asked the question: an opt-in
+        metric it did not request, or a threshold it did not use. ``nan`` keeps
+        its single meaning of asked-and-undefined. The two were previously
+        indistinguishable, which is the collision this separates.
         """
+        def _scalar_cell(report, name):
+            flag = self._OPT_IN_SCALARS.get(name)
+            if flag is not None and not getattr(report.requested, flag):
+                return None
+            return getattr(report, name)
+
         rows = []
         for name in ClusterReport._SCALAR_FIELDS:
-            rows.append((name, *(getattr(r, name) for r in self._reports)))
+            rows.append((name, *(_scalar_cell(r, name) for r in self._reports)))
 
-        # Placed directly beneath the two rows it explains, c_index and
-        # baker_hubert_gamma being the last two scalar fields. Their NaN is the
-        # only one here that can mean "nobody asked" rather than "asked and
-        # undefined", and a comparison of a report that asked against one that
-        # did not otherwise shows two bare NaNs. There is deliberately no
-        # matching row for per_cluster_records: that flag governs ``records``,
-        # which this table does not carry, so the row would be inert.
+        # Placed directly beneath the two rows it summarises, c_index and
+        # baker_hubert_gamma being the last two scalar fields. Those two now
+        # carry the unasked state themselves, as None, so this row states in
+        # one line what their None means rather than being the only way to see
+        # it. There is deliberately no matching row for per_cluster_records:
+        # that flag governs ``records``, which this table does not carry, so
+        # the row would be inert.
         rows.append((
             "requested_pair_rank_indices",
             *(r.requested.pair_rank_indices for r in self._reports),
         ))
 
-        # Takes the vector as an argument because the two coverage curves are
-        # indexed in parallel with the same threshold list; a report with no
-        # clusters keeps its thresholds but empties both vectors, and the
-        # length guard is what turns that into a NaN rather than an IndexError.
-        def _coverage_lookup(report, values, threshold):
+        def _coverage_lookup(report, threshold, curve_name):
+            """This report's value at ``threshold`` on ``curve_name``, or None.
+
+            The ``i < len(curve)`` bound is what turns an empty curve -- a
+            report with no clusters, which carries its thresholds but has no
+            answers -- into "not asked" rather than a stale value.
+            """
+            curve = getattr(report, curve_name)
             for i, t in enumerate(report.coverage_thresholds):
-                if t == threshold and i < len(values):
-                    return values[i]
-            return float("nan")
+                if t == threshold and i < len(curve):
+                    return curve[i]
+            return None
 
         thresholds = sorted(
             set().union(*(r.coverage_thresholds for r in self._reports)))
-        for threshold in thresholds:
-            rows.append((
-                f"coverage_at[{threshold}]",
-                *(_coverage_lookup(r, r.coverage_at, threshold)
-                  for r in self._reports),
-            ))
-        for threshold in thresholds:
-            rows.append((
-                f"noise_coverage_at[{threshold}]",
-                *(_coverage_lookup(r, r.noise_coverage_at, threshold)
-                  for r in self._reports),
-            ))
+        for curve_name in ("coverage_at", "noise_coverage_at"):
+            for threshold in thresholds:
+                rows.append((
+                    f"{curve_name}[{threshold}]",
+                    *(_coverage_lookup(r, threshold, curve_name)
+                      for r in self._reports),
+                ))
         return rows
 
     def __repr__(self):
         def _fmt(value):
+            if value is None:
+                return "--"
             if isinstance(value, float):
                 return f"{value:.4g}"
             return str(value)
