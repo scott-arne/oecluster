@@ -86,6 +86,21 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   Positive infinity remains accepted for both and is unaffected. Negative
   infinity is refused, as it always was, by the non-negative check rather than
   by anything added here.
+- The C++ `cluster_report` now throws `std::invalid_argument` for a NaN
+  `boundary_threshold` (`cluster_report: boundary_threshold must not be NaN`) or
+  a NaN entry in `coverage_thresholds` (`cluster_report: coverage threshold <i>
+  must not be NaN`, naming the offending index). **This refuses C++ calls that
+  5.0.0 accepted.** A NaN threshold never produced a NaN and never raised: every
+  comparison against it is false, so the call returned `boundary_violations = 0`
+  and `coverage_at` entries of `0.0` -- a plausible, in-range answer to a
+  question that was never answerable. Positive infinity is still accepted and
+  still means what it always meant: every cross pair is a boundary violation,
+  and every sample is covered. The checks run only when the result has at least
+  one cluster; a partition with no clusters reads no distance and evaluates no
+  threshold, so there is no wrong number for the NaN to hide behind. **Python
+  callers see no change.** The wrapper already refuses both with its own
+  `ValueError` before the call reaches C++, so this closes a C++/Python
+  asymmetry rather than altering Python behaviour.
 - `cluster_report` now raises `TypeError` for a `treat_noise_as_singletons` that
   is not a `bool` or a `numpy.bool_`. **This refuses calls that 5.0.0 accepted.**
   The keyword predates this release and was coerced with a bare `bool(...)`, so

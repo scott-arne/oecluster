@@ -1843,6 +1843,128 @@ TEST(ClusterReportTest, UnsupportedRepresentativeMethodOutranksNonFiniteDistance
     }
 }
 
+// A NaN boundary_threshold is not an undefined answer, it is a confident wrong
+// one: `distance <= threshold` is false for every pair against a NaN, so the
+// unguarded call returned boundary_violations = 0 -- the same number a
+// perfectly separated clustering reports, with nothing marking it suspect.
+// Passing an explicit NaN must not read as passing nothing. INVARIANT 2.
+TEST(ClusterReportTest, NanBoundaryThresholdIsRefused) {
+    const DenseStorage storage = MakeThreeClusterStorage();
+    const ClusteringResult result = MakeResult({0, 0, 1, 1, 1, 2, 2, 2, 2});
+    ClusterReportOptions options;
+    options.boundary_threshold = std::numeric_limits<double>::quiet_NaN();
+
+    try {
+        cluster_report(result, storage, options);
+        FAIL() << "expected std::invalid_argument";
+    } catch (const std::invalid_argument& e) {
+        // The whole message, not the shared "must not be NaN" tail. The
+        // coverage refusal below ends in those same words, and a test matching
+        // only the tail would stay green if the two throw sites exchanged
+        // messages -- each would then name the option the caller did not set.
+        EXPECT_EQ(
+            std::string(e.what()),
+            "cluster_report: boundary_threshold must not be NaN");
+    }
+}
+
+// The coverage list is a list, so the refusal has to say which entry is bad --
+// the caller cannot act on "one of them is NaN". The NaN sits at index 2 of
+// four, so a message that hardcoded either end of the list names the wrong
+// entry and fails here.
+TEST(ClusterReportTest, NanCoverageThresholdIsRefusedByIndex) {
+    const DenseStorage storage = MakeThreeClusterStorage();
+    const ClusteringResult result = MakeResult({0, 0, 1, 1, 1, 2, 2, 2, 2});
+    ClusterReportOptions options;
+    options.coverage_thresholds = {
+        0.05, 0.10, std::numeric_limits<double>::quiet_NaN(), 0.15};
+
+    try {
+        cluster_report(result, storage, options);
+        FAIL() << "expected std::invalid_argument";
+    } catch (const std::invalid_argument& e) {
+        EXPECT_EQ(
+            std::string(e.what()),
+            "cluster_report: coverage threshold 2 must not be NaN");
+    }
+}
+
+// The over-refusal guard for boundary_threshold. An infinite threshold is a
+// well-formed "count every cross pair" request that the report has always
+// answered, so a guard written as !std::isfinite would take a defined result
+// away. INVARIANT 3.
+//
+// The assertion is the count. "Did not throw" would also hold if the threshold
+// stopped being read at all, and the narrow case below is what separates the 26
+// from a cross pass that counts every pair regardless of the option.
+TEST(ClusterReportTest, InfiniteBoundaryThresholdIsAcceptedAndCountsEveryCrossPair) {
+    const DenseStorage storage = MakeThreeClusterStorage();
+    const ClusteringResult result = MakeResult({0, 0, 1, 1, 1, 2, 2, 2, 2});
+
+    ClusterReportOptions wide;
+    wide.boundary_threshold = std::numeric_limits<double>::infinity();
+    // A-B 6 pairs at 0.80, A-C 8 at 0.90, B-C 12 at 0.60. Twenty-six is none of
+    // the neighbouring counts on this fixture: nine samples, three clusters,
+    // ten intra pairs, thirty-six pairs in total.
+    EXPECT_EQ(cluster_report(result, storage, wide).boundary_violations, 26u);
+
+    ClusterReportOptions narrow;
+    narrow.boundary_threshold = 0.60;
+    EXPECT_EQ(cluster_report(result, storage, narrow).boundary_violations, 12u);
+}
+
+// The same guard for the coverage list. Both a threshold far past the largest
+// distance and an infinite one saturate, and the 0.05 entry sharing the list
+// with them does not, so the two 1.0s are the scan answering rather than the
+// scan having stopped reading. INVARIANT 3.
+TEST(ClusterReportTest, LargeAndInfiniteCoverageThresholdsSaturateCoverage) {
+    const DenseStorage storage = MakeThreeClusterStorage();
+    const ClusteringResult result = MakeResult({0, 0, 1, 1, 1, 2, 2, 2, 2});
+
+    ClusterReportOptions options;
+    options.coverage_thresholds = {
+        0.05, 1.0e6, std::numeric_limits<double>::infinity()};
+    const ClusterReport r = cluster_report(result, storage, options);
+
+    // Distances to the nearest representative (0, 2 or 5), in sample order:
+    // 0, 0.32, 0, 0.12, 0.24, 0, 0.04, 0.06, 0.08. Four of the nine are within
+    // 0.05, and 0.32 is the farthest, so both wide thresholds admit all nine.
+    ASSERT_EQ(r.coverage_at.size(), 3u);
+    EXPECT_DOUBLE_EQ(r.coverage_at[0], 4.0 / 9.0);
+    EXPECT_DOUBLE_EQ(r.coverage_at[1], 1.0);
+    EXPECT_DOUBLE_EQ(r.coverage_at[2], 1.0);
+}
+
+// A call wrong in both ways names the fault the caller must fix first. No
+// threshold value rescues a representative_method ClusterReportOptions cannot
+// configure, so the method outranks the malformed threshold. INVARIANT 1, and
+// the only test pinning that the two threshold guards sit behind the method
+// refusal rather than ahead of it.
+TEST(ClusterReportTest, UnsupportedRepresentativeMethodOutranksNanThreshold) {
+    const DenseStorage storage = MakeThreeClusterStorage();
+    const ClusteringResult result = MakeResult({0, 0, 1, 1, 1, 2, 2, 2, 2});
+    ClusterReportOptions options;
+    options.representative_method = RepresentativeMethod::HighestNeighborhood;
+    options.boundary_threshold = std::numeric_limits<double>::quiet_NaN();
+    options.coverage_thresholds = {
+        0.05, std::numeric_limits<double>::quiet_NaN()};
+
+    try {
+        cluster_report(result, storage, options);
+        FAIL() << "expected std::invalid_argument";
+    } catch (const std::invalid_argument& e) {
+        const std::string message(e.what());
+        EXPECT_NE(
+            message.find(
+                "cluster_report: representative_method HighestNeighborhood is unsupported"),
+            std::string::npos)
+            << message;
+        // Neither threshold refusal may surface here, and "NaN" appears in both
+        // of their messages and in neither of the method's.
+        EXPECT_EQ(message.find("NaN"), std::string::npos) << message;
+    }
+}
+
 // The shape that makes the selector's comparator genuinely inconsistent, rather
 // than merely wrong. cluster_representative sorts each candidate's intra
 // distances through median_distance and then stable_sorts the candidate scores;

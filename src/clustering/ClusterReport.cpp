@@ -337,6 +337,37 @@ ClusterReport cluster_report(
                 "threshold to configure it");
         }
 
+        // Ranked behind the method refusal above and ahead of every threshold
+        // read. A NaN threshold does not propagate: `distance <= threshold` and
+        // `nearest <= threshold` are both false for it, so the caller is handed
+        // zero boundary violations and zero coverage -- a plausible number, not
+        // an error, and indistinguishable from a well-separated clustering.
+        // Passing an explicit NaN must not read as passing nothing. INVARIANT 2.
+        //
+        // std::isnan, not !std::isfinite. An infinite boundary_threshold asks
+        // for every cross pair to count and an infinite coverage threshold for
+        // every sample to be covered; both are answered exactly today, so
+        // refusing them would be over-refusal. INVARIANT 3.
+        //
+        // These sit inside the members-non-empty guard, which means a partition
+        // with no clusters is still accepted with a NaN threshold. That report
+        // reads no distance and evaluates no threshold -- coverage_at stays
+        // empty and boundary_violations is zero for want of a pair to count,
+        // not for want of a comparison that held -- so there is no wrong number
+        // for the NaN to hide behind, and refusing it would be over-refusal of
+        // the same kind. INVARIANT 3 again.
+        if (std::isnan(options.boundary_threshold)) {
+            throw std::invalid_argument(
+                "cluster_report: boundary_threshold must not be NaN");
+        }
+        for (size_t t = 0; t < options.coverage_thresholds.size(); ++t) {
+            if (std::isnan(options.coverage_thresholds[t])) {
+                throw std::invalid_argument(
+                    "cluster_report: coverage threshold " + std::to_string(t) +
+                    " must not be NaN");
+            }
+        }
+
         // Every pair-scaled reservation below is derived here, from the same
         // member lists the fill loops walk, so a reservation cannot disagree
         // with what is pushed into it. Computed once: the three counts differ

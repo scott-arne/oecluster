@@ -90,7 +90,11 @@ struct ClusterRecord {
  * @brief Options controlling clustering-quality report computation.
  */
 struct ClusterReportOptions {
+    /// Distances at which coverage_at is evaluated. A NaN entry is refused;
+    /// infinity is accepted and covers every sample.
     std::vector<double> coverage_thresholds;
+    /// Cross-cluster pairs at or below this distance are boundary violations.
+    /// NaN is refused; infinity is accepted and counts every cross pair.
     double boundary_threshold = 0.30;
     RepresentativeMethod representative_method = RepresentativeMethod::Medoid;
     bool treat_noise_as_singletons = true;
@@ -215,7 +219,9 @@ struct ClusterReportComparison {
  * :raises std::invalid_argument: If storage cannot provide complete distances;
  *     if a cluster in result is empty or repeats a member; if result has at
  *     least one cluster and representative_method is HighestNeighborhood, whose
- *     neighbor threshold ClusterReportOptions has no field to supply; if
+ *     neighbor threshold ClusterReportOptions has no field to supply; if result
+ *     has at least one cluster and boundary_threshold or a coverage_thresholds
+ *     entry is NaN, against which every comparison fails silently; if
  *     Labels() and Members() do not describe the same partition -- a sample in
  *     two clusters, a member whose Labels() entry disagrees with the cluster
  *     holding it, a clustered sample omitted from every member list, a
