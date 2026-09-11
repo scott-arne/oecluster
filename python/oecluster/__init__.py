@@ -3084,17 +3084,34 @@ class ClusterReportComparison:
     def to_table(self):
         """Return rows ``(metric_name, *values)`` -- one value per report.
 
-        Scalar-metric rows come first, then coverage rows aligned by threshold
-        value across all reports; a report lacking a given threshold shows NaN.
+        Scalar-metric rows come first, then ``requested_pair_rank_indices``,
+        then coverage and noise-coverage rows aligned by threshold value across
+        all reports; a report lacking a given threshold shows NaN.
         """
         rows = []
         for name in ClusterReport._SCALAR_FIELDS:
             rows.append((name, *(getattr(r, name) for r in self._reports)))
 
-        def _coverage_lookup(report, threshold):
+        # Placed directly beneath the two rows it explains, c_index and
+        # baker_hubert_gamma being the last two scalar fields. Their NaN is the
+        # only one here that can mean "nobody asked" rather than "asked and
+        # undefined", and a comparison of a report that asked against one that
+        # did not otherwise shows two bare NaNs. There is deliberately no
+        # matching row for per_cluster_records: that flag governs ``records``,
+        # which this table does not carry, so the row would be inert.
+        rows.append((
+            "requested_pair_rank_indices",
+            *(r.requested.pair_rank_indices for r in self._reports),
+        ))
+
+        # Takes the vector as an argument because the two coverage curves are
+        # indexed in parallel with the same threshold list; a report with no
+        # clusters keeps its thresholds but empties both vectors, and the
+        # length guard is what turns that into a NaN rather than an IndexError.
+        def _coverage_lookup(report, values, threshold):
             for i, t in enumerate(report.coverage_thresholds):
-                if t == threshold and i < len(report.coverage_at):
-                    return report.coverage_at[i]
+                if t == threshold and i < len(values):
+                    return values[i]
             return float("nan")
 
         thresholds = sorted(
@@ -3102,7 +3119,14 @@ class ClusterReportComparison:
         for threshold in thresholds:
             rows.append((
                 f"coverage_at[{threshold}]",
-                *(_coverage_lookup(r, threshold) for r in self._reports),
+                *(_coverage_lookup(r, r.coverage_at, threshold)
+                  for r in self._reports),
+            ))
+        for threshold in thresholds:
+            rows.append((
+                f"noise_coverage_at[{threshold}]",
+                *(_coverage_lookup(r, r.noise_coverage_at, threshold)
+                  for r in self._reports),
             ))
         return rows
 
@@ -3177,7 +3201,7 @@ def cluster_report(result, distance_matrix, *, preset="default",
     :returns: A ClusterReport.
     :raises TypeError: If result/distance_matrix have the wrong type, or
         compute_pair_rank_indices, compute_per_cluster_records or
-        allow_nonmetric is not a bool.
+        allow_nonmetric is not a bool or numpy.bool_.
     :raises ValueError: If a preset/method/threshold is invalid, the result and
         the matrix cover different numbers of samples, the matrix uses sparse
         storage, or the matrix is not a metric -- and additionally: any
@@ -3228,15 +3252,25 @@ def cluster_report(result, distance_matrix, *, preset="default",
     if num_threads_int < 0:
         raise ValueError("num_threads must be non-negative")
 
-    if not isinstance(compute_pair_rank_indices, bool):
+    # numpy.bool_ is admitted on the same terms as allow_nonmetric, which the
+    # gate below has always taken: one call must not apply two admissibility
+    # rules to its bool keywords, and np.bool_ is what arr.any() and every
+    # comparison of numpy scalars returns. Truthiness stays refused, because
+    # compute_pair_rank_indices="no" reads to a caller as off while switching
+    # an expensive stage on. The message carries the value as well as the type
+    # for the same reason the gate's does: numpy.bool_.__name__ is itself
+    # "bool", so a bare type name would read as "must be a bool, got bool".
+    if not isinstance(compute_pair_rank_indices, (bool, np.bool_)):
         raise TypeError(
-            "compute_pair_rank_indices must be a bool, got "
-            f"{type(compute_pair_rank_indices).__name__}"
+            "compute_pair_rank_indices must be True or False, "
+            f"not {type(compute_pair_rank_indices).__name__} "
+            f"({compute_pair_rank_indices!r})."
         )
-    if not isinstance(compute_per_cluster_records, bool):
+    if not isinstance(compute_per_cluster_records, (bool, np.bool_)):
         raise TypeError(
-            "compute_per_cluster_records must be a bool, got "
-            f"{type(compute_per_cluster_records).__name__}"
+            "compute_per_cluster_records must be True or False, "
+            f"not {type(compute_per_cluster_records).__name__} "
+            f"({compute_per_cluster_records!r})."
         )
 
     # Nothing else ties the result to the matrix: the native reporter reads
@@ -3272,8 +3306,11 @@ def cluster_report(result, distance_matrix, *, preset="default",
     options.representative_method = native_method
     options.treat_noise_as_singletons = bool(treat_noise_as_singletons)
     options.num_threads = num_threads_int
-    options.compute_pair_rank_indices = compute_pair_rank_indices
-    options.compute_per_cluster_records = compute_per_cluster_records
+    # Coerced like treat_noise_as_singletons above, and for a harder reason:
+    # the SWIG bool setter takes only a Python bool, so an admitted numpy.bool_
+    # would otherwise fail here with a message naming a generated setter.
+    options.compute_pair_rank_indices = bool(compute_pair_rank_indices)
+    options.compute_per_cluster_records = bool(compute_per_cluster_records)
 
     native = _cluster_report(
         _native_clustering_result(result), distance_matrix.storage, options)

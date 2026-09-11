@@ -140,6 +140,75 @@ def test_compare_reports_validation():
         oecluster.compare_reports(rb, "not a report")
 
 
+def test_comparison_table_carries_the_request_flag_and_noise_coverage():
+    """The row set is a contract, and nothing pinned it: a comparison checking
+    only that two known names appear lets rows be added or dropped in silence.
+    The request indicator earns its row because c_index and baker_hubert_gamma
+    are the only rows whose NaN can mean "nobody asked" rather than "asked and
+    undefined", and the comparison path is the one place ClusterReportRequested
+    is otherwise unavailable."""
+    import oecluster
+
+    dm = _two_cluster_dm()
+    result = oecluster.butina(dm, threshold=0.5)
+    asked = oecluster.cluster_report(result, dm, compute_pair_rank_indices=True)
+    plain = oecluster.cluster_report(result, dm)
+
+    rows = oecluster.compare_reports(asked, plain).to_table()
+    names = [row[0] for row in rows]
+    values = {row[0]: row[1:] for row in rows}
+    assert len(values) == len(rows)
+
+    # 27 scalar metrics, the request indicator, then a coverage row and a
+    # noise-coverage row for each of the default preset's three thresholds.
+    assert len(rows) == 34
+    # Directly beneath the two rows it explains: c_index and
+    # baker_hubert_gamma are the last two entries of _SCALAR_FIELDS.
+    assert names[names.index("baker_hubert_gamma") + 1] == (
+        "requested_pair_rank_indices")
+    # No matching row for the other flag, deliberately: per_cluster_records
+    # governs records, which this table does not carry.
+    assert "requested_per_cluster_records" not in values
+
+    assert values["requested_pair_rank_indices"] == (True, False)
+    assert values["c_index"][0] == 0.0
+    assert math.isnan(values["c_index"][1])
+    assert values["baker_hubert_gamma"][0] == 1.0
+    assert math.isnan(values["baker_hubert_gamma"][1])
+
+    for threshold in asked.coverage_thresholds:
+        assert values[f"coverage_at[{threshold}]"] == (1.0, 1.0)
+        # Compared as reprs rather than through all(), so a failure prints the
+        # offending entry. This clustering has no noise, so the noise curve is
+        # NaN everywhere while the ordinary one is complete -- which is what
+        # makes a noise row sourced from coverage_at visible.
+        assert [repr(value)
+                for value in values[f"noise_coverage_at[{threshold}]"]] == (
+                    ["nan", "nan"])
+
+
+def test_comparison_table_pads_a_report_with_no_clusters():
+    """An all-noise report keeps its threshold list but leaves both coverage
+    vectors empty, so the row still has to be produced with a value in it. The
+    lookup's fallback covers that, and the noise rows now depend on it too."""
+    import oecluster
+
+    dm = _two_cluster_dm()
+    clustered = oecluster.cluster_report(
+        oecluster.butina(dm, threshold=0.5), dm)
+    all_noise = oecluster.cluster_report(
+        oecluster.ClusteringResult([-1, -1, -1, -1], []), dm)
+    assert all_noise.num_clusters == 0
+    assert all_noise.coverage_at == ()
+    assert all_noise.noise_coverage_at == ()
+
+    values = {row[0]: row[1:]
+              for row in oecluster.compare_reports(clustered, all_noise).to_table()}
+    for threshold in clustered.coverage_thresholds:
+        assert math.isnan(values[f"coverage_at[{threshold}]"][1])
+        assert math.isnan(values[f"noise_coverage_at[{threshold}]"][1])
+
+
 def test_scalar_fields_mirror_the_native_struct():
     """A field added in C++ and forgotten in _SCALAR_FIELDS is invisible with a
     green suite, which is the gap this closes."""
@@ -214,16 +283,48 @@ def test_default_constructed_record_reads_undefined_not_zero():
     "flag", ["compute_pair_rank_indices", "compute_per_cluster_records"]
 )
 def test_non_bool_flags_are_rejected_by_name(flag):
-    """The match includes "must be a bool" deliberately. Before the signature
-    gains the keyword, Python's own "unexpected keyword argument" TypeError
-    also names the flag, so matching on the flag alone would pass green
-    against an unimplemented feature."""
+    """The match includes "must be True or False" deliberately. Before the
+    signature gains the keyword, Python's own "unexpected keyword argument"
+    TypeError also names the flag, so matching on the flag alone would pass
+    green against an unimplemented feature."""
     import oecluster
 
     dm = _two_cluster_dm()
     result = oecluster.butina(dm, threshold=0.5)
-    with pytest.raises(TypeError, match=f"{flag} must be a bool"):
+    with pytest.raises(
+            TypeError, match=f"{flag} must be True or False") as excinfo:
         oecluster.cluster_report(result, dm, **{flag: "yes"})
+    # The offending value is carried as well as its type, which is what keeps
+    # the message legible for a type whose own __name__ is "bool" -- numpy's
+    # is, and a bare type name would read as "must be a bool, got bool".
+    assert "'yes'" in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    ("flag", "attribute"),
+    [
+        ("compute_pair_rank_indices", "pair_rank_indices"),
+        ("compute_per_cluster_records", "per_cluster_records"),
+    ],
+)
+def test_numpy_bools_are_accepted_and_take_effect(flag, attribute):
+    """numpy.bool_ is what ``arr.any()`` and every comparison of numpy scalars
+    returns, and allow_nonmetric on this same call has always taken it, so
+    refusing it here gave one call two admissibility rules for its bool
+    keywords. Acceptance alone is not the whole contract: the value has to
+    reach the native option too, which is what requested reports back."""
+    import numpy as np
+    import oecluster
+
+    dm = _two_cluster_dm()
+    result = oecluster.butina(dm, threshold=0.5)
+
+    on = oecluster.cluster_report(result, dm, **{flag: np.True_})
+    assert getattr(on.requested, attribute) is True
+    # The false half matters as much: a check that coerced with truthiness
+    # instead of admitting the type would pass the True case and lose this one.
+    off = oecluster.cluster_report(result, dm, **{flag: np.False_})
+    assert getattr(off.requested, attribute) is False
 
 
 @pytest.mark.parametrize(
@@ -243,7 +344,7 @@ def test_flag_type_error_outranks_the_matrix_pairing_check(flag):
     result = oecluster.butina(dm, threshold=0.5)
     bigger = SymmetricDistanceMatrix(
         DenseStorage(6), "test", ["a", "b", "c", "d", "e", "f"], {})
-    with pytest.raises(TypeError, match=f"{flag} must be a bool"):
+    with pytest.raises(TypeError, match=f"{flag} must be True or False"):
         oecluster.cluster_report(result, bigger, **{flag: 1.5})
 
 
