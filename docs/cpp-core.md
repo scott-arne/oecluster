@@ -103,6 +103,61 @@ their option/result types:
 defines the method-agnostic quality scorecard exposed in Python as
 `cluster_report()`/`compare_reports()`.
 
+### Internal validity indices
+
+`ClusterReport` carries seven internal cluster-validity indices, all `double`
+and all NaN when undefined. Five are always computed:
+`calinski_harabasz_medoid` (higher is better), `davies_bouldin_medoid` (lower is
+better), `dunn_mean_separation_mean_diameter` and
+`dunn_medoid_separation_medoid_spread` (higher is better), and `point_biserial`
+(higher is better, positive meaning that between-cluster pairs are the more
+distant). `dunn_medoid_separation_medoid_spread` ignores
+`representative_method` and always uses the true medoid, so a report requested
+with `representative_method="minimax"` still reports medoid-based values here.
+
+> These are **medoid-substituted** indices. The published Calinski-Harabasz and
+> Davies-Bouldin definitions use centroids, which do not exist for a distance
+> matrix; each cluster's medoid stands in for its centroid, and the global
+> medoid stands in for the grand mean. The values are therefore not comparable
+> with published figures or with scikit-learn's. Both ignore
+> `representative_method` and always use the true medoid, so a report requested
+> with `representative_method="minimax"` still reports medoid-based values here.
+
+The remaining two, `c_index` (lower is better) and `baker_hubert_gamma` (higher
+is better), are computed only under `ClusterReportOptions::compute_pair_rank_indices`.
+
+### Optional stages and their cost
+
+`ClusterReportOptions` carries two flags, both `false` by default:
+
+- `compute_pair_rank_indices` fills `c_index` and `baker_hubert_gamma`. The
+  stage materialises every pairwise distance among the `Nc` clustered points as
+  two sortable arrays, `Nc * (Nc - 1) / 2` doubles in total -- roughly 400 MB at
+  `Nc = 10,000` and 10 GB at `Nc = 50,000` -- which is why it is opt-in. One
+  flag covers both indices because both are read off the same sorted arrays.
+- `compute_per_cluster_records` fills `ClusterReport::records`, a
+  `std::vector<ClusterRecord>` holding one row per cluster in member-list order:
+  size, representative, intra-distance mean and median, radius, diameter, mean
+  representative distance, nearest cluster and its distance, silhouette, and
+  boundary-violation count. A record's `boundary_violations` counts pairs
+  involving that cluster, so the sum over records is twice the report's own
+  count, which counts each pair once.
+
+`ClusterReport::noise_coverage_at` is the coverage curve restricted to the noise
+points. Its length matches `coverage_at`: the threshold count when there is at
+least one cluster, and zero when there is none. Every entry is NaN when the
+clustering has no noise, rather than 0.0, which would read as "no noise point is
+covered" instead of "there is nothing to cover".
+
+`ClusterReport::requested` is a `ClusterReportRequested` recording which of the
+two optional computations the caller asked for. It records the request and not
+the outcome, so a NaN can be read unambiguously: false means nobody asked, true
+with NaN means asked and undefined. The Python comparison table carries the same
+distinction into its cells, rendering an unasked cell as `None` -- printed as
+`--` -- and reserving `nan` for asked and undefined. A coverage cell is also
+`None` when the report carries the threshold but answered nothing at it, as when
+the clustering has no clusters and both coverage curves come back empty.
+
 ## Representatives
 
 `Representative.h` provides representative selection over a cluster and distance

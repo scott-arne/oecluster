@@ -441,6 +441,10 @@ report = oecluster.cluster_report(butina_result, dm, preset="tight")
 # or override individual thresholds:
 report = oecluster.cluster_report(
     butina_result, dm, coverage_thresholds=[0.2, 0.3], boundary_threshold=0.25)
+# or opt in to the two stages that are off by default:
+report = oecluster.cluster_report(
+    butina_result, dm, compute_pair_rank_indices=True,
+    compute_per_cluster_records=True)
 ```
 
 All distances below are Tanimoto/Jaccard distances, so **smaller means more
@@ -501,6 +505,34 @@ purchasing, and diversity triage.
 interpretation; set it `False` to keep them distinct. The report requires
 complete pairwise distances (dense or memory-mapped storage); a sparse
 (`cutoff`) matrix raises.
+
+### Internal validity indices and optional stages
+
+Seven internal cluster-validity indices round out the scorecard. Five are always
+computed: `calinski_harabasz_medoid` (higher is better),
+`davies_bouldin_medoid` (lower is better),
+`dunn_mean_separation_mean_diameter` and `dunn_medoid_separation_medoid_spread`
+(higher is better), and `point_biserial` (higher is better). The first two are
+medoid-substituted — a distance matrix has no centroids, so each cluster's
+medoid stands in for one — which makes them incomparable with published or
+scikit-learn figures; those two and `dunn_medoid_separation_medoid_spread`
+always use the true medoid and ignore `representative_method`.
+`compute_pair_rank_indices=True` adds `c_index` (lower is better) and
+`baker_hubert_gamma` (higher is better); it is off by default because the stage
+sorts every pairwise distance among the `Nc` clustered points,
+`Nc * (Nc - 1) / 2` doubles, or roughly 400 MB at 10,000 clustered points and
+10 GB at 50,000.
+
+`compute_per_cluster_records=True` fills `report.records` with one
+`ClusterRecord` per cluster — size, representative, spread, nearest cluster,
+silhouette and boundary violations — as a `NamedTuple` that feeds
+`pandas.DataFrame(report.records)` directly. `report.noise_coverage_at` is the
+coverage curve restricted to the noise points, and `report.requested` names
+which optional stages the caller asked for, so a `NaN` reads unambiguously:
+nobody asked, or asked and undefined. `compare_reports(...).to_table()` draws
+the same line, publishing an unasked cell as `None`, printed `--`. See
+[docs/python-api.md](docs/python-api.md#cluster-quality-reports) for the field
+list and the memory notes.
 
 ---
 

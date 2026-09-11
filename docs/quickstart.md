@@ -158,6 +158,50 @@ Distances are Tanimoto/Jaccard, so smaller means more similar. Choose a preset
 The report needs complete pairwise distances, so dense or memory-mapped storage
 is required; a sparse (`cutoff`) matrix raises.
 
+Alongside the original scorecard the report carries seven internal validity
+indices. Five are always computed: `calinski_harabasz_medoid` (higher is
+better), `davies_bouldin_medoid` (lower is better),
+`dunn_mean_separation_mean_diameter` and `dunn_medoid_separation_medoid_spread`
+(higher is better), and `point_biserial` (higher is better).
+`dunn_medoid_separation_medoid_spread` ignores `representative_method` and
+always uses the true medoid, so a report requested with
+`representative_method="minimax"` still reports medoid-based values here.
+
+> These are **medoid-substituted** indices. The published Calinski-Harabasz and
+> Davies-Bouldin definitions use centroids, which do not exist for a distance
+> matrix; each cluster's medoid stands in for its centroid, and the global
+> medoid stands in for the grand mean. The values are therefore not comparable
+> with published figures or with scikit-learn's. Both ignore
+> `representative_method` and always use the true medoid, so a report requested
+> with `representative_method="minimax"` still reports medoid-based values here.
+
+Two options, both off by default, turn on the optional stages:
+
+```python
+report = oecluster.cluster_report(
+    result,
+    dm,
+    compute_pair_rank_indices=True,    # adds c_index and baker_hubert_gamma
+    compute_per_cluster_records=True,  # populates report.records
+)
+```
+
+`compute_pair_rank_indices` adds `c_index` (lower is better) and
+`baker_hubert_gamma` (higher is better). It is off by default because the stage
+sorts every pairwise distance among the `Nc` clustered points,
+`Nc * (Nc - 1) / 2` doubles -- roughly 400 MB at `Nc = 10,000` and 10 GB at
+`Nc = 50,000`. `compute_per_cluster_records` fills `report.records` with one
+`ClusterRecord` per cluster, a `NamedTuple` that feeds
+`pandas.DataFrame(report.records)` directly. `report.noise_coverage_at` is the
+coverage curve restricted to the noise points, parallel to `coverage_at`.
+
+`report.requested` names which of the two optional computations the caller asked
+for, so a `NaN` can be read unambiguously: false means nobody asked, true with
+`NaN` means asked and undefined. `compare_reports(...).to_table()` follows the
+same rule -- a cell is `None` when that report never asked, including a coverage
+threshold the report carries but answered nothing at, and `nan` only when the
+answer is undefined. `__repr__` renders `None` as `--`.
+
 ## Exporting Cluster Assignments
 
 ```python

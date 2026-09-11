@@ -241,6 +241,91 @@ separately; `treat_noise_as_singletons=True` (the default) folds noise into the
 singleton interpretation. The report requires complete pairwise distances
 (dense or memory-mapped storage); a sparse (`cutoff`) matrix raises.
 
+### Internal validity indices
+
+Seven internal cluster-validity indices sit alongside the original scorecard
+fields. Five of them are always computed:
+
+| Metric | Direction | What it reports |
+|--------|-----------|-----------------|
+| `calinski_harabasz_medoid` | higher is better | Between-cluster scatter divided by within-cluster scatter, each scaled by its degrees of freedom. `NaN` when there are fewer than two clusters, when every cluster is a singleton, or when the within-cluster scatter is zero. |
+| `davies_bouldin_medoid` | lower is better | Mean over clusters of the worst ratio of two clusters' spreads to the distance between their centers. `NaN` when there are fewer than two clusters, and infinite when two centers coincide, which is reported rather than divided by. |
+| `dunn_mean_separation_mean_diameter` | higher is better | Smallest mean between-cluster distance over the largest mean within-cluster distance. Averaging both terms makes it far less outlier-sensitive than `dunn_index`, which takes the extreme of each. |
+| `dunn_medoid_separation_medoid_spread` | higher is better | Smallest medoid-to-medoid distance over the largest medoid spread, the spread being twice a cluster's mean medoid-to-member distance. This field ignores `representative_method` and always uses the true medoid, so a report requested with `representative_method="minimax"` still reports medoid-based values here. |
+| `point_biserial` | higher is better | Correlation between the pairwise distances and the within-versus-between split. Positive means between-cluster pairs are the more distant ones. The sign convention is stated because published sources differ on it. |
+
+The remaining two are read off the ranked pairwise distances and are computed
+only when `compute_pair_rank_indices=True`:
+
+| Metric | Direction | What it reports |
+|--------|-----------|-----------------|
+| `c_index` | lower is better | Where the within-cluster distance sum falls between the smallest and largest sums the same number of pairs could have taken. Zero is perfect. `NaN` when there are no within-pairs, no between-pairs, or no spread between those two bounds. |
+| `baker_hubert_gamma` | higher is better | Rank correlation over couples of one within-pair and one between-pair: the concordant count minus the discordant, over their total. Ranges from -1 to 1. `NaN` when no couple is either. |
+
+> These are **medoid-substituted** indices. The published Calinski-Harabasz and
+> Davies-Bouldin definitions use centroids, which do not exist for a distance
+> matrix; each cluster's medoid stands in for its centroid, and the global
+> medoid stands in for the grand mean. The values are therefore not comparable
+> with published figures or with scikit-learn's. Both ignore
+> `representative_method` and always use the true medoid, so a report requested
+> with `representative_method="minimax"` still reports medoid-based values here.
+
+### Optional report stages
+
+Two options, both off by default, turn on the report's optional stages:
+
+```python
+report = oecluster.cluster_report(
+    butina_result,
+    dm,
+    compute_pair_rank_indices=True,
+    compute_per_cluster_records=True,
+)
+```
+
+`compute_pair_rank_indices` is off by default because it is the one stage whose
+cost scales with the pair count rather than the sample count: it materialises
+every pairwise distance among the `Nc` clustered points as sortable arrays,
+`Nc * (Nc - 1) / 2` doubles in total, which is roughly 400 MB at
+`Nc = 10,000` and 10 GB at `Nc = 50,000`. A failed allocation raises
+`MemoryError`. One option covers both indices rather than two because they come
+off the same sorted arrays; once those are paid for, the second index is nearly
+free.
+
+`compute_per_cluster_records` populates `report.records`, one `ClusterRecord`
+per cluster in member-list order. Each record carries the cluster's `label`,
+`size`, `representative`, `mean_intra_distance`, `median_intra_distance`,
+`radius`, `diameter`, `mean_representative_distance`, `nearest_cluster`,
+`nearest_cluster_distance`, `silhouette` and `boundary_violations`. A record's
+`boundary_violations` counts pairs *involving* that cluster, so summing the
+column gives twice the scorecard's `boundary_violations`, which counts each
+pair once. `ClusterRecord` is a `typing.NamedTuple`, so
+`pandas.DataFrame(report.records)` works without a conversion step; pandas is
+not a dependency.
+
+`report.noise_coverage_at` restricts the coverage curve to the noise points,
+parallel to `coverage_thresholds` in the same way `coverage_at` is. Its length
+always matches `coverage_at`: the threshold count when the clustering has at
+least one cluster, and empty when it has none. Every entry is `NaN` when the
+clustering has no noise, rather than 0.0, which would read as "no noise point is
+covered" instead of "there is nothing to cover".
+
+### Asked-for versus undefined
+
+`report.requested` is a `ClusterReportRequested` naming the two optional
+computations the caller asked for, `pair_rank_indices` and
+`per_cluster_records`. It records the request and not the outcome, which is what
+makes a `NaN` readable: `False` means nobody asked, and `True` with `NaN` means
+asked and undefined.
+
+`compare_reports(...).to_table()` applies the same distinction to its cells. A
+cell is `None` when that report never asked the question -- an opt-in metric it
+did not request, a threshold it did not use, or a threshold it does carry but
+answered nothing at, as when the clustering has no clusters and both coverage
+curves come back empty -- while `nan` keeps its single meaning of asked and
+undefined. `__repr__` renders `None` as `--`. A caller reading cells as floats
+must test for `None` before doing arithmetic on them.
+
 ## Metric Requirements
 
 `butina()`, `dbscan()`, `hdbscan()`, `agglomerative()`, and `cluster_report()`

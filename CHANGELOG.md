@@ -2,6 +2,98 @@
 
 This file starts at 5.0.0; earlier releases are not recorded here.
 
+## [5.1.0] - 2026-09-10
+
+### Added
+
+- Seven internal cluster-validity indices on `ClusterReport`. Always computed:
+  `calinski_harabasz_medoid`, `davies_bouldin_medoid`,
+  `dunn_mean_separation_mean_diameter`,
+  `dunn_medoid_separation_medoid_spread` and `point_biserial`. Behind the new
+  `compute_pair_rank_indices` option: `c_index` and `baker_hubert_gamma`. The
+  two are behind one flag rather than two because both come off the same sorted
+  pair arrays -- once those are paid for, the second index is nearly free, and a
+  separate flag would advertise a saving that does not exist. That stage
+  allocates `Nc * (Nc - 1) / 2` doubles, roughly 400 MB at 10,000 clustered
+  points and 10 GB at 50,000, so it is off by default.
+- The Calinski-Harabasz and Davies-Bouldin indices are **medoid-substituted**:
+  the published definitions use centroids, which do not exist for a distance
+  matrix, so each cluster's medoid stands in for its centroid and the global
+  medoid for the grand mean. The values are not comparable with published or
+  scikit-learn figures. These two fields and
+  `dunn_medoid_separation_medoid_spread` always use the true medoid and ignore
+  `representative_method`, so a minimax-configured report still reports
+  medoid-based values for them.
+- A per-cluster record table, `ClusterReport.records`, behind the new
+  `compute_per_cluster_records` option. Each `ClusterRecord` carries the
+  cluster's size, representative, intra-distance mean and median, radius,
+  diameter, mean representative distance, nearest cluster and distance,
+  silhouette, and boundary-violation count. `boundary_violations` on a record
+  counts pairs *involving* that cluster, so the sum over records is twice the
+  scorecard's, which counts each pair once.
+- `ClusterReport.requested`, a `ClusterReportRequested` recording which optional
+  computations the caller asked for. It records the request, not the outcome, so
+  a NaN can be read unambiguously: false means nobody asked, true with NaN means
+  asked and undefined.
+- `ClusterReport.noise_coverage_at`, the coverage curve restricted to noise
+  points. Its length always matches `coverage_at`: the threshold count when the
+  clustering has at least one cluster, and empty when it has none. Every entry
+  is NaN when the clustering has no noise -- not 0.0, which would read as "no
+  noise point is covered" rather than "there is nothing to cover".
+- Python exports `ClusterRecord` and `ClusterReportRequested`, both
+  `typing.NamedTuple` subclasses, so `pandas.DataFrame(report.records)` works
+  without a conversion step. pandas is not a dependency.
+
+### Changed
+
+- `cluster_report` now refuses a `ClusteringResult` whose labels and members
+  describe different partitions. Newly `std::invalid_argument`: a sample in more
+  than one cluster; a member whose label entry does not match the cluster
+  holding it; a clustered sample omitted from every member list; a non-noise
+  label naming no cluster; a noise-labelled sample sitting in a cluster. Newly
+  `std::out_of_range`: a member index inside the storage range but past the end
+  of a shorter label vector, which previously read out of bounds. The
+  empty-cluster, duplicate-within-a-cluster and beyond-`NumSamples()` refusals
+  are unchanged and keep their present types and messages. The check now also
+  runs when the member list is empty, so a result with a non-noise label and no
+  clusters refuses instead of returning an all-NaN report. Every algorithm the
+  library ships already satisfies all of it, so these can only fire on a
+  hand-built result.
+- `cluster_report` now refuses a non-finite distance that reaches a reported
+  value with `std::invalid_argument`. Previously a NaN reached `std::sort` through the
+  intra-distance median, which is undefined behaviour, so this removes a hazard
+  rather than a defined result. A caller who loaded a matrix with holes will see
+  it.
+- `cluster_report` now raises `ValueError` for a NaN coverage threshold
+  (`coverage thresholds must not be NaN`) or a NaN `boundary_threshold`
+  (`boundary_threshold must not be NaN`). Both were previously accepted and
+  produced a computed value that `compare_reports(...).to_table()` could not
+  match back to its threshold, so the cell rendered as though the question had
+  never been asked. Infinite thresholds remain accepted and are unaffected.
+- `compare_reports(...).to_table()` renders a cell as `None` rather than `nan`
+  when the report never asked the question, in any of three ways: it did not
+  request an opt-in metric (`c_index`, `baker_hubert_gamma`); it does not carry
+  that coverage threshold at all; or it carries the threshold but answered
+  nothing at it, as when the clustering has no clusters and both coverage curves
+  come back empty. `nan` keeps its single meaning of asked-and-undefined; the
+  two states were previously indistinguishable, which is why the change was
+  made. A caller who consumed the table as floats and used `math.isnan` to
+  detect absence must now also test for `None`, and arithmetic on a cell without
+  that test raises `TypeError` where it used to propagate a NaN. `__repr__`
+  renders `None` as `--`. The table also gains rows for the new metrics, for
+  `noise_coverage_at`, and a `requested_pair_rank_indices` row stating in one
+  line what the `None` in those two metric rows means. There is deliberately no
+  matching `requested_per_cluster_records` row: that flag governs `records`,
+  which the table does not carry.
+- The default path's cost changes. It grows no pairwise-sized allocation and no
+  additional distance sweep, and pass fusion removes two of the three
+  cross-cluster walks, one of the two medoid selections, and a factor of the
+  cluster count from the coverage loop, so the expected direction is faster.
+  Unchanged cost is not claimed.
+- Python `MemoryError` now surfaces from `cluster_report` for `std::bad_alloc`
+  and `std::length_error`. Both previously reached Python as `RuntimeError`,
+  indistinguishable from a validation failure.
+
 ## [5.0.0] - 2026-09-06
 
 ### Changed

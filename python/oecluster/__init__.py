@@ -25,8 +25,8 @@ from typing import Any, ClassVar, NamedTuple
 
 import numpy as np
 
-__version__ = "5.0.0"
-__version_info__ = (5, 0, 0)
+__version__ = "5.1.0"
+__version_info__ = (5, 1, 0)
 
 
 _OPENEYE_COMPAT_PRELOAD_PATHS: list[str] = []
@@ -3225,7 +3225,7 @@ def cluster_report(result, distance_matrix, *, preset="default",
     :returns: A ClusterReport.
     :raises TypeError: If result/distance_matrix have the wrong type, or
         compute_pair_rank_indices, compute_per_cluster_records or
-        allow_nonmetric is not a bool or numpy.bool_.
+        allow_nonmetric is not a bool or ``numpy.bool_``.
     :raises ValueError: If a preset/method/threshold is invalid, the result and
         the matrix cover different numbers of samples, the matrix uses sparse
         storage, or the matrix is not a metric -- and additionally: any
