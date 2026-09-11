@@ -315,16 +315,23 @@ def test_comparison_table_carries_populated_coverage_curves():
 
 
 def test_comparison_scalar_cells_come_from_their_own_report():
-    """Every scalar row against the two reports' own attributes.
+    """Every scalar row against the three reports' own attributes.
 
     The table's whole purpose is to put one report's number beside another's,
     and nothing else in this file checks that a cell came from its own column's
-    report: a lookup that read report 0 for every column would publish one
-    clustering's metrics under all the labels and satisfy every other test
-    here. Both reports request the pair-rank indices so no cell is gated and
-    the oracle is uniform across all 27 scalars. The count assertion is what
-    keeps the loop honest -- a fixture whose two reports agreed everywhere
-    would pass it whichever report each cell was read from.
+    report: a lookup that read one fixed report for every column would publish
+    one clustering's metrics under all the labels and satisfy every other test
+    here. All three reports request the pair-rank indices, so no cell is gated
+    and the oracle is uniform across all 27 scalars.
+
+    The three clusterings are chosen so that no scalar holds the same value in
+    all three columns -- a noisy DBSCAN run, a Butina split of the same matrix,
+    and a Butina run tight enough to leave every point a singleton. A scalar the
+    fixtures agreed on everywhere would be a scalar whose cell could be read
+    from any report and still match, so the per-field check below is what stops
+    the loop going quietly vacuous on the metrics that happen to coincide. It
+    has to be per field: an aggregate count of how many scalars differ is
+    satisfied by the ones that already discriminate.
     """
     import oecluster
 
@@ -332,20 +339,21 @@ def test_comparison_scalar_cells_come_from_their_own_report():
     noisy = oecluster.cluster_report(
         oecluster.dbscan(noise_dm, eps=0.2, min_samples=3), noise_dm,
         compute_pair_rank_indices=True)
+    split = oecluster.cluster_report(
+        oecluster.butina(noise_dm, threshold=0.25), noise_dm,
+        compute_pair_rank_indices=True)
     clean_dm = _two_cluster_dm()
-    clean = oecluster.cluster_report(
-        oecluster.butina(clean_dm, threshold=0.5), clean_dm,
+    atomised = oecluster.cluster_report(
+        oecluster.butina(clean_dm, threshold=0.1), clean_dm,
         compute_pair_rank_indices=True)
 
-    table = oecluster.compare_reports(noisy, clean).to_table()
-    differing = 0
+    reports = (noisy, split, atomised)
+    table = oecluster.compare_reports(*reports).to_table()
     for name in oecluster.ClusterReport._SCALAR_FIELDS:
-        cells = _row(table, name)
         # repr rather than == so a NaN cell compares equal to its own NaN.
-        expected = [repr(getattr(report, name)) for report in (noisy, clean)]
-        assert [repr(cell) for cell in cells] == expected, name
-        differing += len(set(expected)) > 1
-    assert differing >= 20
+        expected = [repr(getattr(report, name)) for report in reports]
+        assert len(set(expected)) > 1, f"{name} is equal in every fixture"
+        assert [repr(cell) for cell in _row(table, name)] == expected, name
 
 
 def test_comparison_table_pads_each_report_against_its_own_thresholds():
