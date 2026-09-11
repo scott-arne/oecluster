@@ -53,6 +53,14 @@ def _row(table, name):
     raise AssertionError(f"no row named {name!r} in {[r[0] for r in table]}")
 
 
+def _repr_row(rendered, name):
+    """The rendered cells of the row named ``name``, without the name column."""
+    for line in rendered.splitlines():
+        if line.startswith(name) and not line[len(name):len(name) + 1].strip():
+            return line[len(name):]
+    raise AssertionError(f"no rendered row named {name!r} in:\n{rendered}")
+
+
 def test_report_basic_and_compactness():
     import oecluster
 
@@ -262,7 +270,7 @@ def test_comparison_table_pads_a_report_with_no_clusters():
 def test_comparison_table_carries_populated_coverage_curves():
     """The table looks its coverage values up by threshold index, and the two
     fixtures the tests above use are palindromes -- (1.0, 1.0, 1.0) beside three
-    NaNs, and a column padded with NaN throughout -- so neither can tell an
+    NaNs, and a column padded with None throughout -- so neither can tell an
     intact curve from a rearranged one. A report with real noise supplies a pair
     of curves that rise strictly and differ from each other at every threshold,
     which makes a rearrangement of either row family visible; pairing it with a
@@ -304,6 +312,40 @@ def test_comparison_table_carries_populated_coverage_curves():
     assert [repr(v) for v in values["noise_coverage_at[0.25]"][1:]] == ["nan"]
     assert [repr(v) for v in values["noise_coverage_at[0.35]"][1:]] == ["nan"]
     assert [repr(v) for v in values["noise_coverage_at[0.45]"][1:]] == ["nan"]
+
+
+def test_comparison_scalar_cells_come_from_their_own_report():
+    """Every scalar row against the two reports' own attributes.
+
+    The table's whole purpose is to put one report's number beside another's,
+    and nothing else in this file checks that a cell came from its own column's
+    report: a lookup that read report 0 for every column would publish one
+    clustering's metrics under all the labels and satisfy every other test
+    here. Both reports request the pair-rank indices so no cell is gated and
+    the oracle is uniform across all 27 scalars. The count assertion is what
+    keeps the loop honest -- a fixture whose two reports agreed everywhere
+    would pass it whichever report each cell was read from.
+    """
+    import oecluster
+
+    noise_dm = _noise_bearing_dm()
+    noisy = oecluster.cluster_report(
+        oecluster.dbscan(noise_dm, eps=0.2, min_samples=3), noise_dm,
+        compute_pair_rank_indices=True)
+    clean_dm = _two_cluster_dm()
+    clean = oecluster.cluster_report(
+        oecluster.butina(clean_dm, threshold=0.5), clean_dm,
+        compute_pair_rank_indices=True)
+
+    table = oecluster.compare_reports(noisy, clean).to_table()
+    differing = 0
+    for name in oecluster.ClusterReport._SCALAR_FIELDS:
+        cells = _row(table, name)
+        # repr rather than == so a NaN cell compares equal to its own NaN.
+        expected = [repr(getattr(report, name)) for report in (noisy, clean)]
+        assert [repr(cell) for cell in cells] == expected, name
+        differing += len(set(expected)) > 1
+    assert differing >= 20
 
 
 def test_comparison_table_pads_each_report_against_its_own_thresholds():
@@ -367,7 +409,12 @@ def test_pair_rank_cells_distinguish_unasked_from_undefined():
     one mean anything: a report that did not ask reads None, and a report that
     asked and got no answer reads NaN. A table that collapsed the two would
     satisfy half of this and fail the other. The repr is checked as well
-    because the two states are useless to a reader if they print alike."""
+    because the two states are useless to a reader if they print alike.
+
+    The rendering is read row by row rather than swept for a token: a search of
+    the whole table finds a -- wherever it comes from, so it passes just as well
+    when the formatter blanks some unrelated cell it should have printed. Naming
+    the row ties each token to the cell that must carry it."""
     import oecluster
 
     dm = _two_cluster_dm()
@@ -390,8 +437,16 @@ def test_pair_rank_cells_distinguish_unasked_from_undefined():
     assert math.isnan(undefined_cells[1])
 
     rendered = repr(comparison)
-    assert "--" in rendered
-    assert "nan" in rendered
+    c_index_line = _repr_row(rendered, "c_index")
+    assert "--" in c_index_line
+    assert "nan" in c_index_line
+    # The other two rows are what keep the assertions above from being
+    # satisfied by any -- anywhere in the table. A formatter that tested
+    # falsiness rather than identity would blank the False flag and the zero
+    # count, claiming nobody asked about values the reports did answer.
+    assert "False" in _repr_row(rendered, "requested_pair_rank_indices")
+    assert "0" in _repr_row(rendered, "num_noise")
+    assert "--" not in _repr_row(rendered, "num_noise")
 
 
 def test_coverage_rows_use_none_for_thresholds_a_report_never_used():
