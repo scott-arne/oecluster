@@ -1965,6 +1965,31 @@ TEST(ClusterReportTest, UnsupportedRepresentativeMethodOutranksNanThreshold) {
     }
 }
 
+// Both NaN refusals sit inside the members-non-empty guard, so a partition with
+// no clusters at all still accepts a NaN threshold. That is deliberate: such a
+// report evaluates no threshold comparison, so there is no wrong number for the
+// NaN to hide behind and refusing it would be over-refusal. Nothing else pins
+// the placement, though -- hoisting the guard out of that block is a one-line
+// change no other test in this file would notice.
+TEST(ClusterReportTest, EmptyPartitionAcceptsANanThreshold) {
+    const DenseStorage storage = MakeTwoClusterStorage();
+    // Every sample is noise and the noise is not folded into singletons, so the
+    // member lists come out empty while the labels still match the storage.
+    const ClusteringResult result = MakeResult({-1, -1, -1, -1});
+    ClusterReportOptions options;
+    options.treat_noise_as_singletons = false;
+    options.boundary_threshold = std::numeric_limits<double>::quiet_NaN();
+    options.coverage_thresholds = {std::numeric_limits<double>::quiet_NaN()};
+
+    const ClusterReport r = cluster_report(result, storage, options);
+
+    ASSERT_EQ(r.num_clusters, 0u);
+    EXPECT_EQ(r.num_noise, 4u);
+    // Zero for want of a pair to count, not for want of a comparison that held.
+    EXPECT_EQ(r.boundary_violations, 0u);
+    EXPECT_TRUE(r.coverage_at.empty());
+}
+
 // The shape that makes the selector's comparator genuinely inconsistent, rather
 // than merely wrong. cluster_representative sorts each candidate's intra
 // distances through median_distance and then stable_sorts the candidate scores;
