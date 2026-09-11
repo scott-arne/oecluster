@@ -283,14 +283,14 @@ report = oecluster.cluster_report(
 )
 ```
 
-`compute_pair_rank_indices` is off by default because it is the largest of the
-two optional stages' pair-scaled costs, and the only one that scales with all
-`Nc` clustered points rather than with the largest single cluster: it
-materialises every pairwise distance among them as sortable arrays,
-`Nc * (Nc - 1) / 2` doubles in total, which is roughly 400 MB at `Nc = 10,000`
-and 10 GB at `Nc = 50,000`. A failed allocation raises `MemoryError`. One option
-covers both indices rather than two because they come off the same sorted
-arrays; once those are paid for, the second index is nearly free.
+`compute_pair_rank_indices` is off by default because it is the one optional
+stage whose pair-scaled cost grows with all `Nc` clustered points rather than
+with the largest single cluster: it materialises every pairwise distance among
+them as sortable arrays, `Nc * (Nc - 1) / 2` doubles in total, which is roughly
+400 MB at `Nc = 10,000` and 10 GB at `Nc = 50,000`. A failed allocation raises
+`MemoryError`. One option covers both indices rather than two because they come
+off the same sorted arrays; once those are paid for, the second index is nearly
+free.
 
 `compute_per_cluster_records` populates `report.records`, one `ClusterRecord`
 per cluster in member-list order. Each record carries the cluster's `label`,
