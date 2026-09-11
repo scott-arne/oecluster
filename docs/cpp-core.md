@@ -137,11 +137,14 @@ is better), are computed only under `ClusterReportOptions::compute_pair_rank_ind
   flag covers both indices because both are read off the same sorted arrays.
 - `compute_per_cluster_records` fills `ClusterReport::records`, a
   `std::vector<ClusterRecord>` holding one row per cluster in member-list order:
-  size, representative, intra-distance mean and median, radius, diameter, mean
-  representative distance, nearest cluster and its distance, silhouette, and
-  boundary-violation count. A record's `boundary_violations` counts pairs
-  involving that cluster, so the sum over records is twice the report's own
-  count, which counts each pair once.
+  label, size, representative, intra-distance mean and median, radius, diameter,
+  mean representative distance, nearest cluster and its distance, silhouette,
+  and boundary-violation count. It buffers the largest cluster's `n(n-1)/2`
+  pairwise distances to take their median, and `detail::median_distance` copies
+  that buffer to sort it, so roughly 400 MB for the buffer and 400 MB again for
+  the copy, transiently, at `n = 10,000`. A record's `boundary_violations`
+  counts pairs involving that cluster, so the sum over records is twice the
+  report's own count, which counts each pair once.
 
 `ClusterReport::noise_coverage_at` is the coverage curve restricted to the noise
 points. Its length matches `coverage_at`: the threshold count when there is at

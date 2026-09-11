@@ -251,16 +251,8 @@ fields. Five of them are always computed:
 | `calinski_harabasz_medoid` | higher is better | Between-cluster scatter divided by within-cluster scatter, each scaled by its degrees of freedom. `NaN` when there are fewer than two clusters, when every cluster is a singleton, or when the within-cluster scatter is zero. |
 | `davies_bouldin_medoid` | lower is better | Mean over clusters of the worst ratio of two clusters' spreads to the distance between their centers. `NaN` when there are fewer than two clusters, and infinite when two centers coincide, which is reported rather than divided by. |
 | `dunn_mean_separation_mean_diameter` | higher is better | Smallest mean between-cluster distance over the largest mean within-cluster distance. Averaging both terms makes it far less outlier-sensitive than `dunn_index`, which takes the extreme of each. |
-| `dunn_medoid_separation_medoid_spread` | higher is better | Smallest medoid-to-medoid distance over the largest medoid spread, the spread being twice a cluster's mean medoid-to-member distance. This field ignores `representative_method` and always uses the true medoid, so a report requested with `representative_method="minimax"` still reports medoid-based values here. |
+| `dunn_medoid_separation_medoid_spread` | higher is better | Smallest medoid-to-medoid distance over the largest medoid spread, the spread being twice a cluster's mean medoid-to-member distance, averaged over all `n_k` members and so counting the medoid's own zero. This field ignores `representative_method` and always uses the true medoid, so a report requested with `representative_method="minimax"` still reports medoid-based values here. |
 | `point_biserial` | higher is better | Correlation between the pairwise distances and the within-versus-between split. Positive means between-cluster pairs are the more distant ones. The sign convention is stated because published sources differ on it. |
-
-The remaining two are read off the ranked pairwise distances and are computed
-only when `compute_pair_rank_indices=True`:
-
-| Metric | Direction | What it reports |
-|--------|-----------|-----------------|
-| `c_index` | lower is better | Where the within-cluster distance sum falls between the smallest and largest sums the same number of pairs could have taken. Zero is perfect. `NaN` when there are no within-pairs, no between-pairs, or no spread between those two bounds. |
-| `baker_hubert_gamma` | higher is better | Rank correlation over couples of one within-pair and one between-pair: the concordant count minus the discordant, over their total. Ranges from -1 to 1. `NaN` when no couple is either. |
 
 > These are **medoid-substituted** indices. The published Calinski-Harabasz and
 > Davies-Bouldin definitions use centroids, which do not exist for a distance
@@ -269,6 +261,14 @@ only when `compute_pair_rank_indices=True`:
 > with published figures or with scikit-learn's. Both ignore
 > `representative_method` and always use the true medoid, so a report requested
 > with `representative_method="minimax"` still reports medoid-based values here.
+
+The remaining two of the seven are read off the ranked pairwise distances and
+are computed only when `compute_pair_rank_indices=True`:
+
+| Metric | Direction | What it reports |
+|--------|-----------|-----------------|
+| `c_index` | lower is better | Where the within-cluster distance sum falls between the smallest and largest sums the same number of pairs could have taken. Zero is perfect. `NaN` when there are no within-pairs, no between-pairs, or no spread between those two bounds. |
+| `baker_hubert_gamma` | higher is better | Rank correlation over couples of one within-pair and one between-pair: the concordant count minus the discordant, over their total. Ranges from -1 to 1. `NaN` when no couple is either. |
 
 ### Optional report stages
 
@@ -283,14 +283,14 @@ report = oecluster.cluster_report(
 )
 ```
 
-`compute_pair_rank_indices` is off by default because it is the one stage whose
-cost scales with the pair count rather than the sample count: it materialises
-every pairwise distance among the `Nc` clustered points as sortable arrays,
-`Nc * (Nc - 1) / 2` doubles in total, which is roughly 400 MB at
-`Nc = 10,000` and 10 GB at `Nc = 50,000`. A failed allocation raises
-`MemoryError`. One option covers both indices rather than two because they come
-off the same sorted arrays; once those are paid for, the second index is nearly
-free.
+`compute_pair_rank_indices` is off by default because it is the largest of the
+report's pair-scaled costs, and the only one that scales with all `Nc` clustered
+points rather than with the largest single cluster: it materialises every
+pairwise distance among them as sortable arrays, `Nc * (Nc - 1) / 2` doubles in
+total, which is roughly 400 MB at `Nc = 10,000` and 10 GB at `Nc = 50,000`. A
+failed allocation raises `MemoryError`. One option covers both indices rather
+than two because they come off the same sorted arrays; once those are paid for,
+the second index is nearly free.
 
 `compute_per_cluster_records` populates `report.records`, one `ClusterRecord`
 per cluster in member-list order. Each record carries the cluster's `label`,
@@ -301,7 +301,11 @@ per cluster in member-list order. Each record carries the cluster's `label`,
 column gives twice the scorecard's `boundary_violations`, which counts each
 pair once. `ClusterRecord` is a `typing.NamedTuple`, so
 `pandas.DataFrame(report.records)` works without a conversion step; pandas is
-not a dependency.
+not a dependency. This stage is pair-scaled too, but bounded by the largest
+cluster rather than by the whole clustering: it buffers that cluster's
+`n * (n - 1) / 2` distances to take their median, and the median is taken over a
+copy of the buffer, so roughly 400 MB for the buffer and 400 MB again for the
+copy, transiently, at `n = 10,000`.
 
 `report.noise_coverage_at` restricts the coverage curve to the noise points,
 parallel to `coverage_thresholds` in the same way `coverage_at` is. Its length

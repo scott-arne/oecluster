@@ -26,7 +26,7 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   medoid-based values for them.
 - A per-cluster record table, `ClusterReport.records`, behind the new
   `compute_per_cluster_records` option. Each `ClusterRecord` carries the
-  cluster's size, representative, intra-distance mean and median, radius,
+  cluster's label, size, representative, intra-distance mean and median, radius,
   diameter, mean representative distance, nearest cluster and distance,
   silhouette, and boundary-violation count. `boundary_violations` on a record
   counts pairs *involving* that cluster, so the sum over records is twice the
@@ -66,10 +66,16 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   it.
 - `cluster_report` now raises `ValueError` for a NaN coverage threshold
   (`coverage thresholds must not be NaN`) or a NaN `boundary_threshold`
-  (`boundary_threshold must not be NaN`). Both were previously accepted and
-  produced a computed value that `compare_reports(...).to_table()` could not
-  match back to its threshold, so the cell rendered as though the question had
-  never been asked. Infinite thresholds remain accepted and are unaffected.
+  (`boundary_threshold must not be NaN`). Both were previously accepted, and
+  each failed in its own way. A NaN coverage threshold produced a computed value
+  that `compare_reports(...).to_table()` could not match back to its threshold,
+  so the cell rendered as though the question had never been asked. A NaN
+  `boundary_threshold` failed worse: no distance compares against it, so every
+  pair cleared the boundary and the report returned `boundary_violations = 0`.
+  That is a plain scalar row in the table, published as an ordinary `0` -- a
+  clean bill of health for a question that was never answerable, with nothing
+  marking it as suspect, where the coverage case at least rendered `--`.
+  Infinite thresholds remain accepted and are unaffected.
 - `compare_reports(...).to_table()` renders a cell as `None` rather than `nan`
   when the report never asked the question, in any of three ways: it did not
   request an opt-in metric (`c_index`, `baker_hubert_gamma`); it does not carry
