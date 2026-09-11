@@ -1891,14 +1891,24 @@ TEST(ClusterReportTest, NanBoundaryThresholdIsRefused) {
 
 // The coverage list is a list, so the refusal has to say which entry is bad --
 // the caller cannot act on "one of them is NaN". The NaN sits at index 2 of
-// four, so a message that hardcoded either end of the list names the wrong
+// five, so a message that hardcoded either end of the list names the wrong
 // entry and fails here.
+//
+// The second NaN at index 4 is what makes the refusal name the FIRST offender
+// rather than merely an offender. With one NaN in the list, a guard rewritten
+// to record the offending index and throw after the loop -- naming the last --
+// is indistinguishable from the shipped one. A caller told to fix threshold 4
+// when threshold 2 is also NaN just earns a second refusal on the next call.
 TEST(ClusterReportTest, NanCoverageThresholdIsRefusedByIndex) {
     const DenseStorage storage = MakeThreeClusterStorage();
     const ClusteringResult result = MakeResult({0, 0, 1, 1, 1, 2, 2, 2, 2});
     ClusterReportOptions options;
     options.coverage_thresholds = {
-        0.05, 0.10, std::numeric_limits<double>::quiet_NaN(), 0.15};
+        0.05,
+        0.10,
+        std::numeric_limits<double>::quiet_NaN(),
+        0.15,
+        std::numeric_limits<double>::quiet_NaN()};
 
     try {
         cluster_report(result, storage, options);
@@ -1907,6 +1917,36 @@ TEST(ClusterReportTest, NanCoverageThresholdIsRefusedByIndex) {
         EXPECT_EQ(
             std::string(e.what()),
             "cluster_report: coverage threshold 2 must not be NaN");
+    }
+}
+
+// A malformed threshold is a configuration error of the same class as an
+// unsupported representative_method: no repair of the distance matrix rescues
+// it, so it is named ahead of the finiteness refusal. INVARIANT 1, and the same
+// precedence argument as UnsupportedRepresentativeMethodOutranksNonFiniteDistance
+// above.
+//
+// This is the only test that combines a NaN threshold with a holey matrix, and
+// so the only one that pins WHERE the two threshold guards sit rather than
+// merely that they exist. Moving them down beside the code that reads the
+// options -- a plausible tidy-up -- puts them after the intra pass, and then
+// detail::checked_distance answers first and the caller is told to fix the
+// matrix instead of the option they can actually act on.
+TEST(ClusterReportTest, NanThresholdOutranksNonFiniteDistance) {
+    DenseStorage storage = MakeSixPointStorage();
+    // Inside cluster {0,1,2}, so the intra pass reads it and throws.
+    storage.Set(1, 2, std::numeric_limits<double>::quiet_NaN());
+    const ClusteringResult result = MakeResult({0, 0, 0, 1, 1, 1});
+    ClusterReportOptions options;
+    options.boundary_threshold = std::numeric_limits<double>::quiet_NaN();
+
+    try {
+        cluster_report(result, storage, options);
+        FAIL() << "expected std::invalid_argument";
+    } catch (const std::invalid_argument& e) {
+        const std::string message(e.what());
+        EXPECT_EQ(message, "cluster_report: boundary_threshold must not be NaN");
+        EXPECT_EQ(message.find("not finite"), std::string::npos) << message;
     }
 }
 
@@ -1987,18 +2027,25 @@ TEST(ClusterReportTest, UnsupportedRepresentativeMethodOutranksNanThreshold) {
 }
 
 // Both NaN refusals sit inside the members-non-empty guard, so a partition with
-// no clusters at all still accepts a NaN threshold. That is deliberate: such a
-// report evaluates no threshold comparison, so there is no wrong number for the
-// NaN to hide behind and refusing it would be over-refusal. Nothing else pins
-// the placement, though -- hoisting the guard out of that block is a one-line
-// change no other test in this file would notice.
+// no clusters at all still accepts a NaN threshold. That is deliberate: a report
+// with no clusters is fully determined without either option being read, so
+// there is no wrong number for the NaN to hide behind and refusing it would be
+// over-refusal. Nothing else pins the placement -- hoisting the guard out of
+// that block is a one-line change no other test in this file would notice.
+//
+// The rule the guards implement is a placement rule, "at least one cluster", and
+// not "would this call have read the threshold". SingleClusterRefusesANanThreshold
+// below pins the other side of it: at K == 1 the boundary threshold is provably
+// never read and a NaN is still refused. Uniform placement is the more
+// predictable contract, and refusing a NaN never takes away a meaningful answer.
 TEST(ClusterReportTest, EmptyPartitionAcceptsANanThreshold) {
     const DenseStorage storage = MakeTwoClusterStorage();
-    // Every sample is noise and the noise is not folded into singletons, so the
-    // member lists come out empty while the labels still match the storage.
+    // labels_to_clusters returns an empty Clusters as soon as the largest label
+    // is negative, so an all-noise label vector is what empties the member list.
+    // treat_noise_as_singletons plays no part -- it only picks the denominator
+    // for singleton_fraction, which this test does not assert.
     const ClusteringResult result = MakeResult({-1, -1, -1, -1});
     ClusterReportOptions options;
-    options.treat_noise_as_singletons = false;
     options.boundary_threshold = std::numeric_limits<double>::quiet_NaN();
     options.coverage_thresholds = {std::numeric_limits<double>::quiet_NaN()};
 
@@ -2009,6 +2056,56 @@ TEST(ClusterReportTest, EmptyPartitionAcceptsANanThreshold) {
     // Zero for want of a pair to count, not for want of a comparison that held.
     EXPECT_EQ(r.boundary_violations, 0u);
     EXPECT_TRUE(r.coverage_at.empty());
+}
+
+// K == 1, the cluster count the other NaN tests skip: every one of them uses the
+// K = 3 partition and the acceptance test above uses K = 0. Both guards are
+// therefore pinned only at the two ends, and scoping either of them under a
+// cluster count -- wrapping it in `if (cluster_count >= 2)`, which the guards'
+// own rationale comment can be read as inviting -- keeps the rest of the suite
+// green while restoring the defect the guards exist to close.
+//
+// It restores it for real, not in principle. The coverage scan is not gated on
+// the cluster count; it needs only a non-empty sample count, a non-empty
+// representative list and a non-empty threshold list, all of which hold at
+// K == 1. So a scoped-away guard lets `nearest <= NaN` come back false for every
+// point and publishes coverage_at[0] = 0.0, a plausible "nothing is covered" for
+// a question that was never answerable.
+//
+// The boundary half is here for the opposite reason. At K == 1 the threshold is
+// provably never read -- it appears only inside the double cluster loop, which
+// no single cluster enters -- and it is refused anyway. That is the placement
+// rule stated plainly: the guards refuse from the first cluster onwards, whether
+// or not this particular call would have consumed the value.
+//
+// Both halves share one fixture and one cluster count, so they are one test:
+// each is the other's context, and a future reader relaxing either guard needs
+// to see both consequences together.
+TEST(ClusterReportTest, SingleClusterRefusesANanThreshold) {
+    const DenseStorage storage = MakeTwoClusterStorage();
+    const ClusteringResult result = MakeResult({0, 0, 0, 0});
+
+    ClusterReportOptions coverage_nan;
+    coverage_nan.coverage_thresholds = {std::numeric_limits<double>::quiet_NaN()};
+    try {
+        cluster_report(result, storage, coverage_nan);
+        FAIL() << "expected std::invalid_argument";
+    } catch (const std::invalid_argument& e) {
+        EXPECT_EQ(
+            std::string(e.what()),
+            "cluster_report: coverage threshold 0 must not be NaN");
+    }
+
+    ClusterReportOptions boundary_nan;
+    boundary_nan.boundary_threshold = std::numeric_limits<double>::quiet_NaN();
+    try {
+        cluster_report(result, storage, boundary_nan);
+        FAIL() << "expected std::invalid_argument";
+    } catch (const std::invalid_argument& e) {
+        EXPECT_EQ(
+            std::string(e.what()),
+            "cluster_report: boundary_threshold must not be NaN");
+    }
 }
 
 // The shape that makes the selector's comparator genuinely inconsistent, rather
