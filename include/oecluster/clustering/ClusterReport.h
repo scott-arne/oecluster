@@ -159,8 +159,17 @@ struct ClusterReport {
     // for. New fields get the honest default -- an unpopulated metric reads as
     // undefined rather than as a measurement of zero.
     /// Higher is better. NaN when K < 2, Nc == K, or the denominator is zero.
+    /// Medoid-substituted: the published Calinski-Harabasz definition uses
+    /// centroids, which do not exist for a distance matrix, so each cluster's
+    /// medoid stands in for its centroid and the global medoid stands in for
+    /// the grand mean. The value is therefore not comparable with published
+    /// figures or with scikit-learn's.
     double calinski_harabasz_medoid = std::numeric_limits<double>::quiet_NaN();
     /// Lower is better. NaN when K < 2; inf when two medoids coincide.
+    /// Medoid-substituted: the published Davies-Bouldin definition uses
+    /// centroids, which do not exist for a distance matrix, so each cluster's
+    /// medoid stands in for its centroid. The value is therefore not
+    /// comparable with published figures or with scikit-learn's.
     double davies_bouldin_medoid = std::numeric_limits<double>::quiet_NaN();
     /// Higher is better. NaN when K < 2 or the max mean within-pair distance is 0.
     double dunn_mean_separation_mean_diameter = std::numeric_limits<double>::quiet_NaN();
