@@ -95,10 +95,15 @@ struct ClusterReportOptions {
     RepresentativeMethod representative_method = RepresentativeMethod::Medoid;
     bool treat_noise_as_singletons = true;
     size_t num_threads = 0;
-    /// Enables c_index and baker_hubert_gamma. Off by default: the stage
-    /// materialises every pairwise distance among clustered points as two
-    /// sortable arrays, Nc(Nc-1)/2 doubles in total -- roughly 400 MB at
-    /// Nc = 10,000 and 10 GB at Nc = 50,000.
+    /// Enables c_index and baker_hubert_gamma. The two sorted arrays the
+    /// indices are read off hold every pairwise distance among clustered
+    /// points, Nc(Nc-1)/2 doubles in total -- roughly 400 MB at Nc = 10,000
+    /// and 10 GB at Nc = 50,000 -- but only the between-cluster array is this
+    /// flag's own cost. The within-cluster array, sum_k n_k(n_k-1)/2 doubles,
+    /// is built on every call because median_intra_distance is taken over it.
+    /// So the flag adds nothing to a single-cluster result and nearly the
+    /// whole figure to one with small clusters, and it is off by default for
+    /// the second case.
     bool compute_pair_rank_indices = false;
     /// Enables ClusterReport::records. Off by default: the stage buffers the
     /// largest cluster's pairwise distances for the median, n(n-1)/2 doubles,

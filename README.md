@@ -518,10 +518,14 @@ medoid stands in for one — which makes them incomparable with published or
 scikit-learn figures; those two and `dunn_medoid_separation_medoid_spread`
 always use the true medoid and ignore `representative_method`.
 `compute_pair_rank_indices=True` adds `c_index` (lower is better) and
-`baker_hubert_gamma` (higher is better); it is off by default because the stage
-sorts every pairwise distance among the `Nc` clustered points,
-`Nc * (Nc - 1) / 2` doubles, or roughly 400 MB at 10,000 clustered points and
-10 GB at 50,000.
+`baker_hubert_gamma` (higher is better). Both are read off two sorted arrays
+holding every pairwise distance among the `Nc` clustered points,
+`Nc * (Nc - 1) / 2` doubles between them, or roughly 400 MB at 10,000 clustered
+points and 10 GB at 50,000 — but only the between-cluster array is the flag's
+own cost, because the within-cluster one is built on every call for
+`median_intra_distance`. The flag therefore adds nothing to a single-cluster
+result and nearly the whole figure to one with small clusters, and it is off by
+default for the second case.
 
 `compute_per_cluster_records=True` fills `report.records` with one
 `ClusterRecord` per cluster — size, representative, spread, nearest cluster,

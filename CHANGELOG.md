@@ -13,9 +13,13 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   `compute_pair_rank_indices` option: `c_index` and `baker_hubert_gamma`. The
   two are behind one flag rather than two because both come off the same sorted
   pair arrays -- once those are paid for, the second index is nearly free, and a
-  separate flag would advertise a saving that does not exist. That stage
-  allocates `Nc * (Nc - 1) / 2` doubles, roughly 400 MB at 10,000 clustered
-  points and 10 GB at 50,000, so it is off by default.
+  separate flag would advertise a saving that does not exist. Those arrays hold
+  `Nc * (Nc - 1) / 2` doubles between them, roughly 400 MB at 10,000 clustered
+  points and 10 GB at 50,000, but only the between-cluster one is the flag's own
+  cost: the within-cluster array is built on every call, with or without the
+  flag, because `median_intra_distance` is taken over it. The flag's share of
+  the figure runs from nothing on a single-cluster result to nearly all of it
+  when the clusters are small, and it is off by default for the second case.
 - The Calinski-Harabasz and Davies-Bouldin indices are **medoid-substituted**:
   the published definitions use centroids, which do not exist for a distance
   matrix, so each cluster's medoid stands in for its centroid and the global

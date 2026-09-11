@@ -285,9 +285,14 @@ report = oecluster.cluster_report(
 
 `compute_pair_rank_indices` is off by default because it is the one optional
 stage whose pair-scaled cost grows with all `Nc` clustered points rather than
-with the largest single cluster: it materialises every pairwise distance among
-them as sortable arrays, `Nc * (Nc - 1) / 2` doubles in total, which is roughly
-400 MB at `Nc = 10,000` and 10 GB at `Nc = 50,000`. A failed allocation raises
+with the largest single cluster. The two sorted arrays it reads hold every
+pairwise distance among those points, `Nc * (Nc - 1) / 2` doubles in total,
+which is roughly 400 MB at `Nc = 10,000` and 10 GB at `Nc = 50,000` -- but the
+flag pays for only the between-cluster array. The within-cluster one is built on
+every call, with or without the flag, because `median_intra_distance` is taken
+over it, and taking that median copies the array transiently. So the flag adds
+nothing to a single-cluster result and nearly the whole figure to one with small
+clusters, which is the case it is off by default for. A failed allocation raises
 `MemoryError`. One option covers both indices rather than two because they come
 off the same sorted arrays; once those are paid for, the second index is nearly
 free.

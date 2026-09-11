@@ -3209,11 +3209,15 @@ def cluster_report(result, distance_matrix, *, preset="default",
     :param treat_noise_as_singletons: Fold noise into singleton accounting.
     :param num_threads: Reserved for parallel-safe computation.
     :param compute_pair_rank_indices: Compute ``c_index`` and
-        ``baker_hubert_gamma``. Off by default: the stage materialises every
-        pairwise distance among clustered points as two sortable arrays,
-        ``Nc * (Nc - 1) / 2`` doubles in total -- roughly 400 MB at
-        ``Nc = 10,000`` and 10 GB at ``Nc = 50,000``. Raises ``MemoryError`` if
-        the allocation fails.
+        ``baker_hubert_gamma``. Both are read off two sorted arrays holding
+        every pairwise distance among clustered points,
+        ``Nc * (Nc - 1) / 2`` doubles between them -- roughly 400 MB at
+        ``Nc = 10,000`` and 10 GB at ``Nc = 50,000``. Only the between-cluster
+        array is this flag's own cost; the within-cluster one is built on every
+        call, because ``median_intra_distance`` is taken over it. So the flag
+        adds nothing to a single-cluster result and nearly the whole figure to
+        one with small clusters, and it is off by default for the second case.
+        Raises ``MemoryError`` if the allocation fails.
     :param compute_per_cluster_records: Populate :attr:`ClusterReport.records`.
         Off by default: the stage buffers the largest cluster's pairwise
         distances to take their median, ``n * (n - 1) / 2`` doubles, and the

@@ -130,11 +130,19 @@ is better), are computed only under `ClusterReportOptions::compute_pair_rank_ind
 
 `ClusterReportOptions` carries two flags, both `false` by default:
 
-- `compute_pair_rank_indices` fills `c_index` and `baker_hubert_gamma`. The
-  stage materialises every pairwise distance among the `Nc` clustered points as
-  two sortable arrays, `Nc * (Nc - 1) / 2` doubles in total -- roughly 400 MB at
-  `Nc = 10,000` and 10 GB at `Nc = 50,000` -- which is why it is opt-in. One
-  flag covers both indices because both are read off the same sorted arrays.
+- `compute_pair_rank_indices` fills `c_index` and `baker_hubert_gamma`. Both are
+  read off two sorted arrays that between them hold every pairwise distance
+  among the `Nc` clustered points, `Nc * (Nc - 1) / 2` doubles -- roughly 400 MB
+  at `Nc = 10,000` and 10 GB at `Nc = 50,000` -- but only one of the two arrays
+  is this flag's own cost. The within-cluster array, `sum_k n_k(n_k-1)/2`
+  doubles, is built whether or not the flag is set, because
+  `median_intra_distance` is taken over it; `detail::median_distance` takes its
+  argument by value, so the default path also holds a transient second copy of
+  that array while it sorts. The flag adds the between-cluster array,
+  `Nc(Nc-1)/2 - sum_k n_k(n_k-1)/2` doubles: nothing at all when the clustering
+  is a single cluster, and nearly the whole figure when the clusters are small.
+  It is opt-in for the second case. One flag covers both indices because both
+  are read off the same sorted arrays.
 - `compute_per_cluster_records` fills `ClusterReport::records`, a
   `std::vector<ClusterRecord>` holding one row per cluster in member-list order:
   label, size, representative, intra-distance mean and median, radius, diameter,
