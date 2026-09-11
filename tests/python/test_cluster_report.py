@@ -331,7 +331,10 @@ def test_comparison_scalar_cells_come_from_their_own_report():
     from any report and still match, so the per-field check below is what stops
     the loop going quietly vacuous on the metrics that happen to coincide. It
     has to be per field: an aggregate count of how many scalars differ is
-    satisfied by the ones that already discriminate.
+    satisfied by the ones that already discriminate. Non-constancy is as far as
+    real clusterings reach, so cell-by-cell provenance -- every column
+    distinguishable from every other on every field -- is pinned separately by
+    ``test_comparison_scalar_cells_track_their_report_cell_by_cell``.
     """
     import oecluster
 
@@ -999,3 +1002,46 @@ def test_matrix_gate_outranks_the_native_partition_refusal():
     broken = oecluster.ClusteringResult([0, 0, 0, 0], [[0, 1]])
     with pytest.raises(ValueError, match="non-finite entries"):
         oecluster.cluster_report(broken, dm)
+
+
+def _sentinel_report(index):
+    """A report whose every scalar is a value unique to it and to that field.
+
+    Built from a stand-in for the native report rather than from a clustering:
+    no real clustering can be relied on to give 27 metrics that all differ
+    across every pair of columns, and several are legitimately NaN in more than
+    one column at once. The wrapper reads the native report by plain attribute
+    access, so a namespace carrying the same names is enough to construct a
+    genuine report whose cells are individually identifiable.
+    """
+    import types
+
+    import oecluster
+
+    native = types.SimpleNamespace(
+        coverage_thresholds=(0.3,), coverage_at=(0.5,),
+        noise_coverage_at=(0.25,), records=(),
+        requested=types.SimpleNamespace(pair_rank_indices=True,
+                                        per_cluster_records=False))
+    for position, name in enumerate(oecluster.ClusterReport._SCALAR_FIELDS):
+        setattr(native, name, 100.0 * index + position)
+    return oecluster.ClusterReport(native, method=f"stub{index}")
+
+
+def test_comparison_scalar_cells_track_their_report_cell_by_cell():
+    """Each of the 81 scalar cells against the one value only its report holds.
+
+    The companion test over real clusterings can only tell a cell from its
+    neighbour where the two clusterings disagree on that metric, so a
+    misrouting that happens to land on a column holding the same number stays
+    invisible there. Here every report/field pair carries a different value, so
+    a cell read from the wrong report is wrong whichever report it came from
+    and whichever field it was.
+    """
+    import oecluster
+
+    reports = tuple(_sentinel_report(index) for index in range(3))
+    table = oecluster.compare_reports(*reports).to_table()
+    for position, name in enumerate(oecluster.ClusterReport._SCALAR_FIELDS):
+        expected = tuple(100.0 * index + position for index in range(3))
+        assert _row(table, name) == expected, name
