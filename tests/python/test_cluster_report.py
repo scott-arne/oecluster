@@ -171,6 +171,62 @@ def test_compare_reports_multi_and_labels():
     assert "agglomerative" in header
 
 
+def test_repr_column_labels_follow_the_report_order():
+    """Which column a label sits over, not merely that the label is present.
+
+    The check above looks for three method names anywhere in the header, which
+    any permutation of them satisfies -- including a reversal, the arrangement
+    that puts every number under someone else's name while the table still
+    reads as a plausible comparison. Three clusterings that disagree on
+    ``num_clusters`` make the pairing observable: the header and that row are
+    split into cells and compared position by position.
+    """
+    import oecluster
+
+    dm = _noise_bearing_dm()
+    reports = (
+        oecluster.cluster_report(oecluster.butina(dm, threshold=0.25), dm),
+        oecluster.cluster_report(
+            oecluster.dbscan(dm, eps=0.2, min_samples=3), dm),
+        oecluster.cluster_report(oecluster.agglomerative(dm, n_clusters=3), dm),
+    )
+    assert [report.method for report in reports] == [
+        "butina", "dbscan", "agglomerative"]
+    # Distinct, and deliberately not symmetric under reversal: a palindrome
+    # here would leave the label order unpinned by the row below.
+    assert [report.num_clusters for report in reports] == [4, 1, 3]
+
+    rendered = repr(oecluster.compare_reports(*reports))
+    assert rendered.splitlines()[0].split() == [
+        "metric", "butina", "dbscan", "agglomerative"]
+    assert _repr_row(rendered, "num_clusters").split() == ["4", "1", "3"]
+
+
+def test_repr_renders_a_float_cell_at_its_own_value():
+    """The formatter is the last thing between a metric and a reader.
+
+    Nothing else asserts a rendered number: the repr checks elsewhere look for
+    a token such as ``nan`` or ``--`` in a named row, which any arithmetic on
+    the finite cells leaves alone. A cell that renders some other number is
+    the quietest failure this class of code has -- the table is well formed,
+    the columns line up, and every value is wrong.
+    """
+    import oecluster
+
+    dm = _two_cluster_dm()
+    result = oecluster.butina(dm, threshold=0.5)
+    reports = [oecluster.cluster_report(result, dm) for _ in range(2)]
+    rendered = repr(oecluster.compare_reports(*reports))
+
+    # Both clusters hold two members 0.2 apart and lie 0.8 from each other.
+    assert _repr_row(rendered, "mean_intra_distance").split() == ["0.2", "0.2"]
+    assert _repr_row(rendered, "silhouette").split() == ["0.75", "0.75"]
+    # An integer field alongside, because the float branch is the only one the
+    # rendering above exercises and a shift applied to both would otherwise
+    # look like a single formatter's convention rather than an error.
+    assert _repr_row(rendered, "num_samples").split() == ["4", "4"]
+
+
 def test_compare_reports_validation():
     import oecluster
 
@@ -476,6 +532,47 @@ def test_coverage_rows_use_none_for_thresholds_a_report_never_used():
     assert _row(table, "coverage_at[0.3]")[1] is None
     assert _row(table, "coverage_at[0.7]")[0] is None
     assert _row(table, "coverage_at[0.3]")[0] is not None
+
+
+def test_coverage_lookup_indexes_a_report_s_own_threshold_order():
+    """A report keeps the threshold order it was given; the rows do not.
+
+    Row names come from the sorted union across reports, but a value is found
+    by walking one report's own ``coverage_thresholds`` and taking the curve
+    entry at the matching position. Sorting that walk would keep the row names
+    identical and still read the wrong entry, and every other fixture here
+    passes its thresholds already ascending, which makes the two indistinct.
+
+    Passed descending, the report's own order is (0.45, 0.25, 0.35), so the
+    curve entries are in that order too. The expectations are the fixture's:
+    of the six samples, three lie within 0.25 of the nearest representative,
+    four within 0.35 and five within 0.45, and of the three noise points none,
+    one and two do.
+    """
+    import oecluster
+
+    dm = _noise_bearing_dm()
+    result = oecluster.dbscan(dm, eps=0.2, min_samples=3)
+    descending = oecluster.cluster_report(
+        result, dm, coverage_thresholds=[0.45, 0.25, 0.35])
+    # The premise: the native preserves the caller's order rather than sorting
+    # it, so the lookup has a wrong answer available to give.
+    assert descending.coverage_thresholds == (0.45, 0.25, 0.35)
+
+    ascending = oecluster.cluster_report(
+        result, dm, coverage_thresholds=[0.25, 0.35, 0.45])
+    values = {row[0]: row[1:]
+              for row in oecluster.compare_reports(
+                  descending, ascending).to_table()}
+
+    # Both columns describe the same clustering at the same thresholds, so the
+    # two cells of each row must agree however the report stored them.
+    for threshold, coverage, noise_coverage in (
+            (0.25, 3 / 6, 0.0), (0.35, 4 / 6, 1 / 3), (0.45, 5 / 6, 2 / 3)):
+        for cell in values[f"coverage_at[{threshold}]"]:
+            assert math.isclose(cell, coverage, rel_tol=1e-9), threshold
+        for cell in values[f"noise_coverage_at[{threshold}]"]:
+            assert math.isclose(cell, noise_coverage, rel_tol=1e-9), threshold
 
 
 def test_noise_coverage_rows_are_nan_for_a_noise_free_report():
@@ -867,6 +964,46 @@ def test_record_fields_separate_on_an_unevenly_spaced_cluster():
     assert pair.boundary_violations == 0
 
 
+def test_record_boundary_violations_are_the_cluster_s_own_not_the_total():
+    """The one record field whose name is also a report field's name.
+
+    Every other fixture in this file counts no violations at all, so a record
+    column filled from ``ClusterReport.boundary_violations`` instead of the
+    record's own copies a 0 onto a 0 and nothing notices. Three equal clusters
+    all beneath one boundary separate them: each of the twelve cross pairs is
+    counted once in the report and in both of its clusters, so the report reads
+    12 while each record reads 8, and the record column sums to twice the
+    report -- the relation the record field documents.
+
+    Equal clusters are deliberate. They make the three records identical, so
+    the failure this catches cannot be mistaken for a misrouting between rows;
+    what is being read is the field, not the row.
+    """
+    import oecluster
+    from oecluster import DenseStorage, SymmetricDistanceMatrix
+
+    storage = DenseStorage(6)
+    for left in range(6):
+        for right in range(left + 1, 6):
+            # Paired by index: {0,1}, {2,3}, {4,5}.
+            storage.Set(left, right,
+                        0.2 if left // 2 == right // 2 else 0.8)
+    dm = SymmetricDistanceMatrix(
+        storage, "test", ["a", "b", "c", "d", "e", "f"], {})
+
+    result = oecluster.butina(dm, threshold=0.5)
+    report = oecluster.cluster_report(
+        result, dm, boundary_threshold=0.9, compute_per_cluster_records=True)
+
+    assert report.num_clusters == 3
+    assert report.boundary_violations == 12
+    per_cluster = [record.boundary_violations for record in report.records]
+    assert per_cluster == [8, 8, 8]
+    # Stated as the relation rather than left implicit in the numbers above, so
+    # the two quantities cannot drift into agreement without this failing.
+    assert sum(per_cluster) == 2 * report.boundary_violations
+
+
 def test_pair_rank_indices_are_computed_only_on_request():
     """The two pair-rank metrics are the only opt-in scalars, so whether the
     flag reaches the native options struct is the whole difference between a
@@ -1064,12 +1201,19 @@ def test_nan_coverage_threshold_is_refused():
     means the question was never asked. The report would hold an answer while
     the table said nobody asked for one, so the call has to be refused here,
     at the last point where the caller can still be told.
+
+    Matched on the whole message rather than the shared tail: two adjacent
+    checks whose messages differ only in the subject are exactly the pair a
+    reader has to tell apart, and a match on "must not be NaN" alone accepts
+    either one -- so a caller who passed a NaN coverage threshold could be sent
+    to inspect boundary_threshold with the suite still green.
     """
     import oecluster
 
     dm = _two_cluster_dm()
     result = oecluster.butina(dm, threshold=0.5)
-    with pytest.raises(ValueError, match="must not be NaN"):
+    with pytest.raises(ValueError,
+                       match="coverage thresholds must not be NaN"):
         oecluster.cluster_report(result, dm, coverage_thresholds=[math.nan])
 
 
@@ -1081,12 +1225,17 @@ def test_nan_boundary_threshold_is_refused():
     health for a question that was never answerable. Unlike the coverage case
     there is not even a None to hint at it, so nothing downstream can recover
     the fact that the threshold was meaningless.
+
+    Matched on the subject as well as the rule, for the reason given on the
+    coverage test above: the two messages are each other's nearest neighbour,
+    and only the subject distinguishes them.
     """
     import oecluster
 
     dm = _two_cluster_dm()
     result = oecluster.butina(dm, threshold=0.5)
-    with pytest.raises(ValueError, match="must not be NaN"):
+    with pytest.raises(ValueError,
+                       match="boundary_threshold must not be NaN"):
         oecluster.cluster_report(result, dm, boundary_threshold=math.nan)
 
 
@@ -1133,6 +1282,41 @@ def test_infinite_coverage_threshold_is_accepted_and_reaches_the_table():
     cells = _row(table, "coverage_at[inf]")
     assert None not in cells
     assert cells == (1.0, 1.0)
+
+
+def test_infinite_boundary_threshold_is_accepted_and_counts_every_pair():
+    """The same mirror defect on the other threshold, where it is easier to hit.
+
+    ``inf`` is refused by ``not math.isfinite`` and admitted by ``math.isnan``,
+    and the two read alike on every NaN, so only a finite non-finite value can
+    tell the intended check from the over-broad one. The question is coherent:
+    every between-cluster distance lies within an infinite boundary, so the
+    answer is every cross pair. Asserting only that the call returned would
+    pass just as well if the threshold had been dropped on the way through and
+    the count came back 0, so the count itself is what this pins.
+
+    Four points in two pairs give four cross pairs, each counted once in the
+    report total, and each counted in both of its clusters -- so the two
+    records read 4 apiece and their sum is twice the total.
+    """
+    import oecluster
+
+    dm = _two_cluster_dm()
+    result = oecluster.butina(dm, threshold=0.5)
+    report = oecluster.cluster_report(
+        result, dm, boundary_threshold=float("inf"),
+        compute_per_cluster_records=True)
+
+    assert report.boundary_violations == 4
+    assert [record.boundary_violations for record in report.records] == [4, 4]
+
+    # The counterpart under the default preset's finite boundary of 0.30: the
+    # cross distances are 0.8, so nothing violates. Without it, a threshold
+    # ignored entirely and a threshold of inf would be told apart only if the
+    # ignored default happened to count something, which here it does not.
+    default_boundary = oecluster.cluster_report(
+        result, dm, compute_per_cluster_records=True)
+    assert default_boundary.boundary_violations == 0
 
 
 def _sentinel_report(index):
