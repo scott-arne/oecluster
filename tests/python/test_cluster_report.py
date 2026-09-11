@@ -147,12 +147,16 @@ def test_scalar_fields_mirror_the_native_struct():
     from oecluster import oecluster as _native
 
     native = _native.ClusterReport()
+    # thisown is excluded by name rather than by dropping every bool: it is
+    # SWIG's ownership flag and the only bool on the struct today, and a filter
+    # on the type would silently swallow a genuinely bool-valued metric added
+    # in C++ later.
     scalar_names = {
         name
         for name in dir(native)
         if not name.startswith("_")
+        and name != "thisown"
         and isinstance(getattr(native, name), (int, float))
-        and not isinstance(getattr(native, name), bool)
     }
     assert set(oecluster.ClusterReport._SCALAR_FIELDS) == scalar_names
 
@@ -178,23 +182,32 @@ def test_default_constructed_record_reads_undefined_not_zero():
     import oecluster
     import oecluster.oecluster as _native
 
-    # ClusterRecordVector comes off the extension module: Task 2 instantiates
-    # the SWIG template but no task adds the vector type to the package's
+    # ClusterRecordVector comes off the extension module: the SWIG template is
+    # instantiated there but the vector type is not added to the package's
     # __all__, so only ClusterRecord itself is re-exported at package level.
-    for record in (
-        oecluster.ClusterRecord(),
-        _native.ClusterRecordVector(1)[0],
-    ):
+    py_record = oecluster.ClusterRecord()
+    native_record = _native.ClusterRecordVector(1)[0]
+
+    for record in (py_record, native_record):
         assert math.isnan(record.mean_intra_distance)
         assert math.isnan(record.median_intra_distance)
         assert math.isnan(record.nearest_cluster_distance)
         assert math.isnan(record.silhouette)
         # -1 literal, not oecluster.NO_NEAREST_CLUSTER: the sentinel is a C++
-        # constant and no task exports it to the Python package namespace.
+        # constant that is not exported to the Python package namespace.
         assert record.nearest_cluster == -1
         # 0.0 is the real singleton value for these two, not a placeholder.
         assert record.radius == 0.0
         assert record.diameter == 0.0
+
+    # The literals above say what seven of the values should be, which a
+    # mirror cannot; this says the two sides agree on all twelve and in the
+    # same order, which the literals cannot. repr rather than ==, because a
+    # NaN does not compare equal to itself.
+    assert [repr(value) for value in py_record] == [
+        repr(getattr(native_record, name))
+        for name in oecluster.ClusterRecord._fields
+    ]
 
 
 @pytest.mark.parametrize(
@@ -213,12 +226,16 @@ def test_non_bool_flags_are_rejected_by_name(flag):
         oecluster.cluster_report(result, dm, **{flag: "yes"})
 
 
-def test_flag_type_error_outranks_the_matrix_pairing_check():
+@pytest.mark.parametrize(
+    "flag", ["compute_pair_rank_indices", "compute_per_cluster_records"]
+)
+def test_flag_type_error_outranks_the_matrix_pairing_check(flag):
     """The local-argument block runs before the pairing check, so an
     authoritative complaint about what was typed is never pre-empted by an
     advisory one about the matrix. As above, the match pins the body's own
     message rather than the flag name, which an unexpected-keyword TypeError
-    would also carry."""
+    would also carry. Both flags are covered because the ordering is a
+    property of each check's position, not of the pair."""
     import oecluster
     from oecluster import DenseStorage, SymmetricDistanceMatrix
 
@@ -226,9 +243,8 @@ def test_flag_type_error_outranks_the_matrix_pairing_check():
     result = oecluster.butina(dm, threshold=0.5)
     bigger = SymmetricDistanceMatrix(
         DenseStorage(6), "test", ["a", "b", "c", "d", "e", "f"], {})
-    with pytest.raises(
-            TypeError, match="compute_pair_rank_indices must be a bool"):
-        oecluster.cluster_report(result, bigger, compute_pair_rank_indices=1.5)
+    with pytest.raises(TypeError, match=f"{flag} must be a bool"):
+        oecluster.cluster_report(result, bigger, **{flag: 1.5})
 
 
 def test_sparse_storage_still_outranks_a_non_bool_allow_nonmetric():
@@ -272,18 +288,75 @@ def test_records_and_requested_round_trip():
         result, dm, compute_per_cluster_records=True)
     assert len(detailed.records) == detailed.num_clusters
     assert detailed.requested.per_cluster_records is True
+    # Both clusters hold two members 0.2 apart, 0.8 from the other cluster, so
+    # every row carries the same values and any field sourced from a different
+    # native field lands on a number this fixture does not produce.
     for ordinal, record in enumerate(detailed.records):
         assert record.label == ordinal
+        assert record.size == 2
+        # Written against the ordinal rather than as the constant it would be
+        # for either row on its own: that is what tells nearest_cluster apart
+        # from label, the two fields most easily crossed.
+        assert record.nearest_cluster == 1 - ordinal
+        # Either member of a two-member cluster can be the medoid, so pin what
+        # is invariant -- that the representative is one of the sample indices
+        # a medoid search can return here -- rather than which one it picked.
+        assert record.representative in (1, 3)
+        assert math.isclose(record.mean_intra_distance, 0.2, rel_tol=1e-9)
+        assert math.isclose(record.median_intra_distance, 0.2, rel_tol=1e-9)
+        assert math.isclose(record.radius, 0.2, rel_tol=1e-9)
+        assert math.isclose(record.diameter, 0.2, rel_tol=1e-9)
+        assert math.isclose(
+            record.mean_representative_distance, 0.2, rel_tol=1e-9)
+        assert math.isclose(record.nearest_cluster_distance, 0.8, rel_tol=1e-9)
+        assert math.isclose(record.silhouette, 0.75, rel_tol=1e-9)
+        assert record.boundary_violations == 0
     with pytest.raises(AttributeError):
         detailed.records[0].label = 7
 
 
+def test_pair_rank_indices_are_computed_only_on_request():
+    """The two pair-rank metrics are the only opt-in scalars, so whether the
+    flag reaches the native options struct is the whole difference between a
+    value and a NaN. The negative half is asserted as well, which is what
+    makes this a wiring test rather than a value test."""
+    import oecluster
+
+    dm = _two_cluster_dm()
+    result = oecluster.butina(dm, threshold=0.5)
+
+    unasked = oecluster.cluster_report(result, dm)
+    assert math.isnan(unasked.c_index)
+    assert math.isnan(unasked.baker_hubert_gamma)
+
+    asked = oecluster.cluster_report(
+        result, dm, compute_pair_rank_indices=True)
+    assert asked.requested.pair_rank_indices is True
+    # Both are at their extremes because every within-cluster pair is closer
+    # than every between-cluster pair on this fixture: C reaches its 0.0 floor
+    # and gamma its 1.0 ceiling. An extreme is a weaker witness than an
+    # interior value would be, but it still separates every wiring fault --
+    # a dropped or crossed flag leaves both fields NaN.
+    assert asked.c_index == 0.0
+    assert asked.baker_hubert_gamma == 1.0
+
+
 def test_noise_coverage_parallels_coverage():
+    """Equal lengths are guaranteed by the C++ struct, so that assertion is
+    true of the right vector and of any wrong one. The values are what tell
+    the two apart: this clustering has no noise at all, so every noise entry
+    must read NaN while ordinary coverage is complete."""
     import oecluster
 
     dm = _two_cluster_dm()
     report = oecluster.cluster_report(oecluster.butina(dm, threshold=0.5), dm)
     assert len(report.noise_coverage_at) == len(report.coverage_at)
+    assert report.num_noise == 0
+    assert all(math.isnan(value) for value in report.noise_coverage_at)
+    # Pinning the ordinary curve is what makes the NaN assertion above
+    # load-bearing: the two vectors genuinely differ here, rather than both
+    # happening to be unset.
+    assert report.coverage_at == (1.0, 1.0, 1.0)
 
 
 def test_partition_error_surfaces_as_runtime_error():

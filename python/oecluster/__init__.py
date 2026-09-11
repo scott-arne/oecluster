@@ -2926,6 +2926,10 @@ class ClusterReport:
     not by calling ``__init__`` directly.
 
     All metrics are exposed as read-only properties. Undefined metrics are NaN.
+    ``c_index`` and ``baker_hubert_gamma`` are computed only when
+    ``cluster_report`` is called with ``compute_pair_rank_indices``, so their
+    NaN carries a second meaning; read :attr:`requested` to tell "nobody asked"
+    apart from "asked and undefined".
     Vector metrics (``coverage_thresholds``, ``coverage_at``,
     ``noise_coverage_at``, ``records``) are tuples.
     """
@@ -3163,6 +3167,10 @@ def cluster_report(result, distance_matrix, *, preset="default",
         ``Nc = 10,000`` and 10 GB at ``Nc = 50,000``. Raises ``MemoryError`` if
         the allocation fails.
     :param compute_per_cluster_records: Populate :attr:`ClusterReport.records`.
+        Off by default: the stage buffers the largest cluster's pairwise
+        distances to take their median, ``n * (n - 1) / 2`` doubles, and the
+        median is taken over a copy of that buffer -- roughly 400 MB for the
+        buffer and 400 MB again for the copy, transiently, at ``n = 10,000``.
     :param allow_nonmetric: Score anyway when the distances are known not to
         satisfy the triangle inequality. Does not override the refusals for
         similarity-valued or non-finite matrices.
