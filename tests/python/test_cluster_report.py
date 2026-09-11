@@ -384,6 +384,13 @@ def test_records_and_requested_round_trip():
     assert plain.records == ()
     assert plain.requested.per_cluster_records is False
     assert plain.requested.pair_rank_indices is False
+    # The declared order is the public tuple's order, and every other
+    # assertion here reads a field by name -- which a swap of the two
+    # declarations leaves untouched while reversing positional unpacking and
+    # anything that serialises the tuple. The order is not arbitrary: it
+    # mirrors the native struct, which declares pair_rank_indices first.
+    assert oecluster.ClusterReportRequested._fields == (
+        "pair_rank_indices", "per_cluster_records")
 
     detailed = oecluster.cluster_report(
         result, dm, compute_per_cluster_records=True)
@@ -510,6 +517,10 @@ def test_pair_rank_indices_are_computed_only_on_request():
     asked = oecluster.cluster_report(
         result, dm, compute_pair_rank_indices=True)
     assert asked.requested.pair_rank_indices is True
+    # Read positionally as well, on the suite's only asymmetric request: the
+    # field names can be declared correctly while the tuple they produce comes
+    # out reversed, and only an unequal pair of flags can tell the two apart.
+    assert tuple(asked.requested) == (True, False)
     # Both are at their extremes because every within-cluster pair is closer
     # than every between-cluster pair on this fixture: C reaches its 0.0 floor
     # and gamma its 1.0 ceiling. An extreme is a weaker witness than an
@@ -517,6 +528,66 @@ def test_pair_rank_indices_are_computed_only_on_request():
     # a dropped or crossed flag leaves both fields NaN.
     assert asked.c_index == 0.0
     assert asked.baker_hubert_gamma == 1.0
+
+
+def test_requested_holds_for_a_pair_rank_index_that_came_back_undefined():
+    """requested records the ask, not the outcome, and this is the case that
+    separates the two. A single cluster has no between-cluster pair for either
+    index to rank, so both come back NaN however the caller asked -- and a flag
+    derived from whether a value arrived would report False here, collapsing
+    "asked and undefined" into "nobody asked". The NaN assertions are what make
+    the True load-bearing; without them the report is indistinguishable from
+    any other successful request.
+
+    Built inline because the shared two-cluster helper has two clusters by
+    construction and so cannot leave a pair-rank index undefined.
+    """
+    import oecluster
+    from oecluster import DenseStorage, SymmetricDistanceMatrix
+
+    storage = DenseStorage(3)
+    storage.Set(0, 1, 0.2)
+    storage.Set(0, 2, 0.3)
+    storage.Set(1, 2, 0.25)
+    dm = SymmetricDistanceMatrix(storage, "test", ["a", "b", "c"], {})
+
+    # Every pair lies inside the threshold, so all three points join one
+    # cluster and the between-pair array both indices need is empty.
+    report = oecluster.cluster_report(
+        oecluster.butina(dm, threshold=0.5), dm,
+        compute_pair_rank_indices=True)
+
+    assert report.num_clusters == 1
+    assert math.isnan(report.c_index)
+    assert math.isnan(report.baker_hubert_gamma)
+    assert report.requested.pair_rank_indices is True
+
+
+def test_requested_holds_when_a_records_request_yields_no_records():
+    """The same rule on the other flag. An all-noise clustering has no cluster
+    to describe, so records is empty whatever was asked for, and a flag sourced
+    from the tuple's emptiness would report False for a request that was made.
+    """
+    import oecluster
+    from oecluster import DenseStorage, SymmetricDistanceMatrix
+
+    # Four mutually distant points: no neighbourhood at this eps holds anyone
+    # but the point itself, so nothing reaches core status and all four are
+    # noise.
+    storage = DenseStorage(4)
+    for left in range(4):
+        for right in range(left + 1, 4):
+            storage.Set(left, right, 0.9)
+    dm = SymmetricDistanceMatrix(storage, "test", ["a", "b", "c", "d"], {})
+
+    report = oecluster.cluster_report(
+        oecluster.dbscan(dm, eps=0.1, min_samples=3), dm,
+        compute_per_cluster_records=True)
+
+    assert report.num_clusters == 0
+    assert report.num_noise == 4
+    assert report.records == ()
+    assert report.requested.per_cluster_records is True
 
 
 def test_noise_coverage_parallels_coverage():
@@ -538,6 +609,57 @@ def test_noise_coverage_parallels_coverage():
     # load-bearing: the two vectors genuinely differ here, rather than both
     # happening to be unset.
     assert report.coverage_at == (1.0, 1.0, 1.0)
+
+
+def test_noise_coverage_climbs_with_distance_from_the_representative():
+    """The NaN case above pins a vector empty of information: three NaNs are
+    three NaNs however they are reordered, so no rearrangement of the curve is
+    visible there, and the ordinary curve on that fixture is (1.0, 1.0, 1.0),
+    its own reverse. A populated curve is needed to see one. Here both curves
+    rise strictly and differ from each other at every entry, which makes a
+    reversal of either visible and also makes sourcing either from the other
+    visible.
+
+    Derived from the definitions rather than read off a run. Points 0, 1 and 2
+    lie within eps of one another and each counts three neighbours including
+    itself, so they are core points and form the single cluster; 3, 4 and 5
+    reach nobody and become noise. Point 0 is the cluster's medoid, its
+    distances to the other two members summing to 0.2 against 0.3 for each of
+    them, so every sample's distance to the nearest representative is simply
+    its distance to point 0: 0.0, 0.1, 0.1, 0.3, 0.4 and 0.5. Coverage counts
+    the samples at or under each threshold over all six -- three, then four,
+    then five -- while noise coverage counts only points 3, 4 and 5, of which
+    none, then one, then two are covered.
+    """
+    import oecluster
+    from oecluster import DenseStorage, SymmetricDistanceMatrix
+
+    storage = DenseStorage(6)
+    for (left, right), distance in {
+        (0, 1): 0.1, (0, 2): 0.1, (1, 2): 0.2,
+        (0, 3): 0.3, (1, 3): 0.35, (2, 3): 0.35,
+        (0, 4): 0.4, (1, 4): 0.45, (2, 4): 0.45,
+        (0, 5): 0.5, (1, 5): 0.55, (2, 5): 0.55,
+        (3, 4): 0.6, (3, 5): 0.6, (4, 5): 0.6,
+    }.items():
+        storage.Set(left, right, distance)
+    dm = SymmetricDistanceMatrix(
+        storage, "test", ["a", "b", "c", "d", "e", "f"], {})
+
+    report = oecluster.cluster_report(
+        oecluster.dbscan(dm, eps=0.2, min_samples=3), dm)
+
+    assert report.num_clusters == 1
+    assert report.num_noise == 3
+    assert report.coverage_thresholds == (0.25, 0.35, 0.45)
+    # Asserted entry by entry rather than as a whole tuple so a failure names
+    # the threshold that moved.
+    assert math.isclose(report.coverage_at[0], 3 / 6, rel_tol=1e-9)
+    assert math.isclose(report.coverage_at[1], 4 / 6, rel_tol=1e-9)
+    assert math.isclose(report.coverage_at[2], 5 / 6, rel_tol=1e-9)
+    assert math.isclose(report.noise_coverage_at[0], 0.0, rel_tol=1e-9)
+    assert math.isclose(report.noise_coverage_at[1], 1 / 3, rel_tol=1e-9)
+    assert math.isclose(report.noise_coverage_at[2], 2 / 3, rel_tol=1e-9)
 
 
 def test_partition_error_surfaces_as_runtime_error():
