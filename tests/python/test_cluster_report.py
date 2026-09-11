@@ -282,6 +282,60 @@ def test_comparison_table_carries_populated_coverage_curves():
     assert [repr(v) for v in values["noise_coverage_at[0.45]"][1:]] == ["nan"]
 
 
+def test_comparison_table_pads_each_report_against_its_own_thresholds():
+    """Compared reports need not carry the same thresholds -- the row set is
+    their union -- so each column has to be padded against its own list. Every
+    other fixture in this file gives both reports identical thresholds, which
+    leaves reading one report's list for every column indistinguishable from
+    reading each report's own; overlapping-but-unequal lists separate the two,
+    and a column padded against the wrong list reports one report's value under
+    another's threshold while dropping the value it does have.
+
+    Both columns come from the same clustering, so the threshold list is the
+    only thing that differs between them. The expectations are derived from the
+    per-sample distances to the nearest representative that the fixture's own
+    docstring works out: coverage counts all six samples at or under each
+    threshold, noise coverage counts only points 3, 4 and 5, and a threshold a
+    report does not carry pads to NaN in that report's column alone.
+    """
+    import oecluster
+
+    dm = _noise_bearing_dm()
+    result = oecluster.dbscan(dm, eps=0.2, min_samples=3)
+    low = oecluster.cluster_report(
+        result, dm, coverage_thresholds=[0.15, 0.35])
+    high = oecluster.cluster_report(
+        result, dm, coverage_thresholds=[0.35, 0.45])
+    # Asserted before any row is read so an override that stopped taking effect
+    # fails legibly here rather than as a KeyError on a hardcoded row name.
+    assert low.coverage_thresholds == (0.15, 0.35)
+    assert high.coverage_thresholds == (0.35, 0.45)
+
+    values = {row[0]: row[1:]
+              for row in oecluster.compare_reports(low, high).to_table()}
+
+    # Asserted threshold by threshold, both columns together, so a failure
+    # names the cell that moved. The NaN pads are compared as reprs rather than
+    # through math.isnan so a failure prints the value that arrived instead.
+    assert math.isclose(values["coverage_at[0.15]"][0], 3 / 6, rel_tol=1e-9)
+    assert [repr(v) for v in values["coverage_at[0.15]"][1:]] == ["nan"]
+    assert math.isclose(values["coverage_at[0.35]"][0], 4 / 6, rel_tol=1e-9)
+    assert math.isclose(values["coverage_at[0.35]"][1], 4 / 6, rel_tol=1e-9)
+    assert [repr(v) for v in values["coverage_at[0.45]"][:1]] == ["nan"]
+    assert math.isclose(values["coverage_at[0.45]"][1], 5 / 6, rel_tol=1e-9)
+
+    assert math.isclose(
+        values["noise_coverage_at[0.15]"][0], 0.0, rel_tol=1e-9)
+    assert [repr(v) for v in values["noise_coverage_at[0.15]"][1:]] == ["nan"]
+    assert math.isclose(
+        values["noise_coverage_at[0.35]"][0], 1 / 3, rel_tol=1e-9)
+    assert math.isclose(
+        values["noise_coverage_at[0.35]"][1], 1 / 3, rel_tol=1e-9)
+    assert [repr(v) for v in values["noise_coverage_at[0.45]"][:1]] == ["nan"]
+    assert math.isclose(
+        values["noise_coverage_at[0.45]"][1], 2 / 3, rel_tol=1e-9)
+
+
 def test_scalar_fields_mirror_the_native_struct():
     """A field added in C++ and forgotten in _SCALAR_FIELDS is invisible with a
     green suite, which is the gap this closes."""
@@ -342,10 +396,24 @@ def test_default_constructed_record_reads_undefined_not_zero():
         assert record.radius == 0.0
         assert record.diameter == 0.0
 
+    # The declared order mirrors the native struct's, and it is the order of
+    # tuple(record) and of the columns pandas.DataFrame(report.records) builds,
+    # so it is public. Pinned against a literal because every other assertion
+    # on a record reads a field by name: a swap of two same-typed fields --
+    # label, size and representative are all int, and radius, diameter and
+    # mean_representative_distance are all float -- is invisible to all of
+    # them, and to the mirror below, whose two sides are both driven by this
+    # same declaration and so move together.
+    assert oecluster.ClusterRecord._fields == (
+        "label", "size", "representative", "mean_intra_distance",
+        "median_intra_distance", "radius", "diameter",
+        "mean_representative_distance", "nearest_cluster",
+        "nearest_cluster_distance", "silhouette", "boundary_violations")
+
     # The literals above say what seven of the values should be, which a
-    # mirror cannot; this says the two sides agree on all twelve and in the
-    # same order, which the literals cannot. repr rather than ==, because a
-    # NaN does not compare equal to itself.
+    # mirror cannot; this says the two sides agree on all twelve values, with
+    # the literal order above holding the order they are read in. repr rather
+    # than ==, because a NaN does not compare equal to itself.
     assert [repr(value) for value in py_record] == [
         repr(getattr(native_record, name))
         for name in oecluster.ClusterRecord._fields
