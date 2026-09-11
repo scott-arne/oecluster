@@ -1040,8 +1040,16 @@ def test_comparison_scalar_cells_track_their_report_cell_by_cell():
     """
     import oecluster
 
+    fields = oecluster.ClusterReport._SCALAR_FIELDS
     reports = tuple(_sentinel_report(index) for index in range(3))
+    # The oracle is only as strong as the sentinels are distinct. Were any two
+    # of the cells to hold the same value, a misroute between them would match
+    # and this test would weaken without ever failing -- the failure mode it
+    # exists to rule out, reappearing one level up in its own fixture.
+    stored = [getattr(report, name) for report in reports for name in fields]
+    assert len(set(stored)) == len(stored)
+
     table = oecluster.compare_reports(*reports).to_table()
-    for position, name in enumerate(oecluster.ClusterReport._SCALAR_FIELDS):
+    for position, name in enumerate(fields):
         expected = tuple(100.0 * index + position for index in range(3))
         assert _row(table, name) == expected, name
