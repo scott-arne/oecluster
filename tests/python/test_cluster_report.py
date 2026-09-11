@@ -416,6 +416,83 @@ def test_records_and_requested_round_trip():
         detailed.records[0].label = 7
 
 
+def test_record_fields_separate_on_an_unevenly_spaced_cluster():
+    """Two members 0.2 apart give a cluster whose mean, median, radius,
+    diameter and mean representative distance are all the same number, so a
+    record field sourced from any of the other four still reads correctly.
+    Four members at unequal distances pull the five apart -- 0.45, 0.50, 0.55,
+    0.60 and 0.35 here -- and pairwise distinct values are what make every
+    crossing among them fail.
+
+    The matrix is built inline because the shared two-cluster helper cannot
+    produce this shape. Every expectation is derived from the definitions:
+    cluster 0's six within-pair distances are 0.15, 0.35, 0.45, 0.55, 0.60 and
+    0.60, which sum to 2.70 for a mean of 0.45, whose middle two sorted entries
+    average to a median of 0.50, and whose largest is the diameter, 0.60. The
+    members' distance sums are 1.20, 1.40, 1.05 and 1.75, so sample 2 is the
+    medoid; its mean to the other three is 1.05 / 3 = 0.35 and its farthest
+    member lies at 0.55, the radius. Every member's nearest other cluster sits
+    at 1.00, and the mean of the members' own-cluster mean distances is the
+    mean within-pair distance itself, so the cluster silhouette is
+    1 - 0.45 / 1.00 = 0.55.
+    """
+    import oecluster
+    from oecluster import DenseStorage, SymmetricDistanceMatrix
+
+    storage = DenseStorage(6)
+    within = {
+        (0, 1): 0.45, (0, 2): 0.15, (0, 3): 0.60,
+        (1, 2): 0.35, (1, 3): 0.60, (2, 3): 0.55,
+        (4, 5): 0.10,
+    }
+    for (left, right), distance in within.items():
+        storage.Set(left, right, distance)
+    # One value for every cross pair keeps each member's nearest-other-cluster
+    # mean at 1.00, which is what makes the silhouette derivable by hand, and
+    # puts every between-cluster distance beyond the 0.30 boundary threshold so
+    # no violation is counted.
+    for left in range(4):
+        for right in (4, 5):
+            storage.Set(left, right, 1.00)
+    dm = SymmetricDistanceMatrix(
+        storage, "test", ["a", "b", "c", "d", "e", "f"], {})
+
+    # Partitioned by hand rather than by an algorithm: the point is the record
+    # arithmetic, and a threshold that happened to split these four differently
+    # would change the values without changing the test.
+    result = oecluster.ClusteringResult(
+        [0, 0, 0, 0, 1, 1], [[0, 1, 2, 3], [4, 5]])
+    report = oecluster.cluster_report(
+        result, dm, compute_per_cluster_records=True)
+    uneven, pair = report.records
+
+    assert uneven.label == 0
+    assert uneven.size == 4
+    assert uneven.representative == 2
+    assert math.isclose(uneven.mean_intra_distance, 0.45, rel_tol=1e-9)
+    assert math.isclose(uneven.median_intra_distance, 0.50, rel_tol=1e-9)
+    assert math.isclose(uneven.radius, 0.55, rel_tol=1e-9)
+    assert math.isclose(uneven.diameter, 0.60, rel_tol=1e-9)
+    assert math.isclose(
+        uneven.mean_representative_distance, 0.35, rel_tol=1e-9)
+    assert uneven.nearest_cluster == 1
+    assert math.isclose(uneven.nearest_cluster_distance, 1.00, rel_tol=1e-9)
+    assert math.isclose(uneven.silhouette, 0.55, rel_tol=1e-9)
+    assert uneven.boundary_violations == 0
+
+    # The second cluster exists so the first has a neighbour at all. Its own
+    # five floats coincide at 0.10, which is the collapsed case again.
+    assert pair.label == 1
+    assert pair.size == 2
+    # Either member is an equally good medoid of a two-member cluster.
+    assert pair.representative in (4, 5)
+    assert math.isclose(pair.mean_intra_distance, 0.10, rel_tol=1e-9)
+    assert pair.nearest_cluster == 0
+    assert math.isclose(pair.nearest_cluster_distance, 1.00, rel_tol=1e-9)
+    assert math.isclose(pair.silhouette, 0.90, rel_tol=1e-9)
+    assert pair.boundary_violations == 0
+
+
 def test_pair_rank_indices_are_computed_only_on_request():
     """The two pair-rank metrics are the only opt-in scalars, so whether the
     flag reaches the native options struct is the whole difference between a
@@ -453,7 +530,10 @@ def test_noise_coverage_parallels_coverage():
     report = oecluster.cluster_report(oecluster.butina(dm, threshold=0.5), dm)
     assert len(report.noise_coverage_at) == len(report.coverage_at)
     assert report.num_noise == 0
-    assert all(math.isnan(value) for value in report.noise_coverage_at)
+    # Compared as a materialised list of reprs rather than through all(), which
+    # reports only that a generator was falsy and hides which entry was wrong.
+    assert [repr(value) for value in report.noise_coverage_at] == (
+        ["nan"] * len(report.coverage_at))
     # Pinning the ordinary curve is what makes the NaN assertion above
     # load-bearing: the two vectors genuinely differ here, rather than both
     # happening to be unset.
@@ -463,8 +543,8 @@ def test_noise_coverage_parallels_coverage():
 def test_partition_error_surfaces_as_runtime_error():
     """Every std::exception maps to SWIG_RuntimeError; A1 adds no ValueError
     mapping. The message must survive so the caller learns which index is
-    wrong. The result must still cover four samples, or the pairing check
-    at __init__.py:3094 fires first and this tests nothing."""
+    wrong. The result must still cover four samples, or the result/matrix
+    pairing check fires first and this tests nothing."""
     import oecluster
 
     dm = _two_cluster_dm()
