@@ -81,6 +81,43 @@ double nan_value() {
     return std::numeric_limits<double>::quiet_NaN();
 }
 
+// The number of unordered pairs among n items, refusing rather than wrapping.
+// The three pair-scaled arrays below are reserved from this, and a wrapped
+// count under-reserves in silence -- which would reinstate exactly the
+// push_back growth the reservation exists to remove. Exactly one of n and
+// n - 1 is even, so halving that one first is exact and the guard fires only
+// when the pair count itself does not fit, not when an intermediate product
+// would have overflowed on its way to a count that does.
+//
+// std::length_error rather than a bespoke type, following
+// detail::add_couples in InternalIndices.h: a caller at this scale is already
+// in memory trouble, and the SWIG layer maps length_error to Python
+// MemoryError.
+size_t pair_count(const size_t n) {
+    if (n < 2) {
+        return 0;
+    }
+    const bool even = n % 2 == 0;
+    const size_t half = even ? n / 2 : (n - 1) / 2;
+    const size_t other = even ? n - 1 : n;
+    if (half > std::numeric_limits<size_t>::max() / other) {
+        throw std::length_error(
+            "cluster_report: the pair count of " + std::to_string(n) +
+            " items exceeds the range of size_t");
+    }
+    return half * other;
+}
+
+// Accumulates pair counts under the same refusal, for the same reason.
+void add_pair_count(size_t& total, const size_t increment) {
+    if (total > std::numeric_limits<size_t>::max() - increment) {
+        throw std::length_error(
+            "cluster_report: the total pair count exceeds the range of size_t (" +
+            std::to_string(total) + " + " + std::to_string(increment) + ")");
+    }
+    total += increment;
+}
+
 // One definition, called from the scorecard's mean over all points and from the
 // per-cluster records. The two reductions differ -- the scalar averages over
 // every clustered point, a record over its own members -- but the term they
@@ -300,11 +337,35 @@ ClusterReport cluster_report(
                 "threshold to configure it");
         }
 
+        // Every pair-scaled reservation below is derived here, from the same
+        // member lists the fill loops walk, so a reservation cannot disagree
+        // with what is pushed into it. Computed once: the three counts differ
+        // in reduction -- a sum, a maximum, and a complement -- but not in
+        // input.
+        const size_t clustered_count = std::accumulate(
+            members.begin(),
+            members.end(),
+            size_t{0},
+            [](const size_t total, const Cluster& cluster) {
+                return total + cluster.size();
+            });
+        size_t intra_pair_count = 0;
+        size_t largest_cluster_pair_count = 0;
+        for (const Cluster& cluster : members) {
+            const size_t pairs = pair_count(cluster.size());
+            add_pair_count(intra_pair_count, pairs);
+            largest_cluster_pair_count = std::max(largest_cluster_pair_count, pairs);
+        }
+
         // ---- Intra pass: once per cluster. ----
         std::vector<double> intra_pairs;
         std::vector<double> radii;
         std::vector<double> diameters;
         std::vector<double> medoid_member_means;
+        // Pair-scaled, not cluster-scaled like the three below it: this one
+        // takes every within-cluster distance, sum_k C(n_k, 2) of them, and
+        // takes them unconditionally because median_intra_distance reads it.
+        intra_pairs.reserve(intra_pair_count);
         radii.reserve(cluster_count);
         diameters.reserve(cluster_count);
         medoid_member_means.reserve(cluster_count);
@@ -320,7 +381,14 @@ ClusterReport cluster_report(
         std::vector<double> medoid_square_sums(cluster_count, 0.0);
 
         std::vector<double> cluster_medians(cluster_count, nan_value());
+        // Cleared per cluster rather than grown across them, so its high-water
+        // mark is the largest single cluster's pair count and not the sum.
+        // clear() keeps capacity, so the one reservation here serves every
+        // iteration of the loop below.
         std::vector<double> cluster_distances;
+        if (options.compute_per_cluster_records) {
+            cluster_distances.reserve(largest_cluster_pair_count);
+        }
 
         std::vector<double> own_mean(labels.size(), 0.0);
         std::vector<double> point_total(labels.size(), 0.0);
@@ -457,7 +525,16 @@ ClusterReport cluster_report(
         // footprint to Nc(Nc-1)/2 doubles, since intra_pairs above already
         // holds the within-cluster half unconditionally -- together roughly
         // 400 MB at Nc = 10,000.
+        //
+        // Its own share is only the between-cluster half, which is what it is
+        // reserved to. That share is not a fixed fraction of the total: it is
+        // zero when the clustering is a single cluster, and nearly all of it
+        // when the clusters are small. Reserving the full C(Nc, 2) here would
+        // over-allocate by the within-cluster half on every call.
         std::vector<double> between_distances;
+        if (options.compute_pair_rank_indices) {
+            between_distances.reserve(pair_count(clustered_count) - intra_pair_count);
+        }
 
         size_t violations = 0;
         double min_inter = std::numeric_limits<double>::infinity();
@@ -626,14 +703,9 @@ ClusterReport cluster_report(
         }
 
         // ---- Internal indices (section 5.3). ----
-        const size_t clustered_count = std::accumulate(
-            members.begin(),
-            members.end(),
-            size_t{0},
-            [](const size_t total, const Cluster& cluster) {
-                return total + cluster.size();
-            });
-
+        // clustered_count is the one the pair-array reservations were derived
+        // from, hoisted above them rather than recomputed here, so the between
+        // -cluster reservation and this denominator cannot drift apart.
         if (cluster_count >= 2) {
             // The global medoid M: the clustered point with the smallest total
             // distance to all clustered points. The lowest-index tiebreak is
@@ -855,10 +927,10 @@ ClusterReport cluster_report(
         if (options.compute_pair_rank_indices) {
             // Both arrays are moved, not copied. pair_rank_indices takes them
             // by value and sorts in place, so passing lvalues would hold a
-            // second pair-sized copy alive alongside the originals. The move
-            // bounds the call, not the fill: neither array is reserved, so
-            // push_back growth still peaks above the final size on the way
-            // there. Nothing reads either array after this point; the
+            // second pair-sized copy alive alongside the originals. Each was
+            // also reserved to its exact final count where it was declared, so
+            // the fill does not peak above the final size on the way here
+            // either. Nothing reads either array after this point; the
             // moved-from state is never observed.
             const detail::PairRankIndices pair_rank = detail::pair_rank_indices(
                 std::move(intra_pairs), std::move(between_distances));
