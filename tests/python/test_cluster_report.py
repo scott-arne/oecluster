@@ -212,6 +212,16 @@ def test_comparison_table_carries_the_request_flag_and_noise_coverage():
     assert values["baker_hubert_gamma"][0] == 1.0
     assert values["baker_hubert_gamma"][1] is None
 
+    # The claim is the gate's scope, not just its effect on the two rows above,
+    # so it has to range over every scalar: widening the gate to cover a metric
+    # that is always computed refuses an answer the report holds, which is as
+    # wrong as failing to refuse one it does not. Only plain's column can show
+    # this. Every cell of asked's is non-None whatever the gate covers, because
+    # asked requested the one flag any of them could be gated on.
+    for name in oecluster.ClusterReport._SCALAR_FIELDS:
+        expected_none = name in ("c_index", "baker_hubert_gamma")
+        assert (values[name][1] is None) is expected_none, name
+
     for threshold in asked.coverage_thresholds:
         assert values[f"coverage_at[{threshold}]"] == (1.0, 1.0)
         # Compared as reprs rather than through all(), so a failure prints the
@@ -353,6 +363,11 @@ def test_comparison_table_pads_each_report_against_its_own_thresholds():
 
 
 def test_pair_rank_cells_distinguish_unasked_from_undefined():
+    """Both states of an opt-in cell in one place, which is what makes either
+    one mean anything: a report that did not ask reads None, and a report that
+    asked and got no answer reads NaN. A table that collapsed the two would
+    satisfy half of this and fail the other. The repr is checked as well
+    because the two states are useless to a reader if they print alike."""
     import oecluster
 
     dm = _two_cluster_dm()
@@ -380,6 +395,10 @@ def test_pair_rank_cells_distinguish_unasked_from_undefined():
 
 
 def test_coverage_rows_use_none_for_thresholds_a_report_never_used():
+    """Two reports with disjoint threshold lists, so every row in the union is
+    one report's own and the other's blank. The third assertion is what keeps
+    the first two honest: a lookup that returned None for everything would
+    satisfy them both while reporting nothing at all."""
     import oecluster
 
     dm = _two_cluster_dm()

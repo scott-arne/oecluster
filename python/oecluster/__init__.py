@@ -3097,7 +3097,9 @@ class ClusterReportComparison:
         the matching noise-coverage rows.
 
         A cell is ``None`` when that report never asked the question: an opt-in
-        metric it did not request, or a threshold it did not use. ``nan`` keeps
+        metric it did not request, a threshold it did not use, or a threshold it
+        does carry but answered nothing at, as when the clustering has no
+        clusters and both coverage curves come back empty. ``nan`` keeps
         its single meaning of asked-and-undefined. The two were previously
         indistinguishable, which is the collision this separates.
         """
