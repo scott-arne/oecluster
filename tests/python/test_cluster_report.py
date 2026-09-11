@@ -1004,6 +1004,87 @@ def test_matrix_gate_outranks_the_native_partition_refusal():
         oecluster.cluster_report(broken, dm)
 
 
+def test_nan_coverage_threshold_is_refused():
+    """A NaN threshold reads as an ordinary number that simply never matches.
+
+    It passes the non-negative check, because ``nan < 0.0`` is false, and the
+    native then answers it: the report holds a real coverage value. But the
+    comparison table finds a report's value by ``t == threshold``, which NaN
+    never satisfies, so the cell publishes as None -- and None in that table
+    means the question was never asked. The report would hold an answer while
+    the table said nobody asked for one, so the call has to be refused here,
+    at the last point where the caller can still be told.
+    """
+    import oecluster
+
+    dm = _two_cluster_dm()
+    result = oecluster.butina(dm, threshold=0.5)
+    with pytest.raises(ValueError, match="must not be NaN"):
+        oecluster.cluster_report(result, dm, coverage_thresholds=[math.nan])
+
+
+def test_nan_boundary_threshold_is_refused():
+    """The same hole on the boundary threshold, with a worse consequence.
+
+    No distance compares true against NaN, so every point clears the boundary
+    and the report comes back with ``boundary_violations = 0``: a clean bill of
+    health for a question that was never answerable. Unlike the coverage case
+    there is not even a None to hint at it, so nothing downstream can recover
+    the fact that the threshold was meaningless.
+    """
+    import oecluster
+
+    dm = _two_cluster_dm()
+    result = oecluster.butina(dm, threshold=0.5)
+    with pytest.raises(ValueError, match="must not be NaN"):
+        oecluster.cluster_report(result, dm, boundary_threshold=math.nan)
+
+
+def test_negative_infinity_still_refused_as_non_negative():
+    """Negative and NaN are disjoint, and the messages must stay disjoint too.
+
+    ``-inf`` is refused for being negative, not for being non-finite, and a
+    caller reading the message is being told which rule it broke. Matching only
+    on ValueError would pass whichever check fired, so this pins the wording:
+    if the NaN check ever widened to cover the negatives, or took their message
+    over, this is what notices.
+    """
+    import oecluster
+
+    dm = _two_cluster_dm()
+    result = oecluster.butina(dm, threshold=0.5)
+    with pytest.raises(ValueError, match="must be non-negative"):
+        oecluster.cluster_report(result, dm,
+                                 coverage_thresholds=[float("-inf")])
+
+
+def test_infinite_coverage_threshold_is_accepted_and_reaches_the_table():
+    """Over-refusal is the mirror defect, and ``inf`` is a coherent question.
+
+    Everything is within an infinite distance, so coverage at ``inf`` is 1.0,
+    and ``inf == inf`` holds, so the comparison table's threshold match finds
+    it and the cell carries a real number. A NaN check written as a blanket
+    non-finite ban would refuse this call, and one written to refuse further
+    downstream would leave the cell as None -- rendered ``--``, meaning nobody
+    asked. Asserting only that the call did not raise would miss the second.
+    """
+    import oecluster
+
+    dm = _two_cluster_dm()
+    result = oecluster.butina(dm, threshold=0.5)
+    reports = [
+        oecluster.cluster_report(result, dm, coverage_thresholds=[float("inf")])
+        for _ in range(2)
+    ]
+    for report in reports:
+        assert report.coverage_thresholds == (float("inf"),)
+
+    table = oecluster.compare_reports(*reports).to_table()
+    cells = _row(table, "coverage_at[inf]")
+    assert None not in cells
+    assert cells == (1.0, 1.0)
+
+
 def _sentinel_report(index):
     """A report whose every scalar is a value unique to it and to that field.
 

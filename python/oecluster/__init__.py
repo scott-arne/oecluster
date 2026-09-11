@@ -13,6 +13,7 @@ import json
 import hashlib
 import importlib.machinery
 import importlib.util
+import math
 import os
 import re
 import shutil
@@ -3198,8 +3199,10 @@ def cluster_report(result, distance_matrix, *, preset="default",
     :param result: A clustering result (e.g. from :func:`butina`/:func:`dbscan`).
     :param distance_matrix: Complete SymmetricDistanceMatrix for the same items.
     :param preset: Threshold preset: "default", "tight", or "diversity".
-    :param coverage_thresholds: Optional override for coverage distances.
-    :param boundary_threshold: Optional override for the boundary-violation distance.
+    :param coverage_thresholds: Optional override for coverage distances; NaN
+        is refused, because no reported value can be matched back to it.
+    :param boundary_threshold: Optional override for the boundary-violation
+        distance; NaN is refused, because no distance compares against it.
     :param representative_method: Centrality method for medoid selection:
         "medoid" (default), "minimax", or "weighted_medoid". The
         "highest_neighborhood" method is not supported.
@@ -3250,6 +3253,13 @@ def cluster_report(result, distance_matrix, *, preset="default",
         coverage_vector = _oecluster.DoubleVector()
         for value in coverage_thresholds:
             v = float(value)
+            # NaN slips past the negative check, and every later comparison
+            # against it is false: the native computes a coverage value, the
+            # comparison table's threshold match never finds it, and the cell
+            # publishes as None, which in that table means nobody asked.
+            # Refusing here is the only place the caller can still be told.
+            if math.isnan(v):
+                raise ValueError("coverage thresholds must not be NaN")
             if v < 0.0:
                 raise ValueError("coverage thresholds must be non-negative")
             coverage_vector.push_back(v)
@@ -3257,6 +3267,8 @@ def cluster_report(result, distance_matrix, *, preset="default",
     bt = None
     if boundary_threshold is not None:
         bt = float(boundary_threshold)
+        if math.isnan(bt):
+            raise ValueError("boundary_threshold must not be NaN")
         if bt < 0.0:
             raise ValueError("boundary_threshold must be non-negative")
 
