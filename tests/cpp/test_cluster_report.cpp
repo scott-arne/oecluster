@@ -478,6 +478,14 @@ TEST(ClusterReportTest, HandComputedThreeClusterReport) {
     // Representatives 0, 2 and 5, whose nearest-other distances are 0.80, 0.60
     // and 0.60. Dropping cluster C would leave only 0 and 2 and read 0.80.
     EXPECT_DOUBLE_EQ(r.representative_redundancy, 0.6);
+    // Sizes 2, 3 and 4. The fractional rank for the median is 0.5 * 2 = 1,
+    // which lands on the middle size outright; for p90 it is 0.9 * 2 = 1.8,
+    // i.e. 3 + 0.8 * (4 - 3). This is the only fixture in the file that
+    // asserts either field on unequal sizes -- everywhere else the clusters
+    // are the same size and the two percentiles, the minimum and the maximum
+    // all coincide.
+    EXPECT_DOUBLE_EQ(r.cluster_size_median, 3.0);
+    EXPECT_DOUBLE_EQ(r.cluster_size_p90, 3.8);
 }
 
 // The same fixture at a threshold wide enough to admit every cross pair, which
@@ -2819,4 +2827,218 @@ TEST(ClusterReportTest, ReportPairRankIsUnchangedByClusterRelabelling) {
 
     // Likewise s+ = 4 and s- = 1, giving (4 - 1) / 5 = 0.6.
     EXPECT_NEAR(r.baker_hubert_gamma, 0.6, 1e-12);
+}
+
+namespace {
+
+// Six points in three clusters of two -- C0 = {0,1}, C1 = {2,3}, C2 = {4,5} --
+// every intra pair at 0.1, and the three cross blocks flat but unequal:
+// C0-C1 0.9, C0-C2 0.4, C1-C2 0.9.
+//
+// Three of the fused cross loop's accumulators are written through both loop
+// indices, and a cluster is the inner index b only for partners of lower
+// ordinal. C2 is therefore never the outer a, so its silhouette b term is
+// written on the b-side alone -- and its two writes disagree: 0.4 from the pair
+// (C0, C2), then 0.9 from (C1, C2). A b-side write that kept the last value
+// instead of the smallest would report C2's b term as 0.9. Every other
+// multi-cluster fixture in this file has cross blocks that are flat across all
+// partners, where the two candidates coincide.
+//
+// The same asymmetry gives the Dunn numerator a unique minimum, 0.4, which is
+// not the separation of the last cluster pair the loop visits.
+DenseStorage MakeAsymmetricCrossBlockStorage() {
+    DenseStorage storage(6);
+    storage.Set(0, 1, 0.1);
+    storage.Set(2, 3, 0.1);
+    storage.Set(4, 5, 0.1);
+    for (size_t i = 0; i < 2; ++i) {
+        for (size_t j = 2; j < 4; ++j) {
+            storage.Set(i, j, 0.9);
+        }
+        for (size_t j = 4; j < 6; ++j) {
+            storage.Set(i, j, 0.4);
+        }
+    }
+    for (size_t i = 2; i < 4; ++i) {
+        for (size_t j = 4; j < 6; ++j) {
+            storage.Set(i, j, 0.9);
+        }
+    }
+    return storage;
+}
+
+// The same three-cluster shape with C2 equidistant from both partners at 0.5,
+// so its nearest-cluster answer is a genuine tie and the documented
+// lowest-ordinal rule has something to decide. C2 is again never the outer a,
+// so the tie is resolved entirely by the b-side comparison.
+DenseStorage MakeTiedThirdClusterStorage() {
+    DenseStorage storage(6);
+    storage.Set(0, 1, 0.1);
+    storage.Set(2, 3, 0.1);
+    storage.Set(4, 5, 0.1);
+    for (size_t i = 0; i < 2; ++i) {
+        for (size_t j = 2; j < 4; ++j) {
+            storage.Set(i, j, 0.9);
+        }
+        for (size_t j = 4; j < 6; ++j) {
+            storage.Set(i, j, 0.5);
+        }
+    }
+    for (size_t i = 2; i < 4; ++i) {
+        for (size_t j = 4; j < 6; ++j) {
+            storage.Set(i, j, 0.5);
+        }
+    }
+    return storage;
+}
+
+}  // namespace
+
+TEST(ClusterReportTest, SilhouetteBTermKeepsTheNearestClusterOnTheBSide) {
+    const DenseStorage storage = MakeAsymmetricCrossBlockStorage();
+    ClusterReportOptions options;
+    options.compute_per_cluster_records = true;
+    const ClusterReport r =
+        cluster_report(MakeResult({0, 0, 1, 1, 2, 2}), storage, options);
+
+    ASSERT_EQ(r.records.size(), 3u);
+
+    // Every a term is 0.1, the cluster's single intra distance. C0 is the outer
+    // a in both its pairs and sees 0.9 then 0.4; C1 sees 0.9 on both sides.
+    EXPECT_DOUBLE_EQ(r.records[0].silhouette, (0.4 - 0.1) / 0.4);
+    EXPECT_DOUBLE_EQ(r.records[1].silhouette, (0.9 - 0.1) / 0.9);
+    // The discriminating assertion: C2 sees 0.4 and then 0.9, both on the
+    // b-side. Keeping the last write reports 0.888..., which is larger, still
+    // inside the documented [-1, 1], and wrong.
+    EXPECT_DOUBLE_EQ(r.records[2].silhouette, (0.4 - 0.1) / 0.4);
+
+    // The scalar averages the same six terms, so it moves as well: 0.7963
+    // against 0.8426.
+    EXPECT_NEAR(r.silhouette,
+                (4.0 * ((0.4 - 0.1) / 0.4) + 2.0 * ((0.9 - 0.1) / 0.9)) / 6.0,
+                1e-12);
+}
+
+TEST(ClusterReportTest, DunnNumeratorIsTheGlobalMinimumSeparation) {
+    const DenseStorage storage = MakeAsymmetricCrossBlockStorage();
+    const ClusterReport r = cluster_report(
+        MakeResult({0, 0, 1, 1, 2, 2}), storage, ClusterReportOptions());
+
+    // The cross loop visits the pairs (C0,C1), (C0,C2) and (C1,C2), separating
+    // at 0.9, 0.4 and 0.9, and every diameter is 0.1. Assigning each pair's
+    // minimum rather than folding it leaves the last pair's 0.9 and reports
+    // 9.0 -- a better-looking index than the true 4.0.
+    EXPECT_NEAR(r.dunn_index, 0.4 / 0.1, 1e-12);
+}
+
+TEST(ClusterReportTest, RecordNearestClusterTieOnTheBSideKeepsTheLowestOrdinal) {
+    const DenseStorage storage = MakeTiedThirdClusterStorage();
+    ClusterReportOptions options;
+    options.compute_per_cluster_records = true;
+    const ClusterReport r =
+        cluster_report(MakeResult({0, 0, 1, 1, 2, 2}), storage, options);
+
+    ASSERT_EQ(r.records.size(), 3u);
+
+    // C2's two candidates are both at 0.5 and are compared on the b-side, in
+    // the order C0 then C1. ClusterReport.h documents the lowest ordinal as the
+    // winner, so a <= there -- which the a-side tie test cannot see -- names
+    // C1 instead.
+    EXPECT_EQ(r.records[2].nearest_cluster, 0);
+    EXPECT_DOUBLE_EQ(r.records[2].nearest_cluster_distance, 0.5);
+
+    // The other two clusters are decided outright at 0.5 against 0.9, and are
+    // asserted so a failure separates the tie from a wholesale change.
+    EXPECT_EQ(r.records[0].nearest_cluster, 2);
+    EXPECT_EQ(r.records[1].nearest_cluster, 2);
+}
+
+TEST(ClusterReportTest, SilhouetteDenominatorIsTheLargerOfTheTwoTerms) {
+    // Inverted separation: the within-distance 0.75 exceeds every cross
+    // distance at 0.25, so a > b and the silhouette is negative. Every other
+    // silhouette fixture in this file separates cleanly, and there a < b makes
+    // the larger term and the b term the same number.
+    DenseStorage storage(4);
+    storage.Set(0, 1, 0.75);
+    storage.Set(2, 3, 0.75);
+    storage.Set(0, 2, 0.25);
+    storage.Set(0, 3, 0.25);
+    storage.Set(1, 2, 0.25);
+    storage.Set(1, 3, 0.25);
+
+    const ClusterReport r = cluster_report(
+        MakeResult({0, 0, 1, 1}), storage, ClusterReportOptions());
+
+    // Pinning the exact negative value pins the sign convention with it.
+    // Dividing by the b term alone gives -2.0.
+    EXPECT_DOUBLE_EQ(r.silhouette, (0.25 - 0.75) / 0.75);
+    // The range is published, so it is asserted on its own lines: a term that
+    // leaves [-1, 1] then fails as a range violation rather than only as a
+    // changed number.
+    EXPECT_GE(r.silhouette, -1.0);
+    EXPECT_LE(r.silhouette, 1.0);
+}
+
+TEST(ClusterReportTest, RecordRadiusIsTheFarthestMemberNotTheLastOne) {
+    // C0 = {0,1,2} elects sample 0: the member means are 0.25, 0.4 and 0.25,
+    // and the earliest-member rule breaks the tie. Its farthest member is 1 at
+    // 0.4, while the last member the fill walks is 2 at 0.1. The file's other
+    // radius fixtures all happen to iterate the farthest member last, where
+    // "largest so far" and "last seen" agree.
+    DenseStorage storage(5);
+    storage.Set(0, 1, 0.4);
+    storage.Set(0, 2, 0.1);
+    storage.Set(1, 2, 0.4);
+    storage.Set(3, 4, 0.2);
+    for (size_t i = 0; i < 3; ++i) {
+        for (size_t j = 3; j < 5; ++j) {
+            storage.Set(i, j, 0.9);
+        }
+    }
+
+    ClusterReportOptions options;
+    options.compute_per_cluster_records = true;
+    const ClusterReport r =
+        cluster_report(MakeResult({0, 0, 0, 1, 1}), storage, options);
+
+    ASSERT_EQ(r.records.size(), 2u);
+    EXPECT_EQ(r.records[0].representative, 0u);
+    // Assigning the last distance instead of folding the maximum reports 0.1.
+    EXPECT_DOUBLE_EQ(r.records[0].radius, 0.4);
+    EXPECT_DOUBLE_EQ(r.records[1].radius, 0.2);
+    // The scalar reads the same vector: the median of {0.4, 0.2} against the
+    // median of {0.1, 0.2}.
+    EXPECT_DOUBLE_EQ(r.median_radius, 0.3);
+}
+
+TEST(ClusterReportTest, GlobalMedoidCountsWithinClusterDistancesToo) {
+    // Five samples, A = {0,1,2} and B = {3,4}. Sample 0 sits far from its own
+    // mates at 0.9 and close to B at 0.2, which is what makes "least total
+    // distance to all clustered points" and "least total distance to points in
+    // other clusters" disagree. The file's three global-medoid tests pin the
+    // tiebreak and the clustered-only filter but not the summand, and the one
+    // with three clusters uses size-2 clusters throughout, where the
+    // within-cluster term is a constant offset that cannot discriminate.
+    DenseStorage storage(5);
+    storage.Set(0, 1, 0.9);
+    storage.Set(0, 2, 0.9);
+    storage.Set(1, 2, 0.1);
+    storage.Set(3, 4, 0.1);
+    storage.Set(0, 3, 0.2);
+    storage.Set(0, 4, 0.2);
+    storage.Set(1, 3, 0.6);
+    storage.Set(1, 4, 0.6);
+    storage.Set(2, 3, 0.6);
+    storage.Set(2, 4, 0.6);
+
+    const ClusterReport r = cluster_report(
+        MakeResult({0, 0, 0, 1, 1}), storage, ClusterReportOptions());
+
+    // Totals over the other four clustered points are 2.2, 2.2, 2.2, 1.5, 1.5,
+    // so M = 3. Counting only cross-cluster distances they are 0.4, 1.2, 1.2,
+    // 1.4, 1.4, and M = 0. The cluster medoids are 1 and 3 either way, so the
+    // within-scatter stays 0.9^2 + 0.1^2 + 0.1^2 = 0.83 and only the between
+    // term moves: 3 * d(1,3)^2 = 1.08 at M = 3, against
+    // 3 * d(1,0)^2 + 2 * d(3,0)^2 = 2.51 at M = 0, i.e. 3.904 against 9.072.
+    EXPECT_NEAR(r.calinski_harabasz_medoid, 1.08 / (0.83 / 3.0), 1e-12);
 }

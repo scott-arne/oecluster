@@ -572,8 +572,9 @@ ClusterReport cluster_report(
 
                 const double size_a = static_cast<double>(members[a].size());
                 const double size_b = static_cast<double>(members[b].size());
-                const double pair_count = size_a * size_b;
-                const double mean_cross = pair_count > 0.0 ? pair_total / pair_count : 0.0;
+                const double cross_pair_count = size_a * size_b;
+                const double mean_cross =
+                    cross_pair_count > 0.0 ? pair_total / cross_pair_count : 0.0;
                 min_mean_separation = std::min(min_mean_separation, mean_cross);
 
                 // This loop visits cluster k's partners in strictly ascending
