@@ -95,9 +95,13 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   and `coverage_at` entries of `0.0` -- a plausible, in-range answer to a
   question that was never answerable. Positive infinity is still accepted and
   still means what it always meant: every cross pair is a boundary violation,
-  and every sample is covered. The checks run only when the result has at least
-  one cluster; a partition with no clusters reads no distance and evaluates no
-  threshold, so there is no wrong number for the NaN to hide behind. **Python
+  and every sample is covered. The checks sit at the top of the block that
+  processes clusters, so they run from the first cluster onwards: a partition
+  with no clusters is accepted, because such a report is fully determined
+  without either option being read and there is no wrong number for the NaN to
+  hide behind. That is a placement rule and not a test of whether the particular
+  call would have consumed the value -- a single-cluster result never reads
+  `boundary_threshold` at all, and a NaN one is refused there anyway. **Python
   callers see no change.** The wrapper already refuses both with its own
   `ValueError` before the call reaches C++, so this closes a C++/Python
   asymmetry rather than altering Python behaviour.

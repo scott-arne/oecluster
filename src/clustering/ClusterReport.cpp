@@ -349,13 +349,26 @@ ClusterReport cluster_report(
         // every sample to be covered; both are answered exactly today, so
         // refusing them would be over-refusal. INVARIANT 3.
         //
-        // These sit inside the members-non-empty guard, which means a partition
-        // with no clusters is still accepted with a NaN threshold. That report
-        // reads no distance and evaluates no threshold -- coverage_at stays
-        // empty and boundary_violations is zero for want of a pair to count,
-        // not for want of a comparison that held -- so there is no wrong number
-        // for the NaN to hide behind, and refusing it would be over-refusal of
-        // the same kind. INVARIANT 3 again.
+        // These sit at the top of the members-non-empty block, and that
+        // placement is the rule: a partition with no clusters is accepted with a
+        // NaN threshold, and from the first cluster onwards every call is
+        // refused. The K == 0 report is fully determined without either option
+        // being read -- coverage_at stays empty and boundary_violations is zero
+        // for want of a pair to count, not for want of a comparison that held --
+        // so there is no wrong number for the NaN to hide behind, and refusing
+        // it would be over-refusal. INVARIANT 3 again.
+        //
+        // It is a placement rule and not a test of whether this particular call
+        // would have consumed the value, which is the weaker claim it can read
+        // as. Two cases sit knowingly inside the refusal: at K == 1
+        // boundary_threshold is read only inside the double cluster loop below,
+        // which one cluster never enters, and an empty coverage_thresholds skips
+        // the coverage scan outright. Both are refused anyway, and at K == 1
+        // that does refuse a call whose boundary_violations would have been a
+        // correct zero. The trade is deliberate: one cluster-count boundary is
+        // more predictable than a per-option, per-cluster-count carve-out, and
+        // the caller told to replace a NaN loses no answer they could have acted
+        // on.
         if (std::isnan(options.boundary_threshold)) {
             throw std::invalid_argument(
                 "cluster_report: boundary_threshold must not be NaN");

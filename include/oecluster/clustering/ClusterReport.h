@@ -91,10 +91,12 @@ struct ClusterRecord {
  */
 struct ClusterReportOptions {
     /// Distances at which coverage_at is evaluated. A NaN entry is refused;
-    /// infinity is accepted and covers every sample.
+    /// infinity is accepted and covers every sample. See cluster_report for the
+    /// partitions the NaN refusal reaches.
     std::vector<double> coverage_thresholds;
     /// Cross-cluster pairs at or below this distance are boundary violations.
-    /// NaN is refused; infinity is accepted and counts every cross pair.
+    /// NaN is refused; infinity is accepted and counts every cross pair. See
+    /// cluster_report for the partitions the NaN refusal reaches.
     double boundary_threshold = 0.30;
     RepresentativeMethod representative_method = RepresentativeMethod::Medoid;
     bool treat_noise_as_singletons = true;
