@@ -597,7 +597,9 @@ def test_default_constructed_record_reads_undefined_not_zero():
 
 
 @pytest.mark.parametrize(
-    "flag", ["compute_pair_rank_indices", "compute_per_cluster_records"]
+    "flag",
+    ["compute_pair_rank_indices", "compute_per_cluster_records",
+     "treat_noise_as_singletons"],
 )
 def test_non_bool_flags_are_rejected_by_name(flag):
     """The match includes "must be True or False" deliberately. Before the
@@ -644,8 +646,56 @@ def test_numpy_bools_are_accepted_and_take_effect(flag, attribute):
     assert getattr(off.requested, attribute) is False
 
 
+def test_treat_noise_as_singletons_admits_numpy_bools_and_keeps_both_effects():
+    """The gate must not become an over-refusal. ``requested`` does not record
+    this keyword, so the effect is read where it lands: on a DBSCAN result with
+    three noise points, folding noise into the singleton accounting moves
+    singleton_fraction and leaving it out does not. Both halves are pinned,
+    because a check that coerced with truthiness rather than admitting the type
+    would still pass the True case."""
+    import numpy as np
+    import oecluster
+
+    dm = _noise_bearing_dm()
+    result = oecluster.dbscan(dm, eps=0.2, min_samples=3)
+    assert oecluster.cluster_report(
+        result, dm, treat_noise_as_singletons=np.True_).singleton_fraction == 0.75
+    assert oecluster.cluster_report(
+        result, dm, treat_noise_as_singletons=np.False_).singleton_fraction == 0.0
+    # The Python bools behave identically, which is what makes the numpy pair
+    # above an admission rather than a second behaviour.
+    assert oecluster.cluster_report(
+        result, dm, treat_noise_as_singletons=True).singleton_fraction == 0.75
+    assert oecluster.cluster_report(
+        result, dm, treat_noise_as_singletons=False).singleton_fraction == 0.0
+
+
+def test_treat_noise_as_singletons_is_refused_in_signature_order():
+    """The local-argument block reports its keywords in the order the signature
+    declares them, so a call that is wrong in two ways names the one the caller
+    wrote first. treat_noise_as_singletons sits between representative_method
+    and num_threads, and both neighbours are asserted: placing the new check
+    beside its two bool siblings at the end of the block would have inverted
+    the num_threads pair."""
+    import oecluster
+
+    dm = _two_cluster_dm()
+    result = oecluster.butina(dm, threshold=0.5)
+
+    with pytest.raises(ValueError, match="Unknown representative method"):
+        oecluster.cluster_report(
+            result, dm, representative_method="bogus",
+            treat_noise_as_singletons="no")
+    with pytest.raises(
+            TypeError, match="treat_noise_as_singletons must be True or False"):
+        oecluster.cluster_report(
+            result, dm, treat_noise_as_singletons="no", num_threads=-1)
+
+
 @pytest.mark.parametrize(
-    "flag", ["compute_pair_rank_indices", "compute_per_cluster_records"]
+    "flag",
+    ["compute_pair_rank_indices", "compute_per_cluster_records",
+     "treat_noise_as_singletons"],
 )
 def test_flag_type_error_outranks_the_matrix_pairing_check(flag):
     """The local-argument block runs before the pairing check, so an

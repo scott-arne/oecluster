@@ -3224,8 +3224,9 @@ def cluster_report(result, distance_matrix, *, preset="default",
         similarity-valued or non-finite matrices.
     :returns: A ClusterReport.
     :raises TypeError: If result/distance_matrix have the wrong type, or
-        compute_pair_rank_indices, compute_per_cluster_records or
-        allow_nonmetric is not a bool or ``numpy.bool_``.
+        treat_noise_as_singletons, compute_pair_rank_indices,
+        compute_per_cluster_records or allow_nonmetric is not a bool or
+        ``numpy.bool_``.
     :raises ValueError: If a preset/method/threshold is invalid, the result and
         the matrix cover different numbers of samples, the matrix uses sparse
         storage, or the matrix is not a metric -- and additionally: any
@@ -3277,6 +3278,19 @@ def cluster_report(result, distance_matrix, *, preset="default",
         raise ValueError(
             "cluster_report does not support the 'highest_neighborhood' "
             "representative method; use 'medoid', 'minimax', or 'weighted_medoid'")
+
+    # Gated on the same terms as the two bool keywords below -- see that comment
+    # for why numpy.bool_ is admitted and why the message carries the value --
+    # but checked here rather than beside them, because this block reports its
+    # arguments in signature order. A call that is wrong in two ways names the
+    # keyword the caller wrote first, and treat_noise_as_singletons is declared
+    # ahead of num_threads.
+    if not isinstance(treat_noise_as_singletons, (bool, np.bool_)):
+        raise TypeError(
+            "treat_noise_as_singletons must be True or False, "
+            f"not {type(treat_noise_as_singletons).__name__} "
+            f"({treat_noise_as_singletons!r})."
+        )
 
     num_threads_int = int(num_threads)
 

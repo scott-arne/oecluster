@@ -76,6 +76,18 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   clean bill of health for a question that was never answerable, with nothing
   marking it as suspect, where the coverage case at least rendered `--`.
   Infinite thresholds remain accepted and are unaffected.
+- `cluster_report` now raises `TypeError` for a `treat_noise_as_singletons` that
+  is not a `bool` or a `numpy.bool_`. **This refuses calls that 5.0.0 accepted.**
+  The keyword predates this release and was coerced with a bare `bool(...)`, so
+  `treat_noise_as_singletons="no"` read to a caller as off while switching the
+  folding on, and `0`, `1` and `None` were silently reinterpreted the same way.
+  All four now raise. `numpy.bool_` is still accepted, on the same terms as the
+  new `compute_pair_rank_indices` and `compute_per_cluster_records` keywords and
+  as `allow_nonmetric`; the message carries the offending value as well as its
+  type, because `numpy.bool_.__name__` is itself `bool`. The check is placed in
+  signature order, behind the `representative_method` refusal and ahead of the
+  `num_threads` one, so a call that is wrong in two ways names the keyword the
+  caller wrote first.
 - `compare_reports(...).to_table()` renders a cell as `None` rather than `nan`
   when the report never asked the question, in any of three ways: it did not
   request an opt-in metric (`c_index`, `baker_hubert_gamma`); it does not carry
