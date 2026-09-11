@@ -192,6 +192,30 @@ DenseStorage MakeOffMedoidGlobalStorage() {
     return storage;
 }
 
+// Three singleton clusters {0}, {1} and {2}. A one-member cluster is its own
+// representative under every method, so this fixture removes representative
+// selection from the question entirely and leaves only the reduction that
+// turns K representatives into representative_redundancy.
+//
+// All three pairwise distances differ, and that is load-bearing. Every other
+// multi-cluster fixture in this file has exactly two clusters, where the
+// row-minima vector is [d, d] and the loop start index, the running minimum
+// and the median-versus-mean reduction are all indistinguishable. With three
+// representatives at these distances the row minima are
+//
+//   [min(0.2, 0.9), min(0.2, 0.8), min(0.9, 0.8)] = [0.2, 0.2, 0.8]
+//
+// and each candidate reduction names its own number: the median is 0.2, the
+// mean is 0.4, skipping the first row gives 0.5, and folding to the last
+// partner rather than the least gives 0.8.
+DenseStorage MakeThreeSingletonStorage() {
+    DenseStorage storage(3);
+    storage.Set(0, 1, 0.2);
+    storage.Set(0, 2, 0.9);
+    storage.Set(1, 2, 0.8);
+    return storage;
+}
+
 }  // namespace
 
 TEST(ClusterReportOptionsTest, PresetsSeedDocumentedThresholds) {
@@ -886,6 +910,31 @@ TEST(ClusterReportTest, MedoidNamedIndicesIgnoreRepresentativeMethod) {
     // field above did.
     EXPECT_DOUBLE_EQ(by_medoid.representative_redundancy, 0.95);
     EXPECT_DOUBLE_EQ(by_minimax.representative_redundancy, 0.85);
+}
+
+// The non-Medoid representative_redundancy branch reduced over three
+// representatives rather than two. Every other test of that branch runs on a
+// two-cluster fixture, and with two representatives the row-minima vector is
+// [d, d]: the reduction returns d whether it starts at row 0 or row 1, whether
+// it keeps the least partner distance or the last one, and whether it finishes
+// with a median or a mean. K = 3 is the smallest partition that separates all
+// four, and MakeThreeSingletonStorage is built so they land on four different
+// numbers.
+TEST(ClusterReportTest, NonMedoidRepresentativeRedundancyIsTheMedianOfThreeRowMinima) {
+    const DenseStorage storage = MakeThreeSingletonStorage();
+    const ClusteringResult result = MakeResult({0, 1, 2});
+    ClusterReportOptions options;
+    options.representative_method = RepresentativeMethod::Minimax;
+    const ClusterReport r = cluster_report(result, storage, options);
+
+    // The guard that the reduction really saw three rows. If the partition
+    // collapsed to two clusters the assertion below would hold for the wrong
+    // reason, which is exactly the degeneracy this test exists to remove.
+    ASSERT_EQ(r.num_clusters, 3u);
+    ASSERT_EQ(r.num_singletons, 3u);
+
+    // Median of [0.2, 0.2, 0.8]. The mean of the same three is 0.4.
+    EXPECT_DOUBLE_EQ(r.representative_redundancy, 0.2);
 }
 
 // Section 7.1 item 15. Ties in M resolve to the lowest sample index, which is
