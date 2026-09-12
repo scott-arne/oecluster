@@ -3435,9 +3435,10 @@ TEST(ClusterReportTest, RecordNearestClusterTieOnTheBSideKeepsTheLowestOrdinal) 
 // both of C2's candidates are equal; it cannot see a guard that accepts any
 // different value. Here C2 is offered 0.4 from C0 and then 0.9 from C1, both
 // on the b-side, so a != in place of the < names C1 at 0.9 -- the farther of
-// the two clusters reported as the nearest. SilhouetteBTermKeepsTheNearest-
-// ClusterOnTheBSide uses this same fixture but reads best_other_mean, a
-// different accumulator, so it leaves these two fields unpinned.
+// the two clusters reported as the nearest.
+// SilhouetteBTermKeepsTheNearestClusterOnTheBSide uses this same fixture but
+// reads best_other_mean, a different accumulator, so it leaves these two
+// fields unpinned.
 TEST(ClusterReportTest, RecordNearestClusterOnTheBSideKeepsTheSmallestNotTheLast) {
     const DenseStorage storage = MakeAsymmetricCrossBlockStorage();
     ClusterReportOptions options;
