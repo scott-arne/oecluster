@@ -3452,9 +3452,11 @@ TEST(ClusterReportTest, RecordNearestClusterOnTheBSideKeepsTheSmallestNotTheLast
     EXPECT_EQ(r.records[2].nearest_cluster, 0);
     EXPECT_DOUBLE_EQ(r.records[2].nearest_cluster_distance, 0.4);
 
-    // C0 falls 0.9 then 0.4 on the a-side and C1 is decided outright, so a
-    // failure here is a wholesale change rather than the rising-sequence
-    // defect.
+    // C0 falls 0.9 then 0.4 on the a-side, so it is decided outright. C1 is
+    // not: it ties at 0.9 between C0 on the b-side and C2 on the a-side, and
+    // keeps the lowest ordinal. The line below therefore pins more than it
+    // looks like -- a <= at the a-side guard names C2 there -- so it is not a
+    // canary to be dropped when this test is next simplified.
     EXPECT_EQ(r.records[0].nearest_cluster, 2);
     EXPECT_DOUBLE_EQ(r.records[0].nearest_cluster_distance, 0.4);
     EXPECT_EQ(r.records[1].nearest_cluster, 0);
