@@ -114,9 +114,11 @@ DenseStorage MakeDivergentRepresentativeStorage() {
 // aggregates all of them, and a cross pass that stops after pair (0,1)
 // indistinguishable from one that walks all three pairs. This is the fixture
 // built to separate those: three clusters, three sizes and three separations,
-// no two of them shared. The other K >= 3 fixtures are the singleton ones
-// below, which exist for the redundancy reduction and are flat in every
-// size-weighted and intra-distance quantity this one distinguishes.
+// no two of them shared. Other fixtures do reach K >= 3 -- the singleton ones
+// below, and MakeSixPointStorage under {0,0,1,1,2,-1} or an all-singleton
+// partition -- but every one of them repeats a cluster size, so a size-weighted
+// aggregate and an unweighted one can still coincide there. Reaching K >= 3 is
+// not the same as separating what K >= 3 makes separable.
 //
 // Three properties are load-bearing and none of them is incidental:
 //
