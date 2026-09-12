@@ -463,6 +463,21 @@ TEST(ClusterReportTest, BoundaryViolationsThreshold) {
     ClusterReportOptions exact;
     exact.boundary_threshold = 0.8;
     exact.compute_per_cluster_records = true;
+
+    // The coincidence the paragraph above rests on, asserted rather than
+    // assumed. Retuning MakeTwoClusterStorage's cross distance to 0.75 would
+    // leave every count in this test green -- 0.75 is under the threshold on
+    // either comparison -- while quietly demoting the exact case to a third
+    // bracketing one, and nothing would say so. Exact equality, not
+    // EXPECT_DOUBLE_EQ: four ULPs of slack readmits the near miss this exists
+    // to exclude.
+    for (size_t i = 0; i < 2; ++i) {
+        for (size_t j = 2; j < 4; ++j) {
+            ASSERT_EQ(storage.Get(i, j), exact.boundary_threshold)
+                << "cross pair (" << i << ", " << j << ")";
+        }
+    }
+
     const ClusterReport on_boundary = cluster_report(result, storage, exact);
     EXPECT_EQ(on_boundary.boundary_violations, 4u);
 
@@ -885,8 +900,9 @@ TEST(ClusterReportTest, HandComputedInternalIndicesOnUnequalClusterSizes) {
         (61.0 / 160.0) / std::sqrt(269.0 / 7056.0) * std::sqrt(80.0) / 21.0,
         1e-12);
 
-    // The silhouette b term is looked up per sample, and this is the only
-    // fixture in the file where two members of one cluster disagree about it.
+    // The silhouette b term is looked up per sample, and this is the one place
+    // in the file that asserts a per-record silhouette over a cluster whose
+    // members disagree about that term.
     // The d(0,3) = 0.75 asymmetry pulls sample 0's mean distance to B down to
     // 2.5/3 = 5/6 while sample 1 stays at 2.625/3 = 7/8, and both sit below
     // the 15/16 each sees to C, so A's two b terms are 5/6 and 7/8. Both a
@@ -894,14 +910,21 @@ TEST(ClusterReportTest, HandComputedInternalIndicesOnUnequalClusterSizes) {
     // (5/6 - 5/8)/(5/6) = 1/4 and (7/8 - 5/8)/(7/8) = 2/7, so the record
     // averages them to 15/56.
     //
-    // Sample 0 is also cluster A's ordinal, and it holds the smaller of the
-    // two b terms. A lookup that reaches for the ordinal's slot rather than
-    // the point's -- either where the record loop reads the b term or where
-    // the cross pass carries its running minimum from one cluster pair to the
-    // next -- therefore gives sample 1 the 5/6 as well, and the record reads
-    // 1/4. Every other multi-cluster fixture here has a flat cross block
-    // within each pair, or puts the larger b term on the first member where
-    // the running minimum discards it; either shape hides the substitution.
+    // Sample 0 is also cluster A's ordinal. A lookup that reaches for the
+    // ordinal's slot rather than the point's -- either where the record loop
+    // reads the b term or where the cross pass carries its running minimum
+    // from one cluster pair to the next -- therefore gives sample 1 the 5/6 as
+    // well, and the record reads 1/4.
+    //
+    // The disagreement alone is not what makes this fixture the one that
+    // catches that. MakeDivergentRepresentativeStorage disagrees too: its
+    // d(1,5) = 0.85 leaves sample 1 at 0.925 against its cluster-mates' 0.95.
+    // What is needed on top is a per-record assertion -- the scalar averages
+    // every point and never reads a cluster ordinal -- and a third cluster,
+    // since at K == 2 the cross pass has no second pair to carry a stale
+    // running minimum into. A fixture whose cross block is flat within each
+    // pair supplies neither, because there the two lookups return the same
+    // number and nothing asserted about it can move.
     //
     // EXPECT_NEAR rather than EXPECT_DOUBLE_EQ because the division by
     // cluster B's three members is the one quotient on this fixture that
