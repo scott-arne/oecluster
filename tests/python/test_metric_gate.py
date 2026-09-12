@@ -599,19 +599,34 @@ def _write_sparse_file(path, *, num_samples=3, cutoff=0.5, rows=(0,),
     )
 
 
+class _PokedSparseStorage(oecluster.SparseStorage):
+    """A sparse storage whose entry list holds a pair ``Set`` will not store.
+
+    The test below used to poke the diagonal in through ``Set`` itself, which
+    accepted it: the ``i != j`` precondition was a bare ``assert``, compiled out
+    of release builds. ``Set`` refuses the diagonal now, so no supported call
+    sequence produces a malformed entry list and the only way left to reach
+    ``to_file``'s guard is to hand it one.
+    """
+
+    def _entries(self):
+        return [(2, 2, 0.11)]
+
+
 def test_to_file_refuses_a_sparse_matrix_from_file_would_refuse(tmp_path):
     """A silent write followed by a hard read failure is the worst shape.
 
-    ``SparseStorage::Set`` guards ``i != j`` with a bare ``assert``, compiled
-    out of this build, so a diagonal entry reaches ``Entries()`` and used to be
-    written happily -- then refused by ``from_file`` on the next load, by which
-    time the caller had already thrown the matrix away. The refusal has to come
-    at the write, and before the file exists.
+    A diagonal entry that reached ``Entries()`` used to be written happily --
+    then refused by ``from_file`` on the next load, by which time the caller had
+    thrown the matrix away. The refusal has to come at the write, and before the
+    file exists. ``Set`` is now the first line of that defence and
+    ``test_storage_set_refuses_an_out_of_range_index`` pins it there; this keeps
+    the backstop honest for an entry list that arrives by any other route.
     """
     path = tmp_path / "poked.npz"
-    sparse = _sparse_matrix()
-    sparse.storage.Set(2, 2, 0.11)
-    sparse.storage.Finalize()
+    storage = _PokedSparseStorage(6, 0.9)
+    storage.Finalize()
+    sparse = oecluster.SymmetricDistanceMatrix(storage, "fingerprint")
     with pytest.raises(ValueError,
                        match=r"not a pair of distinct indices below 6"):
         sparse.to_file(str(path))
@@ -1143,6 +1158,44 @@ def test_storage_get_refuses_an_out_of_range_index():
     for i, j in [(0, 6), (1000, 1000)]:
         with pytest.raises(RuntimeError, match="outside the storage range"):
             sparse.storage.Get(i, j)
+
+
+def test_storage_set_refuses_an_out_of_range_index():
+    """The write half of the same contract, and the worse half of it.
+
+    ``Get`` answered about a pair that does not exist; ``Set`` overwrote one
+    that does, then returned as though it had stored what the caller asked for.
+    On six samples the condensed formula sends ``(2, 6)`` to offset 12, which
+    is the ``(3, 4)`` pair, and the diagonal ``(2, 2)`` to offset 8, which is
+    ``(1, 5)`` -- the diagonal is in range on both indices yet owns no slot,
+    because ``Get`` answers it from a shortcut rather than from memory. Further
+    out there is no pair left to collide with: ``(0, 5000)`` wrote roughly
+    40 KiB past a fifteen-element buffer without faulting.
+
+    The sentinel is negative so that a surviving write cannot be mistaken for a
+    distance: no metric in the library produces one.
+    """
+    dense = oecluster.pdist(_mols(), "fingerprint")
+    assert dense.num_samples == 6
+    aliased = [(3, 4), (1, 5)]
+    before = [dense.storage.Get(i, j) for i, j in aliased]
+
+    for i, j in [(2, 6), (500, 1399), (0, 5000), (1000, 1000)]:
+        with pytest.raises(RuntimeError, match="outside the storage range"):
+            dense.storage.Set(i, j, -1.0)
+    with pytest.raises(RuntimeError, match="cannot store the diagonal pair"):
+        dense.storage.Set(2, 2, -1.0)
+
+    assert [dense.storage.Get(i, j) for i, j in aliased] == before
+
+    # SparseStorage never wrote out of bounds -- it keeps (i, j) tuples -- but
+    # its lookup collides the same way, so a stored bad pair would come back
+    # later as a real one's distance.
+    sparse = _sparse_matrix()
+    with pytest.raises(RuntimeError, match="outside the storage range"):
+        sparse.storage.Set(0, 6, -1.0)
+    with pytest.raises(RuntimeError, match="cannot store the diagonal pair"):
+        sparse.storage.Set(2, 2, -1.0)
 
 
 def test_cluster_report_refuses_a_result_from_a_smaller_matrix():

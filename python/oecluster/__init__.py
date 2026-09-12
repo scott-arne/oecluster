@@ -1059,11 +1059,12 @@ class SymmetricDistanceMatrix(DistanceMatrix):
             rows = np.array([e[0] for e in entries], dtype=np.int64)
             cols = np.array([e[1] for e in entries], dtype=np.int64)
             values = np.array([e[2] for e in entries], dtype=np.float64)
-            # Checked before anything is written, not only on load.
-            # ``SparseStorage.Set`` enforces ``i != j`` with a bare ``assert``,
-            # compiled out of release builds, so a poked-at matrix reached here
-            # and wrote a file ``from_file`` then refused -- the caller lost the
-            # data and only found out on the next load.
+            # Checked before anything is written, not only on load. This is a
+            # backstop now: ``SparseStorage.Set`` refuses an out-of-range or
+            # diagonal pair outright, where it once enforced ``i != j`` with a
+            # bare ``assert`` compiled out of release builds -- so a poked-at
+            # matrix reached here and wrote a file ``from_file`` then refused,
+            # and the caller lost the data and only found out on the next load.
             self._validate_sparse_entries(
                 rows, cols, values, self.num_samples, cutoff,
                 "Refusing to write a malformed sparse matrix")

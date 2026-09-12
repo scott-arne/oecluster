@@ -87,6 +87,56 @@ TEST(DenseStorageTest, GetOutOfRangeMessageNamesIndexAndCount) {
     }
 }
 
+TEST(DenseStorageTest, SetOutOfRangeThrowsRatherThanAliasingAnotherPair) {
+    // CondensedIndex(5, 2, 5) == 9 == CondensedIndex(5, 3, 4): just past the
+    // end, the computed index lands on a real pair, so the write used to
+    // succeed and replace a distance the caller never named.
+    DenseStorage storage(5);
+    storage.Set(3, 4, 0.25);
+    EXPECT_THROW(storage.Set(2, 5, 0.99), std::out_of_range);
+    EXPECT_DOUBLE_EQ(storage.Get(3, 4), 0.25);
+}
+
+TEST(DenseStorageTest, SetFarOutOfRangeThrowsRatherThanWritingPastTheBuffer) {
+    // Far past the end there is no pair to collide with: the index leaves the
+    // allocation and the write corrupts whatever follows it, undiagnosed.
+    DenseStorage storage(5);
+    EXPECT_THROW(storage.Set(0, 5000, 1.0), std::out_of_range);
+}
+
+TEST(DenseStorageTest, SetOutOfRangeMessageNamesIndexAndCount) {
+    DenseStorage storage(2);
+    try {
+        storage.Set(1, 1399, 0.5);
+        FAIL() << "Expected std::out_of_range";
+    } catch (const std::out_of_range& e) {
+        EXPECT_STREQ(e.what(),
+                     "DenseStorage index 1399 is outside the storage range of 2 samples");
+    }
+}
+
+TEST(DenseStorageTest, SetDiagonalThrowsRatherThanAliasingAnotherPair) {
+    // CondensedIndex(5, 2, 2) == 6 == CondensedIndex(5, 1, 4). Get answers the
+    // diagonal 0.0 without consulting storage, so the diagonal owns no slot to
+    // write; the condensed formula hands the write a neighbour's slot instead.
+    DenseStorage storage(5);
+    storage.Set(1, 4, 0.75);
+    EXPECT_THROW(storage.Set(2, 2, 0.99), std::invalid_argument);
+    EXPECT_DOUBLE_EQ(storage.Get(1, 4), 0.75);
+}
+
+TEST(DenseStorageTest, SetDiagonalMessageNamesTheIndex) {
+    DenseStorage storage(5);
+    try {
+        storage.Set(3, 3, 0.5);
+        FAIL() << "Expected std::invalid_argument";
+    } catch (const std::invalid_argument& e) {
+        EXPECT_STREQ(e.what(),
+                     "DenseStorage cannot store the diagonal pair (3, 3); "
+                     "only distances between distinct items are stored");
+    }
+}
+
 TEST(MMapStorageTest, CreateAndWrite) {
     auto path = std::filesystem::temp_directory_path() / "test_mmap.bin";
     {
@@ -126,6 +176,21 @@ TEST(MMapStorageTest, GetOutOfRangeThrows) {
     std::filesystem::remove(path);
 }
 
+TEST(MMapStorageTest, SetOutOfRangeThrows) {
+    // The mapping is sized for exactly NumPairs doubles, so an unchecked write
+    // past the end is a write past the mapping, not merely past a vector.
+    auto path = std::filesystem::temp_directory_path() / "test_mmap_set_range.bin";
+    {
+        MMapStorage storage(path.string(), 2);
+        EXPECT_THROW(storage.Set(0, 2, 1.0), std::out_of_range);
+        // Out of range on the diagonal is reported as a range error: the
+        // indices name no item at all, which is the more basic complaint.
+        EXPECT_THROW(storage.Set(1000, 1000, 1.0), std::out_of_range);
+        EXPECT_THROW(storage.Set(1, 1, 1.0), std::invalid_argument);
+    }
+    std::filesystem::remove(path);
+}
+
 TEST(SparseStorageTest, StoresOnlyBelowCutoff) {
     SparseStorage storage(4, 0.5);  // cutoff = 0.5
     storage.Set(0, 1, 0.3);  // below cutoff, stored
@@ -160,4 +225,24 @@ TEST(SparseStorageTest, GetOutOfRangeThrowsRatherThanMissing) {
     storage.Finalize();
     EXPECT_THROW(storage.Get(0, 4), std::out_of_range);
     EXPECT_THROW(storage.Get(1000, 1000), std::out_of_range);
+}
+
+TEST(SparseStorageTest, SetOutOfRangeThrowsWhicheverSideOfTheCutoff) {
+    // The cutoff shortcut returns before anything is stored. Checking the
+    // indices behind it would make the diagnosis depend on the value the bad
+    // call happened to carry: below the cutoff a refusal, above it silence.
+    SparseStorage storage(4, 0.5);
+    EXPECT_THROW(storage.Set(0, 4, 0.3), std::out_of_range);
+    EXPECT_THROW(storage.Set(0, 4, 0.9), std::out_of_range);
+    EXPECT_THROW(storage.Set(2, 2, 0.3), std::invalid_argument);
+    EXPECT_THROW(storage.Set(2, 2, 0.9), std::invalid_argument);
+}
+
+TEST(SparseStorageTest, SetOutOfRangeStoresNothing) {
+    // A refused Set must not leave a half-written entry behind for Finalize to
+    // pick up -- an entry whose condensed index collides with a real pair.
+    SparseStorage storage(4, 0.5);
+    EXPECT_THROW(storage.Set(0, 4, 0.3), std::out_of_range);
+    storage.Finalize();
+    EXPECT_EQ(storage.Entries().size(), 0u);
 }

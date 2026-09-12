@@ -31,9 +31,15 @@ public:
     /**
      * @brief Store a distance value for a pair of items.
      *
-     * :param i: Index of first item (must be less than j).
-     * :param j: Index of second item (must be greater than i).
+     * Handles symmetry automatically: Set(i, j, v) and Set(j, i, v) store the
+     * same pair. The diagonal is refused rather than stored -- Get answers
+     * i == j from a shortcut, so the pair owns no slot to write.
+     *
+     * :param i: Index of first item (must differ from j).
+     * :param j: Index of second item (must differ from i).
      * :param value: Distance value to store.
+     * :raises std::out_of_range: If either index is at or beyond NumSamples().
+     * :raises std::invalid_argument: If the indices are in range but equal.
      */
     virtual void Set(size_t i, size_t j, double value) = 0;
 

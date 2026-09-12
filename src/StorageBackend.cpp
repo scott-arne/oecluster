@@ -76,6 +76,58 @@ inline void check_index_range(const char* backend, size_t i, size_t j, size_t n)
     }
 }
 
+/**
+ * @brief Build and throw the diagnostic for a Set aimed at the diagonal.
+ *
+ * Out of line for the same reason as report_index_out_of_range: Set runs once
+ * per pair over the whole matrix, so the message temporaries stay off its path.
+ *
+ * :param backend: Storage class name, used in the message.
+ * :param index: The index repeated on both sides of the pair.
+ * :raises std::invalid_argument: Always.
+ */
+[[noreturn]] void report_diagonal_set(const char* backend, size_t index) {
+    const std::string text = std::to_string(index);
+    throw std::invalid_argument(
+        std::string(backend) + " cannot store the diagonal pair (" + text +
+        ", " + text + "); only distances between distinct items are stored");
+}
+
+/**
+ * @brief Refuse a Set whose indices name no storable pair.
+ *
+ * Set is the write half of the range contract Get already enforces, and it
+ * fails worse: Get returns a wrong answer, Set destroys a right one. Both
+ * refusals below describe writes the condensed formula happily performs.
+ *
+ * Out of range, CondensedIndex maps the pair to some other slot, so the write
+ * either replaces an unrelated distance -- CondensedIndex(5, 2, 5) == 9 ==
+ * CondensedIndex(5, 3, 4) -- or, further out, leaves the allocation entirely.
+ * For MMapStorage that means writing past the mapping.
+ *
+ * On the diagonal every index is in range yet the pair still has no slot:
+ * only the upper triangle is stored and Get answers i == j from a shortcut
+ * rather than from memory. CondensedIndex has no value to return for it and
+ * yields a neighbour's -- CondensedIndex(5, 2, 2) == 6 == CondensedIndex(5, 1, 4).
+ *
+ * The range check runs first so that an out-of-range diagonal is reported as
+ * the range error it also is: naming no item is the more basic complaint, and
+ * it is the one the caller must fix first.
+ *
+ * :param backend: Storage class name, used in the message.
+ * :param i: Index of first item.
+ * :param j: Index of second item.
+ * :param n: Number of samples the storage was constructed for.
+ * :raises std::out_of_range: If either index is at or beyond n.
+ * :raises std::invalid_argument: If the indices are in range but equal.
+ */
+inline void check_set_indices(const char* backend, size_t i, size_t j, size_t n) {
+    check_index_range(backend, i, j, n);
+    if (i == j) {
+        report_diagonal_set(backend, i);
+    }
+}
+
 }  // namespace
 
 // DenseStorage implementation
@@ -85,6 +137,8 @@ DenseStorage::DenseStorage(size_t n)
 }
 
 void DenseStorage::Set(size_t i, size_t j, double value) {
+    check_set_indices("DenseStorage", i, j, n_);
+
     // Ensure i < j for upper triangle storage
     if (i > j) {
         std::swap(i, j);
@@ -316,6 +370,8 @@ MMapStorage::~MMapStorage() {
 #endif  // _WIN32
 
 void MMapStorage::Set(size_t i, size_t j, double value) {
+    check_set_indices("MMapStorage", i, j, n_);
+
     // Ensure i < j for upper triangle storage
     if (i > j) {
         std::swap(i, j);
@@ -373,6 +429,10 @@ SparseStorage::SparseStorage(size_t n, double cutoff)
 }
 
 void SparseStorage::Set(size_t i, size_t j, double value) {
+    // Checked ahead of the cutoff shortcut: whether a call names a real pair
+    // must not depend on the value it carries.
+    check_set_indices("SparseStorage", i, j, n_);
+
     // Only store values at or below cutoff
     if (value > cutoff_) {
         return;

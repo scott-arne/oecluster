@@ -21,11 +21,12 @@ void pdist(PairwiseComparison& comparison, StorageBackend& storage,
            const PDistOptions& options) {
     const size_t n = comparison.Size();
 
-    // Each backend's Set() re-maps the pair through its own sample count and
-    // writes without a bounds check, so a storage sized differently from the
-    // comparison corrupts a neighbouring slot or runs off the end of its
-    // buffer. Checked before the empty-domain shortcut so the contract does
-    // not depend on how many pairs there happen to be.
+    // Each backend's Set() re-maps the pair through its own sample count, so a
+    // storage larger than the comparison silently scatters the results across
+    // the wrong slots -- Set's own range check cannot see that, because every
+    // index the loop produces is in range for the oversized storage. Checked
+    // before the empty-domain shortcut so the contract does not depend on how
+    // many pairs there happen to be.
     if (storage.NumSamples() != n) {
         throw ComparisonError("pdist storage size does not match the comparison size");
     }
