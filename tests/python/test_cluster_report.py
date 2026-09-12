@@ -77,6 +77,36 @@ def test_report_basic_and_compactness():
     assert math.isclose(report.mean_intra_distance, 0.2, rel_tol=1e-9)
 
 
+def test_singleton_silhouette_is_zero_not_one():
+    """A cluster of one scores 0, per Rousseeuw; through 5.1.0 it scored 1.0.
+
+    The a term of a lone point is 0.0 for want of an own-cluster pair, so the
+    general ``(b - a) / max(a, b)`` reads it as ``b / b`` and hands a singleton
+    the perfect score. On the same four points as ``_two_cluster_dm``, split
+    ``{0,1}`` and ``{2}`` with 3 as noise: points 0 and 1 each have a == 0.2 and
+    b == 0.8, so they score 0.75 apiece, and point 2 is the singleton. The mean
+    over the three clustered points is 1.5 / 3 under the convention against
+    2.5 / 3 without it -- the singleton pulling the scalar ABOVE two of the
+    three terms it averages is the inflation this exists to remove.
+    """
+    import oecluster
+
+    dm = _two_cluster_dm()
+    result = oecluster.ClusteringResult([0, 0, 1, -1], [[0, 1], [2]])
+    report = oecluster.cluster_report(
+        result, dm, compute_per_cluster_records=True)
+
+    assert report.num_singletons == 1
+    assert math.isclose(report.silhouette, 0.5, rel_tol=1e-9)
+
+    singleton, pair = report.records[1], report.records[0]
+    assert singleton.size == 1
+    assert singleton.silhouette == 0.0
+    # The defined cluster is untouched, which is what keeps the assertion above
+    # about the singleton rather than about the silhouette collapsing wholesale.
+    assert math.isclose(pair.silhouette, 0.75, rel_tol=1e-9)
+
+
 def test_coverage_alignment_and_overrides():
     import oecluster
 

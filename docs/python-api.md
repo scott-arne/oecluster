@@ -241,6 +241,12 @@ separately; `treat_noise_as_singletons=True` (the default) folds noise into the
 singleton interpretation. The report requires complete pairwise distances
 (dense or memory-mapped storage); a sparse (`cutoff`) matrix raises.
 
+One shipped combination is refused. `bitbirch_refine()` can return an emptied
+leaf subcluster as an empty member list -- reference-parity behaviour for its
+prune pass -- and `cluster_report()` refuses any result carrying an empty
+cluster, with a `RuntimeError` reading `Cluster must contain at least one
+member`. Nothing else the library produces trips that check.
+
 ### Internal validity indices
 
 Seven internal cluster-validity indices sit alongside the original scorecard
@@ -656,6 +662,11 @@ for advanced use through the lower-level API.
 | `SparseStorage` | Cutoff-filtered results | Stored entries only |
 
 All backends use scipy-compatible condensed distance-matrix indexing.
+
+Reached directly, `Get` and `Set` refuse a pair they cannot address: an index
+at or beyond `NumSamples()` on either, and the diagonal on `Set`, which owns no
+stored slot because `Get` answers `i == j` from a shortcut rather than from
+memory. Both surface as `RuntimeError`.
 
 ## Advanced C++ Binding Access
 

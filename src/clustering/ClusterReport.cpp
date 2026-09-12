@@ -122,7 +122,18 @@ void add_pair_count(size_t& total, const size_t increment) {
 // per-cluster records. The two reductions differ -- the scalar averages over
 // every clustered point, a record over its own members -- but the term they
 // average must not.
-double silhouette_term(const double a_term, const double b_term) {
+//
+// Rousseeuw defines s(i) = 0 for a point that is the only member of its
+// cluster, and the size test is what implements that. A singleton has no own
+// pair to average, so its a term arrives here as 0.0 for want of a distance
+// rather than because its neighbours are coincident, and the general formula
+// would read that as the perfect score 1.0. Awarding the maximum to a cluster
+// of one inflates the mean on exactly the fragmented clusterings this
+// scorecard exists to discriminate.
+double silhouette_term(const double a_term, const double b_term, const size_t cluster_size) {
+    if (cluster_size < 2) {
+        return 0.0;
+    }
     const double denominator = std::max(a_term, b_term);
     return denominator == 0.0 ? 0.0 : (b_term - a_term) / denominator;
 }
@@ -673,7 +684,7 @@ ClusterReport cluster_report(
                 for (const size_t point : cluster) {
                     const double a_term = own_mean[point];
                     const double b_term = best_other_mean[point];
-                    silhouette_sum += silhouette_term(a_term, b_term);
+                    silhouette_sum += silhouette_term(a_term, b_term, cluster.size());
                     ++silhouette_count;
                 }
             }
@@ -966,7 +977,7 @@ ClusterReport cluster_report(
                     for (const size_t point : members[k]) {
                         const double a_term = own_mean[point];
                         const double b_term = best_other_mean[point];
-                        silhouette_total += silhouette_term(a_term, b_term);
+                        silhouette_total += silhouette_term(a_term, b_term, members[k].size());
                     }
                     record.silhouette = members[k].empty()
                         ? nan_value()

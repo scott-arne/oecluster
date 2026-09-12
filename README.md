@@ -19,6 +19,7 @@ cluster summaries as well as lower-level control over distance computation.
 - [Core Python Workflow](#core-python-workflow)
 - [Choosing A Clustering Algorithm](#choosing-a-clustering-algorithm)
 - [Choosing Representatives](#choosing-representatives)
+- [Assessing And Comparing Clustering Quality](#assessing-and-comparing-clustering-quality)
 - [Scaling Guidance](#scaling-guidance)
 - [Comparison Methods](#comparison-methods)
 - [Storage Backends](#storage-backends)
@@ -26,7 +27,6 @@ cluster summaries as well as lower-level control over distance computation.
 - [C++ API](#c-api)
 - [Troubleshooting](#troubleshooting)
 - [Examples](#examples)
-- [Project Structure](#project-structure)
 - [License](#license)
 
 ---
@@ -482,9 +482,9 @@ the core "are these good clusters?" view. Needs the full distance matrix.
 | `median_intra_distance` | Median of those within-cluster pairwise distances — the same idea as above but less sensitive to a few outlier pairs. |
 | `median_radius` | For each cluster, the distance from its medoid (most central member) to its farthest member; reported as the median across clusters. A small radius means a typical cluster is tightly packed around its center. |
 | `p95_diameter` | Cluster diameter is the largest distance between any two members of a cluster; this reports the 95th percentile across clusters. It surfaces the worst-case internal spread — how heterogeneous the loosest clusters get. |
-| `silhouette` | Mean silhouette score over all clustered molecules (range −1 to 1). For each molecule it compares how close it sits to its own cluster versus the nearest other cluster; values near 1 mean tight, well-separated clusters, near 0 mean overlapping clusters, and negative means molecules may be in the wrong cluster. |
+| `silhouette` | Mean silhouette score over all clustered molecules (range −1 to 1). For each molecule it compares how close it sits to its own cluster versus the nearest other cluster; values near 1 mean tight, well-separated clusters, near 0 mean overlapping clusters, and negative means molecules may be in the wrong cluster. A singleton has no within-cluster distance to compare against, so it scores 0 rather than the 1.0 the formula would otherwise give it — Rousseeuw's convention, which scikit-learn also follows. Fragmenting a clustering therefore cannot inflate this number. |
 | `dunn_index` | Smallest between-cluster distance divided by the largest cluster diameter. Higher is better: it rewards clusters that are far apart relative to how wide they are. Sensitive to outliers, so read it alongside the other metrics. |
-| `boundary_violations` | Count of cross-cluster molecule pairs that are closer than `boundary_threshold` — i.e. pairs that look like near-neighbors yet were split into different clusters. A high count suggests the method is cutting through groups of similar compounds. |
+| `boundary_violations` | Count of cross-cluster molecule pairs at or below `boundary_threshold` — i.e. pairs that look like near-neighbors yet were split into different clusters. The comparison is inclusive, so a pair sitting exactly on the threshold counts. A high count suggests the method is cutting through groups of similar compounds. |
 
 ### Representatives and coverage
 
@@ -504,7 +504,9 @@ purchasing, and diversity triage.
 `treat_noise_as_singletons=True` folds noise into the `singleton_fraction`
 interpretation; set it `False` to keep them distinct. The report requires
 complete pairwise distances (dense or memory-mapped storage); a sparse
-(`cutoff`) matrix raises.
+(`cutoff`) matrix raises. `bitbirch_refine` can return an emptied leaf
+subcluster as an empty member list, and `cluster_report` refuses a result
+carrying one; nothing else the library produces trips that check.
 
 ### Internal validity indices and optional stages
 
@@ -675,6 +677,10 @@ All backends use scipy-compatible condensed distance matrix indexing:
 n * i - i * (i + 1) / 2 + j - i - 1
 ```
 
+Reached directly, `Get` and `Set` refuse a pair they cannot address: an index
+at or beyond `NumSamples()` on either, and the diagonal on `Set`, which owns no
+stored slot. Python sees `RuntimeError`.
+
 ---
 
 ## Command-Line Tool
@@ -760,13 +766,18 @@ Runnable examples live in `examples/`:
 |---------|---------------|
 | `quickstart_smiles.py` | End-to-end clustering from inline SMILES. |
 | `rank_representatives.py` | Weighted ranking plus score/diversity k-representative selection. |
+| `getting-started.ipynb` | Notebook walkthrough over a real dataset: distances, all five algorithms, and a side-by-side quality comparison. |
 
-Run them with the local package on your `PYTHONPATH`:
+Run the scripts with the local package on your `PYTHONPATH`:
 
 ```bash
 python examples/quickstart_smiles.py
 python examples/rank_representatives.py
 ```
+
+The notebook additionally imports `oepandas` and `cnotebook`, which are not
+OECluster dependencies; it reads its input from `examples/assets/Bender.csv`
+and must be run from the `examples/` directory.
 
 ## License
 

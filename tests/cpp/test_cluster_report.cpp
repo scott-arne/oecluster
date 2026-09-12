@@ -3045,7 +3045,10 @@ TEST(ClusterReportTest, RecordUndefinedCases) {
     EXPECT_DOUBLE_EQ(lone.mean_representative_distance, 0.0);
     EXPECT_EQ(lone.nearest_cluster, 0);
     EXPECT_DOUBLE_EQ(lone.nearest_cluster_distance, 0.8);
-    EXPECT_NEAR(lone.silhouette, 1.0, 1e-12);
+    // Zero by Rousseeuw's convention, not the 1.0 the general formula yields
+    // from an absent a term. Derived in SingletonSilhouetteIsZeroNotOne, which
+    // also pins what it does to the scalar.
+    EXPECT_DOUBLE_EQ(lone.silhouette, 0.0);
 
     // The defined cases, which are what make the NaN assertions above mean
     // anything. Since Task 2's gate these four fields DEFAULT to NaN, so an
@@ -3062,6 +3065,46 @@ TEST(ClusterReportTest, RecordUndefinedCases) {
     EXPECT_DOUBLE_EQ(populated.nearest_cluster_distance, 0.8);
     EXPECT_NEAR(populated.silhouette, 2.0 / 3.0, 1e-12);
     EXPECT_EQ(populated.nearest_cluster, 1);
+}
+
+// A singleton's a term is 0.0 for want of an own-cluster pair, not because its
+// neighbours are coincident, so the general formula (b - a) / max(a, b) reads it
+// as b/b and awards the perfect score. Rousseeuw defines s(i) = 0 for a cluster
+// of one, and scikit-learn's silhouette_score follows him; through 5.1.0 this
+// library returned 1.0.
+//
+// MakeSixPointStorage under {0,0,0,1,-1,-1}: A = {0,1,2}, B = {3}, two noise
+// points. Every cross distance is 0.8, so each A point's b term is 0.8, and
+// their a terms are 0.2, 0.3, 0.3 -- silhouettes 0.75, 0.625, 0.625. Point 3 is
+// the singleton. The scalar is the mean over all four clustered points, which is
+// where the convention earns its keep: at 1.0 the singleton DRAGS THE MEAN UP,
+// to 0.75 -- level with the best of the three real terms and above the other
+// two. At 0.0 it reads 0.5, below all three. A fragmented clustering must not
+// outscore a tight one by virtue of being fragmented.
+TEST(ClusterReportTest, SingletonSilhouetteIsZeroNotOne) {
+    const DenseStorage storage = MakeSixPointStorage();
+    ClusterReportOptions options;
+    options.compute_per_cluster_records = true;
+    const ClusterReport r =
+        cluster_report(MakeResult({0, 0, 0, 1, -1, -1}), storage, options);
+
+    ASSERT_EQ(r.records.size(), 2u);
+    ASSERT_EQ(r.records[1].size, 1u);
+
+    // The record. A cluster of one averages its single member's term, so this is
+    // that term unmediated.
+    EXPECT_DOUBLE_EQ(r.records[1].silhouette, 0.0);
+
+    // The multi-member cluster is untouched -- the convention applies to the
+    // singleton alone and must not perturb a defined term.
+    EXPECT_NEAR(r.records[0].silhouette, 2.0 / 3.0, 1e-12);
+
+    // The scalar. 2.0 / 4 under the convention; 3.0 / 4 without it. Asserting
+    // both halves separates a singleton still scoring 1.0 from a scalar that
+    // stopped averaging the singleton in at all -- dropping point 3 from the
+    // mean entirely would give 2.0 / 3, which is neither of these.
+    EXPECT_NEAR(r.silhouette, 0.5, 1e-12);
+    EXPECT_LT(r.silhouette, r.records[0].silhouette);
 }
 
 // Section 7.1 item 13, the per_cluster_records half. This is what the requested
@@ -3116,7 +3159,10 @@ TEST(ClusterReportTest, RecordNearestClusterTiesAndPerClusterDistance) {
     // its three guard-controlled fields go undefined.
     EXPECT_EQ(r.records[2].nearest_cluster, 1);
     EXPECT_DOUBLE_EQ(r.records[2].nearest_cluster_distance, 0.2);
-    EXPECT_NEAR(r.records[2].silhouette, 1.0, 1e-12);
+    // Zero, not 1.0: see SingletonSilhouetteIsZeroNotOne. The other two guarded
+    // fields above still carry real values, which is what keeps this a
+    // singleton-scoring assertion rather than a size-guard one.
+    EXPECT_DOUBLE_EQ(r.records[2].silhouette, 0.0);
 }
 
 // The a-side nearest-cluster write is a running minimum, and the tie fixture

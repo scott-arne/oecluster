@@ -83,6 +83,20 @@ use scipy-compatible condensed indexing.
   distance graphs. It cannot serve complete pairwise distances, so workflows
   that need every distance must use dense or memory-mapped storage.
 
+Both accessors refuse a pair they cannot address rather than answering about
+it. `Get` and `Set` throw `std::out_of_range` for an index at or beyond
+`NumSamples()`, and `Set` additionally throws `std::invalid_argument` for an
+in-range diagonal, which owns no stored slot: `Get` answers `i == j` from a
+shortcut rather than from memory. The range check runs first, so an
+out-of-range diagonal is reported as the range error it also is, and it runs
+ahead of `SparseStorage`'s cutoff shortcut, so whether a bad call is diagnosed
+does not depend on the value it carried.
+
+`pdist()` checks the storage size against the comparison size separately.
+`Set`'s own range check cannot see a storage larger than the comparison,
+because every index that loop produces is in range for the oversized storage
+and the distances would simply land in the wrong slots.
+
 ## Clustering
 
 The clustering headers under `oecluster/clustering` provide the algorithms and

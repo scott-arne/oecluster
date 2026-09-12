@@ -78,7 +78,9 @@ struct ClusterRecord {
     /// Min single-linkage distance to nearest_cluster; NaN when K < 2. Not 0.0,
     /// which would read as another cluster sitting at zero distance.
     double nearest_cluster_distance = std::numeric_limits<double>::quiet_NaN();
-    /// Mean over this cluster's members; NaN when K < 2.
+    /// Mean over this cluster's members; NaN when K < 2. A singleton cluster
+    /// scores 0 by Rousseeuw's convention: its member has no own-cluster pair,
+    /// so the term is undefined rather than perfect.
     double silhouette = std::numeric_limits<double>::quiet_NaN();
     /// Pairs involving this cluster within boundary_threshold. Each violating
     /// pair is counted by both of its endpoints, so the sum over records is
@@ -142,6 +144,9 @@ struct ClusterReport {
     double median_intra_distance = 0.0;
     double median_radius = 0.0;
     double p95_diameter = 0.0;
+    /// Mean over every clustered point, singletons contributing 0 each
+    /// (see ClusterRecord::silhouette). Matches Rousseeuw's definition and
+    /// scikit-learn's silhouette_score.
     double silhouette = 0.0;
     double dunn_index = 0.0;
     size_t boundary_violations = 0;

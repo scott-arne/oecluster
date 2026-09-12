@@ -2,6 +2,30 @@
 
 This file starts at 5.0.0; earlier releases are not recorded here.
 
+## [5.2.0] - 2026-09-12
+
+### Changed
+
+- A singleton cluster's silhouette is now 0 rather than 1.0, following
+  Rousseeuw's definition and matching scikit-learn's `silhouette_score`. **This
+  changes the number `cluster_report` returns for any clustering that has a
+  size-1 cluster**, in both `ClusterReport::silhouette` and the affected
+  `ClusterRecord::silhouette`; nothing raises and no other field moves. A
+  singleton's within-cluster mean arrives at the formula as 0.0 for want of an
+  own-cluster pair, not because its neighbours are coincident, so the general
+  `(b - a) / max(a, b)` read it as `b / b` and handed a cluster of one the
+  perfect score. Averaged into the scalar, that pulled the mean **up** on
+  exactly the fragmented clusterings the scorecard exists to discriminate: on a
+  four-point fixture split `{0,1}`, `{2}`, both real members scored 0.75 and the
+  report read 0.833, above two of the three terms it averaged. It now reads 0.5.
+  The old value was never a defensible reading of the index -- no published
+  definition awards a lone point the maximum -- so this is corrected rather than
+  made configurable. Reports produced before this release are not comparable
+  with ones produced after it whenever `num_singletons` is non-zero; the two are
+  identical when it is zero. The correction applies to the silhouette alone:
+  `silhouette_like_score` on `RepresentativeMetrics` is a different quantity
+  over representatives and is unchanged.
+
 ## [5.1.0] - 2026-09-10
 
 ### Added
@@ -96,19 +120,23 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   and `coverage_at` entries of `0.0` -- a plausible, in-range answer to a
   question that was never answerable. Positive infinity is still accepted and
   still means what it always meant: every cross pair is a boundary violation,
-  and every sample is covered. The checks sit at the top of the block that
-  processes clusters, so they run from the first cluster onwards: a partition
-  with no clusters is accepted, because no comparison in such a report consumes
-  either option -- `coverage_at` stays empty and `boundary_violations` is zero
-  for want of a pair to count -- and there is no wrong number for the NaN to
-  hide behind. `coverage_thresholds` is still echoed back verbatim in the
-  report, so a NaN passed there is returned in that field; it is the caller's
-  own value coming back, not a computed one. That is a placement rule and not a
-  test of whether the particular call would have consumed the value -- a
-  single-cluster result never reads `boundary_threshold` at all, and a NaN one
-  is refused there anyway. **Python callers see no change.** The wrapper
-  already refuses both with its own `ValueError` before the call reaches C++,
-  so this closes a C++/Python asymmetry rather than altering Python behaviour.
+  and every sample is covered. The checks sit inside the members-non-empty
+  block, behind only the cluster count and the unsupported-method refusal and
+  ahead of every distance read, so a partition with no clusters is accepted and
+  from the first cluster onwards every call is refused. At `K == 0` no
+  comparison consumes either option -- `coverage_at` stays empty and
+  `boundary_violations` is zero for want of a pair to count, not for want of a
+  comparison that held -- so there is no wrong number for the NaN to hide
+  behind, and refusing it would be over-refusal. `coverage_thresholds` is still
+  echoed back verbatim in the report, so a NaN passed there is returned in that
+  field; it is the caller's own value coming back, not a computed one. That is a
+  placement rule and not a test of whether the particular call would have
+  consumed the value -- a single-cluster result never reads `boundary_threshold`
+  at all, and a NaN one is refused there anyway. Which of the two refusals a
+  call that is NaN in both places receives is deliberately not a guarantee, and
+  no test pins it. **Python callers see no change.** The wrapper already refuses
+  both with its own `ValueError` before the call reaches C++, so this closes a
+  C++/Python asymmetry rather than altering Python behaviour.
 - `cluster_report` now raises `TypeError` for a `treat_noise_as_singletons` that
   is not a `bool` or a `numpy.bool_`. **This refuses calls that 5.0.0 accepted.**
   The keyword predates this release and was coerced with a bare `bool(...)`, so
@@ -144,6 +172,27 @@ This file starts at 5.0.0; earlier releases are not recorded here.
 - Python `MemoryError` now surfaces from `cluster_report` for `std::bad_alloc`
   and `std::length_error`. Both previously reached Python as `RuntimeError`,
   indistinguishable from a validation failure.
+- `StorageBackend::Set` now refuses a pair it cannot store, on all three
+  backends: `std::out_of_range` for an index at or beyond `NumSamples()`, and
+  `std::invalid_argument` for an in-range diagonal. Both reach Python as
+  `RuntimeError`. **This refuses calls that 5.0.0 accepted.** `Get` has been
+  range-checked since 5.0.0 and the write side never was, and it fails worse
+  than the read side: `Get` answered about a pair that does not exist, `Set`
+  destroyed one that does. Out of range the condensed index lands on an
+  unrelated pair -- `CondensedIndex(5, 2, 5) == 9 == CondensedIndex(5, 3, 4)` --
+  or, further out, leaves the allocation entirely: `Set(0, 5000, v)` on a
+  five-sample `DenseStorage` wrote roughly 40 KiB past the buffer without
+  faulting, and the `MMapStorage` equivalent runs past the mapping. On the
+  diagonal both indices are in range yet the pair owns no slot at all, since
+  `Get` answers `i == j` from a shortcut rather than from memory, so
+  `CondensedIndex(5, 2, 2) == 6` handed the write the `(1, 4)` pair. The
+  `i != j` precondition was a bare `assert`, compiled out of release builds. The
+  range check runs ahead of the diagonal check, so an out-of-range diagonal is
+  reported as the range error it also is, and ahead of `SparseStorage`'s cutoff
+  shortcut, so whether a bad call is diagnosed does not depend on the value it
+  carried. `pdist` keeps its separate storage-size check: `Set`'s own range
+  check cannot see a storage larger than the comparison, because every index
+  that loop produces is in range for the oversized storage.
 
 ## [5.0.0] - 2026-09-06
 
