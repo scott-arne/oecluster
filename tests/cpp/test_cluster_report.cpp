@@ -109,11 +109,14 @@ DenseStorage MakeDivergentRepresentativeStorage() {
 }
 
 // Nine samples in three clusters of unequal size -- A = {0,1}, B = {2,3,4},
-// C = {5,6,7,8} -- and the only fixture in this file with K >= 3. Every other
-// partition here is K <= 2, which leaves a report that aggregates only the
-// first cluster indistinguishable from one that aggregates all of them, and a
-// cross pass that stops after pair (0,1) indistinguishable from one that walks
-// all three pairs.
+// C = {5,6,7,8}. Most partitions in this file are K <= 2, which leaves a report
+// that aggregates only the first cluster indistinguishable from one that
+// aggregates all of them, and a cross pass that stops after pair (0,1)
+// indistinguishable from one that walks all three pairs. This is the fixture
+// built to separate those: three clusters, three sizes and three separations,
+// no two of them shared. The other K >= 3 fixtures are the singleton ones
+// below, which exist for the redundancy reduction and are flat in every
+// size-weighted and intra-distance quantity this one distinguishes.
 //
 // Three properties are load-bearing and none of them is incidental:
 //
@@ -197,11 +200,18 @@ DenseStorage MakeOffMedoidGlobalStorage() {
 // selection from the question entirely and leaves only the reduction that
 // turns K representatives into representative_redundancy.
 //
-// All three pairwise distances differ, and that is load-bearing. Every other
-// multi-cluster fixture in this file has exactly two clusters, where the
-// row-minima vector is [d, d] and the loop bounds, the running minimum and the
-// median-versus-mean reduction are all indistinguishable. Three distinct
-// distances are what let those candidates land on different numbers.
+// All three pairwise distances differ, and that is load-bearing. Almost every
+// other partition this file feeds to the redundancy reduction has exactly two
+// clusters, where the row-minima vector is [d, d] and every candidate
+// reduction returns d. Three distinct distances are what separate the loop
+// bounds and the median-versus-mean reduction.
+//
+// They do not separate everything. At K = 3 the smallest distance is a row
+// minimum for two of the three rows, so the median of the row minima is always
+// their minimum and always equals the median of their prefix minima -- neither
+// a min-instead-of-median reduction nor a running minimum hoisted above the
+// outer loop can be seen here, under any label permutation. That is what
+// MakeFourSingletonStorage below is for.
 //
 // Which number each candidate lands on depends on the label order as well as
 // on the distances, because the reduction walks the representatives in cluster
@@ -2155,7 +2165,11 @@ TEST(ClusterReportTest, UnsupportedRepresentativeMethodOutranksNanThreshold) {
 // not "would this call have read the threshold". SingleClusterRefusesANanThreshold
 // below pins the other side of it: at K == 1 the boundary threshold is provably
 // never read and a NaN is still refused. Uniform placement is the more
-// predictable contract, and refusing a NaN never takes away a meaningful answer.
+// predictable contract, and the trade is a real one rather than a free choice:
+// at K == 1 the refusal withholds a report that was already fully determined --
+// median_radius, p95_diameter, the intra-distance and size statistics and
+// coverage_at are all computed there without reading boundary_threshold. The
+// production comment beside the guards records the same concession.
 TEST(ClusterReportTest, EmptyPartitionAcceptsANanThreshold) {
     const DenseStorage storage = MakeTwoClusterStorage();
     // labels_to_clusters returns an empty Clusters as soon as the largest label
@@ -2176,12 +2190,12 @@ TEST(ClusterReportTest, EmptyPartitionAcceptsANanThreshold) {
     EXPECT_TRUE(r.coverage_at.empty());
 }
 
-// K == 1, the cluster count the other NaN tests skip: every one of them uses the
-// K = 3 partition and the acceptance test above uses K = 0. Both guards are
-// therefore pinned only at the two ends, and scoping either of them under a
-// cluster count -- wrapping it in `if (cluster_count >= 2)`, which the guards'
-// own rationale comment can be read as inviting -- keeps the rest of the suite
-// green while restoring the defect the guards exist to close.
+// K == 1, the cluster count the other NaN tests skip: every one of them uses a
+// K = 2 or K = 3 partition and the acceptance test above uses K = 0. Both
+// guards are therefore pinned only at the two ends, and scoping either of them
+// under a cluster count -- wrapping it in `if (cluster_count >= 2)`, which the
+// guards' own rationale comment can be read as inviting -- keeps the rest of
+// the suite green while restoring the defect the guards exist to close.
 //
 // It restores it for real, not in principle. The coverage scan is not gated on
 // the cluster count; it needs only a non-empty sample count, a non-empty
