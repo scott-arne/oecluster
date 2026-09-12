@@ -1230,6 +1230,32 @@ TEST(ClusterReportTest, MedoidDunnUsesMedoidSeparationNotMemberSeparation) {
     EXPECT_DOUBLE_EQ(r.dunn_medoid_separation_medoid_spread, 7.0 / 4.0);
 }
 
+// The numerator is a reduction over the per-cluster row minima, and every other
+// fixture that asserts this metric leaves that reduction free to be anything.
+// The two-cluster ones give a vector of [d, d], where min, max, median, first
+// and last all agree; MakeFourSingletonStorage has three distinct row minima but
+// zero medoid scatter, so the metric is NaN there. Three clusters whose FIRST
+// row minimum is not the smallest are what separate the shipped
+// std::min_element from reading the vector's front element -- the mutation a
+// symmetric matrix makes look harmless, because the front element is a real
+// medoid-pair distance and the quotient stays a plausible Dunn score.
+TEST(ClusterReportTest, MedoidDunnNumeratorIsTheSmallestRowMinimumNotTheFirst) {
+    const DenseStorage storage = MakeThreeClusterStorage();
+    const ClusterReport r = cluster_report(
+        MakeResult({0, 0, 1, 1, 1, 2, 2, 2, 2}), storage, ClusterReportOptions());
+
+    // Medoids 0, 2 and 5, separated by d(0,2) = 0.80, d(0,5) = 0.90 and
+    // d(2,5) = 0.60. The row minima are therefore [0.80, 0.60, 0.60]: the
+    // smallest is 0.60 and the first is 0.80, a quarter larger.
+    //
+    // Medoid scatters divide by the full cluster size: 0.32/2 = 0.16 for A,
+    // 0.36/3 = 0.12 for B, 0.18/4 = 0.045 for C. The spread denominator is
+    // twice the largest, 2 * 0.16 = 0.32, and it comes from cluster A rather
+    // than from either cluster the numerator names.
+    EXPECT_DOUBLE_EQ(r.dunn_medoid_separation_medoid_spread, 0.6 / 0.32);
+    // Taking the front element instead reads 0.80 / 0.32 = 2.5.
+}
+
 // point_biserial is a signed correlation, and the sign is the part of it that
 // carries the verdict: a labelling that groups the far pairs together has to
 // score negative. Every other fixture in this file separates its clusters in
