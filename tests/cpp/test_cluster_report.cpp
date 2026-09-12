@@ -217,6 +217,52 @@ DenseStorage MakeThreeSingletonStorage() {
     return storage;
 }
 
+// Four singleton clusters, and the companion the fixture above cannot be
+// rewritten into. At K = 3 the smallest of the three distances is a row minimum
+// for two of the three rows, so the row-minima vector is always [m, m, d] with
+// m the global minimum: its median IS its minimum, and its prefix minima have
+// that same median. No label permutation changes either fact, so K = 3 cannot
+// tell the shipped median of the row minima from their minimum, nor from a
+// running minimum carried across rows. K = 4 is the smallest partition that
+// can.
+//
+// A one-member cluster is its own representative under every method, so this
+// one storage drives both the Medoid and the non-Medoid reduction -- two
+// separate loops over what are here the same points.
+//
+// With MakeResult({0, 1, 2, 3}) the clusters come out in storage-index order,
+// so the representatives are [0, 1, 2, 3] and the row minima are
+//
+//   row 0: min(0.9, 0.7, 0.2) = 0.2
+//   row 1: min(0.9, 0.6, 0.8) = 0.6
+//   row 2: min(0.7, 0.6, 0.5) = 0.5
+//   row 3: min(0.2, 0.8, 0.5) = 0.2
+//
+// giving [0.2, 0.6, 0.5, 0.2], sorted [0.2, 0.2, 0.5, 0.6], median
+// (0.2 + 0.5) / 2 = 0.35. That quotient is exact in IEEE double, so the
+// assertions need no tolerance.
+//
+// Which index holds the global minimum is load-bearing, the way the label order
+// is load-bearing for MakeThreeSingletonStorage. The smallest distance in the
+// matrix is d(0, 3) = 0.2 and ROW 0 reaches it, so a running minimum hoisted
+// above the outer loop collapses the vector to its prefix minima,
+// [0.2, 0.2, 0.2, 0.2]. Any assignment whose row minima come out non-increasing
+// is its own prefix-min vector and would leave that hoist green -- reordering
+// the matrix disarms the test without reddening anything. Re-derive every
+// candidate, the prefix minima included, before changing a distance; the worked
+// table lives with the tests that fix the order, see
+// NonMedoidRepresentativeRedundancyIsTheMedianOfFourRowMinima.
+DenseStorage MakeFourSingletonStorage() {
+    DenseStorage storage(4);
+    storage.Set(0, 1, 0.9);
+    storage.Set(0, 2, 0.7);
+    storage.Set(0, 3, 0.2);
+    storage.Set(1, 2, 0.6);
+    storage.Set(1, 3, 0.8);
+    storage.Set(2, 3, 0.5);
+    return storage;
+}
+
 }  // namespace
 
 TEST(ClusterReportOptionsTest, PresetsSeedDocumentedThresholds) {
@@ -956,6 +1002,73 @@ TEST(ClusterReportTest, NonMedoidRepresentativeRedundancyIsTheMedianOfThreeRowMi
     // Median of [0.2, 0.8, 0.2]. The mean of the same three is 0.4, and an
     // off-by-one at either end of the outer loop gives 0.5.
     EXPECT_DOUBLE_EQ(r.representative_redundancy, 0.2);
+}
+
+// The K = 4 companion to the test above, and the only place in this file where
+// the median of the row minima is separated from their minimum. Two one-token
+// reductions of the redundancy loops ship green against every other assertion
+// of representative_redundancy here, because every one of them is at K = 2 or
+// K = 3 where the median of the row minima IS their minimum: reducing with
+// std::min_element instead of detail::median_distance, and hoisting the per-row
+// `smallest` above the outer loop so the pushed vector becomes the prefix
+// minima of the row minima. Both land on 0.2 against the shipped 0.35.
+//
+// Over the fixture's [0.2, 0.6, 0.5, 0.2] every one-line reduction names its
+// own number:
+//
+//   median of the row minima (shipped)     0.35
+//   minimum instead of median              0.2
+//   prefix minima (hoisted running min)    0.2
+//   mean instead of median                 0.375
+//   maximum instead of median              0.6
+//   outer loop drops the first row         0.5
+//   outer loop drops the last row          0.5
+//   inner loop drops the first column      0.5
+//   inner loop drops the last column       0.6
+//   i != j narrowed to i < j               0.55
+//   i != j dropped, self at distance 0     0.0
+//   the min fold written as max            0.85
+//   last partner kept instead of the least 0.5
+//
+// The mean at 0.375 is the closest of these to the shipped 0.35, and
+// EXPECT_DOUBLE_EQ still separates the two.
+//
+// Both paths need their own test. The two reductions live in separate loops --
+// the non-Medoid one over the configured representatives, the Medoid one folded
+// into the Davies-Bouldin walk over the true medoids -- so a mutation of either
+// is invisible to the other's test. Singletons make the two loops read the same
+// points, which is what lets one fixture pin both.
+TEST(ClusterReportTest, NonMedoidRepresentativeRedundancyIsTheMedianOfFourRowMinima) {
+    const DenseStorage storage = MakeFourSingletonStorage();
+    const ClusteringResult result = MakeResult({0, 1, 2, 3});
+    ClusterReportOptions options;
+    options.representative_method = RepresentativeMethod::Minimax;
+    const ClusterReport r = cluster_report(result, storage, options);
+
+    // The guard that the reduction really saw four rows.
+    ASSERT_EQ(r.num_clusters, 4u);
+    ASSERT_EQ(r.num_singletons, 4u);
+
+    EXPECT_DOUBLE_EQ(r.representative_redundancy, 0.35);
+}
+
+TEST(ClusterReportTest, MedoidRepresentativeRedundancyIsTheMedianOfFourRowMinima) {
+    const DenseStorage storage = MakeFourSingletonStorage();
+    const ClusteringResult result = MakeResult({0, 1, 2, 3});
+    ClusterReportOptions options;
+    options.representative_method = RepresentativeMethod::Medoid;
+    const ClusterReport r = cluster_report(result, storage, options);
+
+    ASSERT_EQ(r.num_clusters, 4u);
+    ASSERT_EQ(r.num_singletons, 4u);
+
+    // The guard that the answer came from the medoid walk and not from the
+    // non-Medoid loop, which this method switches off. Davies-Bouldin is
+    // computed in the same walk, and every singleton scatter is zero, so each
+    // ratio is 0 / separation with a non-zero separation.
+    ASSERT_DOUBLE_EQ(r.davies_bouldin_medoid, 0.0);
+
+    EXPECT_DOUBLE_EQ(r.representative_redundancy, 0.35);
 }
 
 // Section 7.1 item 15. Ties in M resolve to the lowest sample index, which is
