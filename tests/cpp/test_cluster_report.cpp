@@ -2140,11 +2140,16 @@ TEST(ClusterReportTest, UnsupportedRepresentativeMethodOutranksNanThreshold) {
 }
 
 // Both NaN refusals sit inside the members-non-empty guard, so a partition with
-// no clusters at all still accepts a NaN threshold. That is deliberate: a report
-// with no clusters is fully determined without either option being read, so
-// there is no wrong number for the NaN to hide behind and refusing it would be
-// over-refusal. Nothing else pins the placement -- hoisting the guard out of
-// that block is a one-line change no other test in this file would notice.
+// no clusters at all still accepts a NaN threshold. That is deliberate: no
+// comparison in a K == 0 report consumes either option -- coverage_at stays
+// empty and boundary_violations is zero for want of a pair to count -- so there
+// is no wrong number for the NaN to hide behind and refusing it would be
+// over-refusal. The report is not option-free, though: the NaN coverage
+// threshold passed below is echoed verbatim into report.coverage_thresholds, so
+// it does come back out. That is the caller's own value returned to them rather
+// than a number the report computed, which is why it does not argue for a
+// refusal. Nothing else pins the placement -- hoisting the guard out of that
+// block is a one-line change no other test in this file would notice.
 //
 // The rule the guards implement is a placement rule, "at least one cluster", and
 // not "would this call have read the threshold". SingleClusterRefusesANanThreshold

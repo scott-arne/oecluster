@@ -357,14 +357,21 @@ ClusterReport cluster_report(
         // every sample to be covered; both are answered exactly today, so
         // refusing them would be over-refusal. INVARIANT 3.
         //
-        // These sit at the top of the members-non-empty block, and that
-        // placement is the rule: a partition with no clusters is accepted with a
-        // NaN threshold, and from the first cluster onwards every call is
-        // refused. The K == 0 report is fully determined without either option
-        // being read -- coverage_at stays empty and boundary_violations is zero
-        // for want of a pair to count, not for want of a comparison that held --
-        // so there is no wrong number for the NaN to hide behind, and refusing
-        // it would be over-refusal. INVARIANT 3 again.
+        // These sit inside the members-non-empty block behind only the cluster
+        // count and the unsupported-method refusal above, and ahead of every
+        // distance read, and that placement is the rule: a partition with no
+        // clusters is accepted with a NaN threshold, and from the first cluster
+        // onwards every call is refused. At K == 0 no comparison consumes
+        // either option -- coverage_at stays empty and boundary_violations is
+        // zero for want of a pair to count, not for want of a comparison that
+        // held -- so there is no wrong number for the NaN to hide behind, and
+        // refusing it would be over-refusal. INVARIANT 3 again.
+        //
+        // A K == 0 report is not option-free, though: coverage_thresholds is
+        // echoed verbatim into report.coverage_thresholds at the top of this
+        // function, so a NaN passed there comes back out in that field. It is
+        // the caller's own value returned to them rather than a number the
+        // report computed, so it does not move the decision.
         //
         // It is a placement rule and not a test of whether this particular call
         // would have consumed the value, which is the weaker claim it can read
@@ -374,9 +381,11 @@ ClusterReport cluster_report(
         // the coverage scan outright. Both are refused anyway, and at K == 1
         // that does refuse a call whose boundary_violations would have been a
         // correct zero. The trade is deliberate: one cluster-count boundary is
-        // more predictable than a per-option, per-cluster-count carve-out, and
-        // the caller told to replace a NaN loses no answer they could have acted
-        // on.
+        // more predictable than a per-option, per-cluster-count carve-out. It is
+        // not free -- at K == 1 the radius, diameter, intra-distance, size and
+        // coverage fields are all computed without reading boundary_threshold,
+        // and the refusal withholds every one of them until the caller supplies
+        // a real value.
         if (std::isnan(options.boundary_threshold)) {
             throw std::invalid_argument(
                 "cluster_report: boundary_threshold must not be NaN");

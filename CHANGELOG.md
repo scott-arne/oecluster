@@ -98,14 +98,17 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   still means what it always meant: every cross pair is a boundary violation,
   and every sample is covered. The checks sit at the top of the block that
   processes clusters, so they run from the first cluster onwards: a partition
-  with no clusters is accepted, because such a report is fully determined
-  without either option being read and there is no wrong number for the NaN to
-  hide behind. That is a placement rule and not a test of whether the particular
-  call would have consumed the value -- a single-cluster result never reads
-  `boundary_threshold` at all, and a NaN one is refused there anyway. **Python
-  callers see no change.** The wrapper already refuses both with its own
-  `ValueError` before the call reaches C++, so this closes a C++/Python
-  asymmetry rather than altering Python behaviour.
+  with no clusters is accepted, because no comparison in such a report consumes
+  either option -- `coverage_at` stays empty and `boundary_violations` is zero
+  for want of a pair to count -- and there is no wrong number for the NaN to
+  hide behind. `coverage_thresholds` is still echoed back verbatim in the
+  report, so a NaN passed there is returned in that field; it is the caller's
+  own value coming back, not a computed one. That is a placement rule and not a
+  test of whether the particular call would have consumed the value -- a
+  single-cluster result never reads `boundary_threshold` at all, and a NaN one
+  is refused there anyway. **Python callers see no change.** The wrapper
+  already refuses both with its own `ValueError` before the call reaches C++,
+  so this closes a C++/Python asymmetry rather than altering Python behaviour.
 - `cluster_report` now raises `TypeError` for a `treat_noise_as_singletons` that
   is not a `bool` or a `numpy.bool_`. **This refuses calls that 5.0.0 accepted.**
   The keyword predates this release and was coerced with a bare `bool(...)`, so
