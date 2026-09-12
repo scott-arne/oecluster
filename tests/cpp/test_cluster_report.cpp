@@ -2923,6 +2923,38 @@ TEST(ClusterReportTest, RecordDiametersRecomputeP95) {
     EXPECT_NEAR(r.p95_diameter, 0.74, 1e-12);
 }
 
+// Which count the record mean divides by, which the test above cannot see: its
+// two populated clusters are both single pairs, so cluster_intra_counts is
+// [1, 1, 0] and every fixed subscript into it reads the same 1. The scalar
+// sibling at ClusterReport.cpp:893 is pinned against exactly this by
+// HandComputedInternalIndicesOnUnequalClusterSizes -- the record path at :939
+// had no equivalent, and substituting cluster_intra_counts[0] there left the
+// whole suite green while rescaling every record but the first.
+//
+// Pair counts 1, 3 and 6 are what make the subscript observable, and they are
+// pairwise distinct so that no fixed index reads a divisor that happens to be
+// right for more than one cluster.
+TEST(ClusterReportTest, RecordMeanIntraDistanceDividesByItsOwnPairCount) {
+    const DenseStorage storage = MakeThreeClusterStorage();
+    ClusterReportOptions options;
+    options.compute_per_cluster_records = true;
+    const ClusterReport r = cluster_report(
+        MakeResult({0, 0, 1, 1, 1, 2, 2, 2, 2}), storage, options);
+
+    ASSERT_EQ(r.records.size(), 3u);
+    // A = {0,1}: one pair, 0.32.
+    EXPECT_DOUBLE_EQ(r.records[0].mean_intra_distance, 0.32);
+    // B = {2,3,4}: three pairs summing to 0.72. Over A's count of 1 that reads
+    // 0.72; over C's count of 6, 0.12.
+    EXPECT_NEAR(r.records[1].mean_intra_distance, 0.24, 1e-12);
+    // C = {5,6,7,8}: six pairs summing to 1.44. Over A's count that reads 1.44,
+    // a mean larger than any distance in the matrix; over B's, 0.48.
+    EXPECT_NEAR(r.records[2].mean_intra_distance, 0.24, 1e-12);
+    // None of the three equals the pooled mean of 2.48 / 10, so a record mean
+    // sourced from the scorecard's own aggregate is also excluded here.
+    EXPECT_DOUBLE_EQ(r.mean_intra_distance, 0.248);
+}
+
 // The record-level half of Task 6's MedoidNamedIndicesIgnoreRepresentativeMethod:
 // ClusterRecord::representative is the CONFIGURED representative, section 3.7,
 // while the medoid-named scalars are not. Task 6 could not assert this because
