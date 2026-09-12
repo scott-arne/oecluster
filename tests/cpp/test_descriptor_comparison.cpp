@@ -374,6 +374,52 @@ TEST_F(DescriptorComparisonTest, OverridePathDropsNothingAndReproducesTheFit) {
     EXPECT_NEAR(overridden.Compare(0, 1), fitted.Compare(0, 1), 1e-9);
 }
 
+TEST_F(DescriptorComparisonTest, TheSuppliedInverseCovarianceIsTheMatrixTheScoreUses) {
+    // Every other test that supplies a valid inverse_covariance either expects a
+    // refusal or asserts only that a score came back finite, so nothing read the
+    // matrix itself: dropping the assignment that carries it from the options
+    // into the metric left the whole suite green.
+    //
+    // A diagonal matrix is what makes the value checkable by hand. Mahalanobis
+    // over one reduces to a weighted Euclidean sum, so each column's gap can be
+    // measured on its own -- a single-column euclidean comparison is exactly
+    // that gap -- and recombined here. The two weights are distinct and neither
+    // is 1, so a matrix read transposed, replaced by the identity, or refitted
+    // from the molecules all move the answer.
+    DescriptorOptions weight_only;
+    weight_only.metric = "euclidean";
+    weight_only.columns = {"MolecularWeight"};
+    DescriptorComparison weight_gap(mols_, weight_only);
+
+    DescriptorOptions logp_only;
+    logp_only.metric = "euclidean";
+    logp_only.columns = {"XLogP"};
+    DescriptorComparison logp_gap(mols_, logp_only);
+
+    DescriptorOptions opts;
+    opts.metric = "mahalanobis";
+    opts.columns = {"MolecularWeight", "XLogP"};
+    opts.inverse_covariance = {4.0, 0.0, 0.0, 9.0};
+    DescriptorComparison scored(mols_, opts);
+
+    for (size_t i = 0; i < mols_.size(); ++i) {
+        for (size_t j = i + 1; j < mols_.size(); ++j) {
+            const double weight_delta = weight_gap.Compare(i, j);
+            const double logp_delta = logp_gap.Compare(i, j);
+            const double expected = std::sqrt(4.0 * weight_delta * weight_delta +
+                                              9.0 * logp_delta * logp_delta);
+            ASSERT_GT(expected, 0.0) << "pair (" << i << ", " << j << ") is degenerate";
+            EXPECT_NEAR(scored.Compare(i, j), expected, 1e-9 * expected)
+                << "pair (" << i << ", " << j << ")";
+        }
+    }
+
+    // Reported last, and deliberately not as the gate on the loop above: the
+    // accessor and the metric read the same member, so an accessor check on its
+    // own would pass for a matrix that never reached the metric.
+    EXPECT_EQ(scored.InverseCovariance(), opts.inverse_covariance);
+}
+
 TEST_F(DescriptorComparisonTest, DropReportIsParallel) {
     // Not written against mols_: all eleven columns have positive variance over
     // that fixture, so the two sizes would both be zero and the assertion would
