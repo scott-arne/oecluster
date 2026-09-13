@@ -76,9 +76,9 @@ def test_cross_from_file_rejects_malformed(tmp_path):
 
 def test_cdist_fingerprint_matches_scipy():
     """cdist cross-distances match a scipy reference for fingerprints."""
-    from openeye import oechem
     import oecluster
     from oecluster import CrossDistanceMatrix
+    from openeye import oechem
 
     smiles_a = ["c1ccccc1", "CCCCCCCC"]
     smiles_b = ["c1ccc(O)cc1", "c1ccncc1", "CCO"]
@@ -110,8 +110,8 @@ def test_cdist_fingerprint_matches_scipy():
 
 def test_cdist_orientation_is_a_rows_b_cols():
     """Entry [i, j] pairs items_a[i] with items_b[j]."""
-    from openeye import oechem
     import oecluster
+    from openeye import oechem
 
     def build(smis):
         mols = []
@@ -148,9 +148,9 @@ def test_cdist_similarity_with_cutoff_raises():
 
 def test_cdist_rejects_prebuilt_comparison_object():
     """A non-string comparison is rejected by cdist."""
-    from openeye import oechem
     import oecluster
     from oecluster import FingerprintComparison
+    from openeye import oechem
 
     mol = oechem.OEGraphMol()
     oechem.OESmilesToMol(mol, "c1ccccc1")
@@ -162,8 +162,7 @@ def test_cdist_rejects_prebuilt_comparison_object():
 def test_load_distance_matrix_dispatches(tmp_path):
     """load_distance_matrix returns the correct subclass by file kind."""
     import oecluster
-    from oecluster import (CrossDistanceMatrix, DenseStorage,
-                           SymmetricDistanceMatrix)
+    from oecluster import CrossDistanceMatrix, DenseStorage, SymmetricDistanceMatrix
 
     storage = DenseStorage(3)
     storage.Set(0, 1, 0.5)

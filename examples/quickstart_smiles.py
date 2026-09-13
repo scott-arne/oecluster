@@ -1,9 +1,7 @@
 """Cluster a small set of molecules from inline SMILES."""
 
-from openeye import oechem
-
 import oecluster
-
+from openeye import oechem
 
 MOLECULES = (
     ("benzene", "c1ccccc1"),

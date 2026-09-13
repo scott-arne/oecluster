@@ -6,8 +6,7 @@ import pytest
 
 def _dense_distance_matrix(square):
     """Build a dense DistanceMatrix from a square distance matrix."""
-    from oecluster import DenseStorage
-    from oecluster import SymmetricDistanceMatrix
+    from oecluster import DenseStorage, SymmetricDistanceMatrix
 
     square = np.asarray(square, dtype=np.float64)
     storage = DenseStorage(square.shape[0])

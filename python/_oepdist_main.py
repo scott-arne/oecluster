@@ -50,7 +50,9 @@ def _ensure_compat_symlinks(pkg_dir):
             return
         _build_info = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(_build_info)
-    except Exception:
+    # Build info that is absent or unloadable for any reason just means there
+    # is nothing to symlink, so the catch is deliberately blind.
+    except Exception:  # noqa: BLE001
         return
 
     if getattr(_build_info, 'OPENEYE_LIBRARY_TYPE', 'STATIC') != 'SHARED':
@@ -60,10 +62,14 @@ def _ensure_compat_symlinks(pkg_dir):
     if not expected_libs:
         return
 
+    # Locating the toolkit libraries is best-effort: the symlinks below are a
+    # convenience, and any failure here -- a missing openeye package, a broken
+    # install, an OS error from the lookup -- just means there is nothing to
+    # link, so every exception is swallowed deliberately.
     try:
         from openeye import libs
         oe_lib_dir = libs.FindOpenEyeDLLSDirectory()
-    except (ImportError, Exception):
+    except Exception:  # noqa: BLE001
         return
 
     if not os.path.isdir(oe_lib_dir):
@@ -91,7 +97,7 @@ def _ensure_compat_symlinks(pkg_dir):
         base_name = match.group(1)
         actual_path = None
         for f in os.listdir(oe_lib_dir):
-            if f.startswith(base_name + '-') or f.startswith(base_name + '.'):
+            if f.startswith((base_name + '-', base_name + '.')):
                 actual_path = os.path.join(oe_lib_dir, f)
                 break
 
@@ -106,12 +112,15 @@ def _setup_library_env(pkg_dir):
     """Set LD_LIBRARY_PATH so the binary can find OpenEye shared libraries."""
     extra_paths = [pkg_dir]
 
+    # The toolkit directory is an optional addition to the search path; if it
+    # cannot be found the binary still resolves its own bundled libraries, so a
+    # failure here is not worth reporting.
     try:
         from openeye import libs
         oe_lib_dir = libs.FindOpenEyeDLLSDirectory()
         if os.path.isdir(oe_lib_dir):
             extra_paths.append(oe_lib_dir)
-    except (ImportError, Exception):
+    except Exception:  # noqa: BLE001, S110
         pass
 
     if sys.platform == "darwin":

@@ -1,13 +1,12 @@
 """Sphinx configuration for OECluster documentation."""
 
 import os
-from pathlib import Path
-from shutil import which
 import sys
 import warnings
+from pathlib import Path
+from shutil import which
 
 from sphinx.deprecation import RemovedInSphinx10Warning
-
 
 # Directory holding this conf.py. Generated artifacts (Doxygen XML, Exhale RST)
 # are written relative to here, so a build run from a copied source tree keeps

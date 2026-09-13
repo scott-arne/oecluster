@@ -11,8 +11,7 @@ import json
 import statistics
 import time
 from collections.abc import Callable
-from dataclasses import asdict
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any
 
 import numpy as np

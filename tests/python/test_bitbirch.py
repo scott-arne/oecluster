@@ -8,11 +8,9 @@ import sys
 from pathlib import Path
 
 import numpy as np
-import pytest
-
 import oecluster
 import oefp
-
+import pytest
 
 BITBIRCH_REPO = Path("/Users/johnss51/Development/python/bitbirch")
 ISIM_REPO = Path("/Users/johnss51/Development/python/iSIM")
@@ -612,8 +610,8 @@ def test_bitbirch_fast_quality_equivalent_to_strict(merge_criterion, singly):
     batch = _batch_from_bits(bits)
     dm = _tanimoto_distance_matrix(bits)
 
-    common = dict(threshold=0.5, branching_factor=50,
-                  merge_criterion=merge_criterion, singly=singly)
+    common = {"threshold": 0.5, "branching_factor": 50,
+              "merge_criterion": merge_criterion, "singly": singly}
     strict = oecluster.bitbirch(batch, mode="strict_parity", **common)
     fast = oecluster.bitbirch(batch, mode="fast", **common)
 
@@ -653,7 +651,7 @@ def test_bitbirch_recluster_fast_quality_equivalent_to_strict():
     bits = _random_bits(QUALITY_N, 64, seed=21)
     batch = _batch_from_bits(bits)
     dm = _tanimoto_distance_matrix(bits)
-    common = dict(initial_threshold=0.5, second_threshold=0.5, branching_factor=50)
+    common = {"initial_threshold": 0.5, "second_threshold": 0.5, "branching_factor": 50}
     strict = oecluster.bitbirch_recluster(batch, mode="strict_parity", **common)
     fast = oecluster.bitbirch_recluster(batch, mode="fast", **common)
     strict_report = oecluster.cluster_report(strict, dm)
@@ -671,8 +669,8 @@ def test_bitbirch_recluster_fast_quality_equivalent_to_strict():
 def test_bitbirch_refine_fast_equals_strict():
     bits = _random_bits(5000, 64, seed=33)
     batch = _batch_from_bits(bits)
-    common = dict(threshold=0.5, branching_factor=50, singly=False,
-                  reassign_top_clusters=2)
+    common = {"threshold": 0.5, "branching_factor": 50, "singly": False,
+              "reassign_top_clusters": 2}
     strict = oecluster.bitbirch_refine(batch, mode="strict_parity", **common)
     fast = oecluster.bitbirch_refine(batch, mode="fast", **common)
     assert fast.labels.tolist() == strict.labels.tolist()

@@ -137,13 +137,12 @@ def check_build_backend_available(project_dir, python_exe):
     if not pyproject_path.exists():
         return True
 
-    if sys.version_info >= (3, 11):
+    # tomllib is stdlib from 3.11 on. This script can be driven by an older
+    # interpreter than the one it builds for, so the tomli fallback stays.
+    try:
         import tomllib
-    else:
-        try:
-            import tomllib
-        except ImportError:
-            import tomli as tomllib
+    except ImportError:
+        import tomli as tomllib
 
     with open(pyproject_path, 'rb') as f:
         data = tomllib.load(f)
@@ -221,16 +220,13 @@ def load_build_config(project_dir):
         sys.exit(2)
 
     try:
-        if sys.version_info >= (3, 11):
-            import tomllib
-        else:
-            try:
-                import tomllib
-            except ImportError:
-                import tomli as tomllib
+        import tomllib
     except ImportError:
-        print_error("No TOML parser available. Install tomli for Python < 3.11.")
-        sys.exit(2)
+        try:
+            import tomli as tomllib
+        except ImportError:
+            print_error("No TOML parser available. Install tomli for Python < 3.11.")
+            sys.exit(2)
 
     with open(pyproject_path, 'rb') as f:
         data = tomllib.load(f)
@@ -500,7 +496,7 @@ def run_delocate(project_dir, python_exe, wheel_file, openeye_info, config,
             '-v',
             '--ignore-missing-dependencies',
             str(wheel_file)
-        ], capture_output=True, text=True)
+        ], check=False, capture_output=True, text=True)
 
         # Filter and display output - hide expected library warnings
         if result.stdout and verbose:
@@ -535,7 +531,7 @@ def run_delocate(project_dir, python_exe, wheel_file, openeye_info, config,
                     # Show useful info like copying libraries
                     if 'Copying' in line or 'Modifying' in line or 'Output:' in line:
                         print(f"  {line}")
-                elif line.startswith('ERROR:') or line.startswith('WARNING:'):
+                elif line.startswith(('ERROR:', 'WARNING:')):
                     # Show unexpected errors (shouldn't happen if filtering works)
                     print(f"  {line}")
 
@@ -559,7 +555,10 @@ def run_delocate(project_dir, python_exe, wheel_file, openeye_info, config,
             print_step("Adding RPATH for openeye-toolkits libraries...")
             wheel_file = fix_rpath_and_sign(wheel_file, openeye_info, config)
 
-    except Exception as e:
+    # delocate is an optimization, not a requirement: the undelocated wheel is
+    # still usable, so any failure is downgraded to a warning rather than
+    # aborting a build that has already produced its artifact.
+    except Exception as e:  # noqa: BLE001
         print_step(f"delocate warning: {e}")
 
     # Clean up delocated directory
@@ -620,7 +619,10 @@ def fix_rpath_and_sign(wheel_file, openeye_info, config):
                         ], check=False, capture_output=True)
 
                 print_step("RPATH added and binary re-signed")
-            except Exception as e:
+            # install_name_tool and codesign fail in many environment-specific
+            # ways; none of them should sink the build, so the wheel is repacked
+            # with whatever RPATH work did succeed.
+            except Exception as e:  # noqa: BLE001
                 print_step(f"Warning: Could not fix RPATH: {e}")
 
         # Repackage wheel
@@ -801,11 +803,10 @@ def main():
     print(f"\nPackages are in: {dist_dir}")
 
     # Upload if requested
-    if args.upload:
-        if not upload_to_pypi(
-            dist_dir, config, test_pypi=args.test_upload, verbose=args.verbose
-        ):
-            return 1
+    if args.upload and not upload_to_pypi(
+        dist_dir, config, test_pypi=args.test_upload, verbose=args.verbose
+    ):
+        return 1
 
     print_header("Done!")
     print("To upload to PyPI:")

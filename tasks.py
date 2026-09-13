@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
 
 from invoke.tasks import task
-
 
 PROJECT_ROOT = Path(__file__).parent.absolute()
 DOCS_DIR = PROJECT_ROOT / "docs"

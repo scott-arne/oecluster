@@ -9,15 +9,13 @@ import statistics
 import sys
 import time
 from collections.abc import Callable
-from dataclasses import asdict
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import oecluster
 import oefp
-
 
 BITBIRCH_REPO = Path("/Users/johnss51/Development/python/bitbirch")
 ISIM_REPO = Path("/Users/johnss51/Development/python/iSIM")

@@ -1,5 +1,6 @@
-import pytest
 import numpy as np
+import pytest
+
 
 def test_import():
     import oecluster
@@ -16,8 +17,8 @@ def test_dense_storage_roundtrip():
 
 def test_pdist_fingerprint():
     """Test pdist with default Morgan fingerprint comparison on simple molecules."""
-    from openeye import oechem
     import oecluster
+    from openeye import oechem
 
     smiles = ["c1ccccc1", "c1ccc(O)cc1", "CCCCCCCC", "c1ccncc1"]
     mols = []
@@ -47,8 +48,8 @@ def test_pdist_fingerprint():
 
 def test_pdist_fingerprint_atom_pair():
     """Test pdist with OEFP Atom Pair fingerprints."""
-    from openeye import oechem
     import oecluster
+    from openeye import oechem
 
     smiles = ["c1ccccc1", "c1ccc(O)cc1", "CCCCCCCC"]
     mols = []
@@ -66,8 +67,8 @@ def test_pdist_fingerprint_atom_pair():
 
 def test_pdist_fingerprint_metric_kwarg():
     """Test pdist selects the OEFP scalar metric with the metric kwarg."""
-    from openeye import oechem
     import oecluster
+    from openeye import oechem
 
     smiles = ["c1ccccc1", "c1ccc(O)cc1", "CCCCCCCC"]
     mols = []
@@ -85,8 +86,8 @@ def test_pdist_fingerprint_metric_kwarg():
 
 def test_pdist_fingerprint_removed_openeye_type_raises():
     """OpenEye fingerprint families are not accepted by oecluster fingerprints."""
-    from openeye import oechem
     import oecluster
+    from openeye import oechem
 
     mols = [oechem.OEGraphMol(), oechem.OEGraphMol()]
     oechem.OESmilesToMol(mols[0], "C")
@@ -98,8 +99,8 @@ def test_pdist_fingerprint_removed_openeye_type_raises():
 
 def test_pdist_fingerprint_rejects_openeye_mask_kwargs():
     """OpenEye atom and bond mask kwargs are no longer part of the API."""
-    from openeye import oechem
     import oecluster
+    from openeye import oechem
 
     mols = [oechem.OEGraphMol(), oechem.OEGraphMol()]
     oechem.OESmilesToMol(mols[0], "C")
@@ -111,8 +112,8 @@ def test_pdist_fingerprint_rejects_openeye_mask_kwargs():
 
 def test_pdist_fingerprint_rejects_similarity_func_kwarg():
     """The old similarity_func name is not part of the hard-break API."""
-    from openeye import oechem
     import oecluster
+    from openeye import oechem
 
     mols = [oechem.OEGraphMol(), oechem.OEGraphMol()]
     oechem.OESmilesToMol(mols[0], "C")
@@ -124,8 +125,8 @@ def test_pdist_fingerprint_rejects_similarity_func_kwarg():
 
 def test_pdist_with_cutoff():
     """Test pdist with cutoff produces sparse result."""
-    from openeye import oechem
     import oecluster
+    from openeye import oechem
 
     smiles = ["c1ccccc1", "c1ccc(O)cc1", "CCCCCCCC"]
     mols = []
@@ -139,8 +140,8 @@ def test_pdist_with_cutoff():
 
 def test_pdist_progress():
     """Test progress callback is invoked."""
-    from openeye import oechem
     import oecluster
+    from openeye import oechem
 
     smiles = ["c1ccccc1", "c1ccc(O)cc1", "CCCCCCCC"]
     mols = []
@@ -156,8 +157,8 @@ def test_pdist_progress():
 
 def test_distance_matrix_serialization(tmp_path):
     """Test DistanceMatrix save/load roundtrip."""
-    from openeye import oechem
     import oecluster
+    from openeye import oechem
 
     smiles = ["c1ccccc1", "c1ccc(O)cc1", "CCCCCCCC"]
     mols = []
@@ -179,8 +180,8 @@ def test_distance_matrix_serialization(tmp_path):
 
 def test_pdist_fingerprint_similarity():
     """Test pdist with fingerprint comparison in similarity mode."""
-    from openeye import oechem
     import oecluster
+    from openeye import oechem
 
     smiles = ["c1ccccc1", "c1ccc(O)cc1", "CCCCCCCC"]
     mols = []
@@ -203,8 +204,8 @@ def test_pdist_fingerprint_similarity():
 
 def test_pdist_superpose_sitehopper_alias():
     """Test that 'sitehopper' routes to superpose with method=sitehopper."""
-    from openeye import oechem
     import oecluster
+    from openeye import oechem
 
     # Use a single DU so pdist exercises the alias-dispatch path without
     # invoking Distance() — this test covers routing, not scoring. Scoring
@@ -220,8 +221,8 @@ def test_pdist_superpose_sitehopper_alias():
 
 def test_pdist_superpose_kwargs():
     """Test superpose with method kwarg."""
-    from openeye import oechem
     import oecluster
+    from openeye import oechem
 
     files = [
         "tests/assets/spruce_5FQD_1_5FQD_1-ALIGNED_BC__DU__LVY_B-1438.oedu",
@@ -240,8 +241,8 @@ def test_pdist_superpose_kwargs():
 
 def test_pdist_superpose_predicate():
     """Test superpose with predicate kwarg."""
-    from openeye import oechem
     import oecluster
+    from openeye import oechem
 
     files = [
         "tests/assets/spruce_5FQD_1_5FQD_1-ALIGNED_BC__DU__LVY_B-1438.oedu",
@@ -262,8 +263,8 @@ def test_pdist_superpose_predicate():
 
 def test_pdist_superpose_similarity():
     """Test superpose with similarity=True for SSE method."""
-    from openeye import oechem
     import oecluster
+    from openeye import oechem
 
     files = [
         "tests/assets/spruce_5FQD_1_5FQD_1-ALIGNED_BC__DU__LVY_B-1438.oedu",
@@ -285,8 +286,8 @@ def test_pdist_superpose_similarity():
 
 def test_pdist_unknown_kwargs_raises():
     """Test that unknown kwargs raise TypeError."""
-    from openeye import oechem
     import oecluster
+    from openeye import oechem
 
     mols = [oechem.OEGraphMol(), oechem.OEGraphMol()]
     oechem.OESmilesToMol(mols[0], "C")
@@ -313,7 +314,7 @@ def test_symmetric_distance_matrix_hierarchy():
     assert repr(dm).startswith("SymmetricDistanceMatrix(")
     # The abstract base must not be directly constructible as a symmetric matrix.
     with pytest.raises(TypeError):
-        DistanceMatrix("test", {}).num_samples  # type: ignore[call-arg]
+        DistanceMatrix("test", {})  # type: ignore[call-arg]
 
 
 def test_pdist_rocs_end_to_end():

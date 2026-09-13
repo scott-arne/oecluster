@@ -9,10 +9,10 @@ overlay, protein superposition, and binding site comparison.
 
 import abc
 import ctypes
-import json
 import hashlib
 import importlib.machinery
 import importlib.util
+import json
 import math
 import os
 import re
@@ -31,7 +31,10 @@ __version_info__ = (5, 2, 0)
 
 _OPENEYE_COMPAT_PRELOAD_PATHS: list[str] = []
 _OPENEYE_COMPAT_EXTENSION_DIR: Path | None = None
-__all__ = [
+# Grouped by role -- version, storage, matrices, results, then the callables --
+# so the export list reads as a tour of the API. Alphabetical order would
+# interleave those groups, so RUF022 is suppressed rather than applied.
+__all__ = [  # noqa: RUF022
     "__version__",
     "__version_info__",
     "DenseStorage",
@@ -121,15 +124,13 @@ def _runtime_shared_library_names(lib_names):
     return [
         lib_name
         for lib_name in lib_names
-        if ".so" in lib_name
-        or lib_name.endswith(".dylib")
-        or lib_name.endswith(".dll")
+        if ".so" in lib_name or lib_name.endswith((".dylib", ".dll"))
     ]
 
 
 def _is_openeye_runtime_library_name(lib_name):
     """Return whether a dependency belongs to the OpenEye runtime set."""
-    return lib_name.startswith("liboe") or lib_name.startswith("libzstd.")
+    return lib_name.startswith(("liboe", "libzstd."))
 
 
 def _find_openeye_runtime_lib_dir(expected_libs=()):
@@ -192,7 +193,7 @@ def _candidate_runtime_libraries(oe_lib_dir, expected_name):
         candidate_path = os.path.join(oe_lib_dir, file_name)
         if not os.path.isfile(candidate_path):
             continue
-        if file_name.startswith(f"{family}-") or file_name.startswith(f"{family}."):
+        if file_name.startswith((f"{family}-", f"{family}.")):
             candidates.append(candidate_path)
     return sorted(candidates)
 
@@ -589,9 +590,11 @@ _preload_bundled_libs()
 _load_cached_extension_if_needed()
 _check_openeye_version()
 
-# Import C++ bindings from SWIG module
+# Import C++ bindings from SWIG module. Ordered storage backends, then options,
+# then functions, mirroring the C++ headers; isort would both alphabetize that
+# away and split the aliased names into a dozen separate statements.
 try:
-    from .oecluster import (
+    from .oecluster import (  # noqa: I001
         DenseStorage,
         MMapStorage,
         SparseStorage,
@@ -661,7 +664,11 @@ Options for parallel pairwise-distance computation.
 :ivar progress: Optional callback(completed, total) for progress reporting.
 """
 
-from .oecluster import DescriptorComparison as _DescriptorComparison
+# Import order in this module is load-bearing -- everything here runs only after
+# the preload sequence above -- so the block is ordered deliberately, with the
+# sibling modules that pull in the extension themselves left until last. isort
+# would hoist them to the front and detach the comment below from its import.
+from .oecluster import DescriptorComparison as _DescriptorComparison  # noqa: I001
 # Re-exported only. The wrapper class below builds its options through
 # _comparisons, but oecluster.FingerprintOptions is a documented name and has
 # to keep resolving here; the redundant alias says so rather than leaving the
@@ -2082,7 +2089,10 @@ class RepresentativeMetrics:
         (0 = best).
     """
 
-    __slots__ = (
+    # Field order mirrors the C++ RepresentativeMetrics struct, the :ivar: list
+    # above, and the assignments below; alphabetizing would desynchronize all
+    # three from the native layout they document.
+    __slots__ = (  # noqa: RUF023
         "mean_distance_to_cluster",
         "max_distance_to_cluster",
         "median_distance_to_cluster",
@@ -2126,7 +2136,8 @@ class ClusterRepresentative:
     :ivar metrics: Quality metrics as a :class:`RepresentativeMetrics` instance.
     """
 
-    __slots__ = ("member", "score", "metrics")
+    # Ordered as the native result presents them, matching the :ivar: list above.
+    __slots__ = ("member", "score", "metrics")  # noqa: RUF023
 
     def __init__(self, native_representative):
         """

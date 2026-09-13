@@ -5,8 +5,7 @@ import pytest
 
 def _dense_distance_matrix(values, n):
     """Build a dense DistanceMatrix from explicit upper-triangle values."""
-    from oecluster import DenseStorage
-    from oecluster import SymmetricDistanceMatrix
+    from oecluster import DenseStorage, SymmetricDistanceMatrix
 
     storage = DenseStorage(n)
     for (i, j), value in values.items():
