@@ -538,24 +538,26 @@ TEST(PartitionAgreementTest, HomogeneityAndCompletenessSwapWithTheArguments) {
 }
 
 // kMainA/kMainB happens to be symmetric enough that an order-dependent
-// accumulation still swaps exactly. This contingency table -- [[1, 2],
-// [12, 2]], marginals 3/14 against 13/4 -- is not, and it differs in the
-// last bits unless the term ordering is invariant under transposition.
+// accumulation still swaps exactly. This contingency table -- [[2, 7],
+// [5, 1]], marginals 9/6 against 7/8 -- is not, and the MI term ordering
+// must be invariant under transposition or these values differ in the last
+// bit. The assertion is bitwise because the difference is a single ULP, which
+// EXPECT_DOUBLE_EQ's 4-ULP tolerance would hide.
 TEST(PartitionAgreementTest, ArgumentSwapIsExactOnAsymmetricMarginals) {
-    const std::vector<ClusterLabel> a{0, 0, 0, 1, 1, 1, 1, 1, 1,
-                                      1, 1, 1, 1, 1, 1, 1, 1};
-    const std::vector<ClusterLabel> b{0, 1, 1, 0, 0, 0, 0, 0, 0,
-                                      0, 0, 0, 0, 0, 0, 1, 1};
+    const std::vector<ClusterLabel> a{0, 0, 0, 0, 0, 0, 0, 0, 0,
+                                      1, 1, 1, 1, 1, 1};
+    const std::vector<ClusterLabel> b{0, 0, 1, 1, 1, 1, 1, 1, 1,
+                                      0, 0, 0, 0, 0, 1};
     ASSERT_EQ(a.size(), b.size());
-    ASSERT_EQ(a.size(), 17u);
+    ASSERT_EQ(a.size(), 15u);
 
     const PartitionAgreement forward = partition_agreement(a, b);
     const PartitionAgreement backward = partition_agreement(b, a);
-    EXPECT_DOUBLE_EQ(forward.homogeneity, backward.completeness);
-    EXPECT_DOUBLE_EQ(forward.completeness, backward.homogeneity);
-    EXPECT_DOUBLE_EQ(forward.normalized_mutual_information,
+    ExpectSameDouble(forward.homogeneity, backward.completeness);
+    ExpectSameDouble(forward.completeness, backward.homogeneity);
+    ExpectSameDouble(forward.normalized_mutual_information,
                      backward.normalized_mutual_information);
-    EXPECT_DOUBLE_EQ(forward.v_measure, backward.v_measure);
+    ExpectSameDouble(forward.v_measure, backward.v_measure);
 }
 
 TEST(PartitionAgreementTest, ScaffoldEntropyMetrics) {
