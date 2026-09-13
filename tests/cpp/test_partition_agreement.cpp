@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -187,6 +188,63 @@ PartitionAgreementOptions WithNoise(NoiseHandling noise_handling) {
     PartitionAgreementOptions options;
     options.noise_handling = noise_handling;
     return options;
+}
+
+PartitionAgreementOptions WithAmi() {
+    PartitionAgreementOptions options;
+    options.compute_adjusted_mutual_information = true;
+    return options;
+}
+
+// 18 samples, cluster sizes {1,2,3,3,4,5} against {1,3,4,4,6}: 9 nonzero cells
+// of 30, so 21 zero cells contribute to E[MI].
+const std::vector<ClusterLabel> kAmiA{0, 1, 1, 2, 2, 2, 3, 3, 3,
+                                      4, 4, 4, 4, 5, 5, 5, 5, 5};
+const std::vector<ClusterLabel> kAmiB{0, 1, 1, 1, 2, 2, 2, 2, 3,
+                                      3, 3, 3, 4, 4, 4, 4, 4, 4};
+
+/// log(k!) for k in [0, n], by prefix-summing log(k).
+std::vector<double> ReferenceLogFactorials(uint64_t n) {
+    std::vector<double> table(static_cast<size_t>(n) + 1, 0.0);
+    for (uint64_t k = 2; k <= n; ++k) {
+        table[static_cast<size_t>(k)] =
+            table[static_cast<size_t>(k - 1)] + std::log(static_cast<double>(k));
+    }
+    return table;
+}
+
+/// The inner sum of Vinh et al. (2010) for one pair of marginal values.
+double ReferenceTerm(uint64_t u, uint64_t w, uint64_t n,
+                     const std::vector<double>& logfact) {
+    const auto lf = [&logfact](uint64_t k) {
+        return logfact[static_cast<size_t>(k)];
+    };
+    const double total = static_cast<double>(n);
+    const uint64_t lower = (u + w > n) ? (u + w - n) : 1;
+    const uint64_t upper = std::min(u, w);
+    double sum = 0.0;
+    for (uint64_t count = lower; count <= upper; ++count) {
+        const double log_p = lf(u) + lf(w) + lf(n - u) + lf(n - w) - lf(n) -
+                             lf(count) - lf(u - count) - lf(w - count) -
+                             lf(n - u - w + count);
+        sum += (static_cast<double>(count) / total) *
+               std::log(total * static_cast<double>(count) /
+                        (static_cast<double>(u) * static_cast<double>(w))) *
+               std::exp(log_p);
+    }
+    return sum;
+}
+
+/// A deliberately naive K_a x K_b E[MI], with no grouping by marginal value.
+double NaiveExpectedMutualInformation(const detail::ContingencyTable& table) {
+    const std::vector<double> logfact = ReferenceLogFactorials(table.num_samples);
+    double expected = 0.0;
+    for (uint64_t u : table.marginals_a) {
+        for (uint64_t w : table.marginals_b) {
+            expected += ReferenceTerm(u, w, table.num_samples, logfact);
+        }
+    }
+    return expected;
 }
 
 // NaN != NaN, so pairing isnan is the only way to compare a field that is
@@ -612,4 +670,121 @@ TEST(PartitionAgreementTest, PermutedInputsGiveBitwiseEqualResults) {
     options.compute_adjusted_mutual_information = true;
     ExpectSameAgreement(partition_agreement(permuted_a, permuted_b, options),
                         partition_agreement(a, b, options));
+}
+
+// sklearn.metrics.adjusted_mutual_info_score on kMainA/kMainB.
+TEST(PartitionAgreementTest, MainFixtureAdjustedMutualInformation) {
+    const PartitionAgreement agreement =
+        partition_agreement(kMainA, kMainB, WithAmi());
+    EXPECT_TRUE(agreement.requested.adjusted_mutual_information);
+    EXPECT_NEAR(agreement.adjusted_mutual_information, 0.47492716044734345,
+                1e-12);
+}
+
+// A sparse-only E[MI] passes everything else and fails this: 21 of the 30
+// (i, j) pairs have a zero observed count and still contribute.
+TEST(PartitionAgreementTest, AdjustedMutualInformationIteratesZeroCells) {
+    const PartitionAgreement agreement =
+        partition_agreement(kAmiA, kAmiB, WithAmi());
+    EXPECT_EQ(agreement.num_samples, 18u);
+    EXPECT_EQ(agreement.num_clusters_a, 6u);
+    EXPECT_EQ(agreement.num_clusters_b, 5u);
+    EXPECT_NEAR(agreement.adjusted_mutual_information, 0.5531261900574347,
+                1e-12);
+    // The always-computed metrics on the same fixture, for good measure.
+    EXPECT_NEAR(agreement.adjusted_rand_index, 0.5225144895229603, 1e-12);
+    EXPECT_NEAR(agreement.normalized_mutual_information, 0.7261677779961542,
+                1e-12);
+}
+
+// The grouping of equal marginal values is exact in exact arithmetic but not
+// bitwise identical to the naive loop: the grouped form multiplies once where
+// the naive form adds repeatedly, and IEEE-754 addition is not associative.
+TEST(PartitionAgreementTest, MarginalGroupingMatchesTheNaiveLoop) {
+    const detail::ContingencyTable table =
+        detail::build_contingency(kAmiA, kAmiB, NoiseHandling::Singletons);
+
+    double grouped = 0.0;
+    const std::vector<double> logfact =
+        ReferenceLogFactorials(table.num_samples);
+    detail::for_each_marginal_pair(
+        detail::marginal_histogram(table.marginals_a),
+        detail::marginal_histogram(table.marginals_b),
+        [&](uint64_t u, uint64_t w, uint64_t multiplicity) {
+            grouped += static_cast<double>(multiplicity) *
+                       ReferenceTerm(u, w, table.num_samples, logfact);
+        });
+
+    const double naive = NaiveExpectedMutualInformation(table);
+    EXPECT_NEAR(grouped, naive, 1e-12 * std::abs(naive));
+}
+
+TEST(PartitionAgreementTest, AmiIsNaNWhenNobodyAsked) {
+    const PartitionAgreement agreement = partition_agreement(kMainA, kMainB);
+    EXPECT_FALSE(agreement.requested.adjusted_mutual_information);
+    EXPECT_TRUE(std::isnan(agreement.adjusted_mutual_information));
+}
+
+TEST(PartitionAgreementTest, AmiRequestedOnDegenerateInputIsNaNAndRequested) {
+    const PartitionAgreement agreement = partition_agreement({0}, {0}, WithAmi());
+    EXPECT_TRUE(agreement.requested.adjusted_mutual_information);
+    EXPECT_TRUE(std::isnan(agreement.adjusted_mutual_information));
+}
+
+TEST(PartitionAgreementTest, IdenticalPartitionsReportAmiOnlyWhenRequested) {
+    // The three shapes SelfAgreementIsOneEverywhere uses, so the spec's
+    // self-agreement requirement covers AMI on all of them. The degenerate two
+    // matter most: an all-singletons or single-cluster partition against itself
+    // is where a chance-corrected metric computed rather than short-circuited
+    // would return 0/0, and rule 2 is what keeps them at 1.0.
+    const std::vector<std::vector<ClusterLabel>> fixtures{
+        {0, 0, 1, 1, 2, 2},
+        {0, 1, 2, 3, 4, 5},
+        {0, 0, 0, 0, 0, 0},
+    };
+    for (const std::vector<ClusterLabel>& labels : fixtures) {
+        EXPECT_TRUE(std::isnan(partition_agreement(labels, labels)
+                                   .adjusted_mutual_information));
+        EXPECT_DOUBLE_EQ(partition_agreement(labels, labels, WithAmi())
+                             .adjusted_mutual_information,
+                         1.0);
+    }
+}
+
+// The smallest AMI denominator any input can reach, 0.0866 here. The clamp
+// itself is defensive: the denominator is bounded below by log(2)/N over every
+// input rule 2 does not intercept, so eps would take about 3e15 samples. The
+// assertion is finite and near zero, as the spec states.
+TEST(PartitionAgreementTest, AmiStaysFiniteWhenExpectedMiConsumesTheNormalizer) {
+    const PartitionAgreement agreement = partition_agreement(
+        {0, 1, 2, 3, 4, 5, 6, 7}, {0, 0, 1, 2, 3, 4, 5, 6}, WithAmi());
+    EXPECT_TRUE(std::isfinite(agreement.adjusted_mutual_information));
+    EXPECT_NEAR(agreement.adjusted_mutual_information, 0.0, 1e-9);
+}
+
+TEST(PartitionAgreementTest, AmiIsSymmetric) {
+    EXPECT_NEAR(partition_agreement(kMainA, kMainB, WithAmi())
+                    .adjusted_mutual_information,
+                partition_agreement(kMainB, kMainA, WithAmi())
+                    .adjusted_mutual_information,
+                1e-12);
+}
+
+TEST(PartitionAgreementTest, AmiUnderTheThreeNoiseModes) {
+    // WithAmi() already defaults noise_handling to Singletons.
+    EXPECT_NEAR(partition_agreement(kNoiseA, kNoiseB, WithAmi())
+                    .adjusted_mutual_information,
+                -0.012595285524420317, 1e-12);
+
+    PartitionAgreementOptions grouped = WithAmi();
+    grouped.noise_handling = NoiseHandling::Grouped;
+    EXPECT_NEAR(partition_agreement(kNoiseA, kNoiseB, grouped)
+                    .adjusted_mutual_information,
+                -0.08744260969263824, 1e-12);
+
+    PartitionAgreementOptions excluded = WithAmi();
+    excluded.noise_handling = NoiseHandling::Excluded;
+    EXPECT_NEAR(partition_agreement(kNoiseA, kNoiseB, excluded)
+                    .adjusted_mutual_information,
+                0.09605662055753134, 1e-12);
 }
