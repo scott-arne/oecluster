@@ -1,6 +1,9 @@
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <cstdint>
+#include <limits>
+#include <stdexcept>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -169,4 +172,278 @@ TEST(ContingencyTableTest, MarginalPairMultiplicityDoesNotWrapAt32Bits) {
 
     ASSERT_EQ(recorded.size(), 1u);
     EXPECT_EQ(std::get<2>(recorded[0]), 4900000000ull);
+}
+
+namespace {
+
+// A ClusteringResult with members derived from the labels, as the other
+// clustering tests build one.
+ClusteringResult MakeResult(std::vector<ClusterLabel> labels) {
+    Clusters members = labels_to_clusters(labels);
+    return ClusteringResult(std::move(labels), std::move(members));
+}
+
+PartitionAgreementOptions WithNoise(NoiseHandling noise_handling) {
+    PartitionAgreementOptions options;
+    options.noise_handling = noise_handling;
+    return options;
+}
+
+// NaN != NaN, so pairing isnan is the only way to compare a field that is
+// undefined on both sides. That is what lets the tests below assert on every
+// field from Task 2 onwards: a field this task leaves at its NaN default
+// compares equal to itself now, and the same assertion widens by itself to the
+// real value once Task 3 or Task 4 fills the field in. Defined values are
+// compared bitwise rather than with EXPECT_DOUBLE_EQ, because the two calls
+// under comparison run identical arithmetic and anything but an exact match is
+// a bug.
+void ExpectSameDouble(double actual, double expected) {
+    if (std::isnan(expected)) {
+        EXPECT_TRUE(std::isnan(actual));
+    } else {
+        EXPECT_EQ(actual, expected);
+    }
+}
+
+void ExpectSameAgreement(const PartitionAgreement& actual,
+                         const PartitionAgreement& expected) {
+    EXPECT_EQ(actual.num_samples, expected.num_samples);
+    EXPECT_EQ(actual.num_clusters_a, expected.num_clusters_a);
+    EXPECT_EQ(actual.num_clusters_b, expected.num_clusters_b);
+    EXPECT_EQ(actual.requested.adjusted_mutual_information,
+              expected.requested.adjusted_mutual_information);
+    ExpectSameDouble(actual.adjusted_rand_index, expected.adjusted_rand_index);
+    ExpectSameDouble(actual.fowlkes_mallows, expected.fowlkes_mallows);
+    ExpectSameDouble(actual.normalized_mutual_information,
+                     expected.normalized_mutual_information);
+    ExpectSameDouble(actual.homogeneity, expected.homogeneity);
+    ExpectSameDouble(actual.completeness, expected.completeness);
+    ExpectSameDouble(actual.v_measure, expected.v_measure);
+    ExpectSameDouble(actual.adjusted_mutual_information,
+                     expected.adjusted_mutual_information);
+}
+
+const std::vector<ClusterLabel> kMainA{0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2};
+const std::vector<ClusterLabel> kMainB{0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3};
+const std::vector<ClusterLabel> kNoiseA{0, 0, 0, -1, 1, 1, 1, -1, 2, 2, -1, 2};
+const std::vector<ClusterLabel> kNoiseB{0, 0, 1, 1, 1, -1, 2, 2, 2, 3, 3, -1};
+
+}  // namespace
+
+// sklearn.metrics.adjusted_rand_score / fowlkes_mallows_score on kMainA/kMainB.
+TEST(PartitionAgreementTest, MainFixturePairMetrics) {
+    const PartitionAgreement agreement = partition_agreement(kMainA, kMainB);
+
+    EXPECT_EQ(agreement.num_samples, 12u);
+    EXPECT_EQ(agreement.num_clusters_a, 3u);
+    EXPECT_EQ(agreement.num_clusters_b, 4u);
+    EXPECT_NEAR(agreement.adjusted_rand_index, 0.40310077519379844, 1e-12);
+    EXPECT_NEAR(agreement.fowlkes_mallows, 0.5443310539518174, 1e-12);
+}
+
+TEST(PartitionAgreementTest, SelfAgreementIsOneEverywhere) {
+    const std::vector<std::vector<ClusterLabel>> fixtures{
+        {0, 0, 1, 1, 2, 2},  // a normal partition
+        {0, 1, 2, 3, 4, 5},  // all singletons
+        {0, 0, 0, 0, 0, 0},  // a single cluster
+    };
+    for (const std::vector<ClusterLabel>& labels : fixtures) {
+        const PartitionAgreement agreement = partition_agreement(labels, labels);
+        EXPECT_DOUBLE_EQ(agreement.adjusted_rand_index, 1.0);
+        EXPECT_DOUBLE_EQ(agreement.fowlkes_mallows, 1.0);
+        EXPECT_DOUBLE_EQ(agreement.normalized_mutual_information, 1.0);
+        EXPECT_DOUBLE_EQ(agreement.homogeneity, 1.0);
+        EXPECT_DOUBLE_EQ(agreement.completeness, 1.0);
+        EXPECT_DOUBLE_EQ(agreement.v_measure, 1.0);
+    }
+}
+
+// Rule 2 is about the grouping, not the label values.
+TEST(PartitionAgreementTest, RelabelledPartitionsAreIdentical) {
+    const PartitionAgreement agreement =
+        partition_agreement({0, 0, 1, 1}, {9, 9, 4, 4});
+    EXPECT_DOUBLE_EQ(agreement.adjusted_rand_index, 1.0);
+    EXPECT_DOUBLE_EQ(agreement.fowlkes_mallows, 1.0);
+}
+
+// Rule 2 outranks rule 3: scikit-learn reports FM = 0.0 here.
+TEST(PartitionAgreementTest, BothSidesAllSingletonsAreIdentical) {
+    const PartitionAgreement agreement =
+        partition_agreement({0, 1, 2, 3}, {3, 2, 1, 0});
+    EXPECT_DOUBLE_EQ(agreement.fowlkes_mallows, 1.0);
+    EXPECT_DOUBLE_EQ(agreement.adjusted_rand_index, 1.0);
+}
+
+TEST(PartitionAgreementTest, PairMetricsAreSymmetric) {
+    const PartitionAgreement forward = partition_agreement(kMainA, kMainB);
+    const PartitionAgreement backward = partition_agreement(kMainB, kMainA);
+    EXPECT_DOUBLE_EQ(forward.adjusted_rand_index, backward.adjusted_rand_index);
+    EXPECT_DOUBLE_EQ(forward.fowlkes_mallows, backward.fowlkes_mallows);
+    EXPECT_EQ(forward.num_clusters_a, backward.num_clusters_b);
+    EXPECT_EQ(forward.num_clusters_b, backward.num_clusters_a);
+}
+
+TEST(PartitionAgreementTest, ThreeNoiseModesGiveDistinctResults) {
+    const PartitionAgreement singletons =
+        partition_agreement(kNoiseA, kNoiseB, WithNoise(NoiseHandling::Singletons));
+    EXPECT_EQ(singletons.num_samples, 12u);
+    EXPECT_EQ(singletons.num_clusters_a, 6u);
+    EXPECT_EQ(singletons.num_clusters_b, 6u);
+    EXPECT_NEAR(singletons.adjusted_rand_index, -0.012269938650306749, 1e-12);
+    EXPECT_NEAR(singletons.fowlkes_mallows, 0.11785113019775792, 1e-12);
+
+    const PartitionAgreement grouped =
+        partition_agreement(kNoiseA, kNoiseB, WithNoise(NoiseHandling::Grouped));
+    EXPECT_EQ(grouped.num_samples, 12u);
+    EXPECT_EQ(grouped.num_clusters_a, 4u);
+    EXPECT_EQ(grouped.num_clusters_b, 5u);
+    EXPECT_NEAR(grouped.adjusted_rand_index, -0.07179487179487179, 1e-12);
+    EXPECT_NEAR(grouped.fowlkes_mallows, 0.09622504486493762, 1e-12);
+
+    const PartitionAgreement excluded =
+        partition_agreement(kNoiseA, kNoiseB, WithNoise(NoiseHandling::Excluded));
+    EXPECT_EQ(excluded.num_samples, 7u);
+    EXPECT_EQ(excluded.num_clusters_a, 3u);
+    EXPECT_EQ(excluded.num_clusters_b, 4u);
+    EXPECT_NEAR(excluded.adjusted_rand_index, 0.08695652173913043, 1e-12);
+    EXPECT_NEAR(excluded.fowlkes_mallows, 0.2581988897471611, 1e-12);
+}
+
+TEST(PartitionAgreementTest, ExcludedDropsSamplesNoisyOnEitherSide) {
+    const std::vector<ClusterLabel> a{0, 0, 0, -1, 1, 1, 1, 1, 2, 2};
+    const std::vector<ClusterLabel> b{0, 0, 1, 1, 1, 1, 2, -1, 2, 2};
+
+    EXPECT_EQ(partition_agreement(a, b, WithNoise(NoiseHandling::Singletons))
+                  .num_samples,
+              10u);
+    const PartitionAgreement excluded =
+        partition_agreement(a, b, WithNoise(NoiseHandling::Excluded));
+    EXPECT_EQ(excluded.num_samples, 8u);
+    EXPECT_NEAR(excluded.adjusted_rand_index, 0.23809523809523808, 1e-12);
+    EXPECT_NEAR(excluded.fowlkes_mallows, 0.4285714285714285, 1e-12);
+}
+
+TEST(PartitionAgreementTest, LabelsBelowMinusOneAreNoise) {
+    const std::vector<ClusterLabel> minus_one{0, -1, 1, -1, 2, 2};
+    const std::vector<ClusterLabel> assorted{0, -2, 1, -3, 2, 2};
+    const std::vector<ClusterLabel> other{0, 0, 1, 1, 2, 2};
+
+    // Every field, not just the pair metrics: the requirement is that the two
+    // fixtures score identically, and a divergence confined to the entropy
+    // metrics would be just as much a defect. AMI is requested so this covers
+    // the last field too — at this task both sides are still NaN and the
+    // NaN-aware compare passes; from Task 4 the same assertion compares real
+    // values.
+    for (NoiseHandling mode : {NoiseHandling::Singletons, NoiseHandling::Grouped,
+                               NoiseHandling::Excluded}) {
+        PartitionAgreementOptions options = WithNoise(mode);
+        options.compute_adjusted_mutual_information = true;
+        ExpectSameAgreement(partition_agreement(assorted, other, options),
+                            partition_agreement(minus_one, other, options));
+    }
+}
+
+TEST(PartitionAgreementTest, FowlkesMallowsIsNaNWhenEitherSideIsAllSingletons) {
+    // sum_a == 0 and sum_b == 0 are separate guards; cover both.
+    const PartitionAgreement side_a =
+        partition_agreement({0, 1, 2, 3}, {0, 0, 1, 1});
+    EXPECT_TRUE(std::isnan(side_a.fowlkes_mallows));
+    EXPECT_FALSE(std::isnan(side_a.adjusted_rand_index));
+
+    const PartitionAgreement side_b =
+        partition_agreement({0, 0, 1, 1}, {0, 1, 2, 3});
+    EXPECT_TRUE(std::isnan(side_b.fowlkes_mallows));
+    EXPECT_FALSE(std::isnan(side_b.adjusted_rand_index));
+}
+
+TEST(PartitionAgreementTest, RuleOneReportsEveryMetricNaN) {
+    // Directly: one sample in, one sample out.
+    const PartitionAgreement direct = partition_agreement({0}, {0});
+    // And through Excluded, which leaves one survivor of three.
+    const PartitionAgreement reduced = partition_agreement(
+        {0, -1, -1}, {0, 1, 1}, WithNoise(NoiseHandling::Excluded));
+
+    for (const PartitionAgreement& agreement : {direct, reduced}) {
+        EXPECT_EQ(agreement.num_samples, 1u);
+        EXPECT_TRUE(std::isnan(agreement.adjusted_rand_index));
+        EXPECT_TRUE(std::isnan(agreement.fowlkes_mallows));
+        EXPECT_TRUE(std::isnan(agreement.normalized_mutual_information));
+        EXPECT_TRUE(std::isnan(agreement.homogeneity));
+        EXPECT_TRUE(std::isnan(agreement.completeness));
+        EXPECT_TRUE(std::isnan(agreement.v_measure));
+        EXPECT_TRUE(std::isnan(agreement.adjusted_mutual_information));
+    }
+}
+
+TEST(PartitionAgreementTest, ScaffoldAgreementFollowsNoiseHandling) {
+    const std::vector<ClusterLabel> labels{0, 0, 0, 1, 1, 1, 2, 2, 2};
+    const std::vector<std::string> scaffolds{"ar", "ar", "ar", "pi", "",
+                                             "al", "al", "al", ""};
+
+    const PartitionAgreement singletons =
+        scaffold_agreement(labels, scaffolds, WithNoise(NoiseHandling::Singletons));
+    EXPECT_EQ(singletons.num_samples, 9u);
+    EXPECT_EQ(singletons.num_clusters_b, 5u);
+    EXPECT_NEAR(singletons.adjusted_rand_index, 0.4166666666666667, 1e-12);
+    EXPECT_NEAR(singletons.fowlkes_mallows, 0.5443310539518174, 1e-12);
+
+    const PartitionAgreement grouped =
+        scaffold_agreement(labels, scaffolds, WithNoise(NoiseHandling::Grouped));
+    EXPECT_EQ(grouped.num_clusters_b, 4u);
+    EXPECT_NEAR(grouped.adjusted_rand_index, 0.36, 1e-12);
+    EXPECT_NEAR(grouped.fowlkes_mallows, 0.5039526306789696, 1e-12);
+
+    const PartitionAgreement excluded =
+        scaffold_agreement(labels, scaffolds, WithNoise(NoiseHandling::Excluded));
+    EXPECT_EQ(excluded.num_samples, 7u);
+    EXPECT_EQ(excluded.num_clusters_b, 3u);
+    EXPECT_NEAR(excluded.adjusted_rand_index, 0.631578947368421, 1e-12);
+    EXPECT_NEAR(excluded.fowlkes_mallows, 0.7302967433402214, 1e-12);
+}
+
+// Field for field, so a forwarder that drops an argument is caught.
+TEST(PartitionAgreementTest, ClusteringResultOverloadsForward) {
+    ExpectSameAgreement(
+        partition_agreement(MakeResult(kMainA), MakeResult(kMainB)),
+        partition_agreement(kMainA, kMainB));
+
+    const std::vector<ClusterLabel> labels{0, 0, 1, 1};
+    const std::vector<std::string> scaffolds{"ar", "pi", "pi", "pi"};
+    ExpectSameAgreement(scaffold_agreement(MakeResult(labels), scaffolds),
+                        scaffold_agreement(labels, scaffolds));
+}
+
+TEST(PartitionAgreementTest, ValidationRejectsMismatchedAndEmptyInputs) {
+    // A braced `{}` is ambiguous between the ClusteringResult and raw-vector
+    // overloads -- both are default-constructible -- so name the type.
+    const std::vector<ClusterLabel> no_labels;
+    const std::vector<std::string> no_scaffolds;
+
+    EXPECT_THROW(partition_agreement({0, 0, 1}, {0, 1}), std::invalid_argument);
+    EXPECT_THROW(partition_agreement(no_labels, no_labels),
+                 std::invalid_argument);
+    EXPECT_THROW(partition_agreement(MakeResult({0, 0, 1}), MakeResult({0, 1})),
+                 std::invalid_argument);
+    EXPECT_THROW(partition_agreement(ClusteringResult(), ClusteringResult()),
+                 std::invalid_argument);
+    EXPECT_THROW(scaffold_agreement({0, 0, 1}, {"a", "b"}),
+                 std::invalid_argument);
+    EXPECT_THROW(scaffold_agreement({0, 0}, no_scaffolds),
+                 std::invalid_argument);
+    EXPECT_THROW(scaffold_agreement(MakeResult({0, 0, 1}), {"a", "b"}),
+                 std::invalid_argument);
+    EXPECT_THROW(scaffold_agreement(ClusteringResult(), no_scaffolds),
+                 std::invalid_argument);
+}
+
+TEST(PartitionAgreementTest, MismatchMessageNamesBothSizes) {
+    try {
+        scaffold_agreement({0, 0, 1}, {"a", "b"});
+        FAIL() << "expected std::invalid_argument";
+    } catch (const std::invalid_argument& error) {
+        const std::string message = error.what();
+        EXPECT_NE(message.find("2"), std::string::npos);
+        EXPECT_NE(message.find("3"), std::string::npos);
+        EXPECT_NE(message.find("scaffold_labels"), std::string::npos);
+    }
 }
