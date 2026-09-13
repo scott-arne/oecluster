@@ -537,6 +537,27 @@ TEST(PartitionAgreementTest, HomogeneityAndCompletenessSwapWithTheArguments) {
     EXPECT_DOUBLE_EQ(forward.v_measure, backward.v_measure);
 }
 
+// kMainA/kMainB happens to be symmetric enough that an order-dependent
+// accumulation still swaps exactly. This contingency table -- [[1, 2],
+// [12, 2]], marginals 3/14 against 13/4 -- is not, and it differs in the
+// last bits unless the term ordering is invariant under transposition.
+TEST(PartitionAgreementTest, ArgumentSwapIsExactOnAsymmetricMarginals) {
+    const std::vector<ClusterLabel> a{0, 0, 0, 1, 1, 1, 1, 1, 1,
+                                      1, 1, 1, 1, 1, 1, 1, 1};
+    const std::vector<ClusterLabel> b{0, 1, 1, 0, 0, 0, 0, 0, 0,
+                                      0, 0, 0, 0, 0, 0, 1, 1};
+    ASSERT_EQ(a.size(), b.size());
+    ASSERT_EQ(a.size(), 17u);
+
+    const PartitionAgreement forward = partition_agreement(a, b);
+    const PartitionAgreement backward = partition_agreement(b, a);
+    EXPECT_DOUBLE_EQ(forward.homogeneity, backward.completeness);
+    EXPECT_DOUBLE_EQ(forward.completeness, backward.homogeneity);
+    EXPECT_DOUBLE_EQ(forward.normalized_mutual_information,
+                     backward.normalized_mutual_information);
+    EXPECT_DOUBLE_EQ(forward.v_measure, backward.v_measure);
+}
+
 TEST(PartitionAgreementTest, ScaffoldEntropyMetrics) {
     const std::vector<ClusterLabel> labels{0, 0, 0, 1, 1, 1, 2, 2, 2};
     const std::vector<std::string> scaffolds{"ar", "ar", "ar", "pi", "",
@@ -551,23 +572,30 @@ TEST(PartitionAgreementTest, ScaffoldEntropyMetrics) {
 // The unordered_map traversal is reproducible inside one build, so scoring the
 // same input twice cannot fail. Two orderings of the same table can: interned
 // ids follow first appearance, so permuting the samples renumbers the clusters
-// and reorders every id-driven traversal. This is the test that forces the
-// canonical summation order in Step 3.
+// and reorders every id-driven traversal. This fixture was verified to differ
+// in the last bits when the MI and entropy accumulations are left unsorted, so
+// it exercises the canonical summation order requirement.
 TEST(PartitionAgreementTest, PermutedInputsGiveBitwiseEqualResults) {
     std::vector<ClusterLabel> a;
     std::vector<ClusterLabel> b;
+    int index = 0;
     for (int cluster = 0; cluster < 12; ++cluster) {
-        for (int member = 0; member < 5; ++member) {
+        // Unequal cluster sizes and unequal cell counts are what make the
+        // accumulation order observable: a fixture whose rows are all the
+        // same size sums to the same double in any order.
+        const int size = 4 + cluster % 3;
+        for (int member = 0; member < size; ++member) {
             a.push_back(cluster);
-            b.push_back((cluster * 5 + member) % 7);
+            b.push_back(index % 7);
+            ++index;
         }
     }
 
     // A stride permutation: same contingency table, different sample order.
     std::vector<ClusterLabel> permuted_a;
     std::vector<ClusterLabel> permuted_b;
-    for (size_t offset = 0; offset < 7; ++offset) {
-        for (size_t i = offset; i < a.size(); i += 7) {
+    for (size_t offset = 0; offset < 5; ++offset) {
+        for (size_t i = offset; i < a.size(); i += 5) {
             permuted_a.push_back(a[i]);
             permuted_b.push_back(b[i]);
         }

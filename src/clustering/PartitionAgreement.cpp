@@ -118,10 +118,13 @@ PartitionAgreement score(const detail::ContingencyTable& table,
     // appearance, so permuting the samples renumbers the clusters, and a sum
     // taken in id order would change in its last bits. Sorting by a key that
     // exactly determines each term makes equal keys mean equal terms, so the
-    // emitted sequence -- and the sum -- is the same for every sample order.
-    // The pair metrics above need no such treatment: they are exact integer
-    // arithmetic. Cost is O(K log K + nnz log nnz), the same order as building
-    // the table.
+    // emitted sequence -- and the sum -- is the same for every sample order
+    // and invariant under argument swap. The MI term sort uses (min, max) of
+    // the marginals rather than (row, col), making it transpose-invariant:
+    // each term depends only on count and the product row*col, and (min, max,
+    // count) determines both. The pair metrics above need no such treatment:
+    // they are exact integer arithmetic. Cost is O(K log K + nnz log nnz),
+    // the same order as building the table.
     const double n = static_cast<double>(table.num_samples);
     const auto entropy_of = [n](const std::vector<uint64_t>& marginals) {
         std::vector<uint64_t> sizes(marginals);
@@ -153,8 +156,12 @@ PartitionAgreement score(const detail::ContingencyTable& table,
     std::sort(terms.begin(), terms.end(),
               [](const MutualInformationTerm& lhs,
                  const MutualInformationTerm& rhs) {
-                  return std::tie(lhs.row_size, lhs.col_size, lhs.count) <
-                         std::tie(rhs.row_size, rhs.col_size, rhs.count);
+                  const uint64_t lhs_min = std::min(lhs.row_size, lhs.col_size);
+                  const uint64_t lhs_max = std::max(lhs.row_size, lhs.col_size);
+                  const uint64_t rhs_min = std::min(rhs.row_size, rhs.col_size);
+                  const uint64_t rhs_max = std::max(rhs.row_size, rhs.col_size);
+                  return std::tie(lhs_min, lhs_max, lhs.count) <
+                         std::tie(rhs_min, rhs_max, rhs.count);
               });
 
     double mutual_information = 0.0;
