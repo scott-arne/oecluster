@@ -447,3 +447,139 @@ TEST(PartitionAgreementTest, MismatchMessageNamesBothSizes) {
         EXPECT_NE(message.find("scaffold_labels"), std::string::npos);
     }
 }
+
+// sklearn.metrics.normalized_mutual_info_score and
+// homogeneity_completeness_v_measure on kMainA/kMainB.
+TEST(PartitionAgreementTest, MainFixtureEntropyMetrics) {
+    const PartitionAgreement agreement = partition_agreement(kMainA, kMainB);
+    EXPECT_NEAR(agreement.normalized_mutual_information, 0.6280760724651604,
+                1e-12);
+    EXPECT_NEAR(agreement.homogeneity, 0.7103099178571527, 1e-12);
+    EXPECT_NEAR(agreement.completeness, 0.5629072918469558, 1e-12);
+    EXPECT_NEAR(agreement.v_measure, 0.6280760724651604, 1e-12);
+}
+
+TEST(PartitionAgreementTest, NoiseModesEntropyMetrics) {
+    const PartitionAgreement singletons =
+        partition_agreement(kNoiseA, kNoiseB, WithNoise(NoiseHandling::Singletons));
+    EXPECT_NEAR(singletons.normalized_mutual_information, 0.5919578611106004,
+                1e-12);
+    EXPECT_NEAR(singletons.homogeneity, 0.5997280461117795, 1e-12);
+    EXPECT_NEAR(singletons.completeness, 0.5843864446715682, 1e-12);
+
+    const PartitionAgreement grouped =
+        partition_agreement(kNoiseA, kNoiseB, WithNoise(NoiseHandling::Grouped));
+    EXPECT_NEAR(grouped.normalized_mutual_information, 0.4073100686148156, 1e-12);
+    EXPECT_NEAR(grouped.homogeneity, 0.4370927081530442, 1e-12);
+    EXPECT_NEAR(grouped.completeness, 0.3813271825750331, 1e-12);
+
+    const PartitionAgreement excluded =
+        partition_agreement(kNoiseA, kNoiseB, WithNoise(NoiseHandling::Excluded));
+    EXPECT_NEAR(excluded.normalized_mutual_information, 0.561884803785396, 1e-12);
+    EXPECT_NEAR(excluded.homogeneity, 0.6329129160661658, 1e-12);
+    EXPECT_NEAR(excluded.completeness, 0.505190257900143, 1e-12);
+}
+
+TEST(PartitionAgreementTest, NmiAndVMeasureAreBitwiseEqual) {
+    // `<utility>` is already in the include block from Task 1.
+    const std::vector<std::pair<std::vector<ClusterLabel>,
+                                std::vector<ClusterLabel>>> fixtures{
+        {kMainA, kMainB},
+        {kNoiseA, kNoiseB},
+        {{0, 0, 1, 1}, {0, 1, 0, 1}},
+        {{0, 0, 0, 0}, {0, 0, 1, 1}},
+        {{0, 1, 2, 3}, {0, 0, 1, 1}},
+    };
+    for (const auto& fixture : fixtures) {
+        const PartitionAgreement agreement =
+            partition_agreement(fixture.first, fixture.second);
+        EXPECT_EQ(agreement.normalized_mutual_information, agreement.v_measure);
+    }
+}
+
+// The harmonic form 2hc/(h+c) is 0/0 here; the shared-value definition is 0.
+TEST(PartitionAgreementTest, IndependentPartitionsGiveZeroNotNaN) {
+    const PartitionAgreement agreement =
+        partition_agreement({0, 0, 1, 1}, {0, 1, 0, 1});
+    EXPECT_DOUBLE_EQ(agreement.homogeneity, 0.0);
+    EXPECT_DOUBLE_EQ(agreement.completeness, 0.0);
+    EXPECT_DOUBLE_EQ(agreement.v_measure, 0.0);
+    EXPECT_DOUBLE_EQ(agreement.normalized_mutual_information, 0.0);
+    EXPECT_NEAR(agreement.adjusted_rand_index, -0.5, 1e-12);
+    EXPECT_DOUBLE_EQ(agreement.fowlkes_mallows, 0.0);
+}
+
+// The harmonic form inherits homogeneity's NaN here; the composite is defined.
+TEST(PartitionAgreementTest, ZeroEntropySideLeavesTheCompositeDefined) {
+    const PartitionAgreement agreement =
+        partition_agreement({0, 0, 0, 0}, {0, 0, 1, 1});
+    EXPECT_TRUE(std::isnan(agreement.homogeneity));
+    EXPECT_DOUBLE_EQ(agreement.completeness, 0.0);
+    EXPECT_DOUBLE_EQ(agreement.v_measure, 0.0);
+    EXPECT_DOUBLE_EQ(agreement.normalized_mutual_information, 0.0);
+}
+
+TEST(PartitionAgreementTest, ZeroEntropySideBIsCompletenessNaN) {
+    const PartitionAgreement agreement =
+        partition_agreement({0, 0, 1, 1}, {0, 0, 0, 0});
+    EXPECT_DOUBLE_EQ(agreement.homogeneity, 0.0);
+    EXPECT_TRUE(std::isnan(agreement.completeness));
+    EXPECT_DOUBLE_EQ(agreement.v_measure, 0.0);
+}
+
+TEST(PartitionAgreementTest, HomogeneityAndCompletenessSwapWithTheArguments) {
+    const PartitionAgreement forward = partition_agreement(kMainA, kMainB);
+    const PartitionAgreement backward = partition_agreement(kMainB, kMainA);
+    EXPECT_DOUBLE_EQ(forward.homogeneity, backward.completeness);
+    EXPECT_DOUBLE_EQ(forward.completeness, backward.homogeneity);
+    EXPECT_DOUBLE_EQ(forward.normalized_mutual_information,
+                     backward.normalized_mutual_information);
+    EXPECT_DOUBLE_EQ(forward.v_measure, backward.v_measure);
+}
+
+TEST(PartitionAgreementTest, ScaffoldEntropyMetrics) {
+    const std::vector<ClusterLabel> labels{0, 0, 0, 1, 1, 1, 2, 2, 2};
+    const std::vector<std::string> scaffolds{"ar", "ar", "ar", "pi", "",
+                                             "al", "al", "al", ""};
+    const PartitionAgreement singletons = scaffold_agreement(labels, scaffolds);
+    EXPECT_NEAR(singletons.normalized_mutual_information, 0.6916056673469443,
+                1e-12);
+    EXPECT_NEAR(singletons.homogeneity, 0.8068732785714351, 1e-12);
+    EXPECT_NEAR(singletons.completeness, 0.6051549589285762, 1e-12);
+}
+
+// The unordered_map traversal is reproducible inside one build, so scoring the
+// same input twice cannot fail. Two orderings of the same table can: interned
+// ids follow first appearance, so permuting the samples renumbers the clusters
+// and reorders every id-driven traversal. This is the test that forces the
+// canonical summation order in Step 3.
+TEST(PartitionAgreementTest, PermutedInputsGiveBitwiseEqualResults) {
+    std::vector<ClusterLabel> a;
+    std::vector<ClusterLabel> b;
+    for (int cluster = 0; cluster < 12; ++cluster) {
+        for (int member = 0; member < 5; ++member) {
+            a.push_back(cluster);
+            b.push_back((cluster * 5 + member) % 7);
+        }
+    }
+
+    // A stride permutation: same contingency table, different sample order.
+    std::vector<ClusterLabel> permuted_a;
+    std::vector<ClusterLabel> permuted_b;
+    for (size_t offset = 0; offset < 7; ++offset) {
+        for (size_t i = offset; i < a.size(); i += 7) {
+            permuted_a.push_back(a[i]);
+            permuted_b.push_back(b[i]);
+        }
+    }
+    ASSERT_EQ(permuted_a.size(), a.size());
+
+    // Every field, AMI included: the spec asks for bitwise equality across the
+    // whole struct. AMI is still NaN on both sides at this task, so
+    // ExpectSameAgreement passes it now and compares the real values from
+    // Task 4 on without this test needing to change.
+    PartitionAgreementOptions options;
+    options.compute_adjusted_mutual_information = true;
+    ExpectSameAgreement(partition_agreement(permuted_a, permuted_b, options),
+                        partition_agreement(a, b, options));
+}

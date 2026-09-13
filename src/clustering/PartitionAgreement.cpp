@@ -5,11 +5,13 @@
 
 #include "oecluster/clustering/PartitionAgreement.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "ContingencyTable.h"
@@ -110,6 +112,73 @@ PartitionAgreement score(const detail::ContingencyTable& table,
             : static_cast<double>(sum_cells) /
                   std::sqrt(static_cast<double>(sum_a) *
                             static_cast<double>(sum_b));
+
+    // Natural log throughout. Both sums accumulate in an order determined by
+    // the values being added, never by the interned ids: ids follow first
+    // appearance, so permuting the samples renumbers the clusters, and a sum
+    // taken in id order would change in its last bits. Sorting by a key that
+    // exactly determines each term makes equal keys mean equal terms, so the
+    // emitted sequence -- and the sum -- is the same for every sample order.
+    // The pair metrics above need no such treatment: they are exact integer
+    // arithmetic. Cost is O(K log K + nnz log nnz), the same order as building
+    // the table.
+    const double n = static_cast<double>(table.num_samples);
+    const auto entropy_of = [n](const std::vector<uint64_t>& marginals) {
+        std::vector<uint64_t> sizes(marginals);
+        std::sort(sizes.begin(), sizes.end());
+        double entropy = 0.0;
+        for (uint64_t size : sizes) {
+            const double p = static_cast<double>(size) / n;
+            if (p > 0.0) {
+                entropy -= p * std::log(p);
+            }
+        }
+        return entropy;
+    };
+    const double entropy_a = entropy_of(table.marginals_a);
+    const double entropy_b = entropy_of(table.marginals_b);
+
+    struct MutualInformationTerm {
+        uint64_t row_size;
+        uint64_t col_size;
+        uint64_t count;
+    };
+    std::vector<MutualInformationTerm> terms;
+    terms.reserve(table.cells.size());
+    for (const detail::ContingencyTable::Cell& cell : table.cells) {
+        terms.push_back(MutualInformationTerm{table.marginals_a[cell.row],
+                                              table.marginals_b[cell.col],
+                                              cell.count});
+    }
+    std::sort(terms.begin(), terms.end(),
+              [](const MutualInformationTerm& lhs,
+                 const MutualInformationTerm& rhs) {
+                  return std::tie(lhs.row_size, lhs.col_size, lhs.count) <
+                         std::tie(rhs.row_size, rhs.col_size, rhs.count);
+              });
+
+    double mutual_information = 0.0;
+    for (const MutualInformationTerm& term : terms) {
+        const double count = static_cast<double>(term.count);
+        const double row = static_cast<double>(term.row_size);
+        const double col = static_cast<double>(term.col_size);
+        mutual_information += (count / n) * std::log((count * n) / (row * col));
+    }
+
+    // 2*MI/(H(a)+H(b)) is the definition, not the harmonic mean of the two
+    // components below: the harmonic form is 0/0 both when MI is zero with two
+    // positive entropies and when one entropy is zero, and the composite is
+    // well defined in each case. Rules 1 and 2 have already removed the only
+    // input whose denominator here is zero -- two zero-entropy sides are two
+    // single-cluster partitions, which are identical -- so neither field is
+    // ever NaN.
+    const double shared = 2.0 * mutual_information / (entropy_a + entropy_b);
+    agreement.normalized_mutual_information = shared;
+    agreement.v_measure = shared;
+    agreement.homogeneity =
+        entropy_a > 0.0 ? mutual_information / entropy_a : UNDEFINED;
+    agreement.completeness =
+        entropy_b > 0.0 ? mutual_information / entropy_b : UNDEFINED;
 
     return agreement;
 }
