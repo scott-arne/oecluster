@@ -3627,8 +3627,9 @@ def partition_agreement(a, b, *, noise="singletons",
     scikit-learn on five degenerate inputs; ``docs/python-api.md`` tabulates
     them.
 
-    :param a: A clustering result, or any sequence of ints (list, tuple, or a
-        numpy integer array). The reference labeling.
+    :param a: A clustering result, or a sequence of ints fitting the native
+        32-bit signed label type (list, tuple, or a numpy integer array). The
+        reference labeling.
     :param b: The candidate labeling, in the same forms.
     :param noise: How negatively-labelled samples enter the contingency table:
         ``"singletons"`` (the default, each noise sample is its own cluster),
@@ -3670,7 +3671,8 @@ def scaffold_agreement(result, scaffold_labels, *, noise="singletons",
     An empty scaffold string is missing data, not a category, and follows
     ``noise`` exactly as a negative label does on the integer side.
 
-    :param result: A clustering result, or any sequence of ints.
+    :param result: A clustering result, or a sequence of ints fitting the
+        native 32-bit signed label type.
     :param scaffold_labels: One scaffold string per sample.
     :param noise: As for :func:`partition_agreement`.
     :param adjusted_mutual_information: As for :func:`partition_agreement`.
