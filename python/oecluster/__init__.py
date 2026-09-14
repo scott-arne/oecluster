@@ -50,8 +50,12 @@ __all__ = [  # noqa: RUF022
     "ClusterReport",
     "ClusterReportComparison",
     "ClusterReportRequested",
+    "PartitionAgreement",
+    "PartitionAgreementRequested",
     "cluster_report",
     "compare_reports",
+    "partition_agreement",
+    "scaffold_agreement",
     "ButinaResult",
     "DBSCANResult",
     "HDBSCANResult",
@@ -3198,6 +3202,208 @@ def _cluster_threshold(preset):
     return preset_map[key]
 
 
+class PartitionAgreementRequested(NamedTuple):
+    """Which optional computations a :class:`PartitionAgreement`'s caller asked for.
+
+    Records the request, not the outcome. A requested metric whose value is
+    undefined still reports ``True`` here, so a NaN can be read unambiguously:
+    ``False`` means nobody asked, ``True`` with NaN means asked and undefined.
+    """
+
+    adjusted_mutual_information: bool
+
+
+class PartitionAgreement:
+    """Agreement between two labelings of the same samples.
+
+    Construct these with :func:`partition_agreement` or
+    :func:`scaffold_agreement` rather than by calling ``__init__`` directly.
+    The attributes are read-only by convention; assigning to one changes this
+    object and nothing else.
+
+    :ivar num_samples: Samples entering the contingency table. Equals the input
+        length except under ``noise="excluded"``, which can shrink it.
+    :ivar num_clusters_a: Distinct clusters on side A after noise handling.
+    :ivar num_clusters_b: Distinct clusters on side B after noise handling.
+    :ivar adjusted_rand_index: Hubert-Arabie adjusted Rand index. 1.0 is exact
+        agreement, 0.0 is the value expected by chance, negative is worse than
+        chance.
+    :ivar fowlkes_mallows: Geometric mean of pair precision and pair recall.
+        NaN when either side is all singletons and the partitions differ;
+        scikit-learn reports 0.0 there.
+    :ivar normalized_mutual_information: Mutual information over the arithmetic
+        mean of the two entropies. Bitwise equal to ``v_measure``.
+    :ivar homogeneity: ``MI / H(a)``. Asymmetric. NaN when side A is a single
+        cluster and the partitions differ; scikit-learn reports 1.0 there.
+    :ivar completeness: ``MI / H(b)``. Asymmetric; see ``homogeneity``.
+    :ivar v_measure: The beta = 1 V-measure, assigned from the same value as
+        ``normalized_mutual_information``. Stays defined where the harmonic
+        mean of homogeneity and completeness does not.
+    :ivar adjusted_mutual_information: Mutual information corrected for chance.
+        NaN unless ``adjusted_mutual_information=True`` was passed; read
+        :attr:`requested` to tell "nobody asked" from "asked and undefined".
+        Its accuracy is limited where the denominator -- mean entropy minus
+        expected mutual information -- approaches zero, which happens when both
+        partitions are close to all-singleton. Two 1.5-million-sample
+        partitions differing by one merged pair have a true value of zero and
+        report about 0.035. Partitions whose denominator is order one are
+        unaffected. The limit is inherent to computing the correction in double
+        precision -- scikit-learn shares it -- rather than a property of this
+        implementation.
+    :ivar requested: A :class:`PartitionAgreementRequested`.
+    """
+
+    # Field order mirrors the C++ PartitionAgreement struct and the :ivar: list
+    # above; alphabetizing would desynchronize both from the native layout they
+    # document.
+    __slots__ = (  # noqa: RUF023
+        "num_samples",
+        "num_clusters_a",
+        "num_clusters_b",
+        "adjusted_rand_index",
+        "fowlkes_mallows",
+        "normalized_mutual_information",
+        "homogeneity",
+        "completeness",
+        "v_measure",
+        "adjusted_mutual_information",
+        "requested",
+    )
+
+    # The rows to_table() emits, in order. Excludes `requested`, which gates
+    # the rows rather than being one.
+    _TABLE_FIELDS: ClassVar[tuple[str, ...]] = (
+        "num_samples",
+        "num_clusters_a",
+        "num_clusters_b",
+        "adjusted_rand_index",
+        "fowlkes_mallows",
+        "normalized_mutual_information",
+        "homogeneity",
+        "completeness",
+        "v_measure",
+        "adjusted_mutual_information",
+    )
+
+    # Scalar metric -> the PartitionAgreementRequested flag that gates it. A
+    # metric named here reads as None when its flag is False, which is what
+    # keeps "nobody asked" apart from the NaN of "asked and undefined".
+    _OPT_IN_SCALARS: ClassVar[dict[str, str]] = {
+        "adjusted_mutual_information": "adjusted_mutual_information",
+    }
+
+    def __init__(self, native_agreement):
+        """
+        Construct an agreement scorecard from the native result.
+
+        :param native_agreement: Native agreement object returned by the
+            extension.
+        """
+        self.num_samples = int(native_agreement.num_samples)
+        self.num_clusters_a = int(native_agreement.num_clusters_a)
+        self.num_clusters_b = int(native_agreement.num_clusters_b)
+        self.adjusted_rand_index = float(native_agreement.adjusted_rand_index)
+        self.fowlkes_mallows = float(native_agreement.fowlkes_mallows)
+        self.normalized_mutual_information = float(
+            native_agreement.normalized_mutual_information)
+        self.homogeneity = float(native_agreement.homogeneity)
+        self.completeness = float(native_agreement.completeness)
+        self.v_measure = float(native_agreement.v_measure)
+        self.adjusted_mutual_information = float(
+            native_agreement.adjusted_mutual_information)
+        self.requested = PartitionAgreementRequested(
+            adjusted_mutual_information=bool(
+                native_agreement.requested.adjusted_mutual_information),
+        )
+
+    def to_table(self):
+        """Return ``(metric_name, value)`` rows, one per reported quantity.
+
+        A value is ``None`` when nobody asked the question -- an opt-in metric
+        whose :attr:`requested` flag is ``False`` -- so ``nan`` keeps its single
+        meaning of asked-and-undefined.
+
+        :returns: A list of ``(str, value)`` pairs.
+        """
+        rows = []
+        for name in self._TABLE_FIELDS:
+            flag = self._OPT_IN_SCALARS.get(name)
+            if flag is not None and not getattr(self.requested, flag):
+                rows.append((name, None))
+            else:
+                rows.append((name, getattr(self, name)))
+        return rows
+
+    def __repr__(self):
+        def _fmt(value):
+            if value is None:
+                return "--"
+            if isinstance(value, float):
+                return f"{value:.4g}"
+            return str(value)
+
+        rows = self.to_table()
+        metric_width = max([len("metric")] + [len(row[0]) for row in rows])
+        lines = [f"{'metric':<{metric_width}}  {'value':>12}"]
+        for name, value in rows:
+            lines.append(f"{name:<{metric_width}}  {_fmt(value):>12}")
+        return "\n".join(lines)
+
+
+def _noise_handling(noise):
+    noise_map = {
+        "singletons": _oecluster.NoiseHandling_Singletons,
+        "grouped": _oecluster.NoiseHandling_Grouped,
+        "excluded": _oecluster.NoiseHandling_Excluded,
+    }
+    key = str(noise).lower()
+    if key not in noise_map:
+        raise ValueError(
+            f"Unknown noise handling: {noise!r}; expected 'singletons', "
+            f"'grouped' or 'excluded'")
+    return noise_map[key]
+
+
+def _agreement_options(noise, adjusted_mutual_information):
+    options = _oecluster.PartitionAgreementOptions()
+    options.noise_handling = _noise_handling(noise)
+    options.compute_adjusted_mutual_information = bool(
+        adjusted_mutual_information)
+    return options
+
+
+def _agreement_labels(value, argument_name):
+    """Coerce a clustering result or a sequence of ints to a native IntVector."""
+    labels = getattr(value, "labels", value)
+    vector = _oecluster.IntVector()
+    try:
+        for label in labels:
+            vector.push_back(int(label))
+    except (TypeError, ValueError) as error:
+        raise TypeError(
+            f"{argument_name} must be a clustering result or a sequence of "
+            f"ints") from error
+    return vector
+
+
+def _agreement_scaffolds(value, argument_name):
+    """Coerce a sequence of scaffold strings to a native StringVector."""
+    # A bare str is iterable, so without this guard a single scaffold string
+    # would silently become one annotation per character.
+    if isinstance(value, str):
+        raise TypeError(
+            f"{argument_name} must be a sequence of scaffold strings, not a "
+            f"single str")
+    vector = _oecluster.StringVector()
+    try:
+        for label in value:
+            vector.push_back(str(label))
+    except TypeError as error:
+        raise TypeError(
+            f"{argument_name} must be a sequence of scaffold strings") from error
+    return vector
+
+
 def cluster_report(result, distance_matrix, *, preset="default",
                    coverage_thresholds=None, boundary_threshold=None,
                    representative_method="medoid",
@@ -3395,6 +3601,88 @@ def compare_reports(*reports):
         if not isinstance(report, ClusterReport):
             raise TypeError("compare_reports() expects ClusterReport objects")
     return ClusterReportComparison(reports)
+
+
+def partition_agreement(a, b, *, noise="singletons",
+                        adjusted_mutual_information=False):
+    """
+    Score the agreement between two labelings of the same samples.
+
+    Takes labels and nothing else -- no distance matrix, unlike
+    :func:`cluster_report`. Side A is always the first argument:
+    ``homogeneity`` is ``MI / H(a)`` and ``completeness`` is ``MI / H(b)``, and
+    those two are the only outputs that change when the arguments are swapped.
+
+    Undefined metrics are NaN rather than a convention, which diverges from
+    scikit-learn on five degenerate inputs; ``docs/python-api.md`` tabulates
+    them.
+
+    :param a: A clustering result, or any sequence of ints (list, tuple, or a
+        numpy integer array). The reference labeling.
+    :param b: The candidate labeling, in the same forms.
+    :param noise: How negatively-labelled samples enter the contingency table:
+        ``"singletons"`` (the default, each noise sample is its own cluster),
+        ``"grouped"`` (each side's noise forms one cluster, which is how
+        scikit-learn reads a -1 label), or ``"excluded"`` (a sample noisy on
+        either side is dropped from both).
+    :param adjusted_mutual_information: Also compute AMI. Off by default: its
+        expected-MI correction is the one term whose cost grows with the
+        cluster count rather than the sample count.
+    :returns: A :class:`PartitionAgreement`.
+    :raises TypeError: If either argument is neither a clustering result nor a
+        sequence of ints.
+    :raises ValueError: If the labelings differ in length, either is empty, or
+        ``noise`` is not one of the three accepted strings.
+    """
+    labels_a = _agreement_labels(a, "a")
+    labels_b = _agreement_labels(b, "b")
+    if len(labels_a) == 0 or len(labels_b) == 0:
+        raise ValueError("partition_agreement() requires non-empty labelings")
+    if len(labels_a) != len(labels_b):
+        raise ValueError(
+            f"b has {len(labels_b)} entries but a has {len(labels_a)} samples")
+    options = _agreement_options(noise, adjusted_mutual_information)
+    return PartitionAgreement(
+        _oecluster.partition_agreement(labels_a, labels_b, options))
+
+
+def scaffold_agreement(result, scaffold_labels, *, noise="singletons",
+                       adjusted_mutual_information=False):
+    """
+    Score a clustering against a per-sample scaffold annotation.
+
+    The clustering is side A and the annotation is side B, following the same
+    positional rule as :func:`partition_agreement`. So ``completeness`` carries
+    the scaffold-purity reading -- whether each cluster's members share a
+    single scaffold -- and ``homogeneity`` carries its transpose, whether each
+    scaffold landed in a single cluster.
+
+    An empty scaffold string is missing data, not a category, and follows
+    ``noise`` exactly as a negative label does on the integer side.
+
+    :param result: A clustering result, or any sequence of ints.
+    :param scaffold_labels: One scaffold string per sample.
+    :param noise: As for :func:`partition_agreement`.
+    :param adjusted_mutual_information: As for :func:`partition_agreement`.
+    :returns: A :class:`PartitionAgreement`.
+    :raises TypeError: If ``result`` is not a clustering result or sequence of
+        ints, or ``scaffold_labels`` is not a sequence of strings.
+    :raises ValueError: If the two differ in length, either is empty, or
+        ``noise`` is not one of the three accepted strings.
+    """
+    labels = _agreement_labels(result, "result")
+    scaffolds = _agreement_scaffolds(scaffold_labels, "scaffold_labels")
+    if len(labels) == 0 or len(scaffolds) == 0:
+        raise ValueError(
+            "scaffold_agreement() requires a non-empty clustering and a "
+            "non-empty scaffold annotation")
+    if len(labels) != len(scaffolds):
+        raise ValueError(
+            f"scaffold_labels has {len(scaffolds)} entries but the clustering "
+            f"has {len(labels)} samples")
+    options = _agreement_options(noise, adjusted_mutual_information)
+    return PartitionAgreement(
+        _oecluster.scaffold_agreement(labels, scaffolds, options))
 
 
 def descriptor_statistics(mols, *, sources=None, columns=None, groups=None,
