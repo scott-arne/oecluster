@@ -561,6 +561,9 @@ print(agreement.adjusted_rand_index, agreement.v_measure)
 | `v_measure` | 0.0 to 1.0 | Same number as `normalized_mutual_information`, reported under both names |
 | `adjusted_mutual_information` | Below 0.0 to 1.0, 0.0 by chance | As NMI, but corrected for the agreement many small clusters produce by chance. Opt in with `adjusted_mutual_information=True` |
 
+See [docs/python-api.md](docs/python-api.md#partition-agreement) for the
+`noise=` readings and the divergences from scikit-learn.
+
 ---
 
 ## Scaling Guidance

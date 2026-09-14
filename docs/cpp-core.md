@@ -236,8 +236,9 @@ one entropy is zero, and the composite is well defined in each case.
 ### The positional rule
 
 Side A is always the first argument. `homogeneity` is `MI / H(a)` and
-`completeness` is `MI / H(b)`, and those two are the only fields that change
-when the arguments are swapped -- everything else is symmetric.
+`completeness` is `MI / H(b)`, so swapping the arguments exchanges that pair --
+and with it the counts `num_clusters_a` and `num_clusters_b`. Every other
+metric is symmetric.
 
 `scaffold_agreement` puts the clustering on side A and the scaffold annotation
 on side B, so `completeness` carries the scaffold-purity reading -- whether

@@ -374,12 +374,12 @@ print(oecluster.scaffold_agreement(butina_result, scaffolds).completeness)
 
 Either function accepts a clustering result, a list or tuple of ints, or a
 numpy integer array on each label side. Side A is the first argument:
-`homogeneity` is `MI / H(a)` and `completeness` is `MI / H(b)`, and those two
-are the only fields that change when the arguments are swapped. For
-`scaffold_agreement()` the clustering is side A, so `completeness` is the
-scaffold-purity reading -- whether each cluster's members share a single
-scaffold -- and `homogeneity` is its transpose, whether each scaffold landed in
-a single cluster.
+`homogeneity` is `MI / H(a)` and `completeness` is `MI / H(b)`, and swapping
+the arguments exchanges that pair, along with `num_clusters_a` and
+`num_clusters_b`; every other metric is unchanged. For `scaffold_agreement()`
+the clustering is side A, so `completeness` is the scaffold-purity reading
+-- whether each cluster's members share a single scaffold -- and `homogeneity`
+is its transpose, whether each scaffold landed in a single cluster.
 
 `noise=` takes `"singletons"` (the default; each negatively-labelled sample
 becomes its own cluster), `"grouped"` (each side's noise forms one cluster,
@@ -396,7 +396,7 @@ request and not the outcome, the same convention `cluster_report()` uses:
 opt-in metric nobody asked for reads `None` from `to_table()` and `--` from
 `repr()`, while `nan` keeps its single meaning of asked and undefined.
 
-The metric's accuracy is limited where its denominator -- the mean entropy
+AMI's accuracy is limited where its denominator -- the mean entropy
 minus the expected mutual information -- approaches zero, which happens when
 both partitions are close to all-singleton. Numerator and denominator are then
 each a difference of nearly equal sums over N terms, and the quotient loses

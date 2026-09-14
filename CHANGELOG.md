@@ -24,10 +24,10 @@ This file starts at 5.0.0; earlier releases are not recorded here.
 - `include/oecluster/oecluster.h` now includes `ClusterReport.h`. The umbrella
   header the documentation names as the entry point had never carried it, so
   the whole cluster-quality surface was unreachable through it.
-- `scikit-learn` is now declared in the `dev` extra. Three test modules have
-  imported it and CI has installed it since before 5.0.0, but a fresh
-  `uv pip install -e '.[dev]'` produced a checkout whose parity suites failed
-  to collect.
+- `scikit-learn` is now declared in the `dev` extra. Three test modules had
+  imported it and CI had installed it since before 5.0.0 -- this release brings
+  a fourth -- but a fresh `uv pip install -e '.[dev]'` produced a checkout
+  whose parity suites failed to collect.
 
 ## [5.2.0] - 2026-09-12
 
