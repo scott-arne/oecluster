@@ -2,6 +2,33 @@
 
 This file starts at 5.0.0; earlier releases are not recorded here.
 
+## [5.3.0] - 2026-09-14
+
+### Added
+
+- `partition_agreement` and `scaffold_agreement`, in C++ and Python, scoring
+  the agreement between two labelings of the same samples: adjusted Rand index,
+  Fowlkes-Mallows, normalized mutual information, homogeneity, completeness,
+  V-measure, and adjusted mutual information behind an opt-in flag. The input
+  is labels and nothing else -- no distance matrix -- so two clustering methods
+  can be compared without owning one. `scaffold_agreement` scores a clustering
+  against a per-sample scaffold annotation, where an empty string is missing
+  data rather than a category.
+- `NoiseHandling` selects how negatively-labelled samples enter the contingency
+  table: `Singletons` (the default, matching the rest of the library),
+  `Grouped` (matching scikit-learn's reading of a -1 label), or `Excluded`.
+  Python callers pass `noise="singletons"`, `"grouped"` or `"excluded"`.
+
+### Fixed
+
+- `include/oecluster/oecluster.h` now includes `ClusterReport.h`. The umbrella
+  header the documentation names as the entry point had never carried it, so
+  the whole cluster-quality surface was unreachable through it.
+- `scikit-learn` is now declared in the `dev` extra. Three test modules have
+  imported it and CI has installed it since before 5.0.0, but a fresh
+  `uv pip install -e '.[dev]'` produced a checkout whose parity suites failed
+  to collect.
+
 ## [5.2.0] - 2026-09-12
 
 ### Changed
