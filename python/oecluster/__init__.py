@@ -14,6 +14,7 @@ import importlib.machinery
 import importlib.util
 import json
 import math
+import operator
 import os
 import re
 import shutil
@@ -3378,7 +3379,10 @@ def _agreement_labels(value, argument_name):
     vector = _oecluster.IntVector()
     try:
         for label in labels:
-            vector.push_back(int(label))
+            # operator.index() accepts int, bool, numpy integers, and rejects
+            # float/Decimal/str/None. int() would silently truncate floats and
+            # coerce strings, publishing a wrong metric instead of raising.
+            vector.push_back(operator.index(label))
     except (TypeError, ValueError) as error:
         raise TypeError(
             f"{argument_name} must be a clustering result or a sequence of "
@@ -3397,7 +3401,12 @@ def _agreement_scaffolds(value, argument_name):
     vector = _oecluster.StringVector()
     try:
         for label in value:
-            vector.push_back(str(label))
+            # Require actual strings. str() would coerce None, numbers, etc.,
+            # publishing a wrong metric instead of raising.
+            if not isinstance(label, str):
+                raise TypeError(
+                    f"{argument_name} must be a sequence of scaffold strings")
+            vector.push_back(label)
     except TypeError as error:
         raise TypeError(
             f"{argument_name} must be a sequence of scaffold strings") from error
@@ -3611,7 +3620,8 @@ def partition_agreement(a, b, *, noise="singletons",
     Takes labels and nothing else -- no distance matrix, unlike
     :func:`cluster_report`. Side A is always the first argument:
     ``homogeneity`` is ``MI / H(a)`` and ``completeness`` is ``MI / H(b)``, and
-    those two are the only outputs that change when the arguments are swapped.
+    those two exchange values when the arguments are swapped, as do
+    ``num_clusters_a`` and ``num_clusters_b``; every other metric is symmetric.
 
     Undefined metrics are NaN rather than a convention, which diverges from
     scikit-learn on five degenerate inputs; ``docs/python-api.md`` tabulates
