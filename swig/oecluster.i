@@ -28,6 +28,7 @@
 #include "oecluster/clustering/BitBirch.h"
 #include "oecluster/clustering/Representative.h"
 #include "oecluster/clustering/ClusterReport.h"
+#include "oecluster/clustering/PartitionAgreement.h"
 #include "oefp/batch.h"
 #include "oefp/oefp.h"
 
@@ -928,6 +929,46 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, _oecluster_is_oereceptor, "
     Py_END_ALLOW_THREADS
 }
 
+// The AMI path is the library's one second-scale computation, so it must not
+// hold the GIL. The override is chosen at wrap time and cannot see the option
+// value, so it wraps every overload of the name rather than branching. Each
+// keeps the same catch ladder as the generic handler.
+%exception OECluster::partition_agreement {
+    Py_BEGIN_ALLOW_THREADS
+    try {
+        $action
+    } catch (const OECluster::OEClusterError& e) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError, e.what());
+    } catch (const std::exception& e) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError, e.what());
+    } catch (...) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError,
+                       "Unknown C++ exception in partition_agreement");
+    }
+    Py_END_ALLOW_THREADS
+}
+
+%exception OECluster::scaffold_agreement {
+    Py_BEGIN_ALLOW_THREADS
+    try {
+        $action
+    } catch (const OECluster::OEClusterError& e) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError, e.what());
+    } catch (const std::exception& e) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError, e.what());
+    } catch (...) {
+        Py_BLOCK_THREADS
+        SWIG_exception(SWIG_RuntimeError,
+                       "Unknown C++ exception in scaffold_agreement");
+    }
+    Py_END_ALLOW_THREADS
+}
+
 // ============================================================================
 // Ignore problematic members before %include
 //
@@ -1188,6 +1229,7 @@ public:
 %template(ClusterRepresentativeVector) std::vector<OECluster::ClusterRepresentative>;
 %template(ClusterRecordVector) std::vector<OECluster::ClusterRecord>;
 %include "oecluster/clustering/ClusterReport.h"
+%include "oecluster/clustering/PartitionAgreement.h"
 %include "oecluster/clustering/DBSCAN.h"
 %include "oecluster/clustering/HDBSCAN.h"
 %include "oecluster/clustering/Agglomerative.h"
