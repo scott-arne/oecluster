@@ -181,9 +181,12 @@ def test_the_three_input_forms_agree():
     # spec asks for the clustering-result form, and `ClusteringResult` stores
     # its labels as an np.intp array, which a hand-rolled object would not
     # exercise.
-    result = oecluster.ClusteringResult(
+    result_a = oecluster.ClusteringResult(
         MAIN_A, [[i for i, label in enumerate(MAIN_A) if label == k]
                  for k in (0, 1, 2)])
+    result_b = oecluster.ClusteringResult(
+        MAIN_B, [[i for i, label in enumerate(MAIN_B) if label == k]
+                 for k in (0, 1, 2, 3)])
 
     def agreement(a, b):
         return oecluster.partition_agreement(
@@ -193,13 +196,14 @@ def test_the_three_input_forms_agree():
     as_tuple = agreement(tuple(MAIN_A), tuple(MAIN_B))
     as_array = agreement(np.array(MAIN_A, dtype=np.int32),
                          np.array(MAIN_B, dtype=np.int64))
-    as_result = agreement(result, MAIN_B)
+    as_result_a = agreement(result_a, MAIN_B)
+    as_result_b = agreement(MAIN_A, result_b)
 
     # "Identical" is every field, not a sample of them, so compare the whole
     # table plus `requested`. AMI is requested so the table's one opt-in row
     # carries a value rather than None in all four forms. The rows cannot be
     # compared with a bare == because a NaN cell never equals itself.
-    for other in (as_tuple, as_array, as_result):
+    for other in (as_tuple, as_array, as_result_a, as_result_b):
         assert other.requested == as_list.requested
         for (name, value), (expected_name, expected) in zip(
                 other.to_table(), as_list.to_table(), strict=True):
@@ -290,15 +294,30 @@ def test_scaffold_agreement_matches_sklearn_on_interned_strings():
     from sklearn.metrics import (
         adjusted_mutual_info_score,
         adjusted_rand_score,
+        completeness_score,
+        fowlkes_mallows_score,
+        homogeneity_score,
+        normalized_mutual_info_score,
+        v_measure_score,
     )
 
     labels = [0, 0, 0, 1, 1, 1, 2, 2, 2]
     scaffolds = ["ar", "ar", "ar", "pi", "pi", "al", "al", "al", "al"]
 
-    # Default call: AMI not requested.
+    # Default call: AMI not requested. Pin the full set of reported metrics.
     agreement = oecluster.scaffold_agreement(labels, scaffolds)
     assert agreement.adjusted_rand_index == pytest.approx(
         adjusted_rand_score(labels, scaffolds))
+    assert agreement.fowlkes_mallows == pytest.approx(
+        fowlkes_mallows_score(labels, scaffolds))
+    assert agreement.normalized_mutual_information == pytest.approx(
+        normalized_mutual_info_score(labels, scaffolds))
+    assert agreement.homogeneity == pytest.approx(
+        homogeneity_score(labels, scaffolds))
+    assert agreement.completeness == pytest.approx(
+        completeness_score(labels, scaffolds))
+    assert agreement.v_measure == pytest.approx(
+        v_measure_score(labels, scaffolds))
     assert agreement.requested.adjusted_mutual_information is False
     assert dict(agreement.to_table())["adjusted_mutual_information"] is None
 
@@ -308,6 +327,20 @@ def test_scaffold_agreement_matches_sklearn_on_interned_strings():
     assert with_ami.requested.adjusted_mutual_information is True
     assert with_ami.adjusted_mutual_information == pytest.approx(
         adjusted_mutual_info_score(labels, scaffolds))
+
+    # ClusteringResult as first argument.
+    result = oecluster.ClusteringResult(
+        labels, [[i for i, label in enumerate(labels) if label == k]
+                 for k in (0, 1, 2)])
+    as_result = oecluster.scaffold_agreement(result, scaffolds)
+    assert as_result.requested == agreement.requested
+    for (name, value), (expected_name, expected) in zip(
+            as_result.to_table(), agreement.to_table(), strict=True):
+        assert name == expected_name
+        if isinstance(expected, float) and math.isnan(expected):
+            assert math.isnan(value), name
+        else:
+            assert value == expected, name
 
 
 def test_unasked_ami_renders_as_none_and_asked_undefined_as_nan():
