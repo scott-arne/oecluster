@@ -1,5 +1,7 @@
 """Partition-agreement metrics: parity, divergences and the Python surface."""
 
+import math
+
 import numpy as np
 import oecluster
 import pytest
@@ -35,3 +37,291 @@ def test_partition_agreement_accepts_numpy_intp_labels():
     labels_b = np.array([0, 1, 2, 2], dtype=np.intp)
     agreement = oecluster.partition_agreement(labels_a, labels_b)
     assert agreement.num_samples == 4
+
+
+MAIN_A = [0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2]
+MAIN_B = [0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3]
+NOISE_A = [0, 0, 0, -1, 1, 1, 1, -1, 2, 2, -1, 2]
+NOISE_B = [0, 0, 1, 1, 1, -1, 2, 2, 2, 3, 3, -1]
+
+
+def test_live_sklearn_parity_on_non_degenerate_fixtures():
+    from sklearn.metrics import (
+        adjusted_mutual_info_score,
+        adjusted_rand_score,
+        fowlkes_mallows_score,
+        homogeneity_completeness_v_measure,
+        normalized_mutual_info_score,
+    )
+
+    fixtures = [
+        (MAIN_A, MAIN_B),
+        ([0, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 5],
+         [0, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4]),
+        ([0, 0, 1, 1, 2, 2, 3, 3], [0, 1, 1, 2, 2, 3, 3, 0]),
+    ]
+    for a, b in fixtures:
+        agreement = oecluster.partition_agreement(
+            a, b, adjusted_mutual_information=True)
+        homogeneity, completeness, v_measure = \
+            homogeneity_completeness_v_measure(a, b)
+        assert agreement.adjusted_rand_index == pytest.approx(
+            adjusted_rand_score(a, b))
+        assert agreement.fowlkes_mallows == pytest.approx(
+            fowlkes_mallows_score(a, b))
+        assert agreement.normalized_mutual_information == pytest.approx(
+            normalized_mutual_info_score(a, b))
+        assert agreement.homogeneity == pytest.approx(homogeneity)
+        assert agreement.completeness == pytest.approx(completeness)
+        assert agreement.v_measure == pytest.approx(v_measure)
+        assert agreement.adjusted_mutual_information == pytest.approx(
+            adjusted_mutual_info_score(a, b))
+
+
+def test_rule_one_diverges_from_sklearn_on_a_single_sample():
+    from sklearn.metrics import (
+        adjusted_mutual_info_score,
+        adjusted_rand_score,
+        fowlkes_mallows_score,
+        homogeneity_completeness_v_measure,
+        normalized_mutual_info_score,
+    )
+
+    # AMI is requested so the divergence is asserted over all seven fields:
+    # rule 1 is a whole-struct rule, and an AMI that leaked a value here would
+    # be the one metric this test failed to notice.
+    agreement = oecluster.partition_agreement(
+        [0], [0], adjusted_mutual_information=True)
+    assert agreement.num_samples == 1
+    for name in ("adjusted_rand_index", "fowlkes_mallows",
+                 "normalized_mutual_information", "homogeneity",
+                 "completeness", "v_measure", "adjusted_mutual_information"):
+        assert math.isnan(getattr(agreement, name)), name
+
+    # scikit-learn calls a one-sample labeling perfect agreement -- on every
+    # metric but Fowlkes-Mallows, which it reports as 0.0. None of these raise.
+    assert adjusted_rand_score([0], [0]) == 1.0
+    assert fowlkes_mallows_score([0], [0]) == 0.0
+    assert homogeneity_completeness_v_measure([0], [0]) == (1.0, 1.0, 1.0)
+    assert normalized_mutual_info_score([0], [0]) == 1.0
+    assert adjusted_mutual_info_score([0], [0]) == 1.0
+
+
+def test_single_cluster_side_a_diverges_on_homogeneity():
+    from sklearn.metrics import homogeneity_completeness_v_measure
+
+    a, b = [0, 0, 0, 0], [0, 0, 1, 1]
+    agreement = oecluster.partition_agreement(a, b)
+    homogeneity, _, v_measure = homogeneity_completeness_v_measure(a, b)
+
+    assert math.isnan(agreement.homogeneity)
+    assert homogeneity == 1.0
+    # The composite agrees even though the component does not.
+    assert agreement.v_measure == pytest.approx(v_measure)
+    assert agreement.v_measure == 0.0
+
+
+def test_single_cluster_side_b_diverges_on_completeness():
+    from sklearn.metrics import homogeneity_completeness_v_measure
+
+    a, b = [0, 0, 1, 1], [0, 0, 0, 0]
+    agreement = oecluster.partition_agreement(a, b)
+    _, completeness, _ = homogeneity_completeness_v_measure(a, b)
+
+    assert math.isnan(agreement.completeness)
+    assert completeness == 1.0
+
+
+def test_all_singletons_one_side_diverges_on_fowlkes_mallows():
+    from sklearn.metrics import fowlkes_mallows_score
+
+    a, b = [0, 1, 2, 3], [0, 0, 1, 1]
+    agreement = oecluster.partition_agreement(a, b)
+
+    assert math.isnan(agreement.fowlkes_mallows)
+    assert fowlkes_mallows_score(a, b) == 0.0
+
+
+def test_both_sides_all_singletons_are_identical_not_zero():
+    from sklearn.metrics import fowlkes_mallows_score
+
+    a, b = [0, 1, 2, 3], [3, 2, 1, 0]
+    agreement = oecluster.partition_agreement(a, b)
+
+    assert agreement.fowlkes_mallows == 1.0
+    assert fowlkes_mallows_score(a, b) == 0.0
+
+
+def test_independent_partitions_agree_with_sklearn_everywhere():
+    from sklearn.metrics import (
+        adjusted_mutual_info_score,
+        adjusted_rand_score,
+        fowlkes_mallows_score,
+        normalized_mutual_info_score,
+    )
+
+    a, b = [0, 0, 1, 1], [0, 1, 0, 1]
+    agreement = oecluster.partition_agreement(
+        a, b, adjusted_mutual_information=True)
+
+    assert agreement.adjusted_rand_index == pytest.approx(
+        adjusted_rand_score(a, b))
+    assert agreement.fowlkes_mallows == pytest.approx(fowlkes_mallows_score(a, b))
+    assert agreement.normalized_mutual_information == pytest.approx(
+        normalized_mutual_info_score(a, b))
+    assert agreement.adjusted_mutual_information == pytest.approx(
+        adjusted_mutual_info_score(a, b))
+    assert agreement.homogeneity == 0.0
+    assert agreement.completeness == 0.0
+    assert agreement.v_measure == 0.0
+
+
+def test_the_three_input_forms_agree():
+    # A real ClusteringResult, not a stand-in with a `.labels` attribute: the
+    # spec asks for the clustering-result form, and `ClusteringResult` stores
+    # its labels as an np.intp array, which a hand-rolled object would not
+    # exercise.
+    result = oecluster.ClusteringResult(
+        MAIN_A, [[i for i, label in enumerate(MAIN_A) if label == k]
+                 for k in (0, 1, 2)])
+
+    def agreement(a, b):
+        return oecluster.partition_agreement(
+            a, b, adjusted_mutual_information=True)
+
+    as_list = agreement(MAIN_A, MAIN_B)
+    as_tuple = agreement(tuple(MAIN_A), tuple(MAIN_B))
+    as_array = agreement(np.array(MAIN_A, dtype=np.int32),
+                         np.array(MAIN_B, dtype=np.int64))
+    as_result = agreement(result, MAIN_B)
+
+    # "Identical" is every field, not a sample of them, so compare the whole
+    # table plus `requested`. AMI is requested so the table's one opt-in row
+    # carries a value rather than None in all four forms. The rows cannot be
+    # compared with a bare == because a NaN cell never equals itself.
+    for other in (as_tuple, as_array, as_result):
+        assert other.requested == as_list.requested
+        for (name, value), (expected_name, expected) in zip(
+                other.to_table(), as_list.to_table(), strict=True):
+            assert name == expected_name
+            if isinstance(expected, float) and math.isnan(expected):
+                assert math.isnan(value), name
+            else:
+                assert value == expected, name
+
+
+def test_noise_strings_reach_the_right_enum():
+    singletons = oecluster.partition_agreement(NOISE_A, NOISE_B)
+    grouped = oecluster.partition_agreement(NOISE_A, NOISE_B, noise="grouped")
+    excluded = oecluster.partition_agreement(NOISE_A, NOISE_B, noise="excluded")
+
+    assert (singletons.num_samples, singletons.num_clusters_a,
+            singletons.num_clusters_b) == (12, 6, 6)
+    assert (grouped.num_samples, grouped.num_clusters_a,
+            grouped.num_clusters_b) == (12, 4, 5)
+    assert (excluded.num_samples, excluded.num_clusters_a,
+            excluded.num_clusters_b) == (7, 3, 4)
+
+    assert singletons.adjusted_rand_index == pytest.approx(
+        -0.012269938650306749)
+    assert grouped.adjusted_rand_index == pytest.approx(-0.07179487179487179)
+    assert excluded.adjusted_rand_index == pytest.approx(0.08695652173913043)
+
+
+def test_unknown_noise_string_names_the_three_valid_values():
+    with pytest.raises(ValueError) as excinfo:
+        oecluster.partition_agreement(MAIN_A, MAIN_B, noise="drop")
+    message = str(excinfo.value)
+    assert "singletons" in message
+    assert "grouped" in message
+    assert "excluded" in message
+
+
+def test_non_sequence_arguments_raise_type_error_naming_the_argument():
+    with pytest.raises(TypeError) as excinfo:
+        oecluster.partition_agreement(3, MAIN_B)
+    assert "a" in str(excinfo.value)
+
+    with pytest.raises(TypeError) as excinfo:
+        oecluster.partition_agreement(MAIN_A, object())
+    assert "b" in str(excinfo.value)
+
+    with pytest.raises(TypeError) as excinfo:
+        oecluster.scaffold_agreement([0, 0, 1], "abc")
+    assert "scaffold_labels" in str(excinfo.value)
+
+
+def test_validation_surfaces_as_value_error_not_runtime_error():
+    # SWIG maps every std::exception to RuntimeError, so these only pass while
+    # the Python-side checks run ahead of the native call.
+    with pytest.raises(ValueError) as excinfo:
+        oecluster.scaffold_agreement([0, 0, 1], ["a", "b"])
+    message = str(excinfo.value)
+    assert "2" in message and "3" in message and "scaffold_labels" in message
+
+    with pytest.raises(ValueError) as excinfo:
+        oecluster.partition_agreement([0, 0, 1], [0, 1])
+    message = str(excinfo.value)
+    assert "2" in message and "3" in message
+
+    with pytest.raises(ValueError):
+        oecluster.partition_agreement([], [])
+    with pytest.raises(ValueError):
+        oecluster.scaffold_agreement([0, 1], [])
+
+
+def test_scaffold_agreement_treats_empty_strings_as_missing():
+    labels = [0, 0, 0, 1, 1, 1, 2, 2, 2]
+    scaffolds = ["ar", "ar", "ar", "pi", "", "al", "al", "al", ""]
+
+    singletons = oecluster.scaffold_agreement(labels, scaffolds)
+    grouped = oecluster.scaffold_agreement(labels, scaffolds, noise="grouped")
+    excluded = oecluster.scaffold_agreement(labels, scaffolds, noise="excluded")
+
+    assert (singletons.num_samples, singletons.num_clusters_b) == (9, 5)
+    assert (grouped.num_samples, grouped.num_clusters_b) == (9, 4)
+    assert (excluded.num_samples, excluded.num_clusters_b) == (7, 3)
+    assert singletons.adjusted_rand_index == pytest.approx(0.4166666666666667)
+    assert grouped.adjusted_rand_index == pytest.approx(0.36)
+    assert excluded.adjusted_rand_index == pytest.approx(0.631578947368421)
+
+
+def test_scaffold_agreement_matches_sklearn_on_interned_strings():
+    from sklearn.metrics import adjusted_rand_score
+
+    labels = [0, 0, 0, 1, 1, 1, 2, 2, 2]
+    scaffolds = ["ar", "ar", "ar", "pi", "pi", "al", "al", "al", "al"]
+    agreement = oecluster.scaffold_agreement(labels, scaffolds)
+    assert agreement.adjusted_rand_index == pytest.approx(
+        adjusted_rand_score(labels, scaffolds))
+
+
+def test_unasked_ami_renders_as_none_and_asked_undefined_as_nan():
+    unasked = oecluster.partition_agreement(MAIN_A, MAIN_B)
+    rows = dict(unasked.to_table())
+    assert rows["adjusted_mutual_information"] is None
+    assert "--" in repr(unasked)
+
+    # Asked, but rule 1 leaves it undefined.
+    asked = oecluster.partition_agreement(
+        [0], [0], adjusted_mutual_information=True)
+    rows = dict(asked.to_table())
+    assert math.isnan(rows["adjusted_mutual_information"])
+    assert "nan" in repr(asked)
+
+
+def test_to_table_covers_every_reported_field_in_struct_order():
+    agreement = oecluster.partition_agreement(
+        MAIN_A, MAIN_B, adjusted_mutual_information=True)
+    assert [name for name, _ in agreement.to_table()] == [
+        "num_samples",
+        "num_clusters_a",
+        "num_clusters_b",
+        "adjusted_rand_index",
+        "fowlkes_mallows",
+        "normalized_mutual_information",
+        "homogeneity",
+        "completeness",
+        "v_measure",
+        "adjusted_mutual_information",
+    ]
