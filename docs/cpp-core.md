@@ -238,9 +238,10 @@ one entropy is zero, and the composite is well defined in each case.
 Side A is always the first argument. `homogeneity` is `MI / H(a)` and
 `completeness` is `MI / H(b)`, so swapping the arguments exchanges that pair --
 and with it the counts `num_clusters_a` and `num_clusters_b`. Every other
-metric is symmetric, `adjusted_mutual_information` only to within rounding:
-transposing the contingency table reorders the sum its expected-MI correction
-accumulates, which can move the last bits.
+metric is symmetric, `adjusted_mutual_information` only to within rounding: a
+swap transposes the contingency table and exchanges the two marginal values
+within each expected-MI term, so those terms evaluate in a different
+floating-point order and the last bits can move.
 
 `scaffold_agreement` puts the clustering on side A and the scaffold annotation
 on side B, so `completeness` carries the scaffold-purity reading -- whether
@@ -268,8 +269,12 @@ readings:
 ### Adjusted mutual information
 
 `PartitionAgreementOptions::compute_adjusted_mutual_information` is `false` by
-default. AMI's expected-MI correction is the one term whose cost grows with the
-cluster count rather than the sample count, so it is opt-in rather than free.
+default. The other six metrics come essentially free once the contingency table
+is built, and AMI is the only one that costs more than that pass: its
+expected-MI correction first builds an O(N) table of log factorials -- `8*(n+1)`
+bytes, about 800 KB at `n = 100,000` -- and then sums over pairs of distinct
+marginal values, that is over distinct cluster sizes rather than over clusters,
+each term walking the hypergeometric support. That is why it is opt-in.
 `PartitionAgreement::requested` records the request and not the outcome, the
 same convention `ClusterReportRequested` uses: `false` means nobody asked, and
 `true` with NaN means asked and undefined.
@@ -298,7 +303,8 @@ substitutes a value in five cases, and this table is the complete list:
 | Both sides all singletons, N >= 2 | `{0,1,2,3}` vs `{3,2,1,0}` | `fowlkes_mallows = 0.0` | `1.0` |
 
 The last row is not a NaN case: two all-singleton partitions are the same
-partition, so every metric is 1.0, and `fowlkes_mallows` is 1.0 with them.
+partition, so the six always-computed metrics are 1.0, `fowlkes_mallows` among
+them, and `adjusted_mutual_information` is 1.0 too whenever it was requested.
 
 ## Representatives
 

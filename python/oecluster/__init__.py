@@ -3623,7 +3623,8 @@ def partition_agreement(a, b, *, noise="singletons",
     those two exchange values when the arguments are swapped, as do
     ``num_clusters_a`` and ``num_clusters_b``; every other metric is
     symmetric, though ``adjusted_mutual_information`` only to within rounding,
-    because a swap reorders the sum its expected-MI correction accumulates.
+    because a swap exchanges the two marginal values inside each expected-MI
+    term and so changes the floating-point order they evaluate in.
 
     Undefined metrics are NaN rather than a convention, which diverges from
     scikit-learn on five degenerate inputs; ``docs/python-api.md`` tabulates
@@ -3638,9 +3639,10 @@ def partition_agreement(a, b, *, noise="singletons",
         ``"grouped"`` (each side's noise forms one cluster, which is how
         scikit-learn reads a -1 label), or ``"excluded"`` (a sample noisy on
         either side is dropped from both).
-    :param adjusted_mutual_information: Also compute AMI. Off by default: its
-        expected-MI correction is the one term whose cost grows with the
-        cluster count rather than the sample count.
+    :param adjusted_mutual_information: Also compute AMI. Off by default: the
+        other six metrics are essentially free once the contingency table is
+        built, while the expected-MI correction adds an O(N) log-factorial
+        table and a sum over pairs of distinct cluster sizes.
     :returns: A :class:`PartitionAgreement`.
     :raises TypeError: If either argument is neither a clustering result nor a
         sequence of ints.

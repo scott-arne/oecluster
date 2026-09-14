@@ -50,9 +50,10 @@ struct PartitionAgreementOptions {
     /// How negatively-labelled samples enter the table. See NoiseHandling.
     NoiseHandling noise_handling = NoiseHandling::Singletons;
 
-    /// Adjusted mutual information. Off by default: its expected-MI correction
-    /// is the one term whose cost grows with the cluster count rather than the
-    /// sample count.
+    /// Adjusted mutual information. Off by default: the other six metrics are
+    /// essentially free once the contingency table is built, while the
+    /// expected-MI correction adds an O(N) table of log factorials and a sum
+    /// over pairs of distinct marginal values.
     bool compute_adjusted_mutual_information = false;
 };
 
@@ -60,8 +61,10 @@ struct PartitionAgreementOptions {
  * @brief The agreement scorecard.
  *
  * Every field is NaN when fewer than two samples survive noise handling, and
- * every field is 1.0 when the two partitions are identical after noise
- * handling; the per-field notes describe the remaining case. Pair counts are
+ * the six always-computed metrics are 1.0 when the two partitions are
+ * identical after noise handling -- adjusted_mutual_information joins them
+ * only when it was requested, and otherwise stays NaN with requested false;
+ * the per-field notes describe the remaining case. Pair counts are
  * accumulated in uint64_t, which is exact for any sample count below 2^32.
  */
 struct PartitionAgreement {
@@ -92,9 +95,10 @@ struct PartitionAgreement {
     /// Asymmetric: swapping the arguments exchanges this with completeness,
     /// and num_clusters_a with num_clusters_b; every other metric is
     /// symmetric, adjusted_mutual_information only to within rounding, since
-    /// the transposed table reorders its expected-MI sum. NaN when H(a) is
-    /// zero, that is when side A is a single cluster and the partitions
-    /// differ; scikit-learn reports 1.0 there instead.
+    /// the transposed table exchanges the marginal values in each expected-MI
+    /// term and so changes its floating-point evaluation order. NaN when
+    /// H(a) is zero, that is when side A is a single cluster and the
+    /// partitions differ; scikit-learn reports 1.0 there instead.
     double homogeneity = std::numeric_limits<double>::quiet_NaN();
     /// MI / H(b). Asymmetric; see homogeneity. NaN when H(b) is zero, that is
     /// when side B is a single cluster and the partitions differ;

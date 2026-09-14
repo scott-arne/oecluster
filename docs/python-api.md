@@ -378,7 +378,8 @@ numpy integer array on each label side. Side A is the first argument:
 the arguments exchanges that pair, along with `num_clusters_a` and
 `num_clusters_b`; every other metric is symmetric, with
 `adjusted_mutual_information` symmetric only to within rounding, since a swap
-reverses the order its expected-MI sum accumulates in. For
+transposes the contingency table and trades the two marginal values inside each
+expected-MI term, changing the order those terms evaluate in. For
 `scaffold_agreement()` the clustering is side A, so `completeness` is the
 scaffold-purity reading -- whether each cluster's members share a single
 scaffold -- and `homogeneity` is its transpose, whether each scaffold landed in
@@ -392,12 +393,15 @@ input length). An empty scaffold string is missing data, not a category, and
 follows `noise=` exactly as a negative label does.
 
 `adjusted_mutual_information=True` adds the seventh metric. It is opt-in
-because its expected-MI correction is the one term whose cost grows with the
-cluster count rather than the sample count. `agreement.requested` records the
-request and not the outcome, the same convention `cluster_report()` uses:
-`False` means nobody asked, `True` with `nan` means asked and undefined. An
-opt-in metric nobody asked for reads `None` from `to_table()` and `--` from
-`repr()`, while `nan` keeps its single meaning of asked and undefined.
+because the other six come essentially free once the contingency table is
+built, while the expected-MI correction pays for a pass of its own: an O(N)
+table of log factorials, then a sum over pairs of distinct marginal values --
+distinct cluster sizes, not clusters -- each term walking the hypergeometric
+support. `agreement.requested` records the request and not the outcome, the
+same convention `cluster_report()` uses: `False` means nobody asked, `True`
+with `nan` means asked and undefined. An opt-in metric nobody asked for reads
+`None` from `to_table()` and `--` from `repr()`, while `nan` keeps its single
+meaning of asked and undefined.
 
 AMI's accuracy is limited where its denominator -- the mean entropy
 minus the expected mutual information -- approaches zero, which happens when
@@ -421,7 +425,8 @@ from scikit-learn on five degenerate inputs. This table is the complete list:
 | Both sides all singletons, N >= 2 | `[0,1,2,3]` vs `[3,2,1,0]` | `fowlkes_mallows = 0.0` | `1.0` |
 
 The last row is not a `nan` case: two all-singleton partitions are the same
-partition, so every metric is 1.0.
+partition, so the six always-computed metrics are 1.0 -- and
+`adjusted_mutual_information` with them if it was asked for.
 
 ## Metric Requirements
 
