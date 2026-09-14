@@ -287,32 +287,64 @@ def test_scaffold_agreement_treats_empty_strings_as_missing():
 
 
 def test_scaffold_agreement_matches_sklearn_on_interned_strings():
-    from sklearn.metrics import adjusted_rand_score
+    from sklearn.metrics import (
+        adjusted_mutual_info_score,
+        adjusted_rand_score,
+    )
 
     labels = [0, 0, 0, 1, 1, 1, 2, 2, 2]
     scaffolds = ["ar", "ar", "ar", "pi", "pi", "al", "al", "al", "al"]
+
+    # Default call: AMI not requested.
     agreement = oecluster.scaffold_agreement(labels, scaffolds)
     assert agreement.adjusted_rand_index == pytest.approx(
         adjusted_rand_score(labels, scaffolds))
+    assert agreement.requested.adjusted_mutual_information is False
+    assert dict(agreement.to_table())["adjusted_mutual_information"] is None
+
+    # AMI requested.
+    with_ami = oecluster.scaffold_agreement(
+        labels, scaffolds, adjusted_mutual_information=True)
+    assert with_ami.requested.adjusted_mutual_information is True
+    assert with_ami.adjusted_mutual_information == pytest.approx(
+        adjusted_mutual_info_score(labels, scaffolds))
 
 
 def test_unasked_ami_renders_as_none_and_asked_undefined_as_nan():
     unasked = oecluster.partition_agreement(MAIN_A, MAIN_B)
     rows = dict(unasked.to_table())
     assert rows["adjusted_mutual_information"] is None
-    assert "--" in repr(unasked)
+    repr_lines = repr(unasked).split('\n')
+    ami_line = next(line for line in repr_lines if line.strip().startswith('adjusted_mutual_information'))
+    assert "--" in ami_line
+    # AMI is the only row rendering -- since every other metric has a real value.
+    assert repr(unasked).count('--') == 1
 
     # Asked, but rule 1 leaves it undefined.
     asked = oecluster.partition_agreement(
         [0], [0], adjusted_mutual_information=True)
     rows = dict(asked.to_table())
     assert math.isnan(rows["adjusted_mutual_information"])
-    assert "nan" in repr(asked)
+    repr_lines = repr(asked).split('\n')
+    ami_line = next(line for line in repr_lines if line.strip().startswith('adjusted_mutual_information'))
+    assert "nan" in ami_line
 
 
 def test_to_table_covers_every_reported_field_in_struct_order():
+    from sklearn.metrics import (
+        adjusted_mutual_info_score,
+        adjusted_rand_score,
+        completeness_score,
+        fowlkes_mallows_score,
+        homogeneity_score,
+        normalized_mutual_info_score,
+        v_measure_score,
+    )
+
     agreement = oecluster.partition_agreement(
         MAIN_A, MAIN_B, adjusted_mutual_information=True)
+
+    # Struct-order check is load-bearing.
     assert [name for name, _ in agreement.to_table()] == [
         "num_samples",
         "num_clusters_a",
@@ -325,3 +357,28 @@ def test_to_table_covers_every_reported_field_in_struct_order():
         "v_measure",
         "adjusted_mutual_information",
     ]
+
+    # Pin the row values against live scikit-learn.
+    rows = dict(agreement.to_table())
+    assert rows["num_samples"] == 12
+    assert rows["num_clusters_a"] == 3
+    assert rows["num_clusters_b"] == 4
+    assert rows["adjusted_rand_index"] == pytest.approx(
+        adjusted_rand_score(MAIN_A, MAIN_B))
+    assert rows["fowlkes_mallows"] == pytest.approx(
+        fowlkes_mallows_score(MAIN_A, MAIN_B))
+    assert rows["normalized_mutual_information"] == pytest.approx(
+        normalized_mutual_info_score(MAIN_A, MAIN_B))
+    assert rows["homogeneity"] == pytest.approx(
+        homogeneity_score(MAIN_A, MAIN_B))
+    assert rows["completeness"] == pytest.approx(
+        completeness_score(MAIN_A, MAIN_B))
+    assert rows["v_measure"] == pytest.approx(
+        v_measure_score(MAIN_A, MAIN_B))
+    assert rows["adjusted_mutual_information"] == pytest.approx(
+        adjusted_mutual_info_score(MAIN_A, MAIN_B))
+
+    # normalized_mutual_information and v_measure are identically equal by
+    # construction: homogeneity is I/H(a), completeness is I/H(b), and their
+    # harmonic mean reduces to 2I/(H(a)+H(b)), which is arithmetic-mean NMI.
+    # No fixture can separate a swap between those two rows.
