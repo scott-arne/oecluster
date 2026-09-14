@@ -240,11 +240,11 @@ def test_unknown_noise_string_names_the_three_valid_values():
 def test_non_sequence_arguments_raise_type_error_naming_the_argument():
     with pytest.raises(TypeError) as excinfo:
         oecluster.partition_agreement(3, MAIN_B)
-    assert "a" in str(excinfo.value)
+    assert str(excinfo.value).startswith("a ")
 
     with pytest.raises(TypeError) as excinfo:
         oecluster.partition_agreement(MAIN_A, object())
-    assert "b" in str(excinfo.value)
+    assert str(excinfo.value).startswith("b ")
 
     with pytest.raises(TypeError) as excinfo:
         oecluster.scaffold_agreement([0, 0, 1], "abc")
