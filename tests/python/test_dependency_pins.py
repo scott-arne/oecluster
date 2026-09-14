@@ -5,6 +5,8 @@ catch a hand-edit that bypassed it, the SWIG module dunder in particular, which
 drifted to 4.2.0 while the package was at 4.2.3. ``TestVersionPins`` records
 which locations it checks and which are covered elsewhere. The OEFP pin is not
 managed by ``vrzn`` at all, so the pin sites are checked against one literal.
+``TestManifestAgreement`` covers the rest of the requirement metadata, which the
+two pyproject files must spell identically.
 """
 
 import re
@@ -56,6 +58,31 @@ def _pyproject_version(relative_path: str) -> str:
     with (REPO_ROOT / relative_path).open("rb") as handle:
         data = tomllib.load(handle)
     return data["project"]["version"]
+
+
+def _pyproject_dependencies(relative_path: str) -> list[str]:
+    """Return a pyproject's declared ``project.dependencies``.
+
+    :param relative_path: Path to the pyproject file, relative to the
+        repository root.
+    :returns: The runtime requirement strings, in declaration order.
+    """
+    with (REPO_ROOT / relative_path).open("rb") as handle:
+        data = tomllib.load(handle)
+    return data["project"]["dependencies"]
+
+
+def _pyproject_dev_extra(relative_path: str) -> list[str]:
+    """Return a pyproject's ``dev`` optional-dependency group.
+
+    :param relative_path: Path to the pyproject file, relative to the
+        repository root.
+    :returns: The ``dev`` extra's requirement strings, in declaration order.
+    :raises KeyError: If the file declares no ``dev`` extra.
+    """
+    with (REPO_ROOT / relative_path).open("rb") as handle:
+        data = tomllib.load(handle)
+    return data["project"]["optional-dependencies"]["dev"]
 
 
 def _c_macro_version(relative_path: str) -> str:
@@ -161,3 +188,29 @@ class TestVersionPins:
         """The release notes name the version being released."""
         text = (REPO_ROOT / "CHANGELOG.md").read_text()
         assert f"## [{oecluster.__version__}]" in text
+
+
+class TestManifestAgreement:
+    """The two manifests declare the same requirements.
+
+    Both files describe the same distribution, and ``python/pyproject.toml`` is
+    what a consumer resolves against, so a requirement added to one and not the
+    other ships metadata that installs a different environment than the one CI
+    tests. ``scikit-learn`` drifted exactly that way: it was declared in the
+    root ``dev`` extra alone, leaving an install of the Python-only package's
+    extra short a dependency that several test modules import. Only the groups
+    both files carry are compared -- the root ``docs`` extra has no counterpart
+    because the documentation build runs from the repository root.
+    """
+
+    def test_dependencies_agree(self):
+        """Both manifests declare the same runtime dependencies."""
+        assert _pyproject_dependencies("python/pyproject.toml") == (
+            _pyproject_dependencies("pyproject.toml")
+        )
+
+    def test_dev_extra_agrees(self):
+        """Both manifests declare the same ``dev`` extra."""
+        assert _pyproject_dev_extra("python/pyproject.toml") == (
+            _pyproject_dev_extra("pyproject.toml")
+        )
