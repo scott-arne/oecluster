@@ -271,6 +271,8 @@ def test_validation_surfaces_as_value_error_not_runtime_error():
     with pytest.raises(ValueError):
         oecluster.partition_agreement([], [])
     with pytest.raises(ValueError):
+        oecluster.scaffold_agreement([], [])
+    with pytest.raises(ValueError):
         oecluster.scaffold_agreement([0, 1], [])
 
 
