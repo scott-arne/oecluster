@@ -112,10 +112,16 @@ def test_single_cluster_side_a_diverges_on_homogeneity():
 
     a, b = [0, 0, 0, 0], [0, 0, 1, 1]
     agreement = oecluster.partition_agreement(a, b)
-    homogeneity, _, v_measure = homogeneity_completeness_v_measure(a, b)
+    homogeneity, completeness, v_measure = \
+        homogeneity_completeness_v_measure(a, b)
 
     assert math.isnan(agreement.homogeneity)
     assert homogeneity == 1.0
+    # The divergence is confined to the component whose entropy is zero. Pinning
+    # the transpose component, which stays defined and agrees with
+    # scikit-learn, is what makes a swapped entropy guard detectable.
+    assert agreement.completeness == 0.0
+    assert agreement.completeness == pytest.approx(completeness)
     # The composite agrees even though the component does not.
     assert agreement.v_measure == pytest.approx(v_measure)
     assert agreement.v_measure == 0.0
@@ -126,10 +132,15 @@ def test_single_cluster_side_b_diverges_on_completeness():
 
     a, b = [0, 0, 1, 1], [0, 0, 0, 0]
     agreement = oecluster.partition_agreement(a, b)
-    _, completeness, _ = homogeneity_completeness_v_measure(a, b)
+    homogeneity, completeness, _ = homogeneity_completeness_v_measure(a, b)
 
     assert math.isnan(agreement.completeness)
     assert completeness == 1.0
+    # The divergence is confined to the component whose entropy is zero. Pinning
+    # the transpose component, which stays defined and agrees with
+    # scikit-learn, is what makes a swapped entropy guard detectable.
+    assert agreement.homogeneity == 0.0
+    assert agreement.homogeneity == pytest.approx(homogeneity)
 
 
 def test_all_singletons_one_side_diverges_on_fowlkes_mallows():
