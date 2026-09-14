@@ -60,12 +60,13 @@ struct PartitionAgreementOptions {
 /**
  * @brief The agreement scorecard.
  *
- * Every field is NaN when fewer than two samples survive noise handling, and
- * the six always-computed metrics are 1.0 when the two partitions are
- * identical after noise handling -- adjusted_mutual_information joins them
- * only when it was requested, and otherwise stays NaN with requested false;
- * the per-field notes describe the remaining case. Pair counts are
- * accumulated in uint64_t, which is exact for any sample count below 2^32.
+ * All seven metrics are NaN when fewer than two samples survive noise
+ * handling; the counts keep their real values. The six always-computed
+ * metrics are 1.0 when the two partitions are identical after noise handling
+ * -- adjusted_mutual_information joins them only when it was requested, and
+ * otherwise stays NaN with requested false; the per-field notes describe the
+ * remaining case. Pair counts are accumulated in uint64_t, which is exact for
+ * any sample count below 2^32.
  */
 struct PartitionAgreement {
     /// Samples entering the table. Equals the input length except under
