@@ -112,6 +112,16 @@ struct PartitionAgreement {
     /// consult requested to tell "not asked" from "asked and undefined". This
     /// is the one metric whose denominator is clamped rather than reported as
     /// NaN, matching scikit-learn.
+    ///
+    /// Its accuracy is limited where the denominator -- mean entropy minus
+    /// expected mutual information -- approaches zero, which happens when both
+    /// partitions are close to all-singleton. Numerator and denominator are
+    /// then each a difference of nearly equal sums over N terms, and the
+    /// quotient loses significance: two 1.5-million-sample partitions differing
+    /// by one merged pair have a true AMI of zero and report about 0.035.
+    /// Partitions whose denominator is order one are unaffected. The limit is
+    /// inherent to computing the correction in double precision -- scikit-learn
+    /// shares it -- rather than a property of this implementation.
     double adjusted_mutual_information =
         std::numeric_limits<double>::quiet_NaN();
 
