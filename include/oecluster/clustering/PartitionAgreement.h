@@ -91,9 +91,10 @@ struct PartitionAgreement {
     /// MI / H(a), the fraction of side A's information that side B explains.
     /// Asymmetric: swapping the arguments exchanges this with completeness,
     /// and num_clusters_a with num_clusters_b; every other metric is
-    /// unchanged. NaN when H(a) is zero, that is when side A is a single
-    /// cluster and the partitions differ; scikit-learn reports 1.0 there
-    /// instead.
+    /// symmetric, adjusted_mutual_information only to within rounding, since
+    /// the transposed table reorders its expected-MI sum. NaN when H(a) is
+    /// zero, that is when side A is a single cluster and the partitions
+    /// differ; scikit-learn reports 1.0 there instead.
     double homogeneity = std::numeric_limits<double>::quiet_NaN();
     /// MI / H(b). Asymmetric; see homogeneity. NaN when H(b) is zero, that is
     /// when side B is a single cluster and the partitions differ;

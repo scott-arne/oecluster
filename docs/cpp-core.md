@@ -238,7 +238,9 @@ one entropy is zero, and the composite is well defined in each case.
 Side A is always the first argument. `homogeneity` is `MI / H(a)` and
 `completeness` is `MI / H(b)`, so swapping the arguments exchanges that pair --
 and with it the counts `num_clusters_a` and `num_clusters_b`. Every other
-metric is symmetric.
+metric is symmetric, `adjusted_mutual_information` only to within rounding:
+transposing the contingency table reorders the sum its expected-MI correction
+accumulates, which can move the last bits.
 
 `scaffold_agreement` puts the clustering on side A and the scaffold annotation
 on side B, so `completeness` carries the scaffold-purity reading -- whether

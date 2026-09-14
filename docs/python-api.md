@@ -376,10 +376,13 @@ Either function accepts a clustering result, a list or tuple of ints, or a
 numpy integer array on each label side. Side A is the first argument:
 `homogeneity` is `MI / H(a)` and `completeness` is `MI / H(b)`, and swapping
 the arguments exchanges that pair, along with `num_clusters_a` and
-`num_clusters_b`; every other metric is unchanged. For `scaffold_agreement()`
-the clustering is side A, so `completeness` is the scaffold-purity reading
--- whether each cluster's members share a single scaffold -- and `homogeneity`
-is its transpose, whether each scaffold landed in a single cluster.
+`num_clusters_b`; every other metric is symmetric, with
+`adjusted_mutual_information` symmetric only to within rounding, since a swap
+reverses the order its expected-MI sum accumulates in. For
+`scaffold_agreement()` the clustering is side A, so `completeness` is the
+scaffold-purity reading -- whether each cluster's members share a single
+scaffold -- and `homogeneity` is its transpose, whether each scaffold landed in
+a single cluster.
 
 `noise=` takes `"singletons"` (the default; each negatively-labelled sample
 becomes its own cluster), `"grouped"` (each side's noise forms one cluster,

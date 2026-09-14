@@ -3621,7 +3621,9 @@ def partition_agreement(a, b, *, noise="singletons",
     :func:`cluster_report`. Side A is always the first argument:
     ``homogeneity`` is ``MI / H(a)`` and ``completeness`` is ``MI / H(b)``, and
     those two exchange values when the arguments are swapped, as do
-    ``num_clusters_a`` and ``num_clusters_b``; every other metric is symmetric.
+    ``num_clusters_a`` and ``num_clusters_b``; every other metric is
+    symmetric, though ``adjusted_mutual_information`` only to within rounding,
+    because a swap reorders the sum its expected-MI correction accumulates.
 
     Undefined metrics are NaN rather than a convention, which diverges from
     scikit-learn on five degenerate inputs; ``docs/python-api.md`` tabulates
