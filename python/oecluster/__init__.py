@@ -3417,7 +3417,17 @@ def _agreement_scaffolds(value, argument_name):
         if not isinstance(label, str):
             raise TypeError(
                 f"{argument_name} must be a sequence of scaffold strings")
-        vector.push_back(label)
+        try:
+            # A str SWIG cannot encode to UTF-8 -- a lone surrogate, which
+            # surrogateescape decoding of a mis-encoded file produces -- is
+            # rejected here rather than by the isinstance check above, and
+            # would otherwise escape naming the internal container type. The
+            # check stays outside this guard so its raise is not self-caught.
+            vector.push_back(label)
+        except TypeError as error:
+            raise TypeError(
+                f"{argument_name} must be a sequence of scaffold strings"
+            ) from error
     return vector
 
 

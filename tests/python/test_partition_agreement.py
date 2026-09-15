@@ -278,7 +278,20 @@ def test_out_of_range_label_raises_value_error_naming_the_argument():
 
     with pytest.raises(ValueError) as excinfo:
         oecluster.scaffold_agreement([0, 2**40, 1], ["x", "y", "z"])
-    assert "result" in str(excinfo.value)
+    message = str(excinfo.value)
+    assert "result" in message
+    assert "32-bit" in message
+
+
+def test_unencodable_scaffold_raises_type_error_naming_the_argument():
+    # A lone surrogate is a str, so it clears the isinstance check and is
+    # rejected only when SWIG encodes it. surrogateescape decoding of a
+    # mis-encoded scaffold file is how one reaches a caller in practice.
+    with pytest.raises(TypeError) as excinfo:
+        oecluster.scaffold_agreement([0, 1, 1], ["a", "\ud800", "c"])
+    message = str(excinfo.value)
+    assert "scaffold_labels" in message
+    assert "StringVector" not in message
 
 
 def test_validation_surfaces_as_value_error_not_runtime_error():
