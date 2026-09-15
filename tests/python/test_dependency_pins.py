@@ -30,18 +30,22 @@ OEFP_REQUIREMENT = "oefp==0.3.0"
 # sites from drifting apart.
 OEFP_VERSION = OEFP_REQUIREMENT.split("==", 1)[1]
 
-# The root project builds the distributed wheel through scikit-build-core, so it
-# owns the publication metadata; python/pyproject.toml is the pure-Python
-# manifest and declares only what a consumer resolves against. A field that
-# starts appearing in one manifest alone belongs here with its own reason,
-# deliberately admitted, rather than slipping past unnoticed.
+# Publication metadata the root manifest alone is permitted, because the root
+# project builds the distributed wheel through scikit-build-core and so owns it;
+# python/pyproject.toml is the pure-Python manifest and declares only what a
+# consumer resolves against. These names are excused on the root and nowhere
+# else: the consumer manifest carrying one is itself a defect and fails the
+# comparison. A field that starts appearing on the root alone belongs here with
+# its own reason, deliberately admitted, rather than slipping past unnoticed.
 ROOT_ONLY_PROJECT_FIELDS = frozenset(
     {"authors", "classifiers", "keywords", "license", "license-files"}
 )
 
-# The documentation toolchain is declared only at the root because the docs
-# build runs from the repository root. A new one-sided extra belongs here with
-# its own reason, deliberately admitted, rather than slipping past unnoticed.
+# The documentation toolchain, permitted on the root manifest alone because the
+# docs build runs from the repository root. Excused there and nowhere else: the
+# consumer manifest declaring it is a defect and fails the comparison. A new
+# root-only extra belongs here with its own reason, deliberately admitted,
+# rather than slipping past unnoticed.
 ROOT_ONLY_EXTRAS = frozenset({"docs"})
 
 
@@ -99,35 +103,39 @@ def _pyproject_dev_extra(relative_path: str) -> list[str]:
     return data["project"]["optional-dependencies"]["dev"]
 
 
-def _pyproject_shared_project_table(relative_path: str) -> dict[str, object]:
-    """Return a pyproject's ``project`` table minus the known asymmetries.
+def _pyproject_project_table(
+    relative_path: str, *, drop_root_only: bool
+) -> dict[str, object]:
+    """Return a pyproject's ``project`` table, ready to compare with the other's.
 
     The reduction is a subtraction rather than an enumeration: everything the
-    two manifests are expected to spell identically is kept, and only the names
-    in ``ROOT_ONLY_PROJECT_FIELDS`` and ``ROOT_ONLY_EXTRAS`` are removed. A
-    manifest whose extras are all root-only reduces to no ``optional-
-    dependencies`` key at all, so it still compares equal to a manifest that
-    declares none.
+    two manifests are expected to spell identically is kept. ``optional-
+    dependencies`` is normalized to always be present, so a manifest that
+    declares no extras still compares against one that does.
 
     :param relative_path: Path to the pyproject file, relative to the
         repository root.
-    :returns: A fresh dictionary holding the reduced table. The parsed file is
-        re-read on each call, so callers cannot affect one another.
+    :param drop_root_only: Whether to subtract ``ROOT_ONLY_PROJECT_FIELDS`` and
+        ``ROOT_ONLY_EXTRAS``. True for the root manifest, the only one those
+        names are excused on; False for the consumer manifest, so that it
+        acquiring one of them surfaces as a difference rather than being
+        ignored on both sides.
+    :returns: A fresh dictionary holding the table. The parsed file is re-read
+        on each call, so callers cannot affect one another.
     """
     with (REPO_ROOT / relative_path).open("rb") as handle:
         data = tomllib.load(handle)
-    project = {
-        key: value
-        for key, value in data["project"].items()
-        if key not in ROOT_ONLY_PROJECT_FIELDS
-    }
-    extras = {
-        name: requirements
-        for name, requirements in project.pop("optional-dependencies", {}).items()
-        if name not in ROOT_ONLY_EXTRAS
-    }
-    if extras:
-        project["optional-dependencies"] = extras
+    project = dict(data["project"])
+    extras = dict(project.setdefault("optional-dependencies", {}))
+    if drop_root_only:
+        for field in ROOT_ONLY_PROJECT_FIELDS:
+            project.pop(field, None)
+        extras = {
+            name: requirements
+            for name, requirements in extras.items()
+            if name not in ROOT_ONLY_EXTRAS
+        }
+    project["optional-dependencies"] = extras
     return project
 
 
@@ -245,9 +253,11 @@ class TestManifestAgreement:
     tests. ``scikit-learn`` drifted exactly that way: it was declared in the
     root ``dev`` extra alone, leaving an install of the Python-only package's
     extra short a dependency that several test modules import. What is compared
-    is the whole ``project`` table less the root-only fields named in
-    ``ROOT_ONLY_PROJECT_FIELDS`` and the root-only ``docs`` extra, so a field
-    nobody thought to enumerate cannot drift quietly.
+    is the whole ``project`` table, so a field nobody thought to enumerate
+    cannot drift quietly. The rule is asymmetric: the names in
+    ``ROOT_ONLY_PROJECT_FIELDS`` and ``ROOT_ONLY_EXTRAS`` are subtracted from
+    the root table only, never from the consumer's, so the consumer manifest
+    acquiring one of them fails rather than being excused along with the root.
     """
 
     def test_dependencies_agree(self):
@@ -263,7 +273,12 @@ class TestManifestAgreement:
         )
 
     def test_project_tables_agree(self):
-        """The reduced ``project`` tables are identical.
+        """The two ``project`` tables are identical under the asymmetric rule.
+
+        The root-only names are subtracted from the root table only, so the
+        comparison bites in both directions: the consumer manifest missing
+        something the root declares, and the consumer manifest acquiring a
+        field or an extra that only the root is permitted.
 
         This subsumes ``test_dependencies_agree`` and ``test_dev_extra_agrees``:
         both compare fields already inside this table. They are kept because
@@ -272,6 +287,6 @@ class TestManifestAgreement:
         fields nobody enumerated -- ``requires-python``, ``description``, an
         entry point, or an extra invented after this was written.
         """
-        assert _pyproject_shared_project_table("python/pyproject.toml") == (
-            _pyproject_shared_project_table("pyproject.toml")
-        )
+        assert _pyproject_project_table(
+            "python/pyproject.toml", drop_root_only=False
+        ) == _pyproject_project_table("pyproject.toml", drop_root_only=True)
