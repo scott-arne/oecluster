@@ -751,10 +751,10 @@ TEST(PartitionAgreementTest, IdenticalPartitionsReportAmiOnlyWhenRequested) {
     }
 }
 
-// The smallest AMI denominator any input can reach, 0.0866 here. The clamp
-// itself is defensive: the denominator is bounded below by log(2)/N over every
-// input rule 2 does not intercept, so eps would take about 3e15 samples. The
-// assertion is finite and near zero, as the spec states.
+// The smallest AMI denominator this fixture's eight samples can reach, 0.0866.
+// The clamp itself is defensive: the denominator is bounded below by log(2)/N
+// over every input rule 2 does not intercept, so eps would take about 3e15
+// samples. The assertion is finite and near zero, as the spec states.
 TEST(PartitionAgreementTest, AmiStaysFiniteWhenExpectedMiConsumesTheNormalizer) {
     const PartitionAgreement agreement = partition_agreement(
         {0, 1, 2, 3, 4, 5, 6, 7}, {0, 0, 1, 2, 3, 4, 5, 6}, WithAmi());

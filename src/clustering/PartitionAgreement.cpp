@@ -258,8 +258,10 @@ PartitionAgreement score(const detail::ContingencyTable& table,
         // The one place here where a convention replaces a NaN, matching
         // scikit-learn. Defensive rather than reachable: E[MI] never exceeds
         // min(H(a), H(b)), so the denominator is at least 0.5*|H(a) - H(b)|,
-        // and over every input rule 2 does not already intercept its minimum
-        // is log(2)/N -- about 3e15 samples short of epsilon.
+        // which says nothing wherever the two entropies agree. The figure that
+        // covers every input is measured, not derived: over every input rule 2
+        // does not already intercept the denominator bottoms out at log(2)/N --
+        // about 3e15 samples short of epsilon.
         const double eps = std::numeric_limits<double>::epsilon();
         denominator = denominator < 0.0 ? std::min(denominator, -eps)
                                         : std::max(denominator, eps);
