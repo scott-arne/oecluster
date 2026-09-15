@@ -751,6 +751,35 @@ TEST(PartitionAgreementTest, IdenticalPartitionsReportAmiOnlyWhenRequested) {
     }
 }
 
+// A nearly independent table cancels to a true MI far below the roundoff of
+// the terms that produced it, so without a clamp the sum lands slightly
+// negative and carries the four metrics derived from it below zero. This 2x2
+// table is the smallest reproduction found: the exact MI is +3.1e-18 and the
+// unclamped sum is -2.7e-17. scikit-learn reports 0.0 on the same input.
+TEST(PartitionAgreementTest, NearIndependentTableDoesNotGoNegative) {
+    struct Cell {
+        ClusterLabel a;
+        ClusterLabel b;
+        int count;
+    };
+    const std::vector<Cell> cells{
+        {0, 0, 10000}, {0, 1, 9999}, {1, 0, 10001}, {1, 1, 10000}};
+    std::vector<ClusterLabel> a;
+    std::vector<ClusterLabel> b;
+    for (const Cell& cell : cells) {
+        a.insert(a.end(), cell.count, cell.a);
+        b.insert(b.end(), cell.count, cell.b);
+    }
+
+    const PartitionAgreement agreement = partition_agreement(a, b, WithAmi());
+    EXPECT_GE(agreement.normalized_mutual_information, 0.0);
+    EXPECT_GE(agreement.homogeneity, 0.0);
+    EXPECT_GE(agreement.completeness, 0.0);
+    EXPECT_GE(agreement.v_measure, 0.0);
+    EXPECT_NEAR(agreement.normalized_mutual_information, 0.0, 1e-15);
+    EXPECT_TRUE(std::isfinite(agreement.adjusted_mutual_information));
+}
+
 // The smallest AMI denominator this fixture's eight samples can reach, 0.0866.
 // The clamp itself is defensive: the denominator is bounded below by log(2)/N
 // over every input rule 2 does not intercept, so eps would take about 3e15

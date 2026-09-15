@@ -235,6 +235,16 @@ PartitionAgreement score(const detail::ContingencyTable& table,
         mutual_information += (count / n) * std::log((count * n) / (row * col));
     }
 
+    // MI is nonnegative for every contingency table, but a nearly independent
+    // one cancels to a true value far below the roundoff of the terms that
+    // produced it, so the residue can land on either side of zero: the 2x2
+    // table [[10000, 9999], [10001, 10000]] sums to -2.7e-17 where the exact
+    // value is +3.1e-18. Left alone that residue reaches the four metrics
+    // below as a small negative number, outside the range they document.
+    // Clamping here rather than at each use also matches scikit-learn, which
+    // clips inside mutual_info_score and so feeds the clipped value to AMI.
+    mutual_information = std::max(mutual_information, 0.0);
+
     // 2*MI/(H(a)+H(b)) is the definition, not the harmonic mean of the two
     // components below: the harmonic form is 0/0 both when MI is zero with two
     // positive entropies and when one entropy is zero, and the composite is
