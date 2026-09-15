@@ -294,6 +294,54 @@ def test_unencodable_scaffold_raises_type_error_naming_the_argument():
     assert "StringVector" not in message
 
 
+def test_mapping_arguments_raise_type_error_naming_the_argument():
+    # A dict is iterable, so without the guard these score its keys and return
+    # a plausible number for a labeling nobody passed. The keys here are valid
+    # labels and the lengths line up, so nothing downstream would object.
+    labels = dict(enumerate(MAIN_B))
+
+    with pytest.raises(TypeError) as excinfo:
+        oecluster.partition_agreement(labels, MAIN_B)
+    message = str(excinfo.value)
+    assert message.startswith("a ")
+    assert "mapping" in message
+
+    with pytest.raises(TypeError) as excinfo:
+        oecluster.partition_agreement(MAIN_A, labels)
+    assert str(excinfo.value).startswith("b ")
+
+    with pytest.raises(TypeError) as excinfo:
+        oecluster.scaffold_agreement([0, 1, 1], {"x": 1, "y": 2, "z": 3})
+    message = str(excinfo.value)
+    assert "scaffold_labels" in message
+    assert "mapping" in message
+
+
+def test_string_flag_is_refused_rather_than_read_as_true():
+    # bool("false") is True, so the string a caller most plausibly means as
+    # "off" would have switched AMI on and reported it as requested.
+    # Pyright infers the parameter type from its False default, so the three
+    # off-type arguments below are exactly what it flags -- and exactly what
+    # this test exists to pass at runtime.
+    with pytest.raises(TypeError) as excinfo:
+        oecluster.partition_agreement(
+            MAIN_A, MAIN_B,
+            adjusted_mutual_information="false")  # pyright: ignore[reportArgumentType]
+    message = str(excinfo.value)
+    assert "adjusted_mutual_information" in message
+    assert "str" in message
+
+    # Ints and numpy bools stay admissible: this rejects strings only.
+    assert oecluster.partition_agreement(
+        MAIN_A, MAIN_B,
+        adjusted_mutual_information=1  # pyright: ignore[reportArgumentType]
+    ).requested.adjusted_mutual_information
+    assert not oecluster.partition_agreement(
+        MAIN_A, MAIN_B,
+        adjusted_mutual_information=np.bool_(False)  # pyright: ignore[reportArgumentType]
+    ).requested.adjusted_mutual_information
+
+
 def test_validation_surfaces_as_value_error_not_runtime_error():
     # SWIG maps every std::exception to RuntimeError, so these only pass while
     # the Python-side checks run ahead of the native call.

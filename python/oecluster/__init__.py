@@ -8,6 +8,7 @@ overlay, protein superposition, and binding site comparison.
 """
 
 import abc
+import collections.abc
 import ctypes
 import hashlib
 import importlib.machinery
@@ -724,6 +725,30 @@ class _StorageView:
             'typestr': np.dtype(np.float64).str,
             'version': 3,
         }
+
+
+def _flag(value, argument_name):
+    """Coerce a caller-supplied boolean option, refusing strings.
+
+    Every non-empty str is truthy, so ``bool("false")`` and ``bool("no")`` are
+    both ``True`` and a flag the caller meant to clear would silently be set.
+    Only str is rejected: ints, numpy bools and None all have an unambiguous
+    truth value, and callers do pass ``1`` and ``0``.
+
+    :func:`cluster_report` deliberately does not route through this. Its flags
+    gate expensive stages, so it admits bool and numpy.bool_ and nothing else,
+    refusing the ``1`` this function allows.
+
+    :param value: The option as the caller passed it.
+    :param argument_name: Parameter name, for the error message.
+    :returns: The value as a native bool.
+    :raises TypeError: If ``value`` is a str.
+    """
+    if isinstance(value, str):
+        raise TypeError(
+            f"{argument_name} must be a bool, not a str: every non-empty "
+            f"string is true, so {value!r} would enable it")
+    return bool(value)
 
 
 def _fill_dense_storage(storage, condensed):
@@ -2066,7 +2091,7 @@ def butina(distance_matrix, threshold, *, reordering=False,
 
     options = ButinaOptions()
     options.distance_threshold = float(threshold)
-    options.reordering = bool(reordering)
+    options.reordering = _flag(reordering, "reordering")
     options.num_threads = num_threads_int
     options.chunk_size = chunk_size_int
 
@@ -2554,7 +2579,8 @@ def hdbscan(distance_matrix, *, min_cluster_size=5, min_samples=None,
     options.max_cluster_size = 0 if max_cluster_size is None else int(max_cluster_size)
     options.alpha = float(alpha)
     options.cluster_selection_method = method_map[method_key]
-    options.allow_single_cluster = bool(allow_single_cluster)
+    options.allow_single_cluster = _flag(
+        allow_single_cluster, "allow_single_cluster")
     options.num_threads = num_threads_int
     options.chunk_size = chunk_size_int
 
@@ -2657,7 +2683,7 @@ def agglomerative(distance_matrix, *, n_clusters=2, distance_threshold=None,
         -1.0 if distance_threshold is None else float(distance_threshold)
     )
     options.linkage = linkage_map[linkage_key]
-    options.compute_full_tree = bool(compute_full_tree)
+    options.compute_full_tree = _flag(compute_full_tree, "compute_full_tree")
     options.num_threads = num_threads_int
     options.chunk_size = chunk_size_int
 
@@ -2750,7 +2776,7 @@ def bitbirch(fingerprints, *, threshold=0.65, branching_factor=50,
     options.branching_factor = int(branching_factor)
     options.merge_criterion = _bitbirch_merge_criterion(merge_criterion)
     options.tolerance = float(tolerance)
-    options.singly = bool(singly)
+    options.singly = _flag(singly, "singly")
     options.mode = _bitbirch_mode(mode)
     options.num_threads = int(num_threads)
 
@@ -2851,13 +2877,14 @@ def bitbirch_refine(fingerprints, *, threshold=0.65, branching_factor=50,
     fit_options.branching_factor = int(branching_factor)
     fit_options.merge_criterion = _bitbirch_merge_criterion(merge_criterion)
     fit_options.tolerance = float(tolerance)
-    fit_options.singly = bool(singly)
+    fit_options.singly = _flag(singly, "singly")
     fit_options.mode = _bitbirch_mode(mode)
     fit_options.num_threads = int(num_threads)
 
     options = BitBirchRefinementOptions()
     options.fit_options = fit_options
-    options.redistribute_largest_cluster = bool(redistribute_largest_cluster)
+    options.redistribute_largest_cluster = _flag(
+        redistribute_largest_cluster, "redistribute_largest_cluster")
     options.reassign_top_clusters = int(reassign_top_clusters)
     options.num_threads = int(num_threads)
 
@@ -3168,27 +3195,41 @@ class ClusterReportComparison:
         return rows
 
     def __repr__(self):
-        def _fmt(value):
-            if value is None:
-                return "--"
-            if isinstance(value, float):
-                return f"{value:.4g}"
-            return str(value)
+        return _format_metric_table(self.to_table(), self._column_labels())
 
-        labels = self._column_labels()
-        rows = self.to_table()
-        metric_width = max([len("metric")] + [len(r[0]) for r in rows])
-        col_width = max([12] + [len(label) for label in labels])
-        header = f"{'metric':<{metric_width}}"
-        for label in labels:
-            header += f"  {label:>{col_width}}"
-        lines = [header]
-        for row in rows:
-            line = f"{row[0]:<{metric_width}}"
-            for value in row[1:]:
-                line += f"  {_fmt(value):>{col_width}}"
-            lines.append(line)
-        return "\n".join(lines)
+
+def _format_metric_table(rows, labels):
+    """Render metric rows as the fixed-width table both scorecard reprs print.
+
+    Shared by :class:`ClusterReportComparison` and :class:`PartitionAgreement`,
+    which print the same table at different widths rather than being related
+    types. A row is its metric name followed by one value per column, and None
+    reads as "--" so a metric nobody asked for is distinguishable from one that
+    came back undefined.
+
+    :param rows: Sequence of ``(name, *values)``, one value per label.
+    :param labels: Column headers, left to right.
+    :returns: The rendered table as a single newline-joined str.
+    """
+    def _fmt(value):
+        if value is None:
+            return "--"
+        if isinstance(value, float):
+            return f"{value:.4g}"
+        return str(value)
+
+    metric_width = max([len("metric")] + [len(row[0]) for row in rows])
+    col_width = max([12] + [len(label) for label in labels])
+    header = f"{'metric':<{metric_width}}"
+    for label in labels:
+        header += f"  {label:>{col_width}}"
+    lines = [header]
+    for row in rows:
+        line = f"{row[0]:<{metric_width}}"
+        for value in row[1:]:
+            line += f"  {_fmt(value):>{col_width}}"
+        lines.append(line)
+    return "\n".join(lines)
 
 
 def _cluster_threshold(preset):
@@ -3222,6 +3263,13 @@ class PartitionAgreement:
     The attributes are read-only by convention; assigning to one changes this
     object and nothing else.
 
+    All seven metrics are NaN when fewer than two samples survive noise
+    handling; the counts keep their real values. The six always-computed
+    metrics are 1.0 when the two partitions are identical after noise
+    handling -- ``adjusted_mutual_information`` joins them only when it was
+    requested, and otherwise stays NaN with ``requested`` false. The per-field
+    notes below cover the remaining cases.
+
     :ivar num_samples: Samples entering the contingency table. Equals the input
         length except under ``noise="excluded"``, which can shrink it.
     :ivar num_clusters_a: Distinct clusters on side A after noise handling.
@@ -3236,7 +3284,8 @@ class PartitionAgreement:
         mean of the two entropies. Bitwise equal to ``v_measure``.
     :ivar homogeneity: ``MI / H(a)``. Asymmetric. NaN when side A is a single
         cluster and the partitions differ; scikit-learn reports 1.0 there.
-    :ivar completeness: ``MI / H(b)``. Asymmetric; see ``homogeneity``.
+    :ivar completeness: ``MI / H(b)``. Asymmetric. NaN when side B is a single
+        cluster and the partitions differ; scikit-learn reports 1.0 there.
     :ivar v_measure: The beta = 1 V-measure, assigned from the same value as
         ``normalized_mutual_information``. Stays defined where the harmonic
         mean of homogeneity and completeness does not.
@@ -3336,19 +3385,7 @@ class PartitionAgreement:
         return rows
 
     def __repr__(self):
-        def _fmt(value):
-            if value is None:
-                return "--"
-            if isinstance(value, float):
-                return f"{value:.4g}"
-            return str(value)
-
-        rows = self.to_table()
-        metric_width = max([len("metric")] + [len(row[0]) for row in rows])
-        lines = [f"{'metric':<{metric_width}}  {'value':>12}"]
-        for name, value in rows:
-            lines.append(f"{name:<{metric_width}}  {_fmt(value):>12}")
-        return "\n".join(lines)
+        return _format_metric_table(self.to_table(), ("value",))
 
 
 def _noise_handling(noise):
@@ -3368,14 +3405,22 @@ def _noise_handling(noise):
 def _agreement_options(noise, adjusted_mutual_information):
     options = _oecluster.PartitionAgreementOptions()
     options.noise_handling = _noise_handling(noise)
-    options.compute_adjusted_mutual_information = bool(
-        adjusted_mutual_information)
+    options.compute_adjusted_mutual_information = _flag(
+        adjusted_mutual_information, "adjusted_mutual_information")
     return options
 
 
 def _agreement_labels(value, argument_name):
     """Coerce a clustering result or a sequence of ints to a native IntVector."""
     labels = getattr(value, "labels", value)
+    # A Mapping iterates its keys, so {0: "a", 1: "b"} would score the keys and
+    # report a plausible number for a labeling the caller never passed. The
+    # values are the likelier intent, but guessing between the two is worse
+    # than refusing.
+    if isinstance(labels, collections.abc.Mapping):
+        raise TypeError(
+            f"{argument_name} must be a clustering result or a sequence of "
+            f"ints, not a mapping")
     vector = _oecluster.IntVector()
     try:
         for label in labels:
@@ -3405,6 +3450,12 @@ def _agreement_scaffolds(value, argument_name):
         raise TypeError(
             f"{argument_name} must be a sequence of scaffold strings, not a "
             f"single str")
+    # As in _agreement_labels: a Mapping's iteration yields its keys, which
+    # would score something the caller did not pass.
+    if isinstance(value, collections.abc.Mapping):
+        raise TypeError(
+            f"{argument_name} must be a sequence of scaffold strings, not a "
+            f"mapping")
     vector = _oecluster.StringVector()
     try:
         iterator = iter(value)
@@ -3785,7 +3836,7 @@ def descriptor_statistics(mols, *, sources=None, columns=None, groups=None,
         setattr(options, name, vector)
         if len(vector) == 0:
             empty.append(name)
-    options.inverse_covariance = bool(inverse_covariance)
+    options.inverse_covariance = _flag(inverse_covariance, "inverse_covariance")
 
     # Still ahead of every name verdict, which only the computing call below
     # can give: ordering one of those first would compute and discard a full
