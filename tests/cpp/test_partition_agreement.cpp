@@ -1,9 +1,7 @@
 #include <gtest/gtest.h>
 
-#include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <limits>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -203,45 +201,17 @@ const std::vector<ClusterLabel> kAmiA{0, 1, 1, 2, 2, 2, 3, 3, 3,
 const std::vector<ClusterLabel> kAmiB{0, 1, 1, 1, 2, 2, 2, 2, 3,
                                       3, 3, 3, 4, 4, 4, 4, 4, 4};
 
-/// log(k!) for k in [0, n], by prefix-summing log(k).
-std::vector<double> ReferenceLogFactorials(uint64_t n) {
-    std::vector<double> table(static_cast<size_t>(n) + 1, 0.0);
-    for (uint64_t k = 2; k <= n; ++k) {
-        table[static_cast<size_t>(k)] =
-            table[static_cast<size_t>(k - 1)] + std::log(static_cast<double>(k));
-    }
-    return table;
-}
-
-/// The inner sum of Vinh et al. (2010) for one pair of marginal values.
-double ReferenceTerm(uint64_t u, uint64_t w, uint64_t n,
-                     const std::vector<double>& logfact) {
-    const auto lf = [&logfact](uint64_t k) {
-        return logfact[static_cast<size_t>(k)];
-    };
-    const double total = static_cast<double>(n);
-    const uint64_t lower = (u + w > n) ? (u + w - n) : 1;
-    const uint64_t upper = std::min(u, w);
-    double sum = 0.0;
-    for (uint64_t count = lower; count <= upper; ++count) {
-        const double log_p = lf(u) + lf(w) + lf(n - u) + lf(n - w) - lf(n) -
-                             lf(count) - lf(u - count) - lf(w - count) -
-                             lf(n - u - w + count);
-        sum += (static_cast<double>(count) / total) *
-               std::log(total * static_cast<double>(count) /
-                        (static_cast<double>(u) * static_cast<double>(w))) *
-               std::exp(log_p);
-    }
-    return sum;
-}
-
-/// A deliberately naive K_a x K_b E[MI], with no grouping by marginal value.
+/// A deliberately naive K_a x K_b E[MI]: every marginal pair visited on its
+/// own, with no grouping by marginal value. The per-pair term comes from
+/// production so that what this reference contradicts is the grouping, not a
+/// second transcription of Vinh et al. (2010) that could drift from the first.
 double NaiveExpectedMutualInformation(const detail::ContingencyTable& table) {
-    const std::vector<double> logfact = ReferenceLogFactorials(table.num_samples);
+    const std::vector<double> logfact =
+        detail::log_factorials(table.num_samples);
     double expected = 0.0;
     for (uint64_t u : table.marginals_a) {
         for (uint64_t w : table.marginals_b) {
-            expected += ReferenceTerm(u, w, table.num_samples, logfact);
+            expected += detail::expected_term(u, w, table.num_samples, logfact);
         }
     }
     return expected;
@@ -704,16 +674,10 @@ TEST(PartitionAgreementTest, MarginalGroupingMatchesTheNaiveLoop) {
     const detail::ContingencyTable table =
         detail::build_contingency(kAmiA, kAmiB, NoiseHandling::Singletons);
 
-    double grouped = 0.0;
     const std::vector<double> logfact =
-        ReferenceLogFactorials(table.num_samples);
-    detail::for_each_marginal_pair(
-        detail::marginal_histogram(table.marginals_a),
-        detail::marginal_histogram(table.marginals_b),
-        [&](uint64_t u, uint64_t w, uint64_t multiplicity) {
-            grouped += static_cast<double>(multiplicity) *
-                       ReferenceTerm(u, w, table.num_samples, logfact);
-        });
+        detail::log_factorials(table.num_samples);
+    const double grouped =
+        detail::expected_mutual_information(table, logfact);
 
     const double naive = NaiveExpectedMutualInformation(table);
     EXPECT_NEAR(grouped, naive, 1e-12 * std::abs(naive));
