@@ -113,9 +113,11 @@ their option/result types:
   (`BitBirchOptions`, `BitBirchReclusteringOptions`,
   `BitBirchRefinementOptions`, `BitBirchResult`).
 
-`ClusterTypes.h` defines the shared cluster representation, and `ClusterReport.h`
+`ClusterTypes.h` defines the shared cluster representation, `ClusterReport.h`
 defines the method-agnostic quality scorecard exposed in Python as
-`cluster_report()`/`compare_reports()`.
+`cluster_report()`/`compare_reports()`, and `PartitionAgreement.h` defines the
+labels-only agreement metrics exposed as
+`partition_agreement()`/`scaffold_agreement()`.
 
 ### Internal validity indices
 
@@ -183,6 +185,126 @@ distinction into its cells, rendering an unasked cell as `None` -- printed as
 `--` -- and reserving `nan` for asked and undefined. A coverage cell is also
 `None` when the report carries the threshold but answered nothing at it, as when
 the clustering has no clusters and both coverage curves come back empty.
+
+## Partition Agreement
+
+`PartitionAgreement.h` scores two labelings of the same samples against each
+other. It reads labels and nothing else -- no distance matrix, unlike
+`ClusterReport.h` -- so comparing two clustering methods does not require
+owning the matrix either of them was built from. There are four entry points,
+two per function, differing only in whether the labels arrive inside a
+`ClusteringResult`:
+
+```cpp
+PartitionAgreement partition_agreement(
+    const ClusteringResult& a, const ClusteringResult& b,
+    const PartitionAgreementOptions& options = PartitionAgreementOptions());
+
+PartitionAgreement partition_agreement(
+    const std::vector<ClusterLabel>& a, const std::vector<ClusterLabel>& b,
+    const PartitionAgreementOptions& options = PartitionAgreementOptions());
+
+PartitionAgreement scaffold_agreement(
+    const ClusteringResult& result,
+    const std::vector<std::string>& scaffold_labels,
+    const PartitionAgreementOptions& options = PartitionAgreementOptions());
+
+PartitionAgreement scaffold_agreement(
+    const std::vector<ClusterLabel>& labels,
+    const std::vector<std::string>& scaffold_labels,
+    const PartitionAgreementOptions& options = PartitionAgreementOptions());
+```
+
+The `ClusteringResult` overloads read `Labels()` only. Unlike `cluster_report`,
+they never cross-check `Labels()` against `Members()`, so a result whose two
+views disagree is not rejected here. All four raise `std::invalid_argument`
+when the two sides differ in length or either is empty.
+
+`PartitionAgreement` carries seven `double` metrics. Two are pair-counting --
+`adjusted_rand_index` (Hubert-Arabie; 1.0 is exact agreement, 0.0 is the value
+expected by chance, negative is worse than chance) and `fowlkes_mallows` (the
+geometric mean of pair precision and pair recall). Four are entropy-based:
+`normalized_mutual_information`, `homogeneity`, `completeness`, and
+`v_measure`. The seventh, `adjusted_mutual_information`, is opt-in.
+
+`v_measure` and `normalized_mutual_information` are assigned from one computed
+value, `2*MI/(H(a)+H(b))`, and are bitwise equal on every input. That is the
+definition rather than the harmonic mean of the two components, because the
+harmonic form is 0/0 both when MI is zero with two positive entropies and when
+one entropy is zero, and the composite is well defined in each case.
+
+### The positional rule
+
+Side A is always the first argument. `homogeneity` is `MI / H(a)` and
+`completeness` is `MI / H(b)`, so swapping the arguments exchanges that pair --
+and with it the counts `num_clusters_a` and `num_clusters_b`. Every other
+metric is symmetric, `adjusted_mutual_information` only to within rounding: a
+swap transposes the contingency table and exchanges the two marginal values
+within each expected-MI term, so those terms evaluate in a different
+floating-point order and the last bits can move.
+
+`scaffold_agreement` puts the clustering on side A and the scaffold annotation
+on side B, so `completeness` carries the scaffold-purity reading -- whether
+each cluster's members share a single scaffold, the same question
+`RepresentativeMetrics::scaffold_purity` asks per cluster -- and `homogeneity`
+carries its transpose, whether each scaffold landed in a single cluster.
+
+### Noise handling
+
+A sample is noise on a side when its label there is negative -- not only
+`NOISE_LABEL`, matching how `ClusterReport` and `labels_to_clusters` already
+read labels. In `scaffold_agreement` an empty scaffold string is noise on the
+string side. `PartitionAgreementOptions::noise_handling` chooses one of three
+readings:
+
+- `NoiseHandling::Singletons` (the default) makes each noise sample its own
+  cluster, so `num_clusters_a` and `num_clusters_b` include one entry per noise
+  sample.
+- `NoiseHandling::Grouped` collapses each side's noise into one cluster, which
+  is how scikit-learn reads a -1 label.
+- `NoiseHandling::Excluded` drops a sample noisy on either side from both
+  partitions, so `num_samples` can be smaller than the input length. Every
+  other mode leaves it equal to the input length.
+
+### Adjusted mutual information
+
+`PartitionAgreementOptions::compute_adjusted_mutual_information` is `false` by
+default. The other six metrics come essentially free once the contingency table
+is built, and AMI is the only one that costs more than that pass: its
+expected-MI correction first builds an O(N) table of log factorials -- `8*(n+1)`
+bytes, about 800 KB at `n = 100,000` -- and then sums over pairs of distinct
+marginal values, that is over distinct cluster sizes rather than over clusters,
+each term walking the hypergeometric support. That is why it is opt-in.
+`PartitionAgreement::requested` records the request and not the outcome, the
+same convention `ClusterReportRequested` uses: `false` means nobody asked, and
+`true` with NaN means asked and undefined.
+
+AMI's accuracy is limited where its denominator -- the mean entropy minus the
+expected mutual information -- approaches zero, which happens when both
+partitions are close to all-singleton. Numerator and denominator are then each
+a difference of nearly equal sums over N terms, and the quotient loses
+significance: two 1.5-million-sample partitions differing by one merged pair
+have a true AMI of zero and report about 0.035. Partitions whose denominator is
+order one are unaffected. The limit is inherent to computing the correction in
+double precision -- scikit-learn shares it -- rather than a property of this
+implementation.
+
+### Divergences from scikit-learn
+
+An undefined metric is NaN here rather than a convention. scikit-learn
+substitutes a value in five cases, and this table is the complete list:
+
+| Case | Fixture | scikit-learn 1.9.1 | OECluster |
+| --- | --- | --- | --- |
+| Fewer than two surviving samples | `a = b = {0}` | every metric `1.0`, except `fowlkes_mallows = 0.0` | every metric NaN |
+| Side A is one cluster, partitions differ | `{0,0,0,0}` vs `{0,0,1,1}` | `homogeneity = 1.0` | NaN |
+| Side B is one cluster, partitions differ | `{0,0,1,1}` vs `{0,0,0,0}` | `completeness = 1.0` | NaN |
+| One side all singletons, partitions differ | `{0,1,2,3}` vs `{0,0,1,1}` | `fowlkes_mallows = 0.0` | NaN |
+| Both sides all singletons, N >= 2 | `{0,1,2,3}` vs `{3,2,1,0}` | `fowlkes_mallows = 0.0` | `1.0` |
+
+The last row is not a NaN case: two all-singleton partitions are the same
+partition, so the six always-computed metrics are 1.0, `fowlkes_mallows` among
+them, and `adjusted_mutual_information` is 1.0 too whenever it was requested.
 
 ## Representatives
 

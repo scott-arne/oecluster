@@ -93,3 +93,17 @@ TEST(UmbrellaHeaderTest, ReachesTheClusteringHeaders) {
     // ClusteringResult, which every header above would drag in anyway.
     EXPECT_TRUE(OECluster::labels_to_clusters({}).empty());
 }
+
+// ClusterReport.h was absent from the umbrella header until 5.3.0, so A1's
+// entire public surface was unreachable through the entry point the
+// documentation names. Both quality headers are covered here so the omission
+// cannot recur for either.
+TEST(UmbrellaHeaderTest, ReachesTheClusterQualityHeaders) {
+    const OECluster::ClusterReportOptions report_options;
+    EXPECT_TRUE(report_options.treat_noise_as_singletons);
+
+    const OECluster::PartitionAgreementOptions agreement_options;
+    EXPECT_EQ(agreement_options.noise_handling,
+              OECluster::NoiseHandling::Singletons);
+    EXPECT_FALSE(agreement_options.compute_adjusted_mutual_information);
+}

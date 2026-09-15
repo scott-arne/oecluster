@@ -342,6 +342,94 @@ curves come back empty -- while `nan` keeps its single meaning of asked and
 undefined. `__repr__` renders `None` as `--`. A caller reading cells as floats
 must test for `None` before doing arithmetic on them.
 
+## Partition Agreement
+
+`partition_agreement()` scores two labelings of the same samples against each
+other, and `scaffold_agreement()` scores a clustering against a per-sample
+scaffold annotation. Neither takes a distance matrix, so comparing two methods
+costs nothing beyond the labels they already produced:
+
+```python
+butina_result = oecluster.butina(dm, threshold=0.35)
+dbscan_result = oecluster.dbscan(dm, eps=0.35, min_samples=5)
+
+agreement = oecluster.partition_agreement(
+    butina_result,
+    dbscan_result,
+    noise="excluded",
+    adjusted_mutual_information=True,
+)
+print(agreement)
+print(agreement.adjusted_rand_index, agreement.v_measure)
+```
+
+`scaffold_agreement()` takes one scaffold string per sample, in the same order
+as the molecules the clustering was built from -- `scaffolds` below is the same
+per-molecule list `rank_representatives()` accepts, so it has one entry for
+every molecule in `mols`. A length mismatch raises `ValueError`:
+
+```python
+print(oecluster.scaffold_agreement(butina_result, scaffolds).completeness)
+```
+
+Either function accepts a clustering result, a list or tuple of ints, or a
+numpy integer array on each label side. Labels are held natively as 32-bit
+signed ints, so one outside that range raises `ValueError` naming the argument
+rather than being truncated. Side A is the first argument:
+`homogeneity` is `MI / H(a)` and `completeness` is `MI / H(b)`, and swapping
+the arguments exchanges that pair, along with `num_clusters_a` and
+`num_clusters_b`; every other metric is symmetric, with
+`adjusted_mutual_information` symmetric only to within rounding, since a swap
+transposes the contingency table and trades the two marginal values inside each
+expected-MI term, changing the order those terms evaluate in. For
+`scaffold_agreement()` the clustering is side A, so `completeness` is the
+scaffold-purity reading -- whether each cluster's members share a single
+scaffold -- and `homogeneity` is its transpose, whether each scaffold landed in
+a single cluster.
+
+`noise=` takes `"singletons"` (the default; each negatively-labelled sample
+becomes its own cluster), `"grouped"` (each side's noise forms one cluster,
+which is how scikit-learn reads a -1 label), or `"excluded"` (a sample noisy on
+either side is dropped from both, which can make `num_samples` smaller than the
+input length). An empty scaffold string is missing data, not a category, and
+follows `noise=` exactly as a negative label does.
+
+`adjusted_mutual_information=True` adds the seventh metric. It is opt-in
+because the other six come essentially free once the contingency table is
+built, while the expected-MI correction pays for a pass of its own: an O(N)
+table of log factorials, then a sum over pairs of distinct marginal values --
+distinct cluster sizes, not clusters -- each term walking the hypergeometric
+support. `agreement.requested` records the request and not the outcome, the
+same convention `cluster_report()` uses: `False` means nobody asked, `True`
+with `nan` means asked and undefined. An opt-in metric nobody asked for reads
+`None` from `to_table()` and `--` from `repr()`, while `nan` keeps its single
+meaning of asked and undefined.
+
+AMI's accuracy is limited where its denominator -- the mean entropy
+minus the expected mutual information -- approaches zero, which happens when
+both partitions are close to all-singleton. Numerator and denominator are then
+each a difference of nearly equal sums over N terms, and the quotient loses
+significance: two 1.5-million-sample partitions differing by one merged pair
+have a true value of zero and report about 0.035. Partitions whose denominator
+is order one are unaffected. The limit is inherent to computing the correction
+in double precision -- scikit-learn shares it -- rather than a property of this
+implementation.
+
+An undefined metric is `nan` rather than a substituted value, which diverges
+from scikit-learn on five degenerate inputs. This table is the complete list:
+
+| Case | Fixture | scikit-learn 1.9.1 | OECluster |
+| --- | --- | --- | --- |
+| Fewer than two surviving samples | `a = b = [0]` | every metric `1.0`, except `fowlkes_mallows = 0.0` | every metric `nan` |
+| Side A is one cluster, partitions differ | `[0,0,0,0]` vs `[0,0,1,1]` | `homogeneity = 1.0` | `nan` |
+| Side B is one cluster, partitions differ | `[0,0,1,1]` vs `[0,0,0,0]` | `completeness = 1.0` | `nan` |
+| One side all singletons, partitions differ | `[0,1,2,3]` vs `[0,0,1,1]` | `fowlkes_mallows = 0.0` | `nan` |
+| Both sides all singletons, N >= 2 | `[0,1,2,3]` vs `[3,2,1,0]` | `fowlkes_mallows = 0.0` | `1.0` |
+
+The last row is not a `nan` case: two all-singleton partitions are the same
+partition, so the six always-computed metrics are 1.0 -- and
+`adjusted_mutual_information` with them if it was asked for.
+
 ## Metric Requirements
 
 `butina()`, `dbscan()`, `hdbscan()`, `agglomerative()`, and `cluster_report()`

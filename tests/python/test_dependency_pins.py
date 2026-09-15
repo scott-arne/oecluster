@@ -5,6 +5,8 @@ catch a hand-edit that bypassed it, the SWIG module dunder in particular, which
 drifted to 4.2.0 while the package was at 4.2.3. ``TestVersionPins`` records
 which locations it checks and which are covered elsewhere. The OEFP pin is not
 managed by ``vrzn`` at all, so the pin sites are checked against one literal.
+``TestManifestAgreement`` covers the rest of the requirement metadata, which the
+two pyproject files must spell identically.
 """
 
 import re
@@ -27,6 +29,24 @@ OEFP_REQUIREMENT = "oefp==0.3.0"
 # README names. Deriving it from the one requirement string keeps the four
 # sites from drifting apart.
 OEFP_VERSION = OEFP_REQUIREMENT.split("==", 1)[1]
+
+# Publication metadata the root manifest alone is permitted, because the root
+# project builds the distributed wheel through scikit-build-core and so owns it;
+# python/pyproject.toml is the pure-Python manifest and declares only what a
+# consumer resolves against. These names are excused on the root and nowhere
+# else: the consumer manifest carrying one is itself a defect and fails the
+# comparison. A field that starts appearing on the root alone belongs here with
+# its own reason, deliberately admitted, rather than slipping past unnoticed.
+ROOT_ONLY_PROJECT_FIELDS = frozenset(
+    {"authors", "classifiers", "keywords", "license", "license-files"}
+)
+
+# The documentation toolchain, permitted on the root manifest alone because the
+# docs build runs from the repository root. Excused there and nowhere else: the
+# consumer manifest declaring it is a defect and fails the comparison. A new
+# root-only extra belongs here with its own reason, deliberately admitted,
+# rather than slipping past unnoticed.
+ROOT_ONLY_EXTRAS = frozenset({"docs"})
 
 
 def _pyproject_oefp_requirement(relative_path: str) -> str:
@@ -56,6 +76,67 @@ def _pyproject_version(relative_path: str) -> str:
     with (REPO_ROOT / relative_path).open("rb") as handle:
         data = tomllib.load(handle)
     return data["project"]["version"]
+
+
+def _pyproject_dependencies(relative_path: str) -> list[str]:
+    """Return a pyproject's declared ``project.dependencies``.
+
+    :param relative_path: Path to the pyproject file, relative to the
+        repository root.
+    :returns: The runtime requirement strings, in declaration order.
+    """
+    with (REPO_ROOT / relative_path).open("rb") as handle:
+        data = tomllib.load(handle)
+    return data["project"]["dependencies"]
+
+
+def _pyproject_dev_extra(relative_path: str) -> list[str]:
+    """Return a pyproject's ``dev`` optional-dependency group.
+
+    :param relative_path: Path to the pyproject file, relative to the
+        repository root.
+    :returns: The ``dev`` extra's requirement strings, in declaration order.
+    :raises KeyError: If the file declares no ``dev`` extra.
+    """
+    with (REPO_ROOT / relative_path).open("rb") as handle:
+        data = tomllib.load(handle)
+    return data["project"]["optional-dependencies"]["dev"]
+
+
+def _pyproject_project_table(
+    relative_path: str, *, drop_root_only: bool
+) -> dict[str, object]:
+    """Return a pyproject's ``project`` table, ready to compare with the other's.
+
+    The reduction is a subtraction rather than an enumeration: everything the
+    two manifests are expected to spell identically is kept. ``optional-
+    dependencies`` is normalized to always be present, so a manifest that
+    declares no extras still compares against one that does.
+
+    :param relative_path: Path to the pyproject file, relative to the
+        repository root.
+    :param drop_root_only: Whether to subtract ``ROOT_ONLY_PROJECT_FIELDS`` and
+        ``ROOT_ONLY_EXTRAS``. True for the root manifest, the only one those
+        names are excused on; False for the consumer manifest, so that it
+        acquiring one of them surfaces as a difference rather than being
+        ignored on both sides.
+    :returns: A fresh dictionary holding the table. The parsed file is re-read
+        on each call, so callers cannot affect one another.
+    """
+    with (REPO_ROOT / relative_path).open("rb") as handle:
+        data = tomllib.load(handle)
+    project = dict(data["project"])
+    extras = dict(project.setdefault("optional-dependencies", {}))
+    if drop_root_only:
+        for field in ROOT_ONLY_PROJECT_FIELDS:
+            project.pop(field, None)
+        extras = {
+            name: requirements
+            for name, requirements in extras.items()
+            if name not in ROOT_ONLY_EXTRAS
+        }
+    project["optional-dependencies"] = extras
+    return project
 
 
 def _c_macro_version(relative_path: str) -> str:
@@ -161,3 +242,51 @@ class TestVersionPins:
         """The release notes name the version being released."""
         text = (REPO_ROOT / "CHANGELOG.md").read_text()
         assert f"## [{oecluster.__version__}]" in text
+
+
+class TestManifestAgreement:
+    """The two manifests declare the same ``project`` table, bar the known gaps.
+
+    Both files describe the same distribution, and ``python/pyproject.toml`` is
+    what a consumer resolves against, so a requirement added to one and not the
+    other ships metadata that installs a different environment than the one CI
+    tests. ``scikit-learn`` drifted exactly that way: it was declared in the
+    root ``dev`` extra alone, leaving an install of the Python-only package's
+    extra short a dependency that several test modules import. What is compared
+    is the whole ``project`` table, so a field nobody thought to enumerate
+    cannot drift quietly. The rule is asymmetric: the names in
+    ``ROOT_ONLY_PROJECT_FIELDS`` and ``ROOT_ONLY_EXTRAS`` are subtracted from
+    the root table only, never from the consumer's, so the consumer manifest
+    acquiring one of them fails rather than being excused along with the root.
+    """
+
+    def test_dependencies_agree(self):
+        """Both manifests declare the same runtime dependencies."""
+        assert _pyproject_dependencies("python/pyproject.toml") == (
+            _pyproject_dependencies("pyproject.toml")
+        )
+
+    def test_dev_extra_agrees(self):
+        """Both manifests declare the same ``dev`` extra."""
+        assert _pyproject_dev_extra("python/pyproject.toml") == (
+            _pyproject_dev_extra("pyproject.toml")
+        )
+
+    def test_project_tables_agree(self):
+        """The two ``project`` tables are identical under the asymmetric rule.
+
+        The root-only names are subtracted from the root table only, so the
+        comparison bites in both directions: the consumer manifest missing
+        something the root declares, and the consumer manifest acquiring a
+        field or an extra that only the root is permitted.
+
+        This subsumes ``test_dependencies_agree`` and ``test_dev_extra_agrees``:
+        both compare fields already inside this table. They are kept because
+        they name the drift that actually shipped and report it more sharply
+        than a whole-table diff does. This case earns its place by covering the
+        fields nobody enumerated -- ``requires-python``, ``description``, an
+        entry point, or an extra invented after this was written.
+        """
+        assert _pyproject_project_table(
+            "python/pyproject.toml", drop_root_only=False
+        ) == _pyproject_project_table("pyproject.toml", drop_root_only=True)

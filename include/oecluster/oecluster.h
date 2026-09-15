@@ -9,7 +9,7 @@
 #define OECLUSTER_OECLUSTER_H
 
 #define OECLUSTER_VERSION_MAJOR 5
-#define OECLUSTER_VERSION_MINOR 2
+#define OECLUSTER_VERSION_MINOR 3
 #define OECLUSTER_VERSION_PATCH 0
 
 namespace OECluster {
@@ -49,5 +49,7 @@ class DistanceMatrix;
 #include "oecluster/clustering/HDBSCAN.h"
 #include "oecluster/clustering/Agglomerative.h"
 #include "oecluster/clustering/BitBirch.h"
+#include "oecluster/clustering/ClusterReport.h"
+#include "oecluster/clustering/PartitionAgreement.h"
 
 #endif  // OECLUSTER_OECLUSTER_H

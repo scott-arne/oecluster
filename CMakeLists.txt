@@ -4,7 +4,7 @@ if(POLICY CMP0144)
     cmake_policy(SET CMP0144 NEW)
 endif()
 
-project(oecluster VERSION 5.2.0 LANGUAGES CXX)
+project(oecluster VERSION 5.3.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -141,6 +141,7 @@ set(OECLUSTER_SOURCES
     src/clustering/BitBirchKernels.cpp
     src/clustering/BitBirchTree.cpp
     src/clustering/BitBirch.cpp
+    src/clustering/PartitionAgreement.cpp
     src/DescriptorBuild.cpp
     src/DescriptorStatistics.cpp
 )
