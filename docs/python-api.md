@@ -373,7 +373,9 @@ print(oecluster.scaffold_agreement(butina_result, scaffolds).completeness)
 ```
 
 Either function accepts a clustering result, a list or tuple of ints, or a
-numpy integer array on each label side. Side A is the first argument:
+numpy integer array on each label side. Labels are held natively as 32-bit
+signed ints, so one outside that range raises `ValueError` naming the argument
+rather than being truncated. Side A is the first argument:
 `homogeneity` is `MI / H(a)` and `completeness` is `MI / H(b)`, and swapping
 the arguments exchanges that pair, along with `num_clusters_a` and
 `num_clusters_b`; every other metric is symmetric, with

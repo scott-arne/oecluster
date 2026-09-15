@@ -123,10 +123,13 @@ template <typename LabelA, typename LabelB>
 inline ContingencyTable build_contingency_impl(const std::vector<LabelA>& a,
                                                const std::vector<LabelB>& b,
                                                NoiseHandling noise_handling) {
-    // The public entry points validate this before calling; the assert covers
-    // the C++ tests, which drive the build_contingency overloads directly and
-    // would otherwise index `drop` and `ids_b` out of bounds.
-    assert(a.size() == b.size());
+    // The public entry points validate this before calling, so the invariant
+    // holds in production; the C++ tests drive the build_contingency overloads
+    // directly and would index `drop` and `ids_b` out of bounds without it.
+    // Both the library and the test binary build Release with -DNDEBUG, so
+    // this documents the precondition and traps it under a debug build rather
+    // than guarding the suite that normally runs.
+    assert(a.size() == b.size() && "build_contingency requires equal lengths");
 
     std::vector<bool> drop(a.size(), false);
     mark_excluded(a, noise_handling, drop);
