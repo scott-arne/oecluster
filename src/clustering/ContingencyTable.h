@@ -13,6 +13,7 @@
 #define OECLUSTER_SRC_CLUSTERING_CONTINGENCYTABLE_H
 
 #include <algorithm>
+#include <cassert>
 #include <cstdint>
 #include <string>
 #include <unordered_map>
@@ -122,6 +123,11 @@ template <typename LabelA, typename LabelB>
 inline ContingencyTable build_contingency_impl(const std::vector<LabelA>& a,
                                                const std::vector<LabelB>& b,
                                                NoiseHandling noise_handling) {
+    // The public entry points validate this before calling; the assert covers
+    // the C++ tests, which drive the build_contingency overloads directly and
+    // would otherwise index `drop` and `ids_b` out of bounds.
+    assert(a.size() == b.size());
+
     std::vector<bool> drop(a.size(), false);
     mark_excluded(a, noise_handling, drop);
     mark_excluded(b, noise_handling, drop);
