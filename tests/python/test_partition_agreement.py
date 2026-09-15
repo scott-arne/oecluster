@@ -266,6 +266,21 @@ def test_non_sequence_arguments_raise_type_error_naming_the_argument():
     assert "scaffold_labels" in str(excinfo.value)
 
 
+def test_out_of_range_label_raises_value_error_naming_the_argument():
+    # 2**40 is a perfectly good int, so the rejection comes from the native
+    # vector<int> rather than from the type check, and the raw OverflowError
+    # would name an internal container type instead of the real constraint.
+    with pytest.raises(ValueError) as excinfo:
+        oecluster.partition_agreement([0, 2**40, 1], [0, 1, 1])
+    message = str(excinfo.value)
+    assert message.startswith("a ")
+    assert "32-bit" in message
+
+    with pytest.raises(ValueError) as excinfo:
+        oecluster.scaffold_agreement([0, 2**40, 1], ["x", "y", "z"])
+    assert "result" in str(excinfo.value)
+
+
 def test_validation_surfaces_as_value_error_not_runtime_error():
     # SWIG maps every std::exception to RuntimeError, so these only pass while
     # the Python-side checks run ahead of the native call.

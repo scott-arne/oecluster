@@ -3383,6 +3383,13 @@ def _agreement_labels(value, argument_name):
             # float/Decimal/str/None. int() would silently truncate floats and
             # coerce strings, publishing a wrong metric instead of raising.
             vector.push_back(operator.index(label))
+    except OverflowError as error:
+        # operator.index() admits any Python int, so a label too wide for the
+        # native std::vector<int> only fails inside push_back. Folding it into
+        # the clause below would report a type problem, which is false.
+        raise ValueError(
+            f"{argument_name} must contain labels that fit a 32-bit signed "
+            f"int") from error
     except (TypeError, ValueError) as error:
         raise TypeError(
             f"{argument_name} must be a clustering result or a sequence of "
@@ -3400,16 +3407,17 @@ def _agreement_scaffolds(value, argument_name):
             f"single str")
     vector = _oecluster.StringVector()
     try:
-        for label in value:
-            # Require actual strings. str() would coerce None, numbers, etc.,
-            # publishing a wrong metric instead of raising.
-            if not isinstance(label, str):
-                raise TypeError(
-                    f"{argument_name} must be a sequence of scaffold strings")
-            vector.push_back(label)
+        iterator = iter(value)
     except TypeError as error:
         raise TypeError(
             f"{argument_name} must be a sequence of scaffold strings") from error
+    for label in iterator:
+        # Require actual strings. str() would coerce None, numbers, etc.,
+        # publishing a wrong metric instead of raising.
+        if not isinstance(label, str):
+            raise TypeError(
+                f"{argument_name} must be a sequence of scaffold strings")
+        vector.push_back(label)
     return vector
 
 
@@ -3646,8 +3654,9 @@ def partition_agreement(a, b, *, noise="singletons",
     :returns: A :class:`PartitionAgreement`.
     :raises TypeError: If either argument is neither a clustering result nor a
         sequence of ints.
-    :raises ValueError: If the labelings differ in length, either is empty, or
-        ``noise`` is not one of the three accepted strings.
+    :raises ValueError: If the labelings differ in length, either is empty, a
+        label does not fit the native 32-bit signed label type, or ``noise`` is
+        not one of the three accepted strings.
     """
     labels_a = _agreement_labels(a, "a")
     labels_b = _agreement_labels(b, "b")
@@ -3683,8 +3692,9 @@ def scaffold_agreement(result, scaffold_labels, *, noise="singletons",
     :returns: A :class:`PartitionAgreement`.
     :raises TypeError: If ``result`` is not a clustering result or sequence of
         ints, or ``scaffold_labels`` is not a sequence of strings.
-    :raises ValueError: If the two differ in length, either is empty, or
-        ``noise`` is not one of the three accepted strings.
+    :raises ValueError: If the two differ in length, either is empty, a label
+        does not fit the native 32-bit signed label type, or ``noise`` is not
+        one of the three accepted strings.
     """
     labels = _agreement_labels(result, "result")
     scaffolds = _agreement_scaffolds(scaffold_labels, "scaffold_labels")
