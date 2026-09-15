@@ -547,22 +547,24 @@ other, and `scaffold_agreement` scores a clustering against a per-sample
 scaffold annotation. Neither needs a distance matrix.
 
 ```python
-agreement = oecluster.partition_agreement(butina_result, dbscan_result)
+agreement = oecluster.partition_agreement(
+    butina_result, dbscan_result, noise="excluded")
 print(agreement.adjusted_rand_index, agreement.v_measure)
 ```
 
 | Metric | Range | A low value means |
 |--------|-------|-------------------|
 | `adjusted_rand_index` | −0.5 to 1.0, 0.0 by chance | The two labelings put pairs together and apart no better than chance |
-| `fowlkes_mallows` | 0.0 to 1.0 | Few of the pairs grouped by one side are grouped by the other |
+| `fowlkes_mallows` | 0.0 to 1.0, or `nan` | Few of the pairs grouped by one side are grouped by the other. `nan` when either side is all singletons and the partitions differ |
 | `normalized_mutual_information` | 0.0 to 1.0 | Knowing one labeling tells you little about the other |
-| `homogeneity` | 0.0 to 1.0 | Side B's clusters each span many of side A's. `MI / H(a)`, so it is side A's information that side B has to explain |
-| `completeness` | 0.0 to 1.0 | Side A's clusters each span many of side B's. `MI / H(b)`, the transpose |
+| `homogeneity` | 0.0 to 1.0, or `nan` | Side B's clusters each span many of side A's. `MI / H(a)`, so it is side A's information that side B has to explain. `nan` when side A is a single cluster and the partitions differ |
+| `completeness` | 0.0 to 1.0, or `nan` | Side A's clusters each span many of side B's. `MI / H(b)`, the transpose. `nan` when side B is a single cluster and the partitions differ |
 | `v_measure` | 0.0 to 1.0 | Same number as `normalized_mutual_information`, reported under both names |
-| `adjusted_mutual_information` | Below 0.0 to 1.0, 0.0 by chance | As NMI, but corrected for the agreement many small clusters produce by chance. Opt in with `adjusted_mutual_information=True` |
+| `adjusted_mutual_information` | Below 0.0 to 1.0, 0.0 by chance, or `nan` | As NMI, but corrected for the agreement many small clusters produce by chance. Opt in with `adjusted_mutual_information=True`; `nan` until you do |
 
-See [docs/python-api.md](docs/python-api.md#partition-agreement) for the
-`noise=` readings and the divergences from scikit-learn.
+Every metric is `nan` when fewer than two samples survive noise handling. See
+[docs/python-api.md](docs/python-api.md#partition-agreement) for the `noise=`
+readings and the divergences from scikit-learn.
 
 ---
 
