@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cmath>
 #include <cstdint>
 #include <string>
 #include <unordered_map>
@@ -241,6 +242,69 @@ inline void for_each_marginal_pair(const std::vector<SizeMultiplicity>& hist_a,
             visit(entry_a.size, entry_b.size, multiplicity);
         }
     }
+}
+
+/// log(k!) for k in [0, n], by prefix-summing log(k). Costs 8*(n+1) bytes --
+/// 800 KB at n = 100k -- and turns each inner term into nine table lookups and
+/// eight adds instead of nine lgamma calls.
+inline std::vector<double> log_factorials(uint64_t n) {
+    std::vector<double> table(static_cast<size_t>(n) + 1, 0.0);
+    for (uint64_t k = 2; k <= n; ++k) {
+        table[static_cast<size_t>(k)] =
+            table[static_cast<size_t>(k - 1)] + std::log(static_cast<double>(k));
+    }
+    return table;
+}
+
+/// The inner sum of Vinh et al. (2010) for one pair of marginal values. It
+/// depends on (i, j) only through (u, w), which is what makes the grouping in
+/// expected_mutual_information exact rather than approximate.
+inline double expected_term(uint64_t u, uint64_t w, uint64_t n,
+                            const std::vector<double>& logfact) {
+    const auto lf = [&logfact](uint64_t k) {
+        return logfact[static_cast<size_t>(k)];
+    };
+    const double total = static_cast<double>(n);
+    // The hypergeometric support: a cell cannot be emptier than u + w - n, and
+    // count = 0 contributes nothing because 0 * log(...) is 0.
+    const uint64_t lower = (u + w > n) ? (u + w - n) : 1;
+    const uint64_t upper = std::min(u, w);
+    double sum = 0.0;
+    for (uint64_t count = lower; count <= upper; ++count) {
+        const double log_p = lf(u) + lf(w) + lf(n - u) + lf(n - w) - lf(n) -
+                             lf(count) - lf(u - count) - lf(w - count) -
+                             lf(n - u - w + count);
+        sum += (static_cast<double>(count) / total) *
+               std::log(total * static_cast<double>(count) /
+                        (static_cast<double>(u) * static_cast<double>(w))) *
+               std::exp(log_p);
+    }
+    return sum;
+}
+
+/**
+ * @brief Expected mutual information under the hypergeometric model.
+ *
+ * The outer sums run over every (i, j) pair of marginals, including pairs
+ * whose observed cell count is zero, so this cannot ride the sparse cell list.
+ * Grouping equal marginal values is exact, not an approximation, and bounds the
+ * work by the number of distinct cluster sizes rather than the cluster count --
+ * two all-singleton sides collapse from N^2 pairs to one. This sum needs no
+ * extra canonicalization: the histograms are built from the multiset of
+ * cluster sizes and traversed in ascending order, both of which are unchanged
+ * by a permutation of the samples.
+ */
+inline double expected_mutual_information(const ContingencyTable& table,
+                                          const std::vector<double>& logfact) {
+    double expected = 0.0;
+    for_each_marginal_pair(
+        marginal_histogram(table.marginals_a),
+        marginal_histogram(table.marginals_b),
+        [&](uint64_t u, uint64_t w, uint64_t multiplicity) {
+            expected += static_cast<double>(multiplicity) *
+                        expected_term(u, w, table.num_samples, logfact);
+        });
+    return expected;
 }
 
 }  // namespace OECluster::detail

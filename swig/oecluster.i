@@ -683,9 +683,19 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, _oecluster_is_oereceptor, "
 }
 
 // ============================================================================
-// GIL release for pdist/cdist (override the general handler above)
+// GIL release for the long-running entry points (overrides the general
+// handler above)
+//
+// Every override releases the GIL around $action and restores it on each exit
+// path. Fifteen of the sixteen then share one catch ladder, differing only in
+// the name in the fallback message; spelling that out fifteen times invited
+// the ladders to drift apart, and one of them already had. `NAME` is SWIG
+// preprocessor stringification, which is what keeps each message naming its
+// own function. cluster_report needs an extra pair of catch clauses and so is
+// written out below rather than expanded.
 // ============================================================================
-%exception OECluster::pdist {
+%define OECLUSTER_GIL_EXCEPTION(QUALIFIED, NAME)
+%exception QUALIFIED {
     Py_BEGIN_ALLOW_THREADS
     try {
         $action
@@ -697,113 +707,25 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, _oecluster_is_oereceptor, "
         SWIG_exception(SWIG_RuntimeError, e.what());
     } catch (...) {
         Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, "Unknown C++ exception in pdist");
+        SWIG_exception(SWIG_RuntimeError, "Unknown C++ exception in " `NAME`);
     }
     Py_END_ALLOW_THREADS
 }
+%enddef
 
-%exception OECluster::cdist {
-    Py_BEGIN_ALLOW_THREADS
-    try {
-        $action
-    } catch (const OECluster::OEClusterError& e) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, e.what());
-    } catch (const std::exception& e) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, e.what());
-    } catch (...) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, "Unknown C++ exception in cdist");
-    }
-    Py_END_ALLOW_THREADS
-}
+OECLUSTER_GIL_EXCEPTION(OECluster::pdist, pdist)
+OECLUSTER_GIL_EXCEPTION(OECluster::cdist, cdist)
+OECLUSTER_GIL_EXCEPTION(OECluster::cdist_into_address, cdist_into_address)
+OECLUSTER_GIL_EXCEPTION(OECluster::butina_cluster, butina_cluster)
+OECLUSTER_GIL_EXCEPTION(OECluster::cluster_representative, cluster_representative)
+OECLUSTER_GIL_EXCEPTION(OECluster::rank_representatives, rank_representatives)
+OECLUSTER_GIL_EXCEPTION(OECluster::select_representatives, select_representatives)
 
-%exception OECluster::cdist_into_address {
-    Py_BEGIN_ALLOW_THREADS
-    try {
-        $action
-    } catch (const OECluster::OEClusterError& e) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, e.what());
-    } catch (const std::exception& e) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, e.what());
-    } catch (...) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, "Unknown C++ exception in cdist_into_address");
-    }
-    Py_END_ALLOW_THREADS
-}
-
-%exception OECluster::butina_cluster {
-    Py_BEGIN_ALLOW_THREADS
-    try {
-        $action
-    } catch (const OECluster::OEClusterError& e) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, e.what());
-    } catch (const std::exception& e) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, e.what());
-    } catch (...) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, "Unknown C++ exception in butina_cluster");
-    }
-    Py_END_ALLOW_THREADS
-}
-
-%exception OECluster::cluster_representative {
-    Py_BEGIN_ALLOW_THREADS
-    try {
-        $action
-    } catch (const OECluster::OEClusterError& e) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, e.what());
-    } catch (const std::exception& e) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, e.what());
-    } catch (...) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, "Unknown C++ exception in cluster_representative");
-    }
-    Py_END_ALLOW_THREADS
-}
-
-%exception OECluster::rank_representatives {
-    Py_BEGIN_ALLOW_THREADS
-    try {
-        $action
-    } catch (const OECluster::OEClusterError& e) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, e.what());
-    } catch (const std::exception& e) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, e.what());
-    } catch (...) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, "Unknown C++ exception in rank_representatives");
-    }
-    Py_END_ALLOW_THREADS
-}
-
-%exception OECluster::select_representatives {
-    Py_BEGIN_ALLOW_THREADS
-    try {
-        $action
-    } catch (const OECluster::OEClusterError& e) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, e.what());
-    } catch (const std::exception& e) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, e.what());
-    } catch (...) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, "Unknown C++ exception in select_representatives");
-    }
-    Py_END_ALLOW_THREADS
-}
-
+// cluster_report is the one entry point that allocates proportionally to the
+// square of the input, so it is the one that can plausibly exhaust memory or
+// exceed a container's max_size(). Those two get SWIG_MemoryError rather than
+// the macro's blanket SWIG_RuntimeError, which is why it is spelled out here
+// instead of expanded.
 %exception OECluster::cluster_report {
     Py_BEGIN_ALLOW_THREADS
     try {
@@ -827,147 +749,18 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, _oecluster_is_oereceptor, "
     Py_END_ALLOW_THREADS
 }
 
-%exception OECluster::dbscan_cluster {
-    Py_BEGIN_ALLOW_THREADS
-    try {
-        $action
-    } catch (const OECluster::OEClusterError& e) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, e.what());
-    } catch (const std::exception& e) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, e.what());
-    } catch (...) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, "Unknown C++ exception in dbscan_cluster");
-    }
-    Py_END_ALLOW_THREADS
-}
-
-%exception OECluster::hdbscan_cluster {
-    Py_BEGIN_ALLOW_THREADS
-    try {
-        $action
-    } catch (const OECluster::OEClusterError& e) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, e.what());
-    } catch (const std::exception& e) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, e.what());
-    } catch (...) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, "Unknown C++ exception in hdbscan_cluster");
-    }
-    Py_END_ALLOW_THREADS
-}
-
-%exception OECluster::agglomerative_cluster {
-    Py_BEGIN_ALLOW_THREADS
-    try {
-        $action
-    } catch (const OECluster::OEClusterError& e) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, e.what());
-    } catch (const std::exception& e) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, e.what());
-    } catch (...) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, "Unknown C++ exception in agglomerative_cluster");
-    }
-    Py_END_ALLOW_THREADS
-}
-
-%exception OECluster::bitbirch_cluster {
-    Py_BEGIN_ALLOW_THREADS
-    try {
-        $action
-    } catch (const OECluster::OEClusterError& e) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, e.what());
-    } catch (const std::exception& e) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, e.what());
-    } catch (...) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, "Unknown C++ exception in bitbirch_cluster");
-    }
-    Py_END_ALLOW_THREADS
-}
-
-%exception OECluster::bitbirch_recluster {
-    Py_BEGIN_ALLOW_THREADS
-    try {
-        $action
-    } catch (const OECluster::OEClusterError& e) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, e.what());
-    } catch (const std::exception& e) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, e.what());
-    } catch (...) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, "Unknown C++ exception in bitbirch_recluster");
-    }
-    Py_END_ALLOW_THREADS
-}
-
-%exception OECluster::bitbirch_refine {
-    Py_BEGIN_ALLOW_THREADS
-    try {
-        $action
-    } catch (const OECluster::OEClusterError& e) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, e.what());
-    } catch (const std::exception& e) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, e.what());
-    } catch (...) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, "Unknown C++ exception in bitbirch_refine");
-    }
-    Py_END_ALLOW_THREADS
-}
+OECLUSTER_GIL_EXCEPTION(OECluster::dbscan_cluster, dbscan_cluster)
+OECLUSTER_GIL_EXCEPTION(OECluster::hdbscan_cluster, hdbscan_cluster)
+OECLUSTER_GIL_EXCEPTION(OECluster::agglomerative_cluster, agglomerative_cluster)
+OECLUSTER_GIL_EXCEPTION(OECluster::bitbirch_cluster, bitbirch_cluster)
+OECLUSTER_GIL_EXCEPTION(OECluster::bitbirch_recluster, bitbirch_recluster)
+OECLUSTER_GIL_EXCEPTION(OECluster::bitbirch_refine, bitbirch_refine)
 
 // The AMI path is the library's one second-scale computation, so it must not
 // hold the GIL. The override is chosen at wrap time and cannot see the option
-// value, so it wraps every overload of the name rather than branching. Each
-// keeps the same catch ladder as the generic handler.
-%exception OECluster::partition_agreement {
-    Py_BEGIN_ALLOW_THREADS
-    try {
-        $action
-    } catch (const OECluster::OEClusterError& e) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, e.what());
-    } catch (const std::exception& e) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, e.what());
-    } catch (...) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError,
-                       "Unknown C++ exception in partition_agreement");
-    }
-    Py_END_ALLOW_THREADS
-}
-
-%exception OECluster::scaffold_agreement {
-    Py_BEGIN_ALLOW_THREADS
-    try {
-        $action
-    } catch (const OECluster::OEClusterError& e) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, e.what());
-    } catch (const std::exception& e) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, e.what());
-    } catch (...) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError,
-                       "Unknown C++ exception in scaffold_agreement");
-    }
-    Py_END_ALLOW_THREADS
-}
+// value, so it wraps every overload of the name rather than branching.
+OECLUSTER_GIL_EXCEPTION(OECluster::partition_agreement, partition_agreement)
+OECLUSTER_GIL_EXCEPTION(OECluster::scaffold_agreement, scaffold_agreement)
 
 // ============================================================================
 // Ignore problematic members before %include
