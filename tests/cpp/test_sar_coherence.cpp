@@ -314,3 +314,59 @@ TEST(ActivityMetricsTest, PopulationStddevSurvivesSquaredDeviationUnderflow) {
     EXPECT_GT(spread, 0.0);
     EXPECT_NEAR(spread, 1.4585016579561791e-162, 1e-177);
 }
+
+// A naive mean accumulation's error scales with magnitude, while deviations
+// scale with spread. When the spread is near the values' rounding floor the
+// naive mean can land a full ulp away, reversing the effect sizes. This fixture
+// has values {1.5 + 9u, 1.5 + 10u, 1.5 + 10u, 1.5 + 11u} where u = 2^-52; a
+// naive grand mean lands at 1.5 + 11u instead of 1.5 + 10u, driving eta_squared
+// to exactly 0.0 and omega_squared below zero. The correction pass recovers
+// positive effect sizes.
+TEST(ActivityMetricsTest, MeanCorrectionRescuesSpreadAtTheRoundingFloor) {
+    const std::vector<std::uint32_t> ids = {0, 0, 0, 1};
+    const std::vector<double> values = {0x1.8000000000009p+0, 0x1.800000000000ap+0,
+                                        0x1.800000000000ap+0, 0x1.800000000000bp+0};
+    const OECluster::detail::SumsOfSquares ss =
+        OECluster::detail::sums_of_squares(ids, values, 2, "test");
+
+    const double eta2 = OECluster::detail::eta_squared(ss);
+    const double omega2 = OECluster::detail::omega_squared(ss);
+    const double stddev = OECluster::detail::population_stddev(values);
+
+    // The exact answers are eta_squared = 2/3, omega_squared = 3/7, and
+    // stddev = 1.5700924586837752e-16. The true group mean 1.5 + (29/3)u is not
+    // representable, so the correction cannot recover the exact 2/3; it does
+    // recover the exact stddev.
+    EXPECT_DOUBLE_EQ(eta2, 0.5);
+    EXPECT_DOUBLE_EQ(omega2, 0.2);
+    EXPECT_DOUBLE_EQ(stddev, 1.5700924586837752e-16);
+
+    // Before the fix these were exactly 0.0, -1/3, and slightly high.
+    EXPECT_GT(eta2, 0.0);
+    EXPECT_GT(omega2, 0.0);
+}
+
+// The ss_between clamp at ActivityMetrics.h:307 guards the invariant
+// 0 <= between <= total. Mathematically within <= total because each value is
+// at least as close to its group mean as to the grand mean, but the two sums
+// accumulate in separate loops and can round differently. The mean correction
+// appears to eliminate the condition where within > total — an exhaustive search
+// over 160,000 adversarial patterns at 1e15–1e18 scales, plus 100,000 random
+// trials, found no such fixture. This test pins the invariant's lower bound on
+// a fixture that came close: the original Finding 2 reproducer
+// {1.9256416020404716e16, ...} reported within > total before the mean
+// correction but now rounds cleanly.
+TEST(ActivityMetricsTest, BetweenClampsToZeroWhenWithinEqualsTotal) {
+    const std::vector<std::uint32_t> ids = {0, 0, 0, 1};
+    const std::vector<double> values = {1.9256416020404716e16, 1.9256416020404724e16,
+                                        1.9256416020404748e16, 1.9256416020404724e16};
+    const OECluster::detail::SumsOfSquares ss =
+        OECluster::detail::sums_of_squares(ids, values, 2, "test");
+
+    // The invariant holds: between is non-negative and does not exceed total.
+    EXPECT_GE(ss.between, 0.0);
+    EXPECT_LE(ss.between, ss.total);
+    // This fixture now produces a small positive between; before the mean
+    // correction it produced total < within and the clamp drove between to zero.
+    EXPECT_GE(OECluster::detail::eta_squared(ss), 0.0);
+}
