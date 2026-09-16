@@ -10,6 +10,7 @@
 
 #include "oecluster/clustering/ClusterTypes.h"
 #include "oecluster/clustering/PartitionAgreement.h"
+#include "oecluster/clustering/SARCoherence.h"
 #include "../../src/clustering/ActivityMetrics.h"
 #include "../../src/clustering/ContingencyTable.h"
 
@@ -17,8 +18,23 @@ namespace {
 
 using OECluster::ClusterLabel;
 using OECluster::NoiseHandling;
+using OECluster::SARCoherence;
+using OECluster::SARCoherenceOptions;
 
 constexpr double NOT_A_NUMBER = std::numeric_limits<double>::quiet_NaN();
+
+OECluster::ClusteringResult MakeResult(std::vector<ClusterLabel> labels) {
+    OECluster::Clusters members = OECluster::labels_to_clusters(labels);
+    return OECluster::ClusteringResult(std::move(labels), std::move(members));
+}
+
+SARCoherence Coherence(const std::vector<ClusterLabel>& labels,
+                       const std::vector<double>& activity,
+                       NoiseHandling noise = NoiseHandling::Excluded) {
+    SARCoherenceOptions options;
+    options.noise_handling = noise;
+    return OECluster::sar_coherence(labels, activity, options);
+}
 
 }  // namespace
 
@@ -366,4 +382,217 @@ TEST(ActivityMetricsTest, BetweenClampsToZeroWhenWithinExceedsTotal) {
     // unclamped total - within is strictly negative.
     EXPECT_DOUBLE_EQ(ss.between, 0.0);
     EXPECT_DOUBLE_EQ(OECluster::detail::eta_squared(ss), 0.0);
+}
+
+TEST(SARCoherenceTest, DecomposesAThreeClusterFixture) {
+    const SARCoherence coherence =
+        Coherence({0, 0, 1, 1, 2, 2}, {1.0, 3.0, 5.0, 7.0, 9.0, 11.0});
+
+    EXPECT_EQ(coherence.num_samples, 6u);
+    EXPECT_EQ(coherence.num_scored, 6u);
+    EXPECT_EQ(coherence.num_clusters, 3u);
+    EXPECT_NEAR(coherence.eta_squared, 0.9142857142857143, 1e-12);
+    EXPECT_NEAR(coherence.omega_squared, 0.8333333333333334, 1e-12);
+
+    ASSERT_EQ(coherence.clusters.size(), 3u);
+    EXPECT_EQ(coherence.clusters[0].label, 0);
+    EXPECT_EQ(coherence.clusters[0].num_scored, 2u);
+    EXPECT_NEAR(coherence.clusters[0].mean_activity, 2.0, 1e-12);
+    EXPECT_NEAR(coherence.clusters[0].stddev_activity, 1.0, 1e-12);
+    EXPECT_NEAR(coherence.clusters[1].mean_activity, 6.0, 1e-12);
+    EXPECT_NEAR(coherence.clusters[2].mean_activity, 10.0, 1e-12);
+}
+
+TEST(SARCoherenceTest, ReportsAPerfectSeparationExactly) {
+    const SARCoherence coherence = Coherence({0, 0, 1, 1}, {1.0, 1.0, 5.0, 5.0});
+
+    EXPECT_EQ(coherence.eta_squared, 1.0);
+    EXPECT_EQ(coherence.omega_squared, 1.0);
+}
+
+TEST(SARCoherenceTest, ReportsNoSeparationExactly) {
+    const SARCoherence coherence = Coherence({0, 0, 1, 1}, {1.0, 5.0, 1.0, 5.0});
+
+    EXPECT_EQ(coherence.eta_squared, 0.0);
+    EXPECT_NEAR(coherence.omega_squared, -0.3333333333333333, 1e-12);
+}
+
+// Promoting noise to singletons gives every noise point a group mean equal to
+// its own value, which reads as perfectly explained variance. That is why the
+// default is Excluded, and this fixture is the evidence.
+TEST(SARCoherenceTest, NoiseHandlingChangesTheEffectSize) {
+    const std::vector<ClusterLabel> labels = {-1, -2, 0, 0, 1, 1};
+    const std::vector<double> activity = {10.0, 0.0, 2.0, 4.0, 6.0, 8.0};
+
+    const SARCoherence excluded =
+        Coherence(labels, activity, NoiseHandling::Excluded);
+    EXPECT_EQ(excluded.num_scored, 4u);
+    EXPECT_EQ(excluded.num_clusters, 2u);
+    EXPECT_NEAR(excluded.eta_squared, 0.8, 1e-12);
+    EXPECT_NEAR(excluded.omega_squared, 0.6363636363636364, 1e-12);
+
+    const SARCoherence grouped =
+        Coherence(labels, activity, NoiseHandling::Grouped);
+    EXPECT_EQ(grouped.num_scored, 6u);
+    EXPECT_EQ(grouped.num_clusters, 3u);
+    EXPECT_NEAR(grouped.eta_squared, 0.22857142857142856, 1e-12);
+    EXPECT_NEAR(grouped.omega_squared, -0.22727272727272727, 1e-12);
+    EXPECT_EQ(grouped.clusters[0].label, -1);
+    EXPECT_EQ(grouped.clusters[0].num_scored, 2u);
+
+    const SARCoherence singletons =
+        Coherence(labels, activity, NoiseHandling::Singletons);
+    EXPECT_EQ(singletons.num_clusters, 4u);
+    EXPECT_NEAR(singletons.eta_squared, 0.9428571428571428, 1e-12);
+    EXPECT_NEAR(singletons.omega_squared, 0.8333333333333334, 1e-12);
+    EXPECT_GT(singletons.eta_squared, excluded.eta_squared);
+    EXPECT_EQ(singletons.clusters[0].label, -1);
+    EXPECT_EQ(singletons.clusters[1].label, -2);
+}
+
+// num_samples is the length of the input whatever noise handling drops, so a
+// caller can always tell how many measurements were missing.
+TEST(SARCoherenceTest, MissingActivitiesAreExcludedWithoutShrinkingNumSamples) {
+    const SARCoherence coherence =
+        Coherence({0, 0, 1, 1, 1}, {1.0, 3.0, NOT_A_NUMBER, 5.0, 7.0});
+
+    EXPECT_EQ(coherence.num_samples, 5u);
+    EXPECT_EQ(coherence.num_scored, 4u);
+    EXPECT_EQ(coherence.num_clusters, 2u);
+    EXPECT_NEAR(coherence.eta_squared, 0.8, 1e-12);
+    EXPECT_EQ(coherence.clusters[1].num_scored, 2u);
+
+    // Dropping a NaN must give the same answer as never having supplied it:
+    // exactly, not to a tolerance, since the surviving values reach the
+    // decomposition in the same order either way. Only num_samples differs,
+    // which is the whole point of reporting it separately.
+    const SARCoherence prefiltered = Coherence({0, 0, 1, 1}, {1.0, 3.0, 5.0, 7.0});
+    EXPECT_EQ(coherence.eta_squared, prefiltered.eta_squared);
+    EXPECT_EQ(coherence.omega_squared, prefiltered.omega_squared);
+    EXPECT_EQ(coherence.num_scored, prefiltered.num_scored);
+    EXPECT_EQ(prefiltered.num_samples, 4u);
+}
+
+// Row order is a documented part of the contract, and the interning runs over
+// the finalized drop mask rather than the raw labels -- so a cluster's position
+// comes from its earliest *scored* member, not its earliest member. Here label
+// 1 appears first in the input but its first sample has no measurement, so
+// label 0 takes the leading row. Writing the contract the other way round is
+// the easy mistake; this fixture is the one that tells the two apart.
+TEST(SARCoherenceTest, RowOrderFollowsTheFirstScoredOccurrence) {
+    const SARCoherence coherence = Coherence({1, 0, 1}, {NOT_A_NUMBER, 2.0, 3.0});
+
+    ASSERT_EQ(coherence.clusters.size(), 2u);
+    EXPECT_EQ(coherence.clusters[0].label, 0);
+    EXPECT_EQ(coherence.clusters[1].label, 1);
+    EXPECT_EQ(coherence.clusters[0].num_scored, 1u);
+    EXPECT_EQ(coherence.clusters[1].num_scored, 1u);
+}
+
+TEST(SARCoherenceTest, BothOverloadsAgree) {
+    const std::vector<ClusterLabel> labels = {0, 0, 1, 1, 2, 2};
+    const std::vector<double> activity = {1.0, 3.0, 5.0, 7.0, 9.0, 11.0};
+
+    const SARCoherence from_labels = OECluster::sar_coherence(labels, activity);
+    const SARCoherence from_result =
+        OECluster::sar_coherence(MakeResult(labels), activity);
+
+    EXPECT_EQ(from_result.eta_squared, from_labels.eta_squared);
+    EXPECT_EQ(from_result.omega_squared, from_labels.omega_squared);
+    EXPECT_EQ(from_result.num_clusters, from_labels.num_clusters);
+    EXPECT_EQ(from_result.clusters.size(), from_labels.clusters.size());
+}
+
+TEST(SARCoherenceTest, UndefinedValuesFollowTheDocumentedTable) {
+    const SARCoherence one_scored = Coherence({0, 0}, {1.0, NOT_A_NUMBER});
+    EXPECT_EQ(one_scored.num_scored, 1u);
+    EXPECT_TRUE(std::isnan(one_scored.eta_squared));
+    EXPECT_TRUE(std::isnan(one_scored.omega_squared));
+    ASSERT_EQ(one_scored.clusters.size(), 1u);
+    EXPECT_NEAR(one_scored.clusters[0].mean_activity, 1.0, 1e-12);
+    EXPECT_TRUE(std::isnan(one_scored.clusters[0].stddev_activity));
+
+    const SARCoherence no_variance = Coherence({0, 0, 1, 1}, {3.0, 3.0, 3.0, 3.0});
+    EXPECT_TRUE(std::isnan(no_variance.eta_squared));
+    EXPECT_TRUE(std::isnan(no_variance.omega_squared));
+    EXPECT_NEAR(no_variance.clusters[0].mean_activity, 3.0, 1e-12);
+
+    const SARCoherence all_singletons = Coherence({0, 1, 2}, {1.0, 2.0, 3.0});
+    EXPECT_EQ(all_singletons.eta_squared, 1.0);
+    EXPECT_TRUE(std::isnan(all_singletons.omega_squared));
+
+    const SARCoherence all_missing =
+        Coherence({0, 0}, {NOT_A_NUMBER, NOT_A_NUMBER});
+    EXPECT_EQ(all_missing.num_samples, 2u);
+    EXPECT_EQ(all_missing.num_scored, 0u);
+    EXPECT_EQ(all_missing.num_clusters, 0u);
+    EXPECT_TRUE(all_missing.clusters.empty());
+    EXPECT_TRUE(std::isnan(all_missing.eta_squared));
+
+    // One cluster with a real spread explains none of it. That is zero, not
+    // undefined: num_clusters < 2 is deliberately absent from the NaN table.
+    const SARCoherence one_cluster = Coherence({0, 0, 0}, {1.0, 2.0, 3.0});
+    EXPECT_EQ(one_cluster.num_clusters, 1u);
+    EXPECT_EQ(one_cluster.eta_squared, 0.0);
+    EXPECT_EQ(one_cluster.omega_squared, 0.0);
+}
+
+// Two tight groups a hair apart on a large offset. Catastrophic cancellation
+// in a one-pass decomposition reports 1.0 or a negative total here; the
+// two-pass form reports a plain interior value.
+TEST(SARCoherenceTest, SurvivesALargeOffsetWithATinySpread) {
+    const SARCoherence coherence = Coherence(
+        {0, 0, 1, 1}, {1e8, 1e8 + 1e-4, 1e8 + 1e-4, 1e8 + 2e-4});
+
+    EXPECT_GT(coherence.eta_squared, 0.0);
+    EXPECT_LT(coherence.eta_squared, 1.0);
+    EXPECT_NEAR(coherence.eta_squared, 0.5, 1e-6);
+}
+
+TEST(SARCoherenceTest, RejectsActivitiesOutsideTheSupportedRange) {
+    const double big = std::sqrt(DBL_MAX);
+    try {
+        Coherence({0, 0, 1, 1}, {-big, big, -big, big});
+        FAIL() << "expected an unformable SS_total to be rejected";
+    } catch (const std::invalid_argument& error) {
+        EXPECT_NE(std::string(error.what()).find("SS_total"), std::string::npos);
+    }
+
+    try {
+        Coherence({0, 0}, {DBL_MAX, DBL_MAX});
+        FAIL() << "expected an unformable mean to be rejected";
+    } catch (const std::invalid_argument& error) {
+        EXPECT_NE(std::string(error.what()).find("mean"), std::string::npos);
+    }
+}
+
+TEST(SARCoherenceTest, RejectsAnInfiniteActivity) {
+    try {
+        Coherence({0, 0}, {1.0, std::numeric_limits<double>::infinity()});
+        FAIL() << "expected an infinite activity to be rejected";
+    } catch (const std::invalid_argument& error) {
+        const std::string message = error.what();
+        EXPECT_NE(message.find("sar_coherence"), std::string::npos);
+        EXPECT_NE(message.find("activity[1]"), std::string::npos);
+    }
+}
+
+TEST(SARCoherenceTest, RejectsAnEmptyOrMismatchedActivity) {
+    try {
+        Coherence({0, 1}, {});
+        FAIL() << "expected an empty activity to be rejected";
+    } catch (const std::invalid_argument& error) {
+        EXPECT_NE(std::string(error.what()).find("non-empty"),
+                  std::string::npos);
+    }
+
+    try {
+        Coherence({0, 1, 2}, {1.0, 2.0});
+        FAIL() << "expected a length mismatch to be rejected";
+    } catch (const std::invalid_argument& error) {
+        const std::string message = error.what();
+        EXPECT_NE(message.find("activity has 2 entries"), std::string::npos);
+        EXPECT_NE(message.find("the clustering has 3 samples"),
+                  std::string::npos);
+    }
 }
