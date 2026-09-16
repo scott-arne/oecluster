@@ -309,12 +309,11 @@ inline SumsOfSquares sums_of_squares(const std::vector<std::uint32_t>& group_ids
     // Derive between rather than computing it directly, and clamp to [0, total].
     // Mathematically within <= total because each value is at least as close to
     // its group mean as to the grand mean, but the two sums accumulate in
-    // separate loops and can round differently. The clamp prevents a negative
-    // between from rounding or a within that exceeds total by epsilon. The mean
-    // correction pass appears to eliminate the condition where within > total —
-    // an exhaustive search over 160,000 adversarial patterns at various scales
-    // found no such fixture — but the clamp guards against future arithmetic
-    // changes and documents the intended inequality.
+    // separate loops and round independently. On tightly spaced input where the
+    // group means straddle the grand mean, within can finish one ulp above total,
+    // leaving total - within strictly negative. The clamp keeps between and the
+    // effect sizes from going negative there. See
+    // BetweenClampsToZeroWhenWithinExceedsTotal for a reproducing fixture.
     const double between = ss.total - ss.within;
     ss.between = between < 0.0 ? 0.0 : (between > ss.total ? ss.total : between);
     return ss;

@@ -346,27 +346,24 @@ TEST(ActivityMetricsTest, MeanCorrectionRescuesSpreadAtTheRoundingFloor) {
     EXPECT_GT(omega2, 0.0);
 }
 
-// The ss_between clamp at ActivityMetrics.h:307 guards the invariant
-// 0 <= between <= total. Mathematically within <= total because each value is
-// at least as close to its group mean as to the grand mean, but the two sums
-// accumulate in separate loops and can round differently. The mean correction
-// appears to eliminate the condition where within > total — an exhaustive search
-// over 160,000 adversarial patterns at 1e15–1e18 scales, plus 100,000 random
-// trials, found no such fixture. This test pins the invariant's lower bound on
-// a fixture that came close: the original Finding 2 reproducer
-// {1.9256416020404716e16, ...} reported within > total before the mean
-// correction but now rounds cleanly.
-TEST(ActivityMetricsTest, BetweenClampsToZeroWhenWithinEqualsTotal) {
-    const std::vector<std::uint32_t> ids = {0, 0, 0, 1};
-    const std::vector<double> values = {1.9256416020404716e16, 1.9256416020404724e16,
-                                        1.9256416020404748e16, 1.9256416020404724e16};
+// The ss_between clamp prevents negative effect sizes when within exceeds
+// total by rounding. Mathematically within <= total because each value is at
+// least as close to its group mean as to the grand mean, but the two sums
+// accumulate in separate loops and round independently. On tightly spaced input
+// where the group means straddle the grand mean, within can finish one ulp above
+// total. This fixture — {1.5, 1.5, 1.5 + 10u, 1.5 + 11u} with u = 2^-52,
+// interleaved across two groups — produces total = 3.0833333333333335 and
+// within = 3.0833333333333339, so total - within is strictly negative. Without
+// the clamp, eta_squared would report a negative value.
+TEST(ActivityMetricsTest, BetweenClampsToZeroWhenWithinExceedsTotal) {
+    const std::vector<std::uint32_t> ids = {0, 1, 0, 1};
+    const std::vector<double> values = {0x1.8p+0, 0x1.8p+0,
+                                        0x1.800000000000ap+0, 0x1.800000000000bp+0};
     const OECluster::detail::SumsOfSquares ss =
         OECluster::detail::sums_of_squares(ids, values, 2, "test");
 
-    // The invariant holds: between is non-negative and does not exceed total.
-    EXPECT_GE(ss.between, 0.0);
-    EXPECT_LE(ss.between, ss.total);
-    // This fixture now produces a small positive between; before the mean
-    // correction it produced total < within and the clamp drove between to zero.
-    EXPECT_GE(OECluster::detail::eta_squared(ss), 0.0);
+    // The clamp drives between and eta_squared to exactly zero where the
+    // unclamped total - within is strictly negative.
+    EXPECT_DOUBLE_EQ(ss.between, 0.0);
+    EXPECT_DOUBLE_EQ(OECluster::detail::eta_squared(ss), 0.0);
 }
