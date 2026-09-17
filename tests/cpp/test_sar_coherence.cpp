@@ -670,6 +670,29 @@ TEST(ActivityLandscapeTest, CountsCliffsOnBothBoundariesInclusively) {
     EXPECT_NEAR(landscape.cliff_density, 1.0 / 6.0, 1e-12);
 }
 
+// The boundary fixture above pins the default thresholds. This one pins that
+// they are read from the options at all: hard-coding 0.30 and 1.0 in the sweep
+// would leave validate_landscape_options intact and every other test passing.
+TEST(ActivityLandscapeTest, CliffThresholdsChangeWhichPairsCount) {
+    OECluster::DenseStorage storage(4);
+    FillStorage(storage, {0.30, 0.31, 0.20, 0.50, 0.10, 0.40});
+    const std::vector<double> activity = {0.0, 1.0, 5.0, 0.5};
+
+    ActivityLandscapeOptions loose_distance;
+    loose_distance.distance_threshold = 0.45;
+    const ActivityLandscape wider =
+        OECluster::activity_landscape(storage, activity, loose_distance);
+    EXPECT_EQ(wider.num_cliffs, 3u);
+    EXPECT_DOUBLE_EQ(wider.cliff_density, 0.5);
+
+    ActivityLandscapeOptions strict_activity;
+    strict_activity.activity_threshold = 4.5;
+    const ActivityLandscape steeper =
+        OECluster::activity_landscape(storage, activity, strict_activity);
+    EXPECT_EQ(steeper.num_cliffs, 0u);
+    EXPECT_DOUBLE_EQ(steeper.cliff_density, 0.0);
+}
+
 TEST(ActivityLandscapeTest, ScoresSaliAgainstAHandFixture) {
     OECluster::DenseStorage storage(3);
     FillStorage(storage, {0.5, 0.25, 0.125});
@@ -680,6 +703,25 @@ TEST(ActivityLandscapeTest, ScoresSaliAgainstAHandFixture) {
     EXPECT_EQ(landscape.num_zero_distance_pairs, 0u);
     EXPECT_DOUBLE_EQ(landscape.max_sali, 16.0);
     EXPECT_DOUBLE_EQ(landscape.mean_sali, 10.0);
+    EXPECT_EQ(landscape.num_cliffs, 2u);
+    EXPECT_NEAR(landscape.cliff_density, 2.0 / 3.0, 1e-12);
+    EXPECT_NEAR(landscape.activity_stddev, 1.2472191289246473, 1e-12);
+    EXPECT_EQ(landscape.rmodi, 0.0);
+}
+
+// The mirror of the hand fixture above, with the activity descending instead of
+// ascending. Every other value-asserting fixture is nondecreasing in scored
+// order, where fabs(a_p - a_q) and a_q - a_p agree on every pair; this one is
+// the only place the absolute value is load-bearing.
+TEST(ActivityLandscapeTest, ScoresSaliOnADescendingActivity) {
+    OECluster::DenseStorage storage(3);
+    FillStorage(storage, {0.5, 0.25, 0.125});
+
+    const ActivityLandscape landscape =
+        OECluster::activity_landscape(storage, {3.0, 1.0, 0.0});
+
+    EXPECT_DOUBLE_EQ(landscape.max_sali, 12.0);
+    EXPECT_DOUBLE_EQ(landscape.mean_sali, 8.0);
     EXPECT_EQ(landscape.num_cliffs, 2u);
     EXPECT_NEAR(landscape.cliff_density, 2.0 / 3.0, 1e-12);
     EXPECT_NEAR(landscape.activity_stddev, 1.2472191289246473, 1e-12);
@@ -838,6 +880,20 @@ TEST(ActivityLandscapeTest, RejectsANegativeOrNonFiniteDistance) {
                 {0.5, std::numeric_limits<double>::infinity(), 0.125});
     EXPECT_THROW(OECluster::activity_landscape(infinite, {0.0, 1.0, 3.0}),
                  std::invalid_argument);
+
+    // isinf alone would pass the two cases above while letting a NaN distance
+    // reach the arithmetic, where every comparison reads false and the sweep
+    // reports a silently wrong landscape instead of throwing.
+    OECluster::DenseStorage not_a_number(3);
+    FillStorage(not_a_number, {0.5, NOT_A_NUMBER, 0.125});
+    try {
+        OECluster::activity_landscape(not_a_number, {0.0, 1.0, 3.0});
+        FAIL() << "expected a NaN distance to be rejected";
+    } catch (const std::invalid_argument& error) {
+        const std::string message = error.what();
+        EXPECT_NE(message.find("activity_landscape"), std::string::npos);
+        EXPECT_NE(message.find("0 and 2"), std::string::npos);
+    }
 }
 
 TEST(ActivityLandscapeTest, RejectsAnOverflowingSali) {
