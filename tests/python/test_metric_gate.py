@@ -1364,3 +1364,62 @@ def test_butina_dbscan_hdbscan_still_accept_chunk_size_zero():
     assert len(oecluster.butina(dist, 0.5, chunk_size=0).labels) == 6
     assert len(oecluster.dbscan(dist, 0.5, chunk_size=0).labels) == 6
     assert len(oecluster.hdbscan(dist, min_cluster_size=2, chunk_size=0).labels) == 6
+
+
+def test_require_comparable_refuses_a_similarity():
+    dist = oecluster.pdist(_mols(), "fingerprint")
+    dist._facts['is_distance'] = False
+
+    with pytest.raises(ValueError, match="requires distances"):
+        _gate.require_comparable(dist, "activity_landscape")
+
+
+def test_require_comparable_refuses_a_nonzero_self_distance():
+    dist = oecluster.pdist(_mols(), "fingerprint")
+    dist._facts['zero_self'] = False
+
+    with pytest.raises(ValueError, match="zero self-distance"):
+        _gate.require_comparable(dist, "activity_landscape")
+
+
+def test_require_comparable_refuses_a_non_finite_entry():
+    dist = oecluster.pdist(_mols(), "fingerprint")
+    dist.condensed[0] = math.nan
+
+    with pytest.raises(ValueError, match="non-finite entries"):
+        _gate.require_comparable(dist, "modelability")
+
+
+def test_require_comparable_refuses_subset_scored_without_an_override():
+    """The one tier-2 check that still bites. Ranking a nearest neighbour or
+    thresholding a cliff compares two distances against each other, and under
+    missing='ignore' the two answer different questions."""
+    dist = oecluster.pdist(_mols(), "fingerprint")
+    dist._facts['data_integrity'] = "subset_scored"
+
+    with pytest.raises(ValueError) as excinfo:
+        _gate.require_comparable(dist, "activity_landscape")
+
+    message = str(excinfo.value)
+    assert "not mutually comparable" in message
+    assert "missing='complete_case'" in message
+    assert "cannot be overridden" in message
+    assert "allow_nonmetric" not in message
+
+
+def test_require_comparable_accepts_a_triangle_violation():
+    """These metrics never assume a metric: they rank and threshold distances,
+    and a triangle-inequality violation leaves both operations meaningful."""
+    dist = oecluster.pdist(_mols(), "fingerprint")
+    dist._facts['triangle'] = False
+
+    assert _gate.require_comparable(dist, "activity_landscape") is None
+
+
+def test_require_comparable_accepts_a_proven_probe_violation():
+    dist = oecluster.pdist(_mols(), "fingerprint")
+    dist._facts['metric_probe'] = "violations_found"
+    dist._facts['probe_violations'] = 3
+    dist._facts['probe_sampled'] = 100
+
+    assert _gate.require_comparable(dist, "modelability") is None
