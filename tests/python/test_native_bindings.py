@@ -2,10 +2,14 @@
 
 These assertions are deliberately about names and shapes rather than behavior:
 they fail loudly when an interface-file edit silently drops a symbol, which is
-otherwise only visible as an AttributeError deep inside a builder.
+otherwise only visible as an AttributeError deep inside a builder. A few of them
+do pin exact values, where reading the number back is the only way to show that
+a typemap carried real data across rather than a zero-initialized struct; those
+values are chosen to be exact in binary so the bare == is deliberate.
 """
 
 import math
+import pathlib
 
 import pytest
 
@@ -277,25 +281,113 @@ def test_modelability_is_bound(native):
     assert model.classes[0].fraction_same_class == 0.5
 
 
-def test_the_row_vectors_are_wrapped_rather_than_opaque(native):
-    """Reads a field off the first row of each member vector.
+def test_modelability_options_carry_the_hardware_concurrency_default(native):
+    options = native.ModelabilityOptions()
 
-    A member vector wrapped as an opaque pointer still len()s and indexes from
-    Python but hands back a SwigPyObject with no fields, so the existence of
-    the two template names proves nothing on its own. Touching a row's field is
-    what distinguishes a wrapped row from an opaque one, and it is the shape
-    the Pythonic layer reads.
+    assert options.num_threads == 0
+
+
+def test_sar_coherence_accepts_a_clustering_result(native):
+    """The other sar_coherence overload: a derived result, bound as a base ref.
+
+    butina_cluster returns ButinaResult; the overload takes
+    ``const ClusteringResult&``. Nothing else in this file crosses that
+    inheritance edge, and it is the form the Pythonic layer calls.
+
+    The two-cluster split is forced by the fixture -- 0.1 within each pair,
+    0.9 across -- so the effect size is the degenerate 1.0 rather than
+    something the numerics could drift. The row order is the interesting part:
+    Butina labels this input [1, 1, 0, 0], so a table ordered by first
+    appearance among the scored samples starts at label 1, not at label 0.
+    """
+    storage = native.DenseStorage(4)
+    storage.Set(0, 1, 0.1)
+    storage.Set(0, 2, 0.9)
+    storage.Set(0, 3, 0.9)
+    storage.Set(1, 2, 0.9)
+    storage.Set(1, 3, 0.9)
+    storage.Set(2, 3, 0.1)
+
+    butina = native.ButinaOptions()
+    butina.distance_threshold = 0.5
+    result = native.butina_cluster(storage, butina)
+    assert list(result.Labels()) == [1, 1, 0, 0]
+
+    coherence = native.sar_coherence(result, [1.0, 1.0, 5.0, 5.0])
+
+    assert coherence.num_samples == 4
+    assert coherence.num_scored == 4
+    assert coherence.num_clusters == 2
+    assert coherence.eta_squared == 1.0
+    assert len(coherence.clusters) == 2
+    assert coherence.clusters[0].label == 1
+    assert coherence.clusters[0].mean_activity == 1.0
+    assert coherence.clusters[1].label == 0
+    assert coherence.clusters[1].mean_activity == 5.0
+
+
+def test_the_options_overloads_are_reachable(native):
+    """Every entry point's three-argument form, called with an options object.
+
+    Each of the three is wrapped twice, with and without the trailing options
+    argument, and every other call in this file takes the defaulted form. This
+    one reaches the other wrapper.
+
+    The values are picked so the answer must not move: num_threads is
+    documented as not affecting results, and Excluded is already the
+    sar_coherence default. A difference here is therefore the options object
+    failing to cross, not a change in behavior.
+    """
+    coherence_options = native.SARCoherenceOptions()
+    coherence_options.noise_handling = native.NoiseHandling_Excluded
+    coherence = native.sar_coherence([0, 0, 1, 1], [1.0, 1.0, 5.0, 5.0],
+                                     coherence_options)
+    assert coherence.eta_squared == native.sar_coherence(
+        [0, 0, 1, 1], [1.0, 1.0, 5.0, 5.0]).eta_squared
+
+    storage = native.DenseStorage(3)
+    storage.Set(0, 1, 0.5)
+    storage.Set(0, 2, 0.25)
+    storage.Set(1, 2, 0.125)
+
+    landscape_options = native.ActivityLandscapeOptions()
+    landscape_options.num_threads = 1
+    landscape = native.activity_landscape(storage, [0.0, 1.0, 3.0],
+                                          landscape_options)
+    assert landscape.max_sali == native.activity_landscape(
+        storage, [0.0, 1.0, 3.0]).max_sali
+
+    model_options = native.ModelabilityOptions()
+    model_options.num_threads = 1
+    model = native.modelability(storage, ["A", "A", "B"], model_options)
+    assert model.modi == native.modelability(storage, ["A", "A", "B"]).modi
+
+
+def test_the_row_vectors_are_wrapped_rather_than_opaque(native):
+    """The member vectors resolve to the wrapped vector types, not to a pointer.
+
+    Drop the %template for one of these and its member stops being a sequence
+    altogether: SARCoherence.clusters comes back as a bare SwigPyObject that
+    implements neither __len__ nor __getitem__, so len() and [0] raise
+    TypeError before any row exists. That failure surfaces first in
+    test_sar_coherence_is_bound, as an opaque TypeError on the len() line.
+
+    The two module-level names below prove the vector types were instantiated
+    somewhere, which is what names that cause -- but on their own they say
+    nothing about how the members are typed. The isinstance checks are the part
+    that ties the member to the template, and they are asserted nowhere else in
+    the suite.
     """
     assert hasattr(native, "ClusterActivityVector")
     assert hasattr(native, "ClassConcordanceVector")
 
     coherence = native.sar_coherence([0, 0, 1, 1], [1.0, 1.0, 5.0, 5.0])
-    assert coherence.clusters[0].num_scored == 2
+    assert isinstance(coherence.clusters, native.ClusterActivityVector)
 
     storage = native.DenseStorage(2)
     storage.Set(0, 1, 0.5)
     model = native.modelability(storage, ["A", "B"])
-    assert model.classes[0].label == "A"
+    assert isinstance(model.classes, native.ClassConcordanceVector)
 
 
 def test_the_new_entry_points_release_the_gil():
@@ -306,14 +398,28 @@ def test_the_new_entry_points_release_the_gil():
     cannot separate "released the GIL" from "finished quickly" without a
     fixture large enough to hold the lock for a measurable stretch, and the
     only way to build one here is an O(n^2) Python loop that costs more suite
-    time than the assertion buys. The interface file is the sole input SWIG
-    reads for this, so a missing invocation here is a missing release in the
-    generated wrapper.
-    """
-    import pathlib
+    time than the assertion buys.
 
+    Position is asserted as well as presence, and the position is the half that
+    matters. ``%exception`` binds only to declarations SWIG parses after the
+    invocation, so an invocation sitting below the ``%include`` that declares
+    the function reaches nothing: the release disappears from every generated
+    wrapper, SWIG says nothing about it, and a presence-only check stays green.
+
+    What this cannot see: it reads the interface source, not the built
+    extension, so it passes against a stale ``_oecluster.so`` whose wrappers
+    predate the invocations. Only a rebuild rules that out.
+    """
     interface = pathlib.Path(__file__).resolve().parents[2] / "swig" / "oecluster.i"
     text = interface.read_text(encoding="utf-8")
 
+    include = '%include "oecluster/clustering/SARCoherence.h"'
+    assert text.count(include) == 1, "the position check needs an unambiguous anchor"
+    include_at = text.index(include)
+
     for name in ("sar_coherence", "activity_landscape", "modelability"):
-        assert f"OECLUSTER_GIL_EXCEPTION(OECluster::{name}, {name})" in text
+        invocation = f"OECLUSTER_GIL_EXCEPTION(OECluster::{name}, {name})"
+        assert invocation in text
+        assert text.index(invocation) < include_at, (
+            f"{invocation} must precede the %include that declares {name}, or "
+            "SWIG applies the exception handler to nothing")
