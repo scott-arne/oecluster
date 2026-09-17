@@ -1435,9 +1435,11 @@ def test_require_comparable_has_no_override_keyword():
 
     dist = oecluster.pdist(_mols(), "fingerprint")
     dist._facts['data_integrity'] = "subset_scored"
+    # The call below is intentionally invalid to verify the function rejects
+    # an override parameter rather than silently accepting it.
     with pytest.raises(TypeError):
         _gate.require_comparable(dist, "activity_landscape",
-                                 allow_nonmetric=True)
+                                 allow_nonmetric=True)  # pyright: ignore[reportCallIssue]
 
 
 def test_require_comparable_accepts_a_triangle_violation():
