@@ -426,6 +426,7 @@ TEST(SARCoherenceTest, NoiseHandlingChangesTheEffectSize) {
 
     const SARCoherence excluded =
         Coherence(labels, activity, NoiseHandling::Excluded);
+    EXPECT_EQ(excluded.num_samples, 6u);
     EXPECT_EQ(excluded.num_scored, 4u);
     EXPECT_EQ(excluded.num_clusters, 2u);
     EXPECT_NEAR(excluded.eta_squared, 0.8, 1e-12);
@@ -433,6 +434,7 @@ TEST(SARCoherenceTest, NoiseHandlingChangesTheEffectSize) {
 
     const SARCoherence grouped =
         Coherence(labels, activity, NoiseHandling::Grouped);
+    EXPECT_EQ(grouped.num_samples, 6u);
     EXPECT_EQ(grouped.num_scored, 6u);
     EXPECT_EQ(grouped.num_clusters, 3u);
     EXPECT_NEAR(grouped.eta_squared, 0.22857142857142856, 1e-12);
@@ -442,6 +444,7 @@ TEST(SARCoherenceTest, NoiseHandlingChangesTheEffectSize) {
 
     const SARCoherence singletons =
         Coherence(labels, activity, NoiseHandling::Singletons);
+    EXPECT_EQ(singletons.num_samples, 6u);
     EXPECT_EQ(singletons.num_clusters, 4u);
     EXPECT_NEAR(singletons.eta_squared, 0.9428571428571428, 1e-12);
     EXPECT_NEAR(singletons.omega_squared, 0.8333333333333334, 1e-12);
@@ -490,17 +493,32 @@ TEST(SARCoherenceTest, RowOrderFollowsTheFirstScoredOccurrence) {
 }
 
 TEST(SARCoherenceTest, BothOverloadsAgree) {
-    const std::vector<ClusterLabel> labels = {0, 0, 1, 1, 2, 2};
-    const std::vector<double> activity = {1.0, 3.0, 5.0, 7.0, 9.0, 11.0};
+    const std::vector<ClusterLabel> labels = {-1, 0, 0, 1, 1};
+    const std::vector<double> activity = {1.0, 2.0, NOT_A_NUMBER, 3.0, 4.0};
 
     const SARCoherence from_labels = OECluster::sar_coherence(labels, activity);
     const SARCoherence from_result =
         OECluster::sar_coherence(MakeResult(labels), activity);
 
+    EXPECT_EQ(from_result.num_samples, from_labels.num_samples);
+    EXPECT_EQ(from_result.num_scored, from_labels.num_scored);
+    EXPECT_EQ(from_result.num_clusters, from_labels.num_clusters);
     EXPECT_EQ(from_result.eta_squared, from_labels.eta_squared);
     EXPECT_EQ(from_result.omega_squared, from_labels.omega_squared);
-    EXPECT_EQ(from_result.num_clusters, from_labels.num_clusters);
-    EXPECT_EQ(from_result.clusters.size(), from_labels.clusters.size());
+    ASSERT_EQ(from_result.clusters.size(), from_labels.clusters.size());
+    for (std::size_t i = 0; i < from_result.clusters.size(); ++i) {
+        EXPECT_EQ(from_result.clusters[i].label, from_labels.clusters[i].label);
+        EXPECT_EQ(from_result.clusters[i].num_scored,
+                  from_labels.clusters[i].num_scored);
+        EXPECT_EQ(from_result.clusters[i].mean_activity,
+                  from_labels.clusters[i].mean_activity);
+        const double result_stddev = from_result.clusters[i].stddev_activity;
+        const double labels_stddev = from_labels.clusters[i].stddev_activity;
+        EXPECT_EQ(std::isnan(result_stddev), std::isnan(labels_stddev));
+        if (!std::isnan(result_stddev)) {
+            EXPECT_EQ(result_stddev, labels_stddev);
+        }
+    }
 }
 
 TEST(SARCoherenceTest, UndefinedValuesFollowTheDocumentedTable) {
@@ -528,6 +546,7 @@ TEST(SARCoherenceTest, UndefinedValuesFollowTheDocumentedTable) {
     EXPECT_EQ(all_missing.num_clusters, 0u);
     EXPECT_TRUE(all_missing.clusters.empty());
     EXPECT_TRUE(std::isnan(all_missing.eta_squared));
+    EXPECT_TRUE(std::isnan(all_missing.omega_squared));
 
     // One cluster with a real spread explains none of it. That is zero, not
     // undefined: num_clusters < 2 is deliberately absent from the NaN table.
@@ -535,6 +554,29 @@ TEST(SARCoherenceTest, UndefinedValuesFollowTheDocumentedTable) {
     EXPECT_EQ(one_cluster.num_clusters, 1u);
     EXPECT_EQ(one_cluster.eta_squared, 0.0);
     EXPECT_EQ(one_cluster.omega_squared, 0.0);
+}
+
+TEST(SARCoherenceTest, ReportsDistinctStandardDeviationsPerCluster) {
+    const SARCoherence coherence = Coherence({0, 0, 1, 1}, {3.0, 3.0, 1.0, 5.0});
+
+    ASSERT_EQ(coherence.clusters.size(), 2u);
+    EXPECT_NEAR(coherence.clusters[0].mean_activity, 3.0, 1e-12);
+    EXPECT_EQ(coherence.clusters[0].stddev_activity, 0.0);
+    EXPECT_NEAR(coherence.clusters[1].mean_activity, 3.0, 1e-12);
+    EXPECT_NEAR(coherence.clusters[1].stddev_activity, 2.0, 1e-12);
+}
+
+TEST(SARCoherenceTest, RowMeansMatchTheDecompositionAtTheRoundingFloor) {
+    const SARCoherence coherence = Coherence(
+        {0, 0, 0, 1},
+        {0x1.8000000000009p+0, 0x1.800000000000ap+0, 0x1.800000000000ap+0,
+         0x1.800000000000bp+0});
+
+    ASSERT_EQ(coherence.clusters.size(), 2u);
+    EXPECT_EQ(coherence.clusters[0].num_scored, 3u);
+    EXPECT_EQ(coherence.clusters[0].mean_activity, 0x1.800000000000ap+0);
+    EXPECT_EQ(coherence.clusters[1].num_scored, 1u);
+    EXPECT_EQ(coherence.clusters[1].mean_activity, 0x1.800000000000bp+0);
 }
 
 // Two tight groups a hair apart on a large offset. Catastrophic cancellation

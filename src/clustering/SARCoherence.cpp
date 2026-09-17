@@ -89,7 +89,18 @@ SARCoherence sar_coherence_impl(const std::vector<ClusterLabel>& labels,
         for (const double value : group_values[id]) {
             sum += value;
         }
-        row.mean_activity = sum / static_cast<double>(row.num_scored);
+        const double n = static_cast<double>(row.num_scored);
+        const double mean_0 = sum / n;
+
+        // The same correction pass sums_of_squares applies to its group means.
+        // group_values[id] holds this group's values in the order sums_of_squares
+        // accumulates them, so the two land on the same value; without it the
+        // published mean can sit an ulp off the mean the decomposition actually used.
+        double correction = 0.0;
+        for (const double value : group_values[id]) {
+            correction += value - mean_0;
+        }
+        row.mean_activity = mean_0 + correction / n;
         row.stddev_activity = detail::population_stddev(group_values[id]);
         coherence.clusters.push_back(std::move(row));
     }
