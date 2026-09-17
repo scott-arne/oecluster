@@ -1130,9 +1130,12 @@ TEST(ModelabilityTest, ScoresATwoClassHandFixture) {
     EXPECT_DOUBLE_EQ(model.classes[1].fraction_same_class, 0.5);
 }
 
-// MODI is the unweighted mean over classes, so a class with few members
-// counts as much as a large one. Four classes with two different per-class
-// fractions pin that.
+// The only fixture with more than two classes, and the only one where two
+// distinct per-class fractions coexist in a single result. It does not pin
+// MODI as the unweighted mean over classes, and could not: every class here
+// has exactly two members, so weighting by membership gives the same 0.75.
+// ResolvesTiesToTheLowestScoredIndex (unweighted 0.25 against a weighted 1/3)
+// and ExcludesSamplesWithNoClass (0.5 against 2/3) are where that is pinned.
 TEST(ModelabilityTest, ScoresAFourClassHandFixture) {
     constexpr std::size_t SAMPLES = 8;
     OECluster::DenseStorage storage(SAMPLES);
@@ -1208,7 +1211,68 @@ TEST(ModelabilityTest, ExcludesSamplesWithNoClass) {
     ASSERT_EQ(model.classes.size(), 2u);
     EXPECT_EQ(model.classes[0].num_members, 2u);
     EXPECT_DOUBLE_EQ(model.classes[0].fraction_same_class, 1.0);
+    // The B row's label is read from the original sample index, which is 3
+    // rather than the scored position 2. Reading it at the scored position
+    // reports the dropped sample's neighbour, "A".
+    EXPECT_EQ(model.classes[1].label, "B");
     EXPECT_DOUBLE_EQ(model.classes[1].fraction_same_class, 0.0);
+    EXPECT_DOUBLE_EQ(model.modi, 0.5);
+}
+
+// indices[p] equals p unless something was dropped, so on every fixture with
+// no empty class string the sweep reads the same matrix whether it indexes by
+// scored position or by original sample. ExcludesSamplesWithNoClass has the
+// drop but cannot see the difference: both readings hand every scored sample a
+// nearest neighbour of the same class, so none of its numbers move. Dropping a
+// middle sample here separates the two readings, 0.75 against 0.25.
+TEST(ModelabilityTest, MapsScoredPositionsToSampleIndices) {
+    OECluster::DenseStorage storage(5);
+    FillStorage(storage, {0.5, 0.9, 0.2, 0.3, 0.1, 0.5, 0.9, 0.1, 0.5, 0.1});
+
+    const Modelability model =
+        OECluster::modelability(storage, {"A", "A", "", "B", "B"});
+
+    EXPECT_EQ(model.num_samples, 5u);
+    EXPECT_EQ(model.num_scored, 4u);
+    EXPECT_EQ(model.num_classes, 2u);
+
+    ASSERT_EQ(model.classes.size(), 2u);
+    EXPECT_EQ(model.classes[0].label, "A");
+    EXPECT_EQ(model.classes[0].num_members, 2u);
+    EXPECT_DOUBLE_EQ(model.classes[0].fraction_same_class, 0.5);
+    // Sample 2 is the dropped one, so a label read at the scored position
+    // reports "" here instead of "B".
+    EXPECT_EQ(model.classes[1].label, "B");
+    EXPECT_EQ(model.classes[1].num_members, 2u);
+    EXPECT_DOUBLE_EQ(model.classes[1].fraction_same_class, 1.0);
+    EXPECT_DOUBLE_EQ(model.modi, 0.75);
+}
+
+// The same mapping, witnessed from a drop that lands before the first scored
+// sample. That is the sharper case for the label lookup: a leading drop shifts
+// every scored position, so reading the labels at the scored position corrupts
+// both rows rather than the one the middle-drop fixture above corrupts.
+//
+// classes[0] is "B", not "A", because the order is first appearance among the
+// scored samples and the earliest of those is original sample 1.
+TEST(ModelabilityTest, MapsScoredPositionsWhenTheFirstSampleIsDropped) {
+    OECluster::DenseStorage storage(4);
+    FillStorage(storage, {0.1, 0.8, 0.7, 0.5, 0.9, 0.2});
+
+    const Modelability model =
+        OECluster::modelability(storage, {"", "B", "A", "A"});
+
+    EXPECT_EQ(model.num_samples, 4u);
+    EXPECT_EQ(model.num_scored, 3u);
+    EXPECT_EQ(model.num_classes, 2u);
+
+    ASSERT_EQ(model.classes.size(), 2u);
+    EXPECT_EQ(model.classes[0].label, "B");
+    EXPECT_EQ(model.classes[0].num_members, 1u);
+    EXPECT_DOUBLE_EQ(model.classes[0].fraction_same_class, 0.0);
+    EXPECT_EQ(model.classes[1].label, "A");
+    EXPECT_EQ(model.classes[1].num_members, 2u);
+    EXPECT_DOUBLE_EQ(model.classes[1].fraction_same_class, 1.0);
     EXPECT_DOUBLE_EQ(model.modi, 0.5);
 }
 
