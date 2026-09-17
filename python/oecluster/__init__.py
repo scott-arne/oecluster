@@ -3839,9 +3839,11 @@ class ClusterActivity(NamedTuple):
         coherence.clusters}`` -- silently discards all but the last of them.
     :ivar num_scored: Samples in this cluster with a finite activity.
     :ivar mean_activity: Their mean activity.
-    :ivar stddev_activity: Their population standard deviation, NaN when
-        num_scored is below 2 -- every singleton noise row, where a spread over
-        one sample is not defined. The ordinary cluster rows stay finite.
+    :ivar stddev_activity: Their population standard deviation, NaN for every
+        row whose num_scored is below 2, whatever kind of row it is: a spread
+        over one sample is not defined. That covers the singleton noise rows
+        and both routes an ordinary cluster takes there -- holding a single
+        member, or having missing activity thin it down to one.
     """
 
     label: int = 0
@@ -3942,10 +3944,11 @@ class ActivityLandscape(_Scorecard):
     :ivar num_zero_distance_pairs: Pairs at exactly zero distance. Their SALI
         is undefined, so they are counted here and left out of
         :attr:`max_sali` and :attr:`mean_sali` -- but they are still eligible to
-        count as cliffs, and do whenever their activity difference clears
+        count as cliffs, and do whenever their activity difference reaches
         ``activity_threshold``, because two identical structures with different
-        activities are the sharpest cliff there is. A zero-distance pair whose
-        activities agree is counted here and is not a cliff.
+        activities are the sharpest cliff there is. The comparison is ``>=``,
+        so a zero-distance pair whose activities agree is counted here and is
+        also a cliff exactly when ``activity_threshold`` is zero.
     :ivar max_sali: Largest ``|activity difference| / distance`` over the pairs
         at non-zero distance. NaN when there are none.
     :ivar mean_sali: Their mean. NaN on the same condition.
@@ -4081,7 +4084,12 @@ def _activity_values(value, argument_name):
     :param argument_name: Name of the argument, for the messages.
     :returns: A native DoubleVector.
     :raises TypeError: If the value is a bare str, a bytes-like object, a
-        mapping, not iterable, or yields something that is not a real number.
+        mapping, not iterable, or yields a str, a bytes-like object, or
+        something that is not a real number.
+    :raises ValueError: If it yields a number too large to convert to a double,
+        such as ``10 ** 1000``. A magnitude fault rather than a type fault, so
+        it is not folded into the TypeError above. An infinity converts
+        perfectly well and is refused in C++ instead.
     """
     if isinstance(value, str):
         raise TypeError(
@@ -4106,13 +4114,22 @@ def _activity_values(value, argument_name):
     for item in iterator:
         # float() rather than operator.index(), which _agreement_labels uses:
         # an activity is a measurement, so 7 and 7.0 are the same input and a
-        # numpy float has to pass. str is refused explicitly because float("7")
-        # succeeds -- a column read from a CSV without conversion would
-        # otherwise score as numbers.
-        if isinstance(item, (str, bytes)):
+        # numpy float has to pass. str and every bytes-like spelling are
+        # refused explicitly because float() converts all four -- a column read
+        # from a CSV without conversion, or one whose entries survived a single
+        # layer of deserialization, would otherwise score as numbers.
+        if isinstance(item, (str, bytes, bytearray, memoryview)):
             raise TypeError(f"{argument_name} must be a sequence of floats")
         try:
             vector.push_back(float(item))
+        except OverflowError as error:
+            # float() admits any Python int until the cast itself, so a value
+            # beyond double range only fails inside it, never at the type check
+            # above. Folding it into the clause below would report a type
+            # problem, which is false: the magnitude is the only thing wrong.
+            raise ValueError(
+                f"{argument_name} must contain values that fit a "
+                f"double") from error
         except (TypeError, ValueError) as error:
             raise TypeError(
                 f"{argument_name} must be a sequence of floats") from error
@@ -4145,8 +4162,9 @@ def sar_coherence(result, activity, *, noise="excluded"):
     :returns: A :class:`SARCoherence`.
     :raises TypeError: If ``result`` is neither a clustering result nor a
         sequence of ints, or ``activity`` is not a sequence of floats.
-    :raises ValueError: If ``activity`` is empty or differs in length from the
-        labeling; if a label does not fit the native 32-bit signed label type,
+    :raises ValueError: If ``activity`` is empty, differs in length from the
+        labeling, or holds a number too large to convert to a double; if a
+        label does not fit the native 32-bit signed label type,
         or a clustering result carries a member index that does not fit a
         native ``size_t``, a negative one being the reachable case; or if
         ``noise`` is not one of the three accepted strings.
@@ -4242,13 +4260,15 @@ def activity_landscape(distance_matrix, activity, *, distance_threshold=0.30,
         deviations. 0.625 is the published value.
     :param num_threads: 0 selects the hardware concurrency. The result does not
         depend on this value, bit for bit. Truncated toward zero, so 1.9 selects
-        one thread and -0.5 selects none; a value that exceeds ``size_t`` raises
-        ``OverflowError`` from the binding layer.
+        one thread and -0.5 truncates to 0 and therefore selects the hardware
+        concurrency, like every other value that truncates there; a value that
+        exceeds ``size_t`` raises ``OverflowError`` from the binding layer.
     :returns: An :class:`ActivityLandscape`.
     :raises TypeError: If ``distance_matrix`` is not a SymmetricDistanceMatrix,
         or ``activity`` is not a sequence of floats.
     :raises ValueError: If the matrix uses sparse storage, the activity is
-        empty, the activity and the matrix cover different numbers of samples,
+        empty, the activity holds a number too large to convert to a double,
+        the activity and the matrix cover different numbers of samples,
         any of the three thresholds is non-finite or negative,
         ``num_threads`` truncates toward zero to a negative integer,
         or the gate refuses the matrix --
@@ -4353,13 +4373,17 @@ def modelability(distance_matrix, activity_classes, *, num_threads=0):
         missing annotation rather than a category, and its sample is dropped.
     :param num_threads: 0 selects the hardware concurrency. Nearest-neighbour
         ties resolve to the lowest scored index, so the result does not depend
-        on this value.
+        on this value. Truncated toward zero on :func:`activity_landscape`'s
+        terms: 1.9 selects one thread, -0.5 truncates to 0 and therefore
+        selects the hardware concurrency, and a value that exceeds ``size_t``
+        raises ``OverflowError`` from the binding layer.
     :returns: A :class:`Modelability`.
     :raises TypeError: If ``distance_matrix`` is not a SymmetricDistanceMatrix,
         or ``activity_classes`` is not a sequence of strings.
     :raises ValueError: On the same conditions as :func:`activity_landscape`,
         reading ``activity_classes`` for ``activity``, less the three threshold
-        refusals: this function has no thresholds.
+        refusals and the oversized-value refusal: this function has no
+        thresholds, and a class string has no magnitude to overflow.
     :raises RuntimeError: If a stored distance is negative, on the same terms
         as :func:`activity_landscape`.
 
