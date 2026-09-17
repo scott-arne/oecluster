@@ -1,3 +1,4 @@
+import inspect
 import json
 import math
 
@@ -9,6 +10,20 @@ from oecluster.oecluster import butina_cluster as _butina_cluster
 from openeye import oechem
 
 SMILES = ["CCO", "CCC", "CCCC", "c1ccccc1", "CCN", "CCOC"]
+
+
+# The three refusals require_comparable inherits from require_metric and never
+# waives. Each acceptance test replays all three against its waived fact, so a
+# tier-1 check that gets reordered behind a waiver is caught rather than passing
+# on whichever fault that test happened to pick.
+_TIER1_FAULTS = [
+    ("is_distance", lambda d: d._facts.__setitem__('is_distance', False),
+     "requires distances"),
+    ("zero_self", lambda d: d._facts.__setitem__('zero_self', False),
+     "zero self-distance"),
+    ("non_finite", lambda d: d.condensed.__setitem__(0, math.nan),
+     "non-finite entries"),
+]
 
 
 def _mols(smiles_list=None):
@@ -1407,24 +1422,42 @@ def test_require_comparable_refuses_subset_scored_without_an_override():
     assert "allow_nonmetric" not in message
 
 
+def test_require_comparable_has_no_override_keyword():
+    """The refusal is non-overridable as behaviour, not merely as wording.
+
+    ``test_..._refuses_subset_scored_without_an_override`` asserts the message
+    does not mention ``allow_nonmetric``; this asserts the function really has
+    no such parameter, so the refusal cannot be switched off by a caller who
+    guesses the keyword from ``require_metric``.
+    """
+    parameters = inspect.signature(_gate.require_comparable).parameters
+    assert "allow_nonmetric" not in parameters
+
+    dist = oecluster.pdist(_mols(), "fingerprint")
+    dist._facts['data_integrity'] = "subset_scored"
+    with pytest.raises(TypeError):
+        _gate.require_comparable(dist, "activity_landscape",
+                                 allow_nonmetric=True)
+
+
 def test_require_comparable_accepts_a_triangle_violation():
     """These metrics never assume a metric: they rank and threshold distances,
     and a triangle-inequality violation leaves both operations meaningful.
 
     Asserts that the gate accepts the violation, then proves the gate is
-    actually enforcing tier-1 checks on the same matrix by injecting a tier-1
-    fault and confirming refusal."""
+    actually enforcing all three tier-1 checks by injecting each fault into
+    a fresh matrix with the waived fact present."""
     dist = oecluster.pdist(_mols(), "fingerprint")
     dist._facts['triangle'] = False
 
     assert _gate.require_comparable(dist, "activity_landscape") is None
 
-    # The control for the assertion above: a gate that had been deleted would
-    # also "accept" the triangle violation, so prove on this same matrix that
-    # the gate is still running and still refusing what it must.
-    dist._facts['is_distance'] = False
-    with pytest.raises(ValueError, match="requires distances"):
-        _gate.require_comparable(dist, "activity_landscape")
+    for name, apply_fault, message in _TIER1_FAULTS:
+        dist = oecluster.pdist(_mols(), "fingerprint")
+        dist._facts['triangle'] = False
+        apply_fault(dist)
+        with pytest.raises(ValueError, match=message):
+            _gate.require_comparable(dist, "activity_landscape")
 
 
 def test_require_comparable_accepts_a_proven_probe_violation():
@@ -1433,8 +1466,8 @@ def test_require_comparable_accepts_a_proven_probe_violation():
     operations meaningful.
 
     Asserts that the gate accepts the violation, then proves the gate is
-    actually enforcing tier-1 checks on the same matrix by injecting a tier-1
-    fault and confirming refusal."""
+    actually enforcing all three tier-1 checks by injecting each fault into
+    a fresh matrix with the waived fact present."""
     dist = oecluster.pdist(_mols(), "fingerprint")
     dist._facts['metric_probe'] = "violations_found"
     dist._facts['probe_violations'] = 3
@@ -1442,9 +1475,11 @@ def test_require_comparable_accepts_a_proven_probe_violation():
 
     assert _gate.require_comparable(dist, "modelability") is None
 
-    # The control for the assertion above: a gate that had been deleted would
-    # also "accept" the probe violation, so prove on this same matrix that the
-    # gate is still running and still refusing what it must.
-    dist._facts['zero_self'] = False
-    with pytest.raises(ValueError, match="zero self-distance"):
-        _gate.require_comparable(dist, "modelability")
+    for name, apply_fault, message in _TIER1_FAULTS:
+        dist = oecluster.pdist(_mols(), "fingerprint")
+        dist._facts['metric_probe'] = "violations_found"
+        dist._facts['probe_violations'] = 3
+        dist._facts['probe_sampled'] = 100
+        apply_fault(dist)
+        with pytest.raises(ValueError, match=message):
+            _gate.require_comparable(dist, "modelability")
