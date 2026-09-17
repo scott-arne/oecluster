@@ -163,6 +163,16 @@ def test_sar_coherence_honours_every_noise_spelling():
     assert rows(singletons) == [(-1, 1, 9.0), (-1, 1, 10.0), (0, 2, 2.0),
                                 (1, 2, 6.0)]
 
+    # The fourth field, which the row tables above leave out: a spread over one
+    # sample is not defined, so each singleton noise row reports NaN while every
+    # two-member row reports a real number.
+    assert [row.stddev_activity for row in excluded.clusters] == [1.0, 1.0]
+    assert [row.stddev_activity for row in grouped.clusters] == [0.5, 1.0, 1.0]
+    singleton_stddevs = [row.stddev_activity for row in singletons.clusters]
+    assert [math.isnan(value) for value in singleton_stddevs] == [True, True,
+                                                                  False, False]
+    assert singleton_stddevs[2:] == [1.0, 1.0]
+
 
 def test_sar_coherence_rejects_an_unknown_noise_spelling():
     with pytest.raises(ValueError, match="Unknown noise handling"):
@@ -522,6 +532,7 @@ def test_activity_landscape_refuses_every_bad_threshold_as_value_error():
     for keyword, call in thresholds:
         for bad, expected in ((math.nan, "must be finite"),
                               (math.inf, "must be finite"),
+                              (-math.inf, "must be finite"),
                               (-1.0, "must be non-negative")):
             with pytest.raises(ValueError, match=f"{keyword} {expected}"):
                 call(bad)

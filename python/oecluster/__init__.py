@@ -3839,7 +3839,9 @@ class ClusterActivity(NamedTuple):
         coherence.clusters}`` -- silently discards all but the last of them.
     :ivar num_scored: Samples in this cluster with a finite activity.
     :ivar mean_activity: Their mean activity.
-    :ivar stddev_activity: Their population standard deviation.
+    :ivar stddev_activity: Their population standard deviation, NaN when
+        num_scored is below 2 -- every row under ``noise="singletons"``, where a
+        spread over one sample is not defined.
     """
 
     label: int = 0
