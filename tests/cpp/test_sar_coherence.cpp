@@ -1130,12 +1130,12 @@ TEST(ModelabilityTest, ScoresATwoClassHandFixture) {
     EXPECT_DOUBLE_EQ(model.classes[1].fraction_same_class, 0.5);
 }
 
-// The only fixture with more than two classes, and the only one where two
-// distinct per-class fractions coexist in a single result. It does not pin
-// MODI as the unweighted mean over classes, and could not: every class here
-// has exactly two members, so weighting by membership gives the same 0.75.
-// ResolvesTiesToTheLowestScoredIndex (unweighted 0.25 against a weighted 1/3)
-// and ExcludesSamplesWithNoClass (0.5 against 2/3) are where that is pinned.
+// The only fixture that pins exact per-class fractions across more than two
+// classes. It does not pin MODI as the unweighted mean over classes, and
+// could not: every class here has exactly two members, so weighting by
+// membership gives the same 0.75. ResolvesTiesToTheLowestScoredIndex
+// (unweighted 0.25 against a weighted 1/3) and ExcludesSamplesWithNoClass
+// (0.5 against 2/3) are where that is pinned.
 TEST(ModelabilityTest, ScoresAFourClassHandFixture) {
     constexpr std::size_t SAMPLES = 8;
     OECluster::DenseStorage storage(SAMPLES);
@@ -1213,7 +1213,7 @@ TEST(ModelabilityTest, ExcludesSamplesWithNoClass) {
     EXPECT_DOUBLE_EQ(model.classes[0].fraction_same_class, 1.0);
     // The B row's label is read from the original sample index, which is 3
     // rather than the scored position 2. Reading it at the scored position
-    // reports the dropped sample's neighbour, "A".
+    // reports original sample 2's class, "A".
     EXPECT_EQ(model.classes[1].label, "B");
     EXPECT_DOUBLE_EQ(model.classes[1].fraction_same_class, 0.0);
     EXPECT_DOUBLE_EQ(model.modi, 0.5);
@@ -1342,6 +1342,25 @@ TEST(ModelabilityTest, RejectsANegativeOrNonFiniteDistance) {
         EXPECT_NE(message.find("modelability"), std::string::npos);
         EXPECT_NE(message.find("0 and 2"), std::string::npos);
     }
+
+    // The message names original sample indices, which is what a caller needs
+    // to locate the entry in their own matrix. A dropped sample is the only
+    // thing that makes those differ from the scored positions, and no fixture
+    // above has one: sample 0 is unannotated here, so the corrupt entry
+    // between samples 1 and 2 sits at scored positions 0 and 1. Both surviving
+    // rows read it and both throw, but bad_distance sorts its pair, so the
+    // string is the same whichever worker wins.
+    OECluster::DenseStorage dropped(3);
+    FillStorage(dropped, {0.5, 0.5, std::numeric_limits<double>::infinity()});
+
+    try {
+        OECluster::modelability(dropped, {"", "A", "B"});
+        FAIL() << "expected a non-finite distance to be rejected";
+    } catch (const std::invalid_argument& error) {
+        const std::string message = error.what();
+        EXPECT_NE(message.find("1 and 2"), std::string::npos);
+        EXPECT_EQ(message.find("0 and 1"), std::string::npos);
+    }
 }
 
 // The single-class path returns before the concordance sweep, so it is the one
@@ -1383,6 +1402,23 @@ TEST(ModelabilityTest, RejectsABadDistanceEvenWithOneClass) {
         OECluster::modelability(unreachable, {"A", "", "A"});
     EXPECT_EQ(dropped.num_scored, 2u);
     EXPECT_TRUE(std::isnan(dropped.modi));
+
+    // The same index mapping as the parallel path, on the serial scan. A drop
+    // is the only shape where an original sample index and a scored position
+    // can differ, and the throwing cases above have none: with sample 0
+    // unannotated, the corrupt entry is between samples 1 and 2 and must be
+    // named that way rather than as scored positions 0 and 1.
+    OECluster::DenseStorage shifted(3);
+    FillStorage(shifted, {0.5, 0.5, std::numeric_limits<double>::infinity()});
+
+    try {
+        OECluster::modelability(shifted, {"", "A", "A"});
+        FAIL() << "expected a non-finite distance to be rejected";
+    } catch (const std::invalid_argument& error) {
+        const std::string message = error.what();
+        EXPECT_NE(message.find("1 and 2"), std::string::npos);
+        EXPECT_EQ(message.find("0 and 1"), std::string::npos);
+    }
 }
 
 TEST(ModelabilityTest, RejectsAnEmptyOrMismatchedAnnotation) {
