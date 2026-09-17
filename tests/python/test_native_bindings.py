@@ -213,3 +213,107 @@ def test_typemap_preserves_conformers(native):
     assert max(gaps) > 0.1, (
         "the conformers generated here are too similar for this test to "
         f"distinguish a dropped conformer from a kept one: gaps={gaps}")
+
+
+def test_sar_coherence_is_bound(native):
+    """The labels overload takes a plain list and returns the per-cluster table."""
+    coherence = native.sar_coherence([0, 0, 1, 1], [1.0, 1.0, 5.0, 5.0])
+
+    assert coherence.num_samples == 4
+    assert coherence.num_scored == 4
+    assert coherence.num_clusters == 2
+    assert coherence.eta_squared == 1.0
+    assert len(coherence.clusters) == 2
+    assert coherence.clusters[0].label == 0
+    assert coherence.clusters[0].mean_activity == 1.0
+
+
+def test_sar_coherence_options_carry_the_excluded_default(native):
+    options = native.SARCoherenceOptions()
+
+    assert options.noise_handling == native.NoiseHandling_Excluded
+
+
+def test_activity_landscape_is_bound(native):
+    storage = native.DenseStorage(3)
+    storage.Set(0, 1, 0.5)
+    storage.Set(0, 2, 0.25)
+    storage.Set(1, 2, 0.125)
+
+    landscape = native.activity_landscape(storage, [0.0, 1.0, 3.0])
+
+    assert landscape.num_samples == 3
+    assert landscape.num_pairs_scored == 3
+    assert landscape.max_sali == 16.0
+    assert landscape.mean_sali == 10.0
+    assert landscape.num_cliffs == 2
+
+
+def test_activity_landscape_options_carry_the_published_defaults(native):
+    options = native.ActivityLandscapeOptions()
+
+    assert options.distance_threshold == 0.30
+    assert options.activity_threshold == 1.0
+    assert options.rmodi_delta == 0.625
+    assert options.num_threads == 0
+
+
+def test_modelability_is_bound(native):
+    storage = native.DenseStorage(4)
+    storage.Set(0, 1, 0.5)
+    storage.Set(0, 2, 0.1)
+    storage.Set(0, 3, 0.6)
+    storage.Set(1, 2, 0.7)
+    storage.Set(1, 3, 0.8)
+    storage.Set(2, 3, 0.2)
+
+    model = native.modelability(storage, ["A", "A", "B", "B"])
+
+    assert model.num_classes == 2
+    assert model.modi == 0.5
+    assert len(model.classes) == 2
+    assert model.classes[0].label == "A"
+    assert model.classes[0].num_members == 2
+    assert model.classes[0].fraction_same_class == 0.5
+
+
+def test_the_row_vectors_are_wrapped_rather_than_opaque(native):
+    """Reads a field off the first row of each member vector.
+
+    A member vector wrapped as an opaque pointer still len()s and indexes from
+    Python but hands back a SwigPyObject with no fields, so the existence of
+    the two template names proves nothing on its own. Touching a row's field is
+    what distinguishes a wrapped row from an opaque one, and it is the shape
+    the Pythonic layer reads.
+    """
+    assert hasattr(native, "ClusterActivityVector")
+    assert hasattr(native, "ClassConcordanceVector")
+
+    coherence = native.sar_coherence([0, 0, 1, 1], [1.0, 1.0, 5.0, 5.0])
+    assert coherence.clusters[0].num_scored == 2
+
+    storage = native.DenseStorage(2)
+    storage.Set(0, 1, 0.5)
+    model = native.modelability(storage, ["A", "B"])
+    assert model.classes[0].label == "A"
+
+
+def test_the_new_entry_points_release_the_gil():
+    """All three sweeps are O(n^2) or O(N) over native data and must not hold
+    the interpreter while they run.
+
+    Asserted against the interface file rather than at runtime. A timing test
+    cannot separate "released the GIL" from "finished quickly" without a
+    fixture large enough to hold the lock for a measurable stretch, and the
+    only way to build one here is an O(n^2) Python loop that costs more suite
+    time than the assertion buys. The interface file is the sole input SWIG
+    reads for this, so a missing invocation here is a missing release in the
+    generated wrapper.
+    """
+    import pathlib
+
+    interface = pathlib.Path(__file__).resolve().parents[2] / "swig" / "oecluster.i"
+    text = interface.read_text(encoding="utf-8")
+
+    for name in ("sar_coherence", "activity_landscape", "modelability"):
+        assert f"OECLUSTER_GIL_EXCEPTION(OECluster::{name}, {name})" in text
