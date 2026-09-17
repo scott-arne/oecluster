@@ -3831,6 +3831,15 @@ class ClusterActivity(NamedTuple):
     Every field defaults, mirroring the C++ struct value for value. The two
     statistics default to NaN rather than 0.0, because a zero mean activity is
     a real measurement rather than the absence of one.
+
+    :ivar label: The cluster's label. Under ``noise="grouped"`` the merged noise
+        row reports -1; under ``noise="singletons"`` each noise sample keeps its
+        own label, so several rows may share a label and are distinguished by
+        position. Keying the table by label -- ``{row.label: row for row in
+        coherence.clusters}`` -- silently discards all but the last of them.
+    :ivar num_scored: Samples in this cluster with a finite activity.
+    :ivar mean_activity: Their mean activity.
+    :ivar stddev_activity: Their population standard deviation.
     """
 
     label: int = 0
@@ -3857,10 +3866,14 @@ class SARCoherence(_Scorecard):
         differ in cluster count. NaN when the activity has no variance.
     :ivar omega_squared: The chance-corrected counterpart, which does compare
         across cluster counts. Negative when the clustering explains less than
-        chance would; that is a reading, not an error.
+        chance would; that is a reading, not an error. NaN wherever
+        :attr:`eta_squared` is, and also when every scored sample is its own
+        cluster, which leaves no within-cluster variance to correct against.
     :ivar clusters: A tuple of :class:`ClusterActivity`, one per cluster with a
         scored member, ordered by where the cluster's label first appears among
-        the scored samples rather than in the raw input.
+        the scored samples rather than in the raw input. Under
+        ``noise="singletons"`` several rows carry the label -1; see
+        :class:`ClusterActivity`.
     """
 
     # Field order mirrors the C++ SARCoherence struct and the :ivar: list
@@ -3934,8 +3947,9 @@ class ActivityLandscape(_Scorecard):
     :ivar mean_sali: Their mean. NaN on the same condition.
     :ivar rmodi: The regression modelability index: the fraction of scored
         samples whose nearest neighbour inside the activity band is strictly
-        closer than their nearest neighbour outside it. The band is
-        ``rmodi_delta`` standard deviations wide. NaN below two scored samples.
+        closer than their nearest neighbour outside it. The band reaches
+        ``rmodi_delta`` standard deviations either side of a molecule's own
+        activity, so it spans twice that. NaN below two scored samples.
     :ivar activity_stddev: Population standard deviation of the scored
         activity, the quantity the band is measured in. NaN below two scored
         samples.
@@ -4117,10 +4131,12 @@ def sar_coherence(result, activity, *, noise="excluded"):
     :raises ValueError: If ``activity`` is empty or differs in length from the
         labeling, a label does not fit the native 32-bit signed label type, or
         ``noise`` is not one of the three accepted strings.
-    :raises RuntimeError: If an activity value is infinite, or the magnitudes
-        are large enough that a mean or a sum of squares overflows. These are
-        refusals raised in C++, and SWIG maps every native exception to
-        ``RuntimeError``; the message names the offending index.
+    :raises RuntimeError: If an activity value is infinite, in which case the
+        message names the offending index; or if the magnitudes are large enough
+        that a mean or a sum of squares overflows, in which case it names the
+        quantity that overflowed rather than an index, no single sample being
+        responsible. These are refusals raised in C++, and SWIG maps every
+        native exception to ``RuntimeError``.
 
     Example::
 
@@ -4151,22 +4167,28 @@ def sar_coherence(result, activity, *, noise="excluded"):
             raise ValueError(
                 f"activity has {len(values)} entries but the clustering has "
                 f"{result.num_samples} samples")
-        # ClusteringResult stores its labels as an intp array without range
-        # validation, so one too wide for the native int vector reaches
+        # ClusteringResult stores its labels and its member indices as intp
+        # arrays without range validation, so a value too wide for either native
+        # vector -- an IntVector of labels, a SizeTVector of members -- reaches
         # _native_clustering_result and surfaces as OverflowError. The bare-label
-        # branch already reports that same condition as a ValueError, and the
-        # two overloads must not disagree about which exception a caller catches.
+        # branch already reports the label case as a ValueError, and the two
+        # overloads must not disagree about which exception a caller catches.
+        # The message names both fields because OverflowError does not say which
+        # vector rejected the value, and a negative member index is the easier
+        # of the two to hit.
         try:
             native_result = _native_clustering_result(result)
         except OverflowError as error:
             raise ValueError(
-                "result must contain labels that fit a 32-bit signed "
-                "int") from error
+                "result must contain labels that fit a 32-bit signed int and "
+                "member indices that fit a native size_t") from error
         native = _oecluster.sar_coherence(native_result, values, options)
     else:
         labels = _agreement_labels(result, "result")
-        if len(labels) == 0:
-            raise ValueError("sar_coherence() requires a non-empty labeling")
+        # No separate emptiness refusal here. The activity is already known to
+        # be non-empty, so an empty labeling is always a length mismatch, and
+        # the comparison below reports it with the same message the
+        # ClusteringResult branch gives for the same input shape.
         if len(values) != len(labels):
             raise ValueError(
                 f"activity has {len(values)} entries but the clustering has "
@@ -4206,14 +4228,14 @@ def activity_landscape(distance_matrix, activity, *, distance_threshold=0.30,
         or ``activity`` is not a sequence of floats.
     :raises ValueError: If the matrix uses sparse storage, the activity is
         empty, the activity and the matrix cover different numbers of samples,
+        any of the three thresholds is non-finite or negative,
         ``num_threads`` is negative, or the gate refuses the matrix --
         similarity-valued, a non-zero self-distance, a non-finite entry, or
         scored on a per-pair feature subset.
-    :raises RuntimeError: If a threshold is negative or NaN, an activity value
-        is infinite, or a stored distance is negative. These are refusals
-        raised in C++, and SWIG maps every native exception to
-        ``RuntimeError``. A negative distance reaches C++ because the gate
-        measures finiteness, not sign.
+    :raises RuntimeError: If an activity value is infinite, or a stored distance
+        is negative. These are refusals raised in C++, and SWIG maps every
+        native exception to ``RuntimeError``. A negative distance reaches C++
+        because the gate measures finiteness, not sign.
 
     Example::
 
@@ -4245,6 +4267,25 @@ def activity_landscape(distance_matrix, activity, *, distance_threshold=0.30,
             f"activity has {len(values)} entries but the matrix covers "
             f"{distance_matrix.num_samples} samples")
 
+    # Mirrors validate_landscape_options() in src/clustering/SARCoherence.cpp:
+    # the same three thresholds in the same order, each tested for finiteness
+    # before sign. Refused here rather than left to that function because SWIG
+    # maps every native exception to RuntimeError, and a threshold Python can
+    # inspect for itself belongs in the ValueError this signature documents.
+    # isfinite rather than isnan: an infinite distance_threshold would call
+    # every pair structurally near instead of failing.
+    checked = []
+    for name, value in (("distance_threshold", distance_threshold),
+                        ("activity_threshold", activity_threshold),
+                        ("rmodi_delta", rmodi_delta)):
+        coerced = float(value)
+        if not math.isfinite(coerced):
+            raise ValueError(f"{name} must be finite")
+        if coerced < 0.0:
+            raise ValueError(f"{name} must be non-negative")
+        checked.append(coerced)
+    distance_value, activity_value, rmodi_value = checked
+
     num_threads_int = int(num_threads)
     # num_threads reaches a size_t option field, where a negative value raises
     # OverflowError below the gate. Zero stays legal: it means "choose for me".
@@ -4254,9 +4295,9 @@ def activity_landscape(distance_matrix, activity, *, distance_threshold=0.30,
     _gate.require_comparable(distance_matrix, "activity_landscape")
 
     options = _oecluster.ActivityLandscapeOptions()
-    options.distance_threshold = float(distance_threshold)
-    options.activity_threshold = float(activity_threshold)
-    options.rmodi_delta = float(rmodi_delta)
+    options.distance_threshold = distance_value
+    options.activity_threshold = activity_value
+    options.rmodi_delta = rmodi_value
     options.num_threads = num_threads_int
     # Bound rather than scored inline, on the same terms as sar_coherence().
     # This result carries no member vector today; keeping the three entry
@@ -4287,8 +4328,8 @@ def modelability(distance_matrix, activity_classes, *, num_threads=0):
     :raises TypeError: If ``distance_matrix`` is not a SymmetricDistanceMatrix,
         or ``activity_classes`` is not a sequence of strings.
     :raises ValueError: On the same conditions as :func:`activity_landscape`,
-        reading ``activity_classes`` for ``activity``. This function has no
-        thresholds, so those conditions do not arise.
+        reading ``activity_classes`` for ``activity``, less the three threshold
+        refusals: this function has no thresholds.
     :raises RuntimeError: If a stored distance is negative, on the same terms
         as :func:`activity_landscape`.
 

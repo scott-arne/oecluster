@@ -66,19 +66,40 @@ def test_sar_coherence_reports_the_per_cluster_table():
     assert isinstance(coherence.clusters[0], oecluster.ClusterActivity)
 
 
-def test_sar_coherence_accepts_a_clustering_result():
-    """Both C++ overloads are reachable, and they agree.
+def test_sar_coherence_accepts_a_clustering_result(monkeypatch):
+    """A ClusteringResult takes the result overload, and the answers agree.
 
-    The result path hands the native a ClusteringResult; the sequence path
-    hands it a label vector. Scoring the same labeling through each is the
-    only check that the two overloads did not diverge.
+    Agreement alone does not pin the dispatch. ``_agreement_labels`` opens with
+    ``getattr(value, "labels", value)``, so a ClusteringResult handed to the
+    label branch is decomposed and scored perfectly well -- deleting the
+    ``isinstance`` branch from ``sar_coherence`` leaves every assertion below
+    the spy passing. The spy is the only thing here that says the native
+    overload taking a result was the one called.
+
+    That the two *native* overloads agree on a shared labeling is pinned in
+    ``tests/python/test_native_bindings.py``; what this test pins is the
+    Python-side choice between them.
     """
+    calls = []
+    real_conversion = oecluster._native_clustering_result
+
+    def spy(result):
+        calls.append(result)
+        return real_conversion(result)
+
+    monkeypatch.setattr(oecluster, "_native_clustering_result", spy)
+
     dm = _line_dm([0.0, 0.1, 0.2, 5.0, 5.1, 5.2])
     result = oecluster.dbscan(dm, 0.3, min_samples=2)
     activity = [1.0, 1.2, 0.9, 7.0, 7.4, 7.1]
 
     from_result = oecluster.sar_coherence(result, activity)
     from_labels = oecluster.sar_coherence(list(result.labels), activity)
+
+    # Once, for the result call. The label call must not reach the conversion,
+    # or the two branches are not the two branches.
+    assert len(calls) == 1
+    assert calls[0] is result
 
     # Two degenerate answers agree as readily as two correct ones: had dbscan
     # returned one cluster, or all noise, the three equalities below would hold
@@ -103,13 +124,21 @@ def test_sar_coherence_excludes_noise_by_default():
 
 
 def test_sar_coherence_honours_every_noise_spelling():
-    """The three spellings decompose different partitions, so they differ.
+    """The three spellings decompose three different partitions.
 
-    Excluded drops the noise sample, grouped makes one cluster of it, and
-    singletons gives it a cluster of its own whose mean is its own value.
+    Two noise samples, not one: with a single noise sample, grouped and
+    singletons produce the identical partition, and every count agrees between
+    them no matter what the implementation does with the spelling. The second
+    noise sample is what separates "pool the noise into one cluster" from "give
+    each noise sample its own", so an implementation that collapsed singletons
+    onto grouped would have to change a number here.
+
+    The row tables are asserted as well as the counts, because the counts alone
+    do not show that grouped pools the two noise samples into a single row whose
+    mean is their average.
     """
-    labels = [-1, 0, 0, 1, 1]
-    activity = [9.0, 1.0, 3.0, 5.0, 7.0]
+    labels = [-1, -1, 0, 0, 1, 1]
+    activity = [9.0, 10.0, 1.0, 3.0, 5.0, 7.0]
 
     excluded = oecluster.sar_coherence(labels, activity, noise="excluded")
     grouped = oecluster.sar_coherence(labels, activity, noise="grouped")
@@ -117,10 +146,22 @@ def test_sar_coherence_honours_every_noise_spelling():
 
     assert excluded.num_clusters == 2
     assert grouped.num_clusters == 3
-    assert singletons.num_clusters == 3
+    assert singletons.num_clusters == 4
     assert excluded.num_scored == 4
-    assert grouped.num_scored == 5
-    assert singletons.num_scored == 5
+    assert grouped.num_scored == 6
+    assert singletons.num_scored == 6
+
+    def rows(coherence):
+        return [(row.label, row.num_scored, row.mean_activity)
+                for row in coherence.clusters]
+
+    assert rows(excluded) == [(0, 2, 2.0), (1, 2, 6.0)]
+    # One noise row, holding both samples, at their mean.
+    assert rows(grouped) == [(-1, 2, 9.5), (0, 2, 2.0), (1, 2, 6.0)]
+    # Two noise rows, each its own sample, each at its own value -- and both
+    # still labelled -1, which is why the rows are read by position.
+    assert rows(singletons) == [(-1, 1, 9.0), (-1, 1, 10.0), (0, 2, 2.0),
+                                (1, 2, 6.0)]
 
 
 def test_sar_coherence_rejects_an_unknown_noise_spelling():
@@ -143,6 +184,27 @@ def test_sar_coherence_treats_nan_activity_as_missing():
 def test_sar_coherence_rejects_a_length_mismatch():
     with pytest.raises(ValueError, match="4 samples"):
         oecluster.sar_coherence([0, 0, 1, 1], [1.0, 2.0])
+
+
+def test_sar_coherence_reports_an_empty_labeling_as_a_length_mismatch():
+    """An empty labeling is a length mismatch, and both spellings say so alike.
+
+    By the time the overload split is reached the activity is already known to
+    be non-empty, so there is no empty labeling that is not also a length
+    mismatch. A separate emptiness refusal on the sequence branch -- which the
+    ClusteringResult branch has no equivalent of -- would give the same input
+    shape two different messages depending on how the caller spelled the empty
+    clustering.
+    """
+    with pytest.raises(ValueError) as from_sequence:
+        oecluster.sar_coherence([], [1.0])
+
+    with pytest.raises(ValueError) as from_result:
+        oecluster.sar_coherence(ClusteringResult([], []), [1.0])
+
+    assert str(from_sequence.value) == (
+        "activity has 1 entries but the clustering has 0 samples")
+    assert str(from_result.value) == str(from_sequence.value)
 
 
 def test_sar_coherence_rejects_an_empty_clustering_result():
@@ -335,6 +397,41 @@ def test_activity_landscape_thresholds_move_the_cliff_count():
     assert stricter.cliff_density == 0.0
 
 
+def test_activity_landscape_rmodi_delta_moves_rmodi():
+    """The third tuning keyword is read, and it moves RMODI off its default.
+
+    The other two thresholds are covered by the test above; rmodi_delta is the
+    one keyword no other test in this file reads. Setting ``rmodi_delta =
+    0.625`` unconditionally inside the entry point -- ignoring whatever the
+    caller passed -- leaves every other assertion in this file passing.
+
+    Three settings, not one. Asserting a single value would also pass for an
+    implementation that ignored the keyword and happened to agree with it, so
+    the default case is deliberately spelled as a call passing no keyword at
+    all, and the two bracketing cases have to disagree with it. The band is
+    ``rmodi_delta`` standard deviations either side of a molecule's own
+    activity: narrow it to 0.05 and almost nothing shares a band; widen it to
+    3.0 and everything does.
+    """
+    dm = _line_dm([0.0, 0.1, 0.3, 0.6, 1.0, 1.5])
+    activity = [1.0, 1.2, 3.0, 3.1, 8.0, 8.4]
+
+    default = oecluster.activity_landscape(dm, activity)
+    narrow = oecluster.activity_landscape(dm, activity, rmodi_delta=0.05)
+    wide = oecluster.activity_landscape(dm, activity, rmodi_delta=3.0)
+
+    assert default.rmodi == pytest.approx(0.8333333333333334, abs=1e-12)
+    assert narrow.rmodi == pytest.approx(0.16666666666666666, abs=1e-12)
+    assert wide.rmodi == pytest.approx(1.0, abs=1e-12)
+
+    # The keyword moves the band, not the data: the standard deviation the band
+    # is measured in is the same in all three, so the three RMODI values differ
+    # because of the setting and nothing else.
+    for landscape in (default, narrow, wide):
+        assert landscape.activity_stddev == pytest.approx(2.998008598312479,
+                                                          abs=1e-12)
+
+
 def test_activity_landscape_to_table_and_repr():
     landscape = oecluster.activity_landscape(_line_dm(_SALI_COORDS),
                                              _SALI_ACTIVITY)
@@ -390,6 +487,49 @@ def test_activity_landscape_rejects_a_negative_num_threads():
     with pytest.raises(ValueError, match="num_threads must be non-negative"):
         oecluster.activity_landscape(_line_dm(_SALI_COORDS), _SALI_ACTIVITY,
                                      num_threads=-1)
+
+
+def test_activity_landscape_refuses_every_bad_threshold_as_value_error():
+    """All three thresholds are refused in Python, not left to C++.
+
+    SWIG maps every native exception to ``RuntimeError``, so a threshold that
+    only C++ validates comes back as the wrong exception type for a condition
+    the caller could see for itself. These mirror ``validate_landscape_options``
+    in ``src/clustering/SARCoherence.cpp``: the same three names, finiteness
+    tested before sign, and the same two messages.
+
+    Infinity as well as NaN for each keyword. A check written as ``math.isnan``
+    would satisfy the NaN rows and let every infinity through -- and an infinite
+    ``distance_threshold`` does not even fail downstream; it silently calls
+    every pair structurally near.
+    """
+    dm = _line_dm(_SALI_COORDS)
+    # Each keyword is spelled out in its own call rather than unpacked from a
+    # mapping, so that a typo here is a type error rather than a TypeError the
+    # pytest.raises below would report as a missing ValueError.
+    thresholds = (
+        ("distance_threshold",
+         lambda value: oecluster.activity_landscape(
+             dm, _SALI_ACTIVITY, distance_threshold=value)),
+        ("activity_threshold",
+         lambda value: oecluster.activity_landscape(
+             dm, _SALI_ACTIVITY, activity_threshold=value)),
+        ("rmodi_delta",
+         lambda value: oecluster.activity_landscape(
+             dm, _SALI_ACTIVITY, rmodi_delta=value)),
+    )
+
+    for keyword, call in thresholds:
+        for bad, expected in ((math.nan, "must be finite"),
+                              (math.inf, "must be finite"),
+                              (-1.0, "must be non-negative")):
+            with pytest.raises(ValueError, match=f"{keyword} {expected}"):
+                call(bad)
+
+    # Zero is the boundary and has to be accepted. Without this, a validator
+    # that refused all three keywords outright would satisfy the block above.
+    for _, call in thresholds:
+        assert call(0.0).num_samples == 3
 
 
 def test_activity_landscape_rejects_a_misspelled_keyword():
@@ -516,8 +656,14 @@ def test_modelability_rejects_sparse_storage():
 def test_modelability_refuses_subset_scored_distances():
     dm = _line_dm(_MODI_COORDS, facts={'data_integrity': "subset_scored"})
 
-    with pytest.raises(ValueError, match="not mutually comparable"):
+    with pytest.raises(ValueError) as excinfo:
         oecluster.modelability(dm, _MODI_CLASSES)
+
+    # The caller name as well as the refusal: the gate interpolates whatever
+    # string it is handed, so a message asserted on "not mutually comparable"
+    # alone reads identically when this entry point passes the wrong name.
+    assert "modelability" in str(excinfo.value)
+    assert "not mutually comparable" in str(excinfo.value)
 
     # As in the landscape case: the same geometry without the stamp scores.
     assert oecluster.modelability(
@@ -557,6 +703,13 @@ def test_modelability_to_table_and_repr():
     assert [line.split()[0] for line in rendered.splitlines()[1:]] == [
         "num_samples", "num_scored", "num_classes", "modi",
     ]
+
+    # A NaN field renders as a cell rather than blanking the row or raising in
+    # the formatter. The fixture above is all-finite and cannot show it; a
+    # single-class matrix gives a NaN modi.
+    flat = repr(oecluster.modelability(_line_dm(_MODI_COORDS),
+                                       ["A", "A", "A", "A"]))
+    assert flat.splitlines()[-1].split() == ["modi", "nan"]
 
 
 def _thread_fixture():
@@ -635,14 +788,8 @@ def test_native_refusals_surface_as_runtime_error():
     gate measures finiteness, which a negative number passes, so the refusal
     can only come from C++.
     """
-    dm = _line_dm(_SALI_COORDS)
-
     with pytest.raises(RuntimeError, match=r"activity\[1\] is infinite"):
         oecluster.sar_coherence([0, 0, 1], [1.0, math.inf, 3.0])
-
-    with pytest.raises(RuntimeError, match="distance_threshold must be"):
-        oecluster.activity_landscape(dm, _SALI_ACTIVITY,
-                                     distance_threshold=-1.0)
 
     negative_storage = DenseStorage(3)
     negative_storage.Set(0, 1, -0.25)
