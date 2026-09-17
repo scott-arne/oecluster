@@ -4083,11 +4083,14 @@ def _activity_values(value, argument_name):
     :param value: The caller's sequence; NaN marks a missing measurement.
     :param argument_name: Name of the argument, for the messages.
     :returns: A native DoubleVector.
-    :raises TypeError: If the value is a bare str, a bytes-like object, a
-        mapping, not iterable, or yields a str, a bytes-like object, or
-        something that is not a real number. A memoryview is a bytes-like
-        object whatever its format, so a float buffer is refused with the rest;
-        pass ``np.asarray(view)`` to score one.
+    :raises TypeError: If the value is a bare str, a ``bytes``, a ``bytearray``
+        or a ``memoryview``, a mapping, not iterable, or yields one of those
+        four or something that is not a real number. Those three binary
+        containers are named one by one rather than tested for as buffers, so
+        every other buffer exporter -- a byte-format ``array.array``, a numpy
+        ``uint8`` column -- is accepted and read as the numbers it holds. A
+        memoryview is refused whatever its format, so a float buffer is refused
+        with the rest; pass ``np.asarray(view)`` to score one.
     :raises ValueError: If it yields a number too large to convert to a double,
         such as ``10 ** 1000``. A magnitude fault rather than a type fault, so
         it is not folded into the TypeError above. An infinity converts
@@ -4100,7 +4103,13 @@ def _activity_values(value, argument_name):
     # ints, so b"12" would score as the activities [49.0, 50.0]; a numeric
     # memoryview would convert correctly, but it is refused with them rather
     # than branching on .format -- pass np.asarray(view) to score a float
-    # buffer.
+    # buffer. Three concrete types are named here rather than the buffer
+    # protocol tested for, and that closes the reinterpretation for these three
+    # only: a buffer test cannot tell a uint8 measurement column from misread
+    # text, so array("B", b"12") and np.frombuffer(b"12", "u1") are accepted and
+    # read as the numbers they hold. The three named types earn the refusal by
+    # being the text-and-binary containers, which a caller holding one has
+    # almost certainly not meant as a column of measurements.
     if isinstance(value, (bytes, bytearray, memoryview)):
         raise TypeError(
             f"{argument_name} must be a sequence of floats, not a bytes-like "
@@ -4119,13 +4128,15 @@ def _activity_values(value, argument_name):
     for item in iterator:
         # float() rather than operator.index(), which _agreement_labels uses:
         # an activity is a measurement, so 7 and 7.0 are the same input and a
-        # numpy float has to pass. str and every bytes-like spelling are
+        # numpy float has to pass. str, bytes, bytearray and memoryview are
         # refused explicitly because float() converts str, bytes, bytearray and
         # a byte-format memoryview -- a column read from a CSV without
         # conversion, or one whose entries survived a single layer of
-        # deserialization, would otherwise score as numbers. A numeric
-        # memoryview is the one spelling float() does not convert; it is
-        # refused with them for consistency with the column guard above.
+        # deserialization, would otherwise score as numbers. These are three
+        # concrete types and not a buffer test, for the reason the column guard
+        # gives, so any other buffer-exporting element is read as the number it
+        # holds. A numeric memoryview is the one spelling float() does not
+        # convert; it is refused with them for consistency with that guard.
         if isinstance(item, (str, bytes, bytearray, memoryview)):
             raise TypeError(f"{argument_name} must be a sequence of floats")
         try:
@@ -4269,8 +4280,12 @@ def activity_landscape(distance_matrix, activity, *, distance_threshold=0.30,
     :param num_threads: 0 selects the hardware concurrency. The result does not
         depend on this value, bit for bit. Truncated toward zero, so 1.9 selects
         one thread and -0.5 truncates to 0 and therefore selects the hardware
-        concurrency, like every other value that truncates there; a value that
-        exceeds ``size_t`` raises ``OverflowError`` from the binding layer.
+        concurrency, like every other value that truncates there.
+        ``OverflowError`` has two sources, with different causes and different
+        moments: an infinite value has no integer to truncate to and fails
+        inside ``int()``, before the non-negative check runs at all, while a
+        finite but oversized value coerces cleanly there and fails later, in the
+        binding layer's ``size_t`` assignment.
     :returns: An :class:`ActivityLandscape`.
     :raises TypeError: If ``distance_matrix`` is not a SymmetricDistanceMatrix,
         ``activity`` is not a sequence of floats, or ``num_threads`` is a value
@@ -4387,8 +4402,9 @@ def modelability(distance_matrix, activity_classes, *, num_threads=0):
         ties resolve to the lowest scored index, so the result does not depend
         on this value. Truncated toward zero on :func:`activity_landscape`'s
         terms: 1.9 selects one thread, -0.5 truncates to 0 and therefore
-        selects the hardware concurrency, and a value that exceeds ``size_t``
-        raises ``OverflowError`` from the binding layer.
+        selects the hardware concurrency, and ``OverflowError`` arrives from
+        the same two places -- an infinite value out of ``int()``, a finite but
+        oversized one out of the binding layer's ``size_t`` assignment.
     :returns: A :class:`Modelability`.
     :raises TypeError: If ``distance_matrix`` is not a SymmetricDistanceMatrix,
         ``activity_classes`` is not a sequence of strings, or ``num_threads``
@@ -4397,9 +4413,11 @@ def modelability(distance_matrix, activity_classes, *, num_threads=0):
     :raises ValueError: On the same conditions as :func:`activity_landscape`,
         reading ``activity_classes`` for ``activity``, less the three threshold
         refusals and the oversized-value refusal: this function has no
-        thresholds, and a class string has no magnitude to overflow. The
-        ``num_threads`` conditions carry over unchanged, the coercion failures
-        on a str or a NaN included.
+        thresholds, and a class string has no magnitude to overflow. Every
+        ``num_threads`` condition carries over unchanged, including the ones
+        the coercion raises: a str ``int()`` cannot parse and a NaN as the
+        ValueError this clause describes, an infinite value as the
+        ``OverflowError`` the parameter above sets out.
     :raises RuntimeError: If a stored distance is negative, on the same terms
         as :func:`activity_landscape`.
 
