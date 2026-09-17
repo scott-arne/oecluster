@@ -20,6 +20,8 @@ namespace {
 using OECluster::ActivityLandscape;
 using OECluster::ActivityLandscapeOptions;
 using OECluster::ClusterLabel;
+using OECluster::Modelability;
+using OECluster::ModelabilityOptions;
 using OECluster::NoiseHandling;
 using OECluster::SARCoherence;
 using OECluster::SARCoherenceOptions;
@@ -1106,4 +1108,335 @@ TEST(ActivityLandscapeTest, CapsAnAbsurdThreadCount) {
     EXPECT_EQ(landscape.max_sali, reference.max_sali);
     EXPECT_EQ(landscape.mean_sali, reference.mean_sali);
     EXPECT_EQ(landscape.rmodi, reference.rmodi);
+}
+
+TEST(ModelabilityTest, ScoresATwoClassHandFixture) {
+    OECluster::DenseStorage storage(4);
+    FillStorage(storage, {0.5, 0.1, 0.6, 0.7, 0.8, 0.2});
+
+    const Modelability model =
+        OECluster::modelability(storage, {"A", "A", "B", "B"});
+
+    EXPECT_EQ(model.num_samples, 4u);
+    EXPECT_EQ(model.num_scored, 4u);
+    EXPECT_EQ(model.num_classes, 2u);
+    EXPECT_DOUBLE_EQ(model.modi, 0.5);
+
+    ASSERT_EQ(model.classes.size(), 2u);
+    EXPECT_EQ(model.classes[0].label, "A");
+    EXPECT_EQ(model.classes[0].num_members, 2u);
+    EXPECT_DOUBLE_EQ(model.classes[0].fraction_same_class, 0.5);
+    EXPECT_EQ(model.classes[1].label, "B");
+    EXPECT_DOUBLE_EQ(model.classes[1].fraction_same_class, 0.5);
+}
+
+// MODI is the unweighted mean over classes, so a class with few members
+// counts as much as a large one. Four classes with two different per-class
+// fractions pin that.
+TEST(ModelabilityTest, ScoresAFourClassHandFixture) {
+    constexpr std::size_t SAMPLES = 8;
+    OECluster::DenseStorage storage(SAMPLES);
+    for (std::size_t i = 0; i < SAMPLES; ++i) {
+        for (std::size_t j = i + 1; j < SAMPLES; ++j) {
+            storage.Set(i, j, 0.9);
+        }
+    }
+    storage.Set(0, 1, 0.1);
+    storage.Set(2, 3, 0.3);
+    storage.Set(2, 4, 0.2);
+    storage.Set(4, 5, 0.4);
+    storage.Set(6, 7, 0.15);
+
+    const Modelability model = OECluster::modelability(
+        storage, {"A", "A", "B", "B", "C", "C", "D", "D"});
+
+    EXPECT_EQ(model.num_classes, 4u);
+    ASSERT_EQ(model.classes.size(), 4u);
+    EXPECT_DOUBLE_EQ(model.classes[0].fraction_same_class, 1.0);
+    EXPECT_DOUBLE_EQ(model.classes[1].fraction_same_class, 0.5);
+    EXPECT_DOUBLE_EQ(model.classes[2].fraction_same_class, 0.5);
+    EXPECT_DOUBLE_EQ(model.classes[3].fraction_same_class, 1.0);
+    EXPECT_DOUBLE_EQ(model.modi, 0.75);
+}
+
+TEST(ModelabilityTest, ReportsOneOnAPerfectSeparation) {
+    OECluster::DenseStorage storage(4);
+    FillStorage(storage, {0.1, 0.9, 0.9, 0.9, 0.9, 0.1});
+
+    const Modelability model =
+        OECluster::modelability(storage, {"A", "A", "B", "B"});
+
+    EXPECT_DOUBLE_EQ(model.modi, 1.0);
+}
+
+// A molecule is never its own nearest neighbour. With every off-diagonal
+// distance equal, the diagonal's zero would otherwise make every molecule
+// concordant and report 1.0 instead of 0.0.
+TEST(ModelabilityTest, NeverReadsTheDiagonal) {
+    OECluster::DenseStorage storage(3);
+    FillStorage(storage, {1.0, 1.0, 1.0});
+
+    const Modelability model = OECluster::modelability(storage, {"A", "B", "B"});
+
+    EXPECT_DOUBLE_EQ(model.modi, 0.0);
+    EXPECT_DOUBLE_EQ(model.classes[0].fraction_same_class, 0.0);
+    EXPECT_DOUBLE_EQ(model.classes[1].fraction_same_class, 0.0);
+}
+
+TEST(ModelabilityTest, ResolvesTiesToTheLowestScoredIndex) {
+    OECluster::DenseStorage storage(3);
+    FillStorage(storage, {0.5, 0.5, 0.9});
+
+    const Modelability model = OECluster::modelability(storage, {"A", "B", "A"});
+
+    // Breaking the tie towards the highest index would report 0.5.
+    EXPECT_DOUBLE_EQ(model.modi, 0.25);
+    EXPECT_DOUBLE_EQ(model.classes[0].fraction_same_class, 0.5);
+    EXPECT_DOUBLE_EQ(model.classes[1].fraction_same_class, 0.0);
+}
+
+TEST(ModelabilityTest, ExcludesSamplesWithNoClass) {
+    OECluster::DenseStorage storage(4);
+    FillStorage(storage, {0.1, 0.2, 0.9, 0.9, 0.9, 0.3});
+
+    const Modelability model =
+        OECluster::modelability(storage, {"A", "", "A", "B"});
+
+    EXPECT_EQ(model.num_samples, 4u);
+    EXPECT_EQ(model.num_scored, 3u);
+    EXPECT_EQ(model.num_classes, 2u);
+    ASSERT_EQ(model.classes.size(), 2u);
+    EXPECT_EQ(model.classes[0].num_members, 2u);
+    EXPECT_DOUBLE_EQ(model.classes[0].fraction_same_class, 1.0);
+    EXPECT_DOUBLE_EQ(model.classes[1].fraction_same_class, 0.0);
+    EXPECT_DOUBLE_EQ(model.modi, 0.5);
+}
+
+// With one class nobody has a neighbour that could differ, so concordance is
+// not a question that has an answer.
+TEST(ModelabilityTest, IsUndefinedBelowTwoClasses) {
+    OECluster::DenseStorage storage(3);
+    FillStorage(storage, {0.5, 0.25, 0.125});
+
+    const Modelability single =
+        OECluster::modelability(storage, {"A", "A", "A"});
+    EXPECT_EQ(single.num_classes, 1u);
+    EXPECT_TRUE(std::isnan(single.modi));
+    ASSERT_EQ(single.classes.size(), 1u);
+    EXPECT_EQ(single.classes[0].num_members, 3u);
+    EXPECT_TRUE(std::isnan(single.classes[0].fraction_same_class));
+
+    const Modelability none = OECluster::modelability(storage, {"", "", ""});
+    EXPECT_EQ(none.num_scored, 0u);
+    EXPECT_EQ(none.num_classes, 0u);
+    EXPECT_TRUE(none.classes.empty());
+    EXPECT_TRUE(std::isnan(none.modi));
+}
+
+// The pair indices are sorted before they are formatted, so the message reads
+// the same whichever of the two rows reached the bad entry first. Without that
+// the assertion below is a coin flip on the thread schedule.
+TEST(ModelabilityTest, RejectsANegativeOrNonFiniteDistance) {
+    OECluster::DenseStorage infinite(3);
+    FillStorage(infinite,
+                {0.5, std::numeric_limits<double>::infinity(), 0.125});
+
+    try {
+        OECluster::modelability(infinite, {"A", "B", "B"});
+        FAIL() << "expected a non-finite distance to be rejected";
+    } catch (const std::invalid_argument& error) {
+        const std::string message = error.what();
+        EXPECT_NE(message.find("modelability"), std::string::npos);
+        EXPECT_NE(message.find("0 and 2"), std::string::npos);
+        EXPECT_EQ(message.find("2 and 0"), std::string::npos);
+    }
+
+    OECluster::DenseStorage negative(3);
+    FillStorage(negative, {0.5, -0.25, 0.125});
+
+    try {
+        OECluster::modelability(negative, {"A", "B", "B"});
+        FAIL() << "expected a negative distance to be rejected";
+    } catch (const std::invalid_argument& error) {
+        const std::string message = error.what();
+        EXPECT_NE(message.find("0 and 2"), std::string::npos);
+        EXPECT_NE(message.find("finite and non-negative"), std::string::npos);
+    }
+
+    // A NaN is the case a guard written as isinf would let through, and it is
+    // the one that fails silently: every comparison against a NaN reads false,
+    // so the sweep would keep an earlier neighbour and return a plausible
+    // number over a corrupt matrix instead of refusing it.
+    OECluster::DenseStorage not_a_number(3);
+    FillStorage(not_a_number, {0.5, NOT_A_NUMBER, 0.125});
+
+    try {
+        OECluster::modelability(not_a_number, {"A", "B", "B"});
+        FAIL() << "expected a NaN distance to be rejected";
+    } catch (const std::invalid_argument& error) {
+        const std::string message = error.what();
+        EXPECT_NE(message.find("modelability"), std::string::npos);
+        EXPECT_NE(message.find("0 and 2"), std::string::npos);
+    }
+}
+
+// The single-class path returns before the concordance sweep, so it is the one
+// shape that could skip validation entirely. It must refuse on the same terms
+// as every other shape rather than hand back NaNs over a corrupt matrix.
+TEST(ModelabilityTest, RejectsABadDistanceEvenWithOneClass) {
+    OECluster::DenseStorage infinite(3);
+    FillStorage(infinite,
+                {0.5, std::numeric_limits<double>::infinity(), 0.125});
+
+    try {
+        OECluster::modelability(infinite, {"A", "A", "A"});
+        FAIL() << "expected a non-finite distance to be rejected";
+    } catch (const std::invalid_argument& error) {
+        EXPECT_NE(std::string(error.what()).find("0 and 2"), std::string::npos);
+    }
+
+    // The serial path needs the NaN case for the same reason the parallel one
+    // does: an isinf-only guard would return NaNs over a corrupt matrix rather
+    // than refuse it, and this is the shape where nothing else reads a
+    // distance.
+    OECluster::DenseStorage not_a_number(3);
+    FillStorage(not_a_number, {0.5, NOT_A_NUMBER, 0.125});
+
+    try {
+        OECluster::modelability(not_a_number, {"A", "A", "A"});
+        FAIL() << "expected a NaN distance to be rejected";
+    } catch (const std::invalid_argument& error) {
+        EXPECT_NE(std::string(error.what()).find("0 and 2"), std::string::npos);
+    }
+
+    // The dropped sample takes its distances out of the scan with it: sample 1
+    // is unannotated, so the infinity at (0, 2) is still the pair that bites,
+    // while a corrupt entry touching only sample 1 would not be read at all.
+    OECluster::DenseStorage unreachable(3);
+    FillStorage(unreachable,
+                {std::numeric_limits<double>::infinity(), 0.25, 0.125});
+    const Modelability dropped =
+        OECluster::modelability(unreachable, {"A", "", "A"});
+    EXPECT_EQ(dropped.num_scored, 2u);
+    EXPECT_TRUE(std::isnan(dropped.modi));
+}
+
+TEST(ModelabilityTest, RejectsAnEmptyOrMismatchedAnnotation) {
+    OECluster::DenseStorage storage(3);
+    FillStorage(storage, {0.5, 0.25, 0.125});
+
+    try {
+        OECluster::modelability(storage, {});
+        FAIL() << "expected an empty annotation to be rejected";
+    } catch (const std::invalid_argument& error) {
+        EXPECT_NE(std::string(error.what()).find("non-empty"),
+                  std::string::npos);
+    }
+
+    // Both directions of the cardinality check, since a size comparison
+    // written with the wrong operator passes one of them.
+    try {
+        OECluster::modelability(storage, {"A", "B"});
+        FAIL() << "expected a short annotation to be rejected";
+    } catch (const std::invalid_argument& error) {
+        const std::string message = error.what();
+        EXPECT_NE(message.find("activity_classes has 2 entries"),
+                  std::string::npos);
+        EXPECT_NE(message.find("the storage has 3 samples"), std::string::npos);
+    }
+
+    try {
+        OECluster::modelability(storage, {"A", "B", "A", "B"});
+        FAIL() << "expected an overlong annotation to be rejected";
+    } catch (const std::invalid_argument& error) {
+        const std::string message = error.what();
+        EXPECT_NE(message.find("activity_classes has 4 entries"),
+                  std::string::npos);
+        EXPECT_NE(message.find("the storage has 3 samples"), std::string::npos);
+    }
+
+    // An empty annotation against empty storage takes the non-empty refusal,
+    // not the cardinality one: the emptiness check runs first, so "0 entries
+    // and 0 samples" never reads as agreement.
+    OECluster::DenseStorage empty(0);
+    try {
+        OECluster::modelability(empty, {});
+        FAIL() << "expected an empty annotation to be rejected";
+    } catch (const std::invalid_argument& error) {
+        EXPECT_NE(std::string(error.what()).find("non-empty"),
+                  std::string::npos);
+    }
+}
+
+TEST(ModelabilityTest, RefusesSparseStorage) {
+    OECluster::SparseStorage sparse(3, 0.5);
+
+    try {
+        OECluster::modelability(sparse, {"A", "B", "B"});
+        FAIL() << "expected SparseStorage to be refused";
+    } catch (const std::invalid_argument& error) {
+        const std::string message = error.what();
+        EXPECT_NE(message.find("modelability"), std::string::npos);
+        EXPECT_NE(message.find("SparseStorage"), std::string::npos);
+    }
+}
+
+TEST(ModelabilityTest, IsInvariantUnderTheThreadCount) {
+    constexpr std::size_t SAMPLES = 200;
+    OECluster::DenseStorage storage(SAMPLES);
+    for (std::size_t i = 0; i < SAMPLES; ++i) {
+        for (std::size_t j = i + 1; j < SAMPLES; ++j) {
+            storage.Set(i, j, static_cast<double>((i * 37 + j * 11) % 100) / 100.0);
+        }
+    }
+    std::vector<std::string> classes(SAMPLES);
+    for (std::size_t i = 0; i < SAMPLES; ++i) {
+        classes[i] = "class" + std::to_string((i * 7) % 4);
+    }
+
+    ModelabilityOptions single;
+    single.num_threads = 1;
+    const Modelability reference =
+        OECluster::modelability(storage, classes, single);
+
+    for (const std::size_t threads : {2u, 4u, 8u}) {
+        ModelabilityOptions options;
+        options.num_threads = threads;
+        const Modelability model =
+            OECluster::modelability(storage, classes, options);
+
+        EXPECT_EQ(model.modi, reference.modi);
+        ASSERT_EQ(model.classes.size(), reference.classes.size());
+        for (std::size_t k = 0; k < model.classes.size(); ++k) {
+            EXPECT_EQ(model.classes[k].label, reference.classes[k].label);
+            EXPECT_EQ(model.classes[k].fraction_same_class,
+                      reference.classes[k].fraction_same_class);
+        }
+    }
+}
+
+// The same cap as `activity_landscape`, tested the same way: an absurd
+// num_threads must neither be handed to ThreadPool as a thread count nor wrap
+// `8 * threads` to zero, and the answer must not change.
+TEST(ModelabilityTest, CapsAnAbsurdThreadCount) {
+    OECluster::DenseStorage storage(4);
+    FillStorage(storage, {0.1, 0.8, 0.9, 0.7, 0.6, 0.2});
+    const std::vector<std::string> classes = {"A", "A", "B", "B"};
+
+    ModelabilityOptions single;
+    single.num_threads = 1;
+    const Modelability reference =
+        OECluster::modelability(storage, classes, single);
+
+    ModelabilityOptions absurd;
+    absurd.num_threads = std::size_t{1} << 61;
+    const Modelability model =
+        OECluster::modelability(storage, classes, absurd);
+
+    EXPECT_EQ(model.modi, reference.modi);
+    ASSERT_EQ(model.classes.size(), reference.classes.size());
+    for (std::size_t k = 0; k < model.classes.size(); ++k) {
+        EXPECT_EQ(model.classes[k].fraction_same_class,
+                  reference.classes[k].fraction_same_class);
+    }
 }

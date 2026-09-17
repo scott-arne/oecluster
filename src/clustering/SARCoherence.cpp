@@ -131,6 +131,34 @@ void validate_landscape_options(const ActivityLandscapeOptions& options) {
     }
 }
 
+void validate_class_annotation(const std::vector<std::string>& activity_classes,
+                               std::size_t expected) {
+    if (activity_classes.empty()) {
+        throw std::invalid_argument(
+            "modelability requires a non-empty class annotation");
+    }
+    if (activity_classes.size() != expected) {
+        throw std::invalid_argument(
+            "modelability: activity_classes has " +
+            std::to_string(activity_classes.size()) +
+            " entries but the storage has " + std::to_string(expected) +
+            " samples");
+    }
+}
+
+// The MODI sweep reads each pair from both rows, so without a canonical order
+// the message names "0 and 2" or "2 and 0" depending on which worker threw
+// first. Sorting the pair makes the diagnostic reproducible; activity_landscape
+// needs no equivalent because its sweep visits each pair once, from the lower
+// row.
+std::invalid_argument bad_distance(std::size_t left, std::size_t right) {
+    return std::invalid_argument(
+        "modelability: the distance between samples " +
+        std::to_string(std::min(left, right)) + " and " +
+        std::to_string(std::max(left, right)) +
+        " must be finite and non-negative");
+}
+
 }  // namespace
 
 SARCoherence sar_coherence(const ClusteringResult& result,
@@ -332,6 +360,140 @@ ActivityLandscape activity_landscape(const StorageBackend& storage,
     landscape.rmodi = static_cast<double>(concordant) / static_cast<double>(n);
 
     return landscape;
+}
+
+Modelability modelability(const StorageBackend& storage,
+                          const std::vector<std::string>& activity_classes,
+                          const ModelabilityOptions& options) {
+    detail::validate_complete_distance_storage(storage, "modelability");
+    validate_class_annotation(activity_classes, storage.NumSamples());
+
+    Modelability model;
+    model.num_samples = activity_classes.size();
+
+    // An empty class string is this input's "missing", and Excluded is the
+    // only reading of it that makes sense: a sample with no class cannot be a
+    // class of its own, and cannot be pooled with the others either.
+    std::vector<bool> drop(activity_classes.size(), false);
+    detail::mark_excluded(activity_classes, NoiseHandling::Excluded, drop);
+
+    const std::vector<std::size_t> indices = detail::gather_indices(drop);
+    std::uint32_t num_ids = 0;
+    const std::vector<std::uint32_t> class_ids = detail::intern_side(
+        activity_classes, NoiseHandling::Excluded, drop, num_ids);
+
+    const std::size_t n = indices.size();
+    model.num_scored = n;
+    model.num_classes = num_ids;
+
+    std::vector<std::string> id_label(num_ids);
+    std::vector<std::size_t> id_count(num_ids, 0);
+    std::vector<bool> id_seen(num_ids, false);
+    for (std::size_t p = 0; p < n; ++p) {
+        const std::uint32_t id = class_ids[p];
+        if (!id_seen[id]) {
+            id_seen[id] = true;
+            id_label[id] = activity_classes[indices[p]];
+        }
+        ++id_count[id];
+    }
+
+    const std::size_t num_samples = storage.NumSamples();
+    const double* data = storage.Data();
+
+    model.classes.reserve(num_ids);
+    if (num_ids < 2) {
+        // Nothing to compute: with one class no neighbour can differ, so the
+        // sweep would only confirm that every molecule matches itself. The
+        // distances still have to be validated, though, or a caller with one
+        // class and a corrupt matrix gets NaNs where every other input shape
+        // gets a refusal. This scan is the only O(n^2) work on a path that
+        // would otherwise read no distance at all, and it is serial, so its
+        // diagnostic needs no canonicalisation.
+        for (std::size_t p = 0; p < n; ++p) {
+            for (std::size_t q = p + 1; q < n; ++q) {
+                const double distance = detail::dense_distance(
+                    data, num_samples, indices[p], indices[q]);
+                if (!std::isfinite(distance) || distance < 0.0) {
+                    throw bad_distance(indices[p], indices[q]);
+                }
+            }
+        }
+        for (std::uint32_t id = 0; id < num_ids; ++id) {
+            ClassConcordance row;
+            row.label = id_label[id];
+            row.num_members = id_count[id];
+            model.classes.push_back(std::move(row));
+        }
+        return model;
+    }
+
+    const std::size_t no_neighbour = n;
+    // char, not bool: distinct elements of a vector<bool> share a word, so
+    // writing different indices from different threads is a data race.
+    std::vector<char> concordant(n, 0);
+
+    // Capped at the row count for the same reason as in `activity_landscape`:
+    // `num_threads` is a size_t on a public options struct, so without this an
+    // absurd value has ThreadPool try to create that many OS threads, and
+    // `8 * threads` below wraps to zero. Reaching here means num_ids >= 2 and
+    // so n >= 2, which is what keeps the cap from turning an explicit request
+    // into the zero the pool reads as "use the hardware concurrency"; a
+    // num_threads of 0 is the caller asking for exactly that, and passes
+    // through unchanged.
+    ThreadPool pool(std::min<std::size_t>(options.num_threads, n));
+    const std::size_t threads =
+        std::max<std::size_t>(1, std::min<std::size_t>(pool.NumThreads(), n));
+    const std::size_t chunk_size = std::max<std::size_t>(1, n / (8 * threads));
+
+    pool.ParallelFor(0, n, chunk_size, [&](std::size_t begin, std::size_t end) {
+        for (std::size_t p = begin; p < end; ++p) {
+            double best_distance = std::numeric_limits<double>::infinity();
+            std::size_t best_q = no_neighbour;
+            for (std::size_t q = 0; q < n; ++q) {
+                if (q == p) {
+                    continue;
+                }
+                const double distance = detail::dense_distance(
+                    data, num_samples, indices[p], indices[q]);
+                if (!std::isfinite(distance) || distance < 0.0) {
+                    throw bad_distance(indices[p], indices[q]);
+                }
+                // Strict, over an ascending scan: ties resolve to the lowest
+                // scored index, which is what makes the result independent of
+                // the thread count.
+                if (distance < best_distance) {
+                    best_distance = distance;
+                    best_q = q;
+                }
+            }
+            concordant[p] = (best_q != no_neighbour &&
+                             class_ids[best_q] == class_ids[p])
+                                ? 1
+                                : 0;
+        }
+    });
+
+    std::vector<std::size_t> id_concordant(num_ids, 0);
+    for (std::size_t p = 0; p < n; ++p) {
+        if (concordant[p] != 0) {
+            ++id_concordant[class_ids[p]];
+        }
+    }
+
+    double fraction_sum = 0.0;
+    for (std::uint32_t id = 0; id < num_ids; ++id) {
+        ClassConcordance row;
+        row.label = id_label[id];
+        row.num_members = id_count[id];
+        row.fraction_same_class = static_cast<double>(id_concordant[id]) /
+                                  static_cast<double>(id_count[id]);
+        fraction_sum += row.fraction_same_class;
+        model.classes.push_back(std::move(row));
+    }
+    model.modi = fraction_sum / static_cast<double>(num_ids);
+
+    return model;
 }
 
 }  // namespace OECluster
