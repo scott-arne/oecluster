@@ -3,6 +3,7 @@
 import concurrent.futures
 import math
 
+import numpy as np
 import oecluster
 import pytest
 from oecluster import (
@@ -695,9 +696,8 @@ def test_modelability_accepts_any_iterable_of_class_strings():
     assert oecluster.modelability(
         dm, (label for label in block)).modi == pytest.approx(
             expected, abs=1e-12)
-    numpy = pytest.importorskip("numpy")
     assert oecluster.modelability(
-        dm, numpy.array(block, dtype=object)).modi == pytest.approx(
+        dm, np.array(block, dtype=object)).modi == pytest.approx(
             expected, abs=1e-12)
 
 
