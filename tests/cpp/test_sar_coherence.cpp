@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cfloat>
 #include <cmath>
 #include <cstdint>
@@ -8,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "oecluster/StorageBackend.h"
 #include "oecluster/clustering/ClusterTypes.h"
 #include "oecluster/clustering/PartitionAgreement.h"
 #include "oecluster/clustering/SARCoherence.h"
@@ -16,12 +18,28 @@
 
 namespace {
 
+using OECluster::ActivityLandscape;
+using OECluster::ActivityLandscapeOptions;
 using OECluster::ClusterLabel;
 using OECluster::NoiseHandling;
 using OECluster::SARCoherence;
 using OECluster::SARCoherenceOptions;
 
 constexpr double NOT_A_NUMBER = std::numeric_limits<double>::quiet_NaN();
+
+/// Fills the upper triangle in condensed (i, j) order. The list must hold
+/// exactly n * (n - 1) / 2 entries.
+void FillStorage(OECluster::DenseStorage& storage,
+                 const std::vector<double>& condensed) {
+    const std::size_t n = storage.NumSamples();
+    std::size_t k = 0;
+    for (std::size_t i = 0; i < n; ++i) {
+        for (std::size_t j = i + 1; j < n; ++j) {
+            storage.Set(i, j, condensed[k]);
+            ++k;
+        }
+    }
+}
 
 OECluster::ClusteringResult MakeResult(std::vector<ClusterLabel> labels) {
     OECluster::Clusters members = OECluster::labels_to_clusters(labels);
@@ -637,4 +655,396 @@ TEST(SARCoherenceTest, RejectsAnEmptyOrMismatchedActivity) {
         EXPECT_NE(message.find("the clustering has 3 samples"),
                   std::string::npos);
     }
+}
+
+TEST(ActivityLandscapeTest, CountsCliffsOnBothBoundariesInclusively) {
+    OECluster::DenseStorage storage(4);
+    FillStorage(storage, {0.30, 0.31, 0.20, 0.50, 0.10, 0.40});
+
+    const ActivityLandscape landscape =
+        OECluster::activity_landscape(storage, {0.0, 1.0, 5.0, 0.5});
+
+    EXPECT_EQ(landscape.num_samples, 4u);
+    EXPECT_EQ(landscape.num_scored, 4u);
+    EXPECT_EQ(landscape.num_pairs_scored, 6u);
+    EXPECT_EQ(landscape.num_cliffs, 1u);
+    EXPECT_NEAR(landscape.cliff_density, 1.0 / 6.0, 1e-12);
+}
+
+TEST(ActivityLandscapeTest, ScoresSaliAgainstAHandFixture) {
+    OECluster::DenseStorage storage(3);
+    FillStorage(storage, {0.5, 0.25, 0.125});
+
+    const ActivityLandscape landscape =
+        OECluster::activity_landscape(storage, {0.0, 1.0, 3.0});
+
+    EXPECT_EQ(landscape.num_zero_distance_pairs, 0u);
+    EXPECT_DOUBLE_EQ(landscape.max_sali, 16.0);
+    EXPECT_DOUBLE_EQ(landscape.mean_sali, 10.0);
+    EXPECT_EQ(landscape.num_cliffs, 2u);
+    EXPECT_NEAR(landscape.cliff_density, 2.0 / 3.0, 1e-12);
+    EXPECT_NEAR(landscape.activity_stddev, 1.2472191289246473, 1e-12);
+    EXPECT_EQ(landscape.rmodi, 0.0);
+}
+
+TEST(ActivityLandscapeTest, ReportsZeroDistancePairsRatherThanScoringThem) {
+    OECluster::DenseStorage storage(3);
+    FillStorage(storage, {0.0, 0.5, 0.25});
+
+    const ActivityLandscape landscape =
+        OECluster::activity_landscape(storage, {0.0, 1.0, 2.0});
+
+    EXPECT_EQ(landscape.num_zero_distance_pairs, 1u);
+    EXPECT_DOUBLE_EQ(landscape.max_sali, 4.0);
+    EXPECT_DOUBLE_EQ(landscape.mean_sali, 4.0);
+}
+
+TEST(ActivityLandscapeTest, LeavesSaliUndefinedWhenEveryPairIsCoincident) {
+    OECluster::DenseStorage storage(3);
+    FillStorage(storage, {0.0, 0.0, 0.0});
+
+    const ActivityLandscape landscape =
+        OECluster::activity_landscape(storage, {0.0, 1.0, 2.0});
+
+    EXPECT_EQ(landscape.num_zero_distance_pairs, 3u);
+    EXPECT_TRUE(std::isnan(landscape.max_sali));
+    EXPECT_TRUE(std::isnan(landscape.mean_sali));
+    EXPECT_EQ(landscape.num_cliffs, 3u);
+    EXPECT_DOUBLE_EQ(landscape.cliff_density, 1.0);
+    EXPECT_EQ(landscape.rmodi, 0.0);
+}
+
+// A zero spread makes the band zero, so every neighbour is in the same band
+// and every molecule is concordant. Nothing here is undefined.
+TEST(ActivityLandscapeTest, HandlesAFlatActivity) {
+    OECluster::DenseStorage storage(3);
+    FillStorage(storage, {0.5, 0.25, 0.125});
+
+    const ActivityLandscape landscape =
+        OECluster::activity_landscape(storage, {5.0, 5.0, 5.0});
+
+    EXPECT_EQ(landscape.activity_stddev, 0.0);
+    EXPECT_EQ(landscape.rmodi, 1.0);
+    EXPECT_EQ(landscape.num_cliffs, 0u);
+    EXPECT_EQ(landscape.max_sali, 0.0);
+    EXPECT_EQ(landscape.mean_sali, 0.0);
+}
+
+// A molecule with no same-band neighbour keeps same_min at infinity and
+// cannot be concordant.
+TEST(ActivityLandscapeTest, AMoleculeWithNoSameBandNeighbourIsDiscordant) {
+    OECluster::DenseStorage storage(3);
+    FillStorage(storage, {0.5, 0.25, 0.125});
+
+    const ActivityLandscape landscape =
+        OECluster::activity_landscape(storage, {0.0, 10.0, 10.5});
+
+    EXPECT_NEAR(landscape.rmodi, 2.0 / 3.0, 1e-12);
+}
+
+// A molecule with no different-band neighbour keeps diff_min at infinity and
+// is concordant, which is the opposite convention and easy to get backwards.
+TEST(ActivityLandscapeTest, AMoleculeWithNoDifferentBandNeighbourIsConcordant) {
+    OECluster::DenseStorage storage(4);
+    FillStorage(storage, {0.8, 0.9, 0.1, 0.2, 0.3, 0.4});
+    ActivityLandscapeOptions options;
+    options.rmodi_delta = 2.0;
+
+    const ActivityLandscape landscape =
+        OECluster::activity_landscape(storage, {0.0, 1.0, 2.0, 3.0}, options);
+
+    EXPECT_NEAR(landscape.activity_stddev, 1.118033988749895, 1e-12);
+    EXPECT_DOUBLE_EQ(landscape.rmodi, 0.5);
+}
+
+// Equal band minima do not count: the comparison is strict, so a molecule
+// whose nearest same-band and nearest different-band neighbours are both at
+// distance zero is discordant.
+TEST(ActivityLandscapeTest, EqualBandMinimaAtZeroDoNotCount) {
+    OECluster::DenseStorage storage(4);
+    FillStorage(storage, {0.0, 0.0, 0.7, 0.6, 0.5, 0.4});
+
+    const ActivityLandscape landscape =
+        OECluster::activity_landscape(storage, {0.0, 0.0, 5.0, 5.0});
+
+    EXPECT_EQ(landscape.num_zero_distance_pairs, 2u);
+    EXPECT_DOUBLE_EQ(landscape.rmodi, 0.5);
+}
+
+TEST(ActivityLandscapeTest, EqualBandMinimaAtANonzeroDistanceDoNotCount) {
+    OECluster::DenseStorage storage(4);
+    FillStorage(storage, {0.3, 0.3, 0.9, 0.8, 0.7, 0.6});
+
+    const ActivityLandscape landscape =
+        OECluster::activity_landscape(storage, {0.0, 0.0, 5.0, 5.0});
+
+    // A non-strict comparison would report 0.75 here.
+    EXPECT_DOUBLE_EQ(landscape.rmodi, 0.5);
+}
+
+TEST(ActivityLandscapeTest, MissingActivitiesLeaveTheirPairsUnscored) {
+    OECluster::DenseStorage storage(4);
+    FillStorage(storage, {0.5, 0.25, 0.5, 0.125, 0.5, 0.5});
+
+    const ActivityLandscape landscape = OECluster::activity_landscape(
+        storage, {0.0, 1.0, 3.0, NOT_A_NUMBER});
+
+    EXPECT_EQ(landscape.num_samples, 4u);
+    EXPECT_EQ(landscape.num_scored, 3u);
+    EXPECT_EQ(landscape.num_pairs_scored, 3u);
+    EXPECT_DOUBLE_EQ(landscape.max_sali, 16.0);
+    EXPECT_DOUBLE_EQ(landscape.mean_sali, 10.0);
+}
+
+// Guards 8 and 9 must not reject a degenerate but legal input. Each of these
+// returns the documented undefined values rather than throwing.
+TEST(ActivityLandscapeTest, DegenerateInputsReturnUndefinedValues) {
+    OECluster::DenseStorage storage(2);
+    FillStorage(storage, {0.5});
+
+    const ActivityLandscape all_missing = OECluster::activity_landscape(
+        storage, {NOT_A_NUMBER, NOT_A_NUMBER});
+    EXPECT_EQ(all_missing.num_scored, 0u);
+    EXPECT_EQ(all_missing.num_pairs_scored, 0u);
+    EXPECT_TRUE(std::isnan(all_missing.cliff_density));
+    EXPECT_TRUE(std::isnan(all_missing.rmodi));
+    EXPECT_TRUE(std::isnan(all_missing.activity_stddev));
+
+    const ActivityLandscape one_scored =
+        OECluster::activity_landscape(storage, {1.0, NOT_A_NUMBER});
+    EXPECT_EQ(one_scored.num_scored, 1u);
+    EXPECT_EQ(one_scored.num_pairs_scored, 0u);
+    EXPECT_TRUE(std::isnan(one_scored.rmodi));
+    EXPECT_TRUE(std::isnan(one_scored.activity_stddev));
+}
+
+TEST(ActivityLandscapeTest, RejectsANegativeOrNonFiniteDistance) {
+    OECluster::DenseStorage negative(3);
+    FillStorage(negative, {0.5, -0.25, 0.125});
+    try {
+        OECluster::activity_landscape(negative, {0.0, 1.0, 3.0});
+        FAIL() << "expected a negative distance to be rejected";
+    } catch (const std::invalid_argument& error) {
+        const std::string message = error.what();
+        EXPECT_NE(message.find("activity_landscape"), std::string::npos);
+        EXPECT_NE(message.find("0 and 2"), std::string::npos);
+    }
+
+    OECluster::DenseStorage infinite(3);
+    FillStorage(infinite,
+                {0.5, std::numeric_limits<double>::infinity(), 0.125});
+    EXPECT_THROW(OECluster::activity_landscape(infinite, {0.0, 1.0, 3.0}),
+                 std::invalid_argument);
+}
+
+TEST(ActivityLandscapeTest, RejectsAnOverflowingSali) {
+    OECluster::DenseStorage storage(2);
+    FillStorage(storage, {1e-200});
+
+    try {
+        OECluster::activity_landscape(storage, {0.0, 1e154});
+        FAIL() << "expected an overflowing SALI accumulator to be rejected";
+    } catch (const std::invalid_argument& error) {
+        EXPECT_NE(std::string(error.what()).find("mean_sali"),
+                  std::string::npos);
+    }
+}
+
+TEST(ActivityLandscapeTest, RejectsAnOverflowingSpread) {
+    OECluster::DenseStorage storage(2);
+    FillStorage(storage, {0.5});
+
+    for (const std::vector<double>& activity :
+         {std::vector<double>{-1e300, 1e300}, std::vector<double>{DBL_MAX, DBL_MAX}}) {
+        try {
+            OECluster::activity_landscape(storage, activity);
+            FAIL() << "expected an overflowing spread to be rejected";
+        } catch (const std::invalid_argument& error) {
+            EXPECT_NE(std::string(error.what()).find("activity_stddev"),
+                      std::string::npos);
+        }
+    }
+
+    // The arrangement that would invert RMODI if the spread guard ever stopped
+    // firing: |a - b| overflows to +inf, the band overflows to +inf too, and
+    // `delta <= band` reads as true even though 2*DBL_MAX exceeds
+    // 1.5*DBL_MAX. A zero distance is what makes it dangerous, because it skips
+    // the SALI division where the infinity would otherwise be caught -- the
+    // sweep would report a perfectly concordant landscape. The sweep carries no
+    // check of its own against this, deliberately: an overflowing difference
+    // forces a scale above DBL_MAX/2, whose square cannot be represented, so
+    // the spread guard necessarily precedes it. That argument is only worth
+    // making if something pins it, which is this block.
+    OECluster::DenseStorage coincident(2);
+    FillStorage(coincident, {0.0});
+    ActivityLandscapeOptions wide_band;
+    wide_band.rmodi_delta = 1.5;
+    try {
+        OECluster::activity_landscape(coincident, {-DBL_MAX, DBL_MAX},
+                                      wide_band);
+        FAIL() << "expected an overflowing difference to be rejected";
+    } catch (const std::invalid_argument& error) {
+        EXPECT_NE(std::string(error.what()).find("activity_stddev"),
+                  std::string::npos);
+    }
+}
+
+TEST(ActivityLandscapeTest, RejectsNegativeOrNonFiniteOptions) {
+    OECluster::DenseStorage storage(3);
+    FillStorage(storage, {0.5, 0.25, 0.125});
+    const std::vector<double> activity = {0.0, 1.0, 3.0};
+
+    ActivityLandscapeOptions negative_distance;
+    negative_distance.distance_threshold = -0.1;
+    try {
+        OECluster::activity_landscape(storage, activity, negative_distance);
+        FAIL() << "expected a negative distance_threshold to be rejected";
+    } catch (const std::invalid_argument& error) {
+        EXPECT_NE(std::string(error.what()).find("distance_threshold"),
+                  std::string::npos);
+    }
+
+    ActivityLandscapeOptions negative_activity;
+    negative_activity.activity_threshold = -1.0;
+    EXPECT_THROW(
+        OECluster::activity_landscape(storage, activity, negative_activity),
+        std::invalid_argument);
+
+    ActivityLandscapeOptions nonfinite_delta;
+    nonfinite_delta.rmodi_delta = std::numeric_limits<double>::infinity();
+    try {
+        OECluster::activity_landscape(storage, activity, nonfinite_delta);
+        FAIL() << "expected a non-finite rmodi_delta to be rejected";
+    } catch (const std::invalid_argument& error) {
+        EXPECT_NE(std::string(error.what()).find("rmodi_delta"),
+                  std::string::npos);
+    }
+
+    // Zero is legal for both thresholds that can meaningfully be zero.
+    ActivityLandscapeOptions zeroed;
+    zeroed.rmodi_delta = 0.0;
+    zeroed.activity_threshold = 0.0;
+    EXPECT_NO_THROW(OECluster::activity_landscape(storage, activity, zeroed));
+}
+
+TEST(ActivityLandscapeTest, RejectsAnEmptyOrMismatchedActivity) {
+    OECluster::DenseStorage storage(3);
+    FillStorage(storage, {0.5, 0.25, 0.125});
+
+    try {
+        OECluster::activity_landscape(storage, {});
+        FAIL() << "expected an empty activity to be rejected";
+    } catch (const std::invalid_argument& error) {
+        EXPECT_NE(std::string(error.what()).find("non-empty"),
+                  std::string::npos);
+    }
+
+    try {
+        OECluster::activity_landscape(storage, {1.0, 2.0});
+        FAIL() << "expected a length mismatch to be rejected";
+    } catch (const std::invalid_argument& error) {
+        const std::string message = error.what();
+        EXPECT_NE(message.find("activity has 2 entries"), std::string::npos);
+        EXPECT_NE(message.find("the storage has 3 samples"), std::string::npos);
+    }
+
+    // Both directions of the mismatch, because the check is a comparison and a
+    // one-sided test would pass against `activity.size() < expected`.
+    try {
+        OECluster::activity_landscape(storage, {1.0, 2.0, 3.0, 4.0});
+        FAIL() << "expected an overlong activity to be rejected";
+    } catch (const std::invalid_argument& error) {
+        const std::string message = error.what();
+        EXPECT_NE(message.find("activity has 4 entries"), std::string::npos);
+        EXPECT_NE(message.find("the storage has 3 samples"), std::string::npos);
+    }
+
+    // An empty activity against empty storage takes the non-empty refusal, not
+    // the cardinality one: the emptiness check runs first, so "0 entries and 0
+    // samples" never reads as agreement.
+    OECluster::DenseStorage empty(0);
+    try {
+        OECluster::activity_landscape(empty, {});
+        FAIL() << "expected an empty activity to be rejected";
+    } catch (const std::invalid_argument& error) {
+        EXPECT_NE(std::string(error.what()).find("non-empty"),
+                  std::string::npos);
+    }
+}
+
+TEST(ActivityLandscapeTest, RefusesSparseStorage) {
+    OECluster::SparseStorage sparse(3, 0.5);
+
+    try {
+        OECluster::activity_landscape(sparse, {0.0, 1.0, 3.0});
+        FAIL() << "expected SparseStorage to be refused";
+    } catch (const std::invalid_argument& error) {
+        const std::string message = error.what();
+        EXPECT_NE(message.find("activity_landscape"), std::string::npos);
+        EXPECT_NE(message.find("SparseStorage"), std::string::npos);
+    }
+}
+
+// Every reported value must be identical bit for bit across thread counts.
+// The floating-point sums are the fragile part: they are only invariant
+// because the per-row partials are combined in ascending row order after the
+// join, never inside a worker.
+TEST(ActivityLandscapeTest, IsInvariantUnderTheThreadCount) {
+    constexpr std::size_t SAMPLES = 200;
+    OECluster::DenseStorage storage(SAMPLES);
+    for (std::size_t i = 0; i < SAMPLES; ++i) {
+        for (std::size_t j = i + 1; j < SAMPLES; ++j) {
+            storage.Set(i, j, static_cast<double>((i * 37 + j * 11) % 100) / 100.0);
+        }
+    }
+    std::vector<double> activity(SAMPLES);
+    for (std::size_t i = 0; i < SAMPLES; ++i) {
+        activity[i] = static_cast<double>((i * 13) % 29) / 7.0;
+    }
+
+    ActivityLandscapeOptions single;
+    single.num_threads = 1;
+    const ActivityLandscape reference =
+        OECluster::activity_landscape(storage, activity, single);
+
+    for (const std::size_t threads : {2u, 4u, 8u}) {
+        ActivityLandscapeOptions options;
+        options.num_threads = threads;
+        const ActivityLandscape landscape =
+            OECluster::activity_landscape(storage, activity, options);
+
+        EXPECT_EQ(landscape.num_cliffs, reference.num_cliffs);
+        EXPECT_EQ(landscape.num_zero_distance_pairs,
+                  reference.num_zero_distance_pairs);
+        EXPECT_EQ(landscape.max_sali, reference.max_sali);
+        EXPECT_EQ(landscape.mean_sali, reference.mean_sali);
+        EXPECT_EQ(landscape.rmodi, reference.rmodi);
+        EXPECT_EQ(landscape.cliff_density, reference.cliff_density);
+    }
+}
+
+// num_threads is a size_t, so "more threads than the machine could ever run"
+// is a value a caller can pass. Two things have to survive it: ThreadPool must
+// not be asked to create that many OS threads, and `8 * threads` must not wrap
+// to zero and turn the chunk-size division into division by zero. The cap at
+// the row count handles both, and the answer must be the single-threaded one.
+TEST(ActivityLandscapeTest, CapsAnAbsurdThreadCount) {
+    OECluster::DenseStorage storage(4);
+    FillStorage(storage, {0.1, 0.2, 0.3, 0.15, 0.25, 0.35});
+    const std::vector<double> activity = {1.0, 2.0, 4.0, 8.0};
+
+    ActivityLandscapeOptions single;
+    single.num_threads = 1;
+    const ActivityLandscape reference =
+        OECluster::activity_landscape(storage, activity, single);
+
+    ActivityLandscapeOptions absurd;
+    absurd.num_threads = std::size_t{1} << 61;
+    const ActivityLandscape landscape =
+        OECluster::activity_landscape(storage, activity, absurd);
+
+    EXPECT_EQ(landscape.num_cliffs, reference.num_cliffs);
+    EXPECT_EQ(landscape.max_sali, reference.max_sali);
+    EXPECT_EQ(landscape.mean_sali, reference.mean_sali);
+    EXPECT_EQ(landscape.rmodi, reference.rmodi);
 }
