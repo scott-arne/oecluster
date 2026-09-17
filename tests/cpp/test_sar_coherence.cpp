@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <algorithm>
 #include <cfloat>
 #include <cmath>
 #include <cstdint>
@@ -784,10 +783,14 @@ TEST(ActivityLandscapeTest, EqualBandMinimaAtANonzeroDistanceDoNotCount) {
 
 TEST(ActivityLandscapeTest, MissingActivitiesLeaveTheirPairsUnscored) {
     OECluster::DenseStorage storage(4);
-    FillStorage(storage, {0.5, 0.25, 0.5, 0.125, 0.5, 0.5});
+    // Sample 1 is the dropped one, so scored position p no longer equals
+    // original sample p. The distances involving sample 1 are all 0.9 and
+    // differ from every scored distance, so reading the matrix at the scored
+    // position instead of the original index changes the answer.
+    FillStorage(storage, {0.9, 0.5, 0.25, 0.9, 0.9, 0.125});
 
     const ActivityLandscape landscape = OECluster::activity_landscape(
-        storage, {0.0, 1.0, 3.0, NOT_A_NUMBER});
+        storage, {0.0, NOT_A_NUMBER, 1.0, 3.0});
 
     EXPECT_EQ(landscape.num_samples, 4u);
     EXPECT_EQ(landscape.num_scored, 3u);

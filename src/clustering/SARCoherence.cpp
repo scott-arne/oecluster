@@ -180,26 +180,28 @@ ActivityLandscape activity_landscape(const StorageBackend& storage,
     const std::size_t num_samples = storage.NumSamples();
     const double* data = storage.Data();
     const double band = options.rmodi_delta * landscape.activity_stddev;
-    constexpr double INFINITE = std::numeric_limits<double>::infinity();
+    constexpr double INFTY = std::numeric_limits<double>::infinity();
 
     std::vector<std::size_t> row_cliffs(n, 0);
     std::vector<std::size_t> row_zero_pairs(n, 0);
     std::vector<std::size_t> row_sali_count(n, 0);
     std::vector<double> row_sali_sum(n, 0.0);
-    std::vector<double> row_max(n, -INFINITE);
-    std::vector<double> same_min(n, INFINITE);
-    std::vector<double> diff_min(n, INFINITE);
+    std::vector<double> row_max(n, -INFTY);
+    std::vector<double> same_min(n, INFTY);
+    std::vector<double> diff_min(n, INFTY);
     std::mutex merge_mutex;
 
-    // Capped at the row count before the pool is built. num_threads is a
-    // size_t on a public options struct, so the only thing standing between a
-    // caller and ThreadPool trying to spawn 2^61 OS threads is this line; and
-    // a worker with no row to take is pure overhead even at sane values. The
-    // cap is also what makes 8 * threads below safe to form: a matrix with n
-    // rows needs n^2/2 doubles, so n is nowhere near the value at which the
-    // multiplication could wrap. A num_threads of 0 means "use the hardware
-    // concurrency" and passes through the cap unchanged; the early return
-    // above guarantees n >= 2, so no other value can reach zero here.
+    // Capped at the row count before the pool is built. The cap defends
+    // against an explicitly oversized num_threads: it is a size_t on a public
+    // options struct, so the only thing standing between a caller and
+    // ThreadPool trying to spawn 2^61 OS threads is this line. The cap is also
+    // what makes 8 * threads below safe to form: a matrix with n rows needs
+    // n^2/2 doubles, so n is nowhere near the value at which the multiplication
+    // could wrap. A num_threads of 0 bypasses the cap by design, because it
+    // means "use the hardware concurrency" -- so a small n still spawns that
+    // many workers for what is a single chunk, matching how HDBSCAN and
+    // Agglomerative already size their pools. The early return above guarantees
+    // n >= 2, so no value other than that deliberate 0 can reach zero here.
     ThreadPool pool(std::min<std::size_t>(options.num_threads, n));
     const std::size_t threads =
         std::max<std::size_t>(1, std::min<std::size_t>(pool.NumThreads(), n));
@@ -208,8 +210,8 @@ ActivityLandscape activity_landscape(const StorageBackend& storage,
     const std::size_t chunk_size = std::max<std::size_t>(64, n / (8 * threads));
 
     pool.ParallelFor(0, n, chunk_size, [&](std::size_t begin, std::size_t end) {
-        std::vector<double> local_same(n, INFINITE);
-        std::vector<double> local_diff(n, INFINITE);
+        std::vector<double> local_same(n, INFTY);
+        std::vector<double> local_diff(n, INFTY);
         for (std::size_t p = begin; p < end; ++p) {
             for (std::size_t q = p + 1; q < n; ++q) {
                 const double distance = detail::dense_distance(
@@ -228,6 +230,13 @@ ActivityLandscape activity_landscape(const StorageBackend& storage,
                 // for exactly that, above, before any distance is read. A check
                 // here would be unreachable. RejectsAnOverflowingSpread pins
                 // the ordering with the case that would otherwise invert RMODI.
+                // The unreachability is borrowed from population_stddev's
+                // declared domain rather than from arithmetic alone -- see
+                // ActivityMetrics.h, where refusing {-1e300, 1e300} is a
+                // deliberate agreement with sums_of_squares even though the
+                // scaling could represent that spread -- so widening that
+                // domain makes an overflowing delta reachable here, and this
+                // sweep would then need its own check.
                 const double delta =
                     std::fabs(scored.values[p] - scored.values[q]);
 
@@ -281,7 +290,7 @@ ActivityLandscape activity_landscape(const StorageBackend& storage,
     std::size_t num_zero_pairs = 0;
     std::size_t sali_count = 0;
     double sali_sum = 0.0;
-    double max_sali = -INFINITE;
+    double max_sali = -INFTY;
     for (std::size_t p = 0; p < n; ++p) {
         num_cliffs += row_cliffs[p];
         num_zero_pairs += row_zero_pairs[p];
