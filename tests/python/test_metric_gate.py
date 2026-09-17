@@ -1409,17 +1409,42 @@ def test_require_comparable_refuses_subset_scored_without_an_override():
 
 def test_require_comparable_accepts_a_triangle_violation():
     """These metrics never assume a metric: they rank and threshold distances,
-    and a triangle-inequality violation leaves both operations meaningful."""
+    and a triangle-inequality violation leaves both operations meaningful.
+
+    Asserts that the gate accepts the violation, then proves the gate is
+    actually enforcing tier-1 checks on the same matrix by injecting a tier-1
+    fault and confirming refusal."""
     dist = oecluster.pdist(_mols(), "fingerprint")
     dist._facts['triangle'] = False
 
     assert _gate.require_comparable(dist, "activity_landscape") is None
 
+    # The control for the assertion above: a gate that had been deleted would
+    # also "accept" the triangle violation, so prove on this same matrix that
+    # the gate is still running and still refusing what it must.
+    dist._facts['is_distance'] = False
+    with pytest.raises(ValueError, match="requires distances"):
+        _gate.require_comparable(dist, "activity_landscape")
+
 
 def test_require_comparable_accepts_a_proven_probe_violation():
+    """These metrics never assume a metric: they rank and threshold distances,
+    and a proven triangle inequality violation (via probe sampling) leaves both
+    operations meaningful.
+
+    Asserts that the gate accepts the violation, then proves the gate is
+    actually enforcing tier-1 checks on the same matrix by injecting a tier-1
+    fault and confirming refusal."""
     dist = oecluster.pdist(_mols(), "fingerprint")
     dist._facts['metric_probe'] = "violations_found"
     dist._facts['probe_violations'] = 3
     dist._facts['probe_sampled'] = 100
 
     assert _gate.require_comparable(dist, "modelability") is None
+
+    # The control for the assertion above: a gate that had been deleted would
+    # also "accept" the probe violation, so prove on this same matrix that the
+    # gate is still running and still refusing what it must.
+    dist._facts['zero_self'] = False
+    with pytest.raises(ValueError, match="zero self-distance"):
+        _gate.require_comparable(dist, "modelability")
