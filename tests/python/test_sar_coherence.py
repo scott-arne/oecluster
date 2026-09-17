@@ -74,8 +74,13 @@ def test_sar_coherence_accepts_a_clustering_result(monkeypatch):
     ``getattr(value, "labels", value)``, so a ClusteringResult handed to the
     label branch is decomposed and scored perfectly well -- deleting the
     ``isinstance`` branch from ``sar_coherence`` leaves every assertion below
-    the spy passing. The spy is the only thing here that says the native
-    overload taking a result was the one called.
+    the spies passing. It takes two spies to say what the branches did, and
+    neither says it alone. The conversion spy pins that the result branch
+    converts and that the label branch never does; it says nothing about what
+    was then handed to the extension, and a branch that converted a result and
+    passed the label vector on regardless would satisfy it. The native spy
+    pins that, by recording the argument type of each call: a native
+    ``ClusteringResult`` for the first, a native ``IntVector`` for the second.
 
     That the two *native* overloads agree on a shared labeling is pinned in
     ``tests/python/test_native_bindings.py``; what this test pins is the
@@ -90,6 +95,17 @@ def test_sar_coherence_accepts_a_clustering_result(monkeypatch):
 
     monkeypatch.setattr(oecluster, "_native_clustering_result", spy)
 
+    # The call site looks this up on the extension module at call time, so
+    # patching the attribute there intercepts the dispatch itself.
+    native_argument_types = []
+    real_native = oecluster._oecluster.sar_coherence
+
+    def native_spy(*args, **kwargs):
+        native_argument_types.append(type(args[0]).__name__)
+        return real_native(*args, **kwargs)
+
+    monkeypatch.setattr(oecluster._oecluster, "sar_coherence", native_spy)
+
     dm = _line_dm([0.0, 0.1, 0.2, 5.0, 5.1, 5.2])
     result = oecluster.dbscan(dm, 0.3, min_samples=2)
     activity = [1.0, 1.2, 0.9, 7.0, 7.4, 7.1]
@@ -101,6 +117,10 @@ def test_sar_coherence_accepts_a_clustering_result(monkeypatch):
     # or the two branches are not the two branches.
     assert len(calls) == 1
     assert calls[0] is result
+
+    # And each call reached the native overload named for the argument it was
+    # given, in that order.
+    assert native_argument_types == ["ClusteringResult", "IntVector"]
 
     # Two degenerate answers agree as readily as two correct ones: had dbscan
     # returned one cluster, or all noise, the three equalities below would hold
@@ -263,13 +283,16 @@ def test_sar_coherence_reports_its_two_undefined_effect_sizes():
 
 
 def test_sar_coherence_rejects_a_length_mismatch():
-    """Both directions and both overloads, on an ordinary fixture.
+    """Both directions and both overloads, on an ordinary fixture: four cases.
 
-    Short and long are separate checks and ``!=`` is the only comparison that
-    catches both: narrowing either overload's guard to ``<`` keeps refusing a
-    short activity while letting an overlong one reach native code, where it
-    comes back as ``RuntimeError`` rather than the ``ValueError`` documented
-    for it. The only overlong case the file had was the zero-sample fixture in
+    The four are short then overlong on the bare-label overload, then short
+    then overlong on the ClusteringResult overload. Both directions are needed
+    on each because ``!=`` is the only comparison that catches both: narrowing
+    that overload's guard to ``<`` keeps refusing a short activity while letting
+    an overlong one reach native code, where it comes back as ``RuntimeError``
+    rather than the ``ValueError`` documented for it, and narrowing it to ``>``
+    does the same to a short one. The only overlong case the file had was the
+    zero-sample fixture in
     ``test_sar_coherence_reports_an_empty_labeling_as_a_length_mismatch``,
     which is overlong by accident of covering ``0 == 0``.
 
@@ -286,13 +309,19 @@ def test_sar_coherence_rejects_a_length_mismatch():
         oecluster.sar_coherence([0, 0, 1], [1.0, 2.0, 3.0, 4.0])
 
     # The ClusteringResult overload measures against ``result.num_samples``
-    # rather than a coerced label vector, so it is a second check and needs its
-    # own overlong case.
+    # rather than a coerced label vector, so it is a second check and needs both
+    # of its own directions.
     result = ClusteringResult([0, 0, 1], [[0, 1], [2]])
 
     with pytest.raises(ValueError, match="activity has 4 entries but the "
                                          "clustering has 3 samples"):
         oecluster.sar_coherence(result, [1.0, 2.0, 3.0, 4.0])
+
+    four_samples = ClusteringResult([0, 0, 1, 1], [[0, 1], [2, 3]])
+
+    with pytest.raises(ValueError, match="activity has 2 entries but the "
+                                         "clustering has 4 samples"):
+        oecluster.sar_coherence(four_samples, [1.0, 2.0])
 
 
 def test_sar_coherence_reports_an_empty_labeling_as_a_length_mismatch():
@@ -487,25 +516,45 @@ def test_the_row_tables_are_ordered_by_first_appearance():
 
     Every other fixture in this file numbers its clusters and names its classes
     in ascending order, where the documented contract and a
-    ``sorted(rows, key=label)`` implementation agree row for row. These labels
-    descend, so the two disagree: sorting would report ``[1, 5]`` and
-    ``["A", "Z"]``.
+    ``sorted(rows, key=label)`` implementation agree row for row. A two-row
+    fixture is barely better: descending labels separate first appearance from
+    an ascending sort on the label and from nothing else, so a sort on the row
+    count, in either direction, goes unnoticed.
 
-    A statistic is asserted beside each label list so the rows are shown to
+    Both fixtures below therefore carry three rows, with three distinct counts,
+    arranged so that first appearance differs from all four of ascending label,
+    descending label, ascending count and descending count. Any one of those
+    four orderings moves at least one row, and the enumerations in the comments
+    say which.
+
+    Two statistics are asserted beside each label list so the rows are shown to
     travel with their labels rather than the labels merely being in some order.
     """
-    coherence = oecluster.sar_coherence([5, 1, 5, 1], [1.0, 2.0, 3.0, 4.0])
+    coherence = oecluster.sar_coherence([7, 7, 4, 7, 9, 9],
+                                        [1.0, 2.0, 10.0, 3.0, 20.0, 22.0])
 
-    assert [row.label for row in coherence.clusters] == [5, 1]
-    # Cluster 5 holds samples 0 and 2 and cluster 1 holds 1 and 3, so the means
-    # swap under a sort too and the two rows are not interchangeable.
-    assert [row.mean_activity for row in coherence.clusters] == [2.0, 3.0]
+    assert coherence.num_clusters == 3
+    assert coherence.num_scored == 6
+    # First appearance [7, 4, 9]; ascending label [4, 7, 9]; descending
+    # [9, 7, 4]; ascending num_scored [4, 9, 7]; descending [7, 9, 4].
+    assert [row.label for row in coherence.clusters] == [7, 4, 9]
+    assert [row.num_scored for row in coherence.clusters] == [3, 1, 2]
+    # Cluster 7 holds samples 0, 1 and 3, cluster 4 holds 2, and cluster 9 holds
+    # 4 and 5, so every reordering carries a different mean into each position.
+    assert [row.mean_activity for row in coherence.clusters] == [2.0, 10.0, 21.0]
 
-    report = oecluster.modelability(_line_dm([0.0, 1.0, 2.0, 3.0]),
-                                    ["Z", "A", "Z", "Z"])
+    report = oecluster.modelability(_line_dm([0.0, 0.1, 1.0, 0.2, 2.0, 2.1]),
+                                    ["M", "M", "C", "M", "T", "T"])
 
-    assert [row.label for row in report.classes] == ["Z", "A"]
-    assert [row.num_members for row in report.classes] == [3, 1]
+    # First appearance ["M", "C", "T"]; ascending label ["C", "M", "T"];
+    # descending ["T", "M", "C"]; ascending num_members ["C", "T", "M"];
+    # descending ["M", "T", "C"].
+    assert [row.label for row in report.classes] == ["M", "C", "T"]
+    # num_members is the discriminating triple here: fraction_same_class repeats
+    # 1.0 across two of the three rows and cannot pin the ordering alone.
+    assert [row.num_members for row in report.classes] == [3, 1, 2]
+    assert [row.fraction_same_class for row in report.classes] == [1.0, 0.0, 1.0]
+    assert report.modi == pytest.approx(2.0 / 3.0, abs=1e-12)
 
 
 def test_activity_landscape_matches_a_hand_fixture():
@@ -934,6 +983,7 @@ def test_modelability_matches_a_hand_fixture():
     assert report.num_scored == 4
     assert report.num_classes == 2
     assert report.modi == pytest.approx(1.0 / 3.0, abs=1e-12)
+    assert isinstance(report.classes, tuple)
     assert [row.label for row in report.classes] == ["A", "B"]
     assert [row.num_members for row in report.classes] == [3, 1]
     assert report.classes[0].fraction_same_class == pytest.approx(
