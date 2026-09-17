@@ -4132,11 +4132,14 @@ def _activity_values(value, argument_name):
         # refused explicitly because float() converts str, bytes, bytearray and
         # a byte-format memoryview -- a column read from a CSV without
         # conversion, or one whose entries survived a single layer of
-        # deserialization, would otherwise score as numbers. These are three
-        # concrete types and not a buffer test, for the reason the column guard
-        # gives, so any other buffer-exporting element is read as the number it
-        # holds. A numeric memoryview is the one spelling float() does not
-        # convert; it is refused with them for consistency with that guard.
+        # deserialization, would otherwise score as numbers. These four are
+        # named concretely rather than tested for as buffers, for the reason
+        # the column guard gives, and the element position is where the cost
+        # shows: float() parses any other buffer exporter as text, so an
+        # element of array("B", b"1") scores 1.0 -- the digit its byte spells
+        # -- rather than the 49 the array holds. A numeric memoryview is the
+        # one spelling float() does not convert; it is refused with them for
+        # consistency with that guard.
         if isinstance(item, (str, bytes, bytearray, memoryview)):
             raise TypeError(f"{argument_name} must be a sequence of floats")
         try:
