@@ -1458,9 +1458,12 @@ def test_require_comparable_takes_no_override_argument():
         _gate.require_comparable(dist, "activity_landscape",
                                  True)  # pyright: ignore[reportCallIssue]
 
-    # __signature__ is a forgeable attribute; __code__ is the shape of the
-    # function that actually runs, so this is the probe a forged signature
-    # cannot slip past.
+    # __signature__ is a forgeable attribute; a function's __code__ is not --
+    # rebinding it rebinds what the function runs. That holds only for a real
+    # function, though: any other callable can carry a __code__ copied from a
+    # two-argument decoy while its __call__ takes an override. So the premise
+    # is asserted before the probe that rests on it.
+    assert inspect.isfunction(_gate.require_comparable)
     code = _gate.require_comparable.__code__
     assert code.co_argcount == 2
     assert code.co_kwonlyargcount == 0
