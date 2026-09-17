@@ -326,41 +326,92 @@ def test_sar_coherence_accepts_a_clustering_result(native):
     assert coherence.clusters[1].mean_activity == 5.0
 
 
-def test_the_options_overloads_are_reachable(native):
-    """Every entry point's three-argument form, called with an options object.
+def test_the_options_object_changes_the_answer_it_governs(native):
+    """The three-argument wrappers, with an option set to move the result.
 
-    Each of the three is wrapped twice, with and without the trailing options
-    argument, and every other call in this file takes the defaulted form. This
-    one reaches the other wrapper.
+    Every other call in this file takes the defaulted two-argument form, so the
+    options wrapper is only reached here. Passing a *default-valued* options
+    object would not test much: if the object failed to cross, the native
+    defaults would apply and produce the same numbers, so the call could only
+    fail by raising. Each option below is therefore set to a non-default value
+    that changes a specific count, and the two forms are asserted to differ in
+    exactly that count.
 
-    The values are picked so the answer must not move: num_threads is
-    documented as not affecting results, and Excluded is already the
-    sar_coherence default. A difference here is therefore the options object
-    failing to cross, not a change in behavior.
+    sar_coherence: the fixture carries a -1, so noise_handling has something to
+    do. The default drops it; Singletons promotes it, raising num_scored and
+    num_clusters. A failure means either the options object did not cross or
+    noise handling stopped being applied. Note this fixture has one noise
+    sample, so it separates Excluded from the other two readings but not
+    Singletons from Grouped.
+
+    activity_landscape: raising distance_threshold past the 0.5 pair makes a
+    third pair near, so num_cliffs rises. A failure means the threshold did not
+    cross or is no longer consulted.
     """
-    coherence_options = native.SARCoherenceOptions()
-    coherence_options.noise_handling = native.NoiseHandling_Excluded
-    coherence = native.sar_coherence([0, 0, 1, 1], [1.0, 1.0, 5.0, 5.0],
-                                     coherence_options)
-    assert coherence.eta_squared == native.sar_coherence(
-        [0, 0, 1, 1], [1.0, 1.0, 5.0, 5.0]).eta_squared
+    noisy = [0, 0, 1, -1]
+    activity = [1.0, 1.0, 5.0, 9.0]
 
-    storage = native.DenseStorage(3)
+    dropped = native.sar_coherence(noisy, activity)
+    assert dropped.num_samples == 4
+    assert dropped.num_scored == 3
+    assert dropped.num_clusters == 2
+    assert [row.label for row in dropped.clusters] == [0, 1]
+
+    singleton_options = native.SARCoherenceOptions()
+    singleton_options.noise_handling = native.NoiseHandling_Singletons
+    promoted = native.sar_coherence(noisy, activity, singleton_options)
+
+    assert promoted.num_samples == 4
+    assert promoted.num_scored == 4
+    assert promoted.num_clusters == 3
+    assert [row.label for row in promoted.clusters] == [0, 1, -1]
+
+    def landscape_storage():
+        storage = native.DenseStorage(3)
+        storage.Set(0, 1, 0.5)
+        storage.Set(0, 2, 0.25)
+        storage.Set(1, 2, 0.125)
+        return storage
+
+    near = [0.0, 1.0, 3.0]
+    narrow = native.activity_landscape(landscape_storage(), near)
+    assert narrow.num_cliffs == 2
+
+    wide_options = native.ActivityLandscapeOptions()
+    wide_options.distance_threshold = 0.6
+    wide = native.activity_landscape(landscape_storage(), near, wide_options)
+
+    assert wide.num_cliffs == 3
+    assert wide.cliff_density == 1.0
+
+
+def test_the_modelability_options_overload_is_reachable(native):
+    """Reachability only, because ModelabilityOptions has nothing that can move
+    a result.
+
+    Its single field is num_threads (SARCoherence.h:228), documented at :227
+    and :240-243 as leaving the result identical bit for bit. There is no value
+    that would make the two forms differ, so equality is the correct
+    expectation and the only defect this can catch is the three-argument
+    wrapper raising -- a bad typemap on the options parameter, or the overload
+    not being generated at all. It cannot show that the object's contents were
+    read.
+    """
+    storage = native.DenseStorage(4)
     storage.Set(0, 1, 0.5)
-    storage.Set(0, 2, 0.25)
-    storage.Set(1, 2, 0.125)
+    storage.Set(0, 2, 0.1)
+    storage.Set(0, 3, 0.6)
+    storage.Set(1, 2, 0.7)
+    storage.Set(1, 3, 0.8)
+    storage.Set(2, 3, 0.2)
+    classes = ["A", "A", "B", "B"]
 
-    landscape_options = native.ActivityLandscapeOptions()
-    landscape_options.num_threads = 1
-    landscape = native.activity_landscape(storage, [0.0, 1.0, 3.0],
-                                          landscape_options)
-    assert landscape.max_sali == native.activity_landscape(
-        storage, [0.0, 1.0, 3.0]).max_sali
+    options = native.ModelabilityOptions()
+    options.num_threads = 1
+    threaded = native.modelability(storage, classes, options)
 
-    model_options = native.ModelabilityOptions()
-    model_options.num_threads = 1
-    model = native.modelability(storage, ["A", "A", "B"], model_options)
-    assert model.modi == native.modelability(storage, ["A", "A", "B"]).modi
+    assert threaded.modi == native.modelability(storage, classes).modi
+    assert threaded.modi == 0.5
 
 
 def test_the_row_vectors_are_wrapped_rather_than_opaque(native):
