@@ -3840,8 +3840,8 @@ class ClusterActivity(NamedTuple):
     :ivar num_scored: Samples in this cluster with a finite activity.
     :ivar mean_activity: Their mean activity.
     :ivar stddev_activity: Their population standard deviation, NaN when
-        num_scored is below 2 -- every row under ``noise="singletons"``, where a
-        spread over one sample is not defined.
+        num_scored is below 2 -- every singleton noise row, where a spread over
+        one sample is not defined. The ordinary cluster rows stay finite.
     """
 
     label: int = 0
@@ -3941,9 +3941,11 @@ class ActivityLandscape(_Scorecard):
         was scored.
     :ivar num_zero_distance_pairs: Pairs at exactly zero distance. Their SALI
         is undefined, so they are counted here and left out of
-        :attr:`max_sali` and :attr:`mean_sali` -- but they still count as
-        cliffs, because two identical structures with different activities are
-        the sharpest cliff there is.
+        :attr:`max_sali` and :attr:`mean_sali` -- but they are still eligible to
+        count as cliffs, and do whenever their activity difference clears
+        ``activity_threshold``, because two identical structures with different
+        activities are the sharpest cliff there is. A zero-distance pair whose
+        activities agree is counted here and is not a cliff.
     :ivar max_sali: Largest ``|activity difference| / distance`` over the pairs
         at non-zero distance. NaN when there are none.
     :ivar mean_sali: Their mean. NaN on the same condition.
@@ -3998,6 +4000,13 @@ class ClassConcordance(NamedTuple):
     """One row of a :class:`Modelability`'s per-class table.
 
     A ``NamedTuple`` on the same terms as :class:`ClusterActivity`.
+
+    :ivar label: The class string, as it appears in the input.
+    :ivar num_members: Scored samples carrying it -- those with a non-empty
+        class string.
+    :ivar fraction_same_class: The fraction of those whose nearest scored
+        neighbour shares the class. NaN when this is the only scored class,
+        where no molecule has a neighbour that could differ.
     """
 
     label: str = ""
@@ -4071,12 +4080,18 @@ def _activity_values(value, argument_name):
     :param value: The caller's sequence; NaN marks a missing measurement.
     :param argument_name: Name of the argument, for the messages.
     :returns: A native DoubleVector.
-    :raises TypeError: If the value is a bare str, a mapping, not iterable, or
-        yields something that is not a real number.
+    :raises TypeError: If the value is a bare str, a bytes-like object, a
+        mapping, not iterable, or yields something that is not a real number.
     """
     if isinstance(value, str):
         raise TypeError(
             f"{argument_name} must be a sequence of floats, not a single str")
+    # bytes, bytearray and memoryview all iterate as ints, so b"12" would score
+    # as the activities [49.0, 50.0] rather than being refused.
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        raise TypeError(
+            f"{argument_name} must be a sequence of floats, not a bytes-like "
+            "object")
     # As in _agreement_labels: a Mapping iterates its keys, so
     # {0: 5.4, 1: 6.1} would score the indices and report a plausible number.
     if isinstance(value, collections.abc.Mapping):
@@ -4131,7 +4146,9 @@ def sar_coherence(result, activity, *, noise="excluded"):
     :raises TypeError: If ``result`` is neither a clustering result nor a
         sequence of ints, or ``activity`` is not a sequence of floats.
     :raises ValueError: If ``activity`` is empty or differs in length from the
-        labeling, a label does not fit the native 32-bit signed label type, or
+        labeling; if a label does not fit the native 32-bit signed label type,
+        or a clustering result carries a member index that does not fit a
+        native ``size_t``, a negative one being the reachable case; or if
         ``noise`` is not one of the three accepted strings.
     :raises RuntimeError: If an activity value is infinite, in which case the
         message names the offending index; or if the magnitudes are large enough
@@ -4224,20 +4241,26 @@ def activity_landscape(distance_matrix, activity, *, distance_threshold=0.30,
     :param rmodi_delta: Half-width of the RMODI activity band, in standard
         deviations. 0.625 is the published value.
     :param num_threads: 0 selects the hardware concurrency. The result does not
-        depend on this value, bit for bit.
+        depend on this value, bit for bit. Truncated toward zero, so 1.9 selects
+        one thread and -0.5 selects none; a value that exceeds ``size_t`` raises
+        ``OverflowError`` from the binding layer.
     :returns: An :class:`ActivityLandscape`.
     :raises TypeError: If ``distance_matrix`` is not a SymmetricDistanceMatrix,
         or ``activity`` is not a sequence of floats.
     :raises ValueError: If the matrix uses sparse storage, the activity is
         empty, the activity and the matrix cover different numbers of samples,
         any of the three thresholds is non-finite or negative,
-        ``num_threads`` is negative, or the gate refuses the matrix --
+        ``num_threads`` truncates toward zero to a negative integer,
+        or the gate refuses the matrix --
         similarity-valued, a non-zero self-distance, a non-finite entry, or
         scored on a per-pair feature subset.
     :raises RuntimeError: If an activity value is infinite, or a stored distance
-        is negative. These are refusals raised in C++, and SWIG maps every
-        native exception to ``RuntimeError``. A negative distance reaches C++
-        because the gate measures finiteness, not sign.
+        is negative; or if the activity magnitudes are large enough that
+        ``activity_stddev`` or a SALI accumulator overflows to infinity, in
+        which case the message names the quantity that overflowed rather than an
+        index. These are refusals raised in C++, and SWIG maps every native
+        exception to ``RuntimeError``. A negative distance reaches C++ because
+        the gate measures finiteness, not sign.
 
     Example::
 
@@ -4280,7 +4303,12 @@ def activity_landscape(distance_matrix, activity, *, distance_threshold=0.30,
     for name, value in (("distance_threshold", distance_threshold),
                         ("activity_threshold", activity_threshold),
                         ("rmodi_delta", rmodi_delta)):
-        coerced = float(value)
+        try:
+            coerced = float(value)
+        except OverflowError as error:
+            # An int beyond double range is the same condition isfinite() is
+            # there to refuse; it just fails one step earlier, in the cast.
+            raise ValueError(f"{name} must be finite") from error
         if not math.isfinite(coerced):
             raise ValueError(f"{name} must be finite")
         if coerced < 0.0:
