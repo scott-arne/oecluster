@@ -1429,13 +1429,16 @@ def test_require_comparable_takes_no_override_argument():
     probes below establish: no third positional, no keyword-only parameter, no
     ``*args`` and no ``**kwargs`` for an override to arrive through, and the
     keyword a caller would guess from ``require_metric`` is rejected rather
-    than quietly ignored.
+    than quietly ignored. The probes also pin the two things that make those
+    claims mean anything -- that the name is bound to a real function, and
+    that the function closes over nothing.
 
-    That leaves one family a shape assertion cannot reach: an override
-    smuggled through the *value* of a parameter the gate already takes -- a
-    caller name read as a magic word -- or one held in module state. Neither
-    changes the function's arity, so nothing asserted here would see it. They
-    are guarded instead by
+    Together those exhaust what a shape assertion can settle: everything a
+    Python function reads comes from its arguments, its closure, or its
+    globals, and the first two are now pinned. Globals are module state, which
+    no assertion about a function's shape can see -- nor can one see an
+    override riding on the *value* of a parameter the gate already takes, a
+    caller name read as a magic word. Both are guarded instead by
     ``test_require_comparable_refuses_subset_scored_without_an_override``,
     which calls the gate on a default-state module under an ordinary caller
     name and requires it to raise; that is the level at which an override of
@@ -1469,6 +1472,9 @@ def test_require_comparable_takes_no_override_argument():
     assert code.co_kwonlyargcount == 0
     assert not code.co_flags & inspect.CO_VARARGS
     assert not code.co_flags & inspect.CO_VARKEYWORDS
+    # Arguments, closure, globals: a function reads from nowhere else. The
+    # assertions above pin the first; this pins the second to empty.
+    assert not code.co_freevars
 
 
 def test_require_comparable_accepts_a_triangle_violation():
