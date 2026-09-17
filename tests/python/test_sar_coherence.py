@@ -181,15 +181,33 @@ def test_sar_coherence_rejects_an_unknown_noise_spelling():
                                 noise="drop")
 
 
-def test_sar_coherence_treats_nan_activity_as_missing():
+def test_a_cluster_row_has_no_spread_below_two_scored_members():
+    """Both routes an ordinary cluster takes to a one-member row.
+
+    :class:`oecluster.ClusterActivity` states one rule for every row, so both
+    of its ordinary-cluster routes are pinned here: a two-member cluster whose
+    second measurement is missing, and a cluster that only ever held one
+    member. Neither label is negative, so neither NaN is the singleton-noise
+    case that ``test_sar_coherence_honours_every_noise_spelling`` covers.
+    """
     coherence = oecluster.sar_coherence([0, 0, 1, 1],
                                         [1.0, float("nan"), 5.0, 7.0])
 
+    # A NaN measurement is dropped rather than refused, which is what thins
+    # this cluster to one scored member.
     assert coherence.num_samples == 4
     assert coherence.num_scored == 3
     assert coherence.clusters[0].num_scored == 1
     # One scored member, so no spread is defined for that cluster.
     assert math.isnan(coherence.clusters[0].stddev_activity)
+
+    # The other route, with nothing missing anywhere: cluster 0 genuinely holds
+    # one member. The two-member row beside it stays finite, so the NaN is a
+    # reading about the row rather than about the call.
+    singleton = oecluster.sar_coherence([0, 1, 1], [1.0, 5.0, 6.0])
+    assert [row.num_scored for row in singleton.clusters] == [1, 2]
+    assert math.isnan(singleton.clusters[0].stddev_activity)
+    assert singleton.clusters[1].stddev_activity == 0.5
 
 
 def test_sar_coherence_rejects_a_length_mismatch():
@@ -263,6 +281,43 @@ def test_the_activity_entry_points_reject_a_bytes_like_activity():
             oecluster.sar_coherence([0, 0], bad)
     with pytest.raises(TypeError, match="not a bytes-like object"):
         oecluster.activity_landscape(_line_dm(_SALI_COORDS), b"123")
+
+
+def test_the_activity_entry_points_reject_a_nested_bytes_like_value():
+    """One bytes-like element converts too: ``float(bytearray(b"1"))`` is 1.0.
+
+    The top-level guard above catches a whole column handed over as bytes. This
+    is the same serialized column after one layer of deserialization -- a list
+    whose entries are still bytes-like -- and without the element guard it is
+    scored as plausible numbers rather than refused.
+
+    All three spellings, because ``float()`` accepts all three: a guard naming
+    only ``bytes`` leaves ``bytearray`` and ``memoryview`` converting.
+    """
+    for bad in (b"1", bytearray(b"1"), memoryview(b"1")):
+        with pytest.raises(TypeError, match="must be a sequence of floats"):
+            oecluster.sar_coherence([0, 0], [bad, 2.0])
+        with pytest.raises(TypeError, match="must be a sequence of floats"):
+            oecluster.activity_landscape(_line_dm(_SALI_COORDS),
+                                         [bad, 2.0, 3.0])
+
+
+def test_the_activity_entry_points_reject_an_oversized_activity_value():
+    """An int beyond double range fails in the cast, not at the type check.
+
+    ``float(10 ** 1000)`` raises ``OverflowError``, which neither signature
+    documents. It is refused as ``ValueError`` rather than ``TypeError``
+    because an int is a number and only its magnitude is out of range -- the
+    same reading the threshold keywords already get in
+    ``test_activity_landscape_refuses_every_bad_threshold_as_value_error``.
+    """
+    expected = "activity must contain values that fit a double"
+
+    with pytest.raises(ValueError, match=expected):
+        oecluster.sar_coherence([0, 0], [10 ** 1000, 1.0])
+    with pytest.raises(ValueError, match=expected):
+        oecluster.activity_landscape(_line_dm(_SALI_COORDS),
+                                     [10 ** 1000, 1.0, 2.0])
 
 
 def test_sar_coherence_accepts_any_iterable_of_activity_values():
@@ -372,6 +427,35 @@ def test_activity_landscape_matches_a_hand_fixture():
                                                       abs=1e-12)
 
 
+def test_activity_landscape_separates_its_three_missing_data_counts():
+    """A missing measurement drives the three counts apart.
+
+    Every other landscape fixture in this file is fully scored, where
+    ``num_samples``, ``num_scored`` and ``num_pairs_scored`` all read the same
+    number and a projection publishing ``num_samples`` three times satisfies
+    every assertion about them. One NaN out of three separates them into 3, 2
+    and 1.
+
+    The metrics are pinned beside the counts because the counts alone say
+    nothing about which samples were scored. Over the two survivors the only
+    pair is 0-2, at distance 0.25 with three log units between them, so SALI is
+    12.0 and the spread is that of ``{0, 3}``.
+    """
+    landscape = oecluster.activity_landscape(_line_dm([0.0, 0.1, 0.25]),
+                                             [0.0, float("nan"), 3.0])
+
+    assert landscape.num_samples == 3
+    assert landscape.num_scored == 2
+    assert landscape.num_pairs_scored == 1
+    assert landscape.num_cliffs == 1
+    # One cliff over the one scored pair. Had the unscored sample's two pairs
+    # been counted in the denominator, the same numerator would read 1/3.
+    assert landscape.cliff_density == 1.0
+    assert landscape.max_sali == 12.0
+    assert landscape.mean_sali == 12.0
+    assert landscape.activity_stddev == 1.5
+
+
 def test_activity_landscape_counts_zero_distance_pairs_apart_from_sali():
     """A zero-distance pair has no SALI, but it is still a cliff.
 
@@ -467,9 +551,15 @@ def test_activity_landscape_rmodi_delta_moves_rmodi():
                                                           abs=1e-12)
 
 
-def test_a_zero_distance_pair_is_a_cliff_only_above_the_activity_threshold():
+def test_a_zero_distance_pair_is_a_cliff_at_or_above_the_activity_threshold():
     """The pair is counted as zero-distance either way; whether it is also a
-    cliff still depends on the activity difference."""
+    cliff still depends on the activity difference.
+
+    Read at the default threshold alone, the equal-activity pair looks like a
+    permanent non-cliff. The comparison is ``>=``, so at the lowest legal
+    threshold the very same pair clears it -- and zero is legal, since
+    ``validate_landscape_options`` refuses only negative and non-finite values.
+    """
     dm = _line_dm([0.0, 0.0, 1.0])
 
     equal = oecluster.activity_landscape(dm, [5.0, 5.0, 9.0])
@@ -479,6 +569,11 @@ def test_a_zero_distance_pair_is_a_cliff_only_above_the_activity_threshold():
     assert differing.num_zero_distance_pairs == 1
     assert equal.num_cliffs == 0
     assert differing.num_cliffs == 1
+
+    at_zero = oecluster.activity_landscape(dm, [5.0, 5.0, 9.0],
+                                           activity_threshold=0.0)
+    assert at_zero.num_zero_distance_pairs == 1
+    assert at_zero.num_cliffs == 1
 
 
 def test_activity_landscape_to_table_and_repr():
