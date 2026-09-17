@@ -530,6 +530,10 @@ def test_activity_landscape_refuses_every_bad_threshold_as_value_error():
     )
 
     for keyword, call in thresholds:
+        # Negative infinity is the row that pins the ordering: it is the only
+        # input both checks would refuse, so it is the only one whose message
+        # differs depending on which runs first. Dropping it as redundant with
+        # the other two infinities would leave the order unpinned again.
         for bad, expected in ((math.nan, "must be finite"),
                               (math.inf, "must be finite"),
                               (-math.inf, "must be finite"),
