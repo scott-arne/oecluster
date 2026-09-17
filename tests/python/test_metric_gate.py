@@ -1423,23 +1423,33 @@ def test_require_comparable_refuses_subset_scored_without_an_override():
 
 
 def test_require_comparable_has_no_override_keyword():
-    """The refusal is non-overridable as behaviour, not merely as wording.
+    """An override cannot be passed in, whatever it is called and however it
+    is passed.
 
     ``test_..._refuses_subset_scored_without_an_override`` asserts the message
-    does not mention ``allow_nonmetric``; this asserts the function really has
-    no such parameter, so the refusal cannot be switched off by a caller who
-    guesses the keyword from ``require_metric``.
+    does not mention ``allow_nonmetric``; the three probes here close the three
+    routes by which an argument could reach the check and switch it off: the
+    keyword a caller would guess from ``require_metric``, any other keyword a
+    ``**kwargs`` catch-all would swallow, and a third positional, which is all
+    a renamed or positional-only override needs -- with or without a forged
+    ``__signature__``.
     """
     parameters = inspect.signature(_gate.require_comparable).parameters
     assert "allow_nonmetric" not in parameters
 
     dist = oecluster.pdist(_mols(), "fingerprint")
     dist._facts['data_integrity'] = "subset_scored"
-    # The call below is intentionally invalid to verify the function rejects
-    # an override parameter rather than silently accepting it.
+    # The calls below are intentionally invalid to verify the function rejects
+    # an override argument rather than silently accepting it.
     with pytest.raises(TypeError):
         _gate.require_comparable(dist, "activity_landscape",
                                  allow_nonmetric=True)  # pyright: ignore[reportCallIssue]
+
+    dist = oecluster.pdist(_mols(), "fingerprint")
+    dist._facts['data_integrity'] = "subset_scored"
+    with pytest.raises(TypeError):
+        _gate.require_comparable(dist, "activity_landscape",
+                                 True)  # pyright: ignore[reportCallIssue]
 
 
 def test_require_comparable_accepts_a_triangle_violation():
