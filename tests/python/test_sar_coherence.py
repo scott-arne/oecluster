@@ -210,9 +210,89 @@ def test_a_cluster_row_has_no_spread_below_two_scored_members():
     assert singleton.clusters[1].stddev_activity == 0.5
 
 
+def test_sar_coherence_publishes_a_weaker_than_chance_omega_squared():
+    """A negative chance-corrected effect size is a reading, not an error.
+
+    Alternating labels over a rising activity leave the two cluster means
+    closer together than the cluster count alone would place them by chance:
+    the raw ratio is 0.2 where ``(K - 1) / (n - 1)`` is a third, so the
+    correction carries ``omega_squared`` below zero. Every other fixture in
+    this file scores both metrics positive, which is exactly where a
+    ``max(value, 0.0)`` applied on the way out of the native result is
+    invisible.
+
+    Both literals are asserted rather than the sign alone, so the test also
+    tells the two metrics apart: a layer publishing ``eta_squared`` into both
+    slots fails the second.
+    """
+    coherence = oecluster.sar_coherence([0, 1, 0, 1], [0.0, 1.0, 2.0, 3.0])
+
+    assert coherence.num_scored == 4
+    assert coherence.num_clusters == 2
+    assert coherence.eta_squared == pytest.approx(0.20000000000000007,
+                                                  abs=1e-12)
+    assert coherence.omega_squared == pytest.approx(-0.1428571428571428,
+                                                    abs=1e-12)
+
+
+def test_sar_coherence_reports_its_two_undefined_effect_sizes():
+    """Both documented NaN states, which are not the same state.
+
+    An activity with no variance leaves nothing to apportion, so the two
+    effect sizes go undefined together. One cluster per scored sample is the
+    other case and is the sharper one: the labels account for all of the
+    variance, so ``eta_squared`` is a finite 1.0, while the correction has no
+    within-cluster variance to work against and only ``omega_squared`` goes
+    undefined. Mapping either NaN to 0.0 publishes an undefined result as a
+    valid one -- and in the second case as the opposite of what the finite
+    metric beside it reports.
+    """
+    flat = oecluster.sar_coherence([0, 0, 1, 1], [5.0, 5.0, 5.0, 5.0])
+
+    assert flat.num_scored == 4
+    assert flat.num_clusters == 2
+    assert math.isnan(flat.eta_squared)
+    assert math.isnan(flat.omega_squared)
+
+    singletons = oecluster.sar_coherence([0, 1, 2], [1.0, 2.0, 3.0])
+
+    assert singletons.num_scored == 3
+    assert singletons.num_clusters == 3
+    assert singletons.eta_squared == 1.0
+    assert math.isnan(singletons.omega_squared)
+
+
 def test_sar_coherence_rejects_a_length_mismatch():
-    with pytest.raises(ValueError, match="4 samples"):
+    """Both directions and both overloads, on an ordinary fixture.
+
+    Short and long are separate checks and ``!=`` is the only comparison that
+    catches both: narrowing either overload's guard to ``<`` keeps refusing a
+    short activity while letting an overlong one reach native code, where it
+    comes back as ``RuntimeError`` rather than the ``ValueError`` documented
+    for it. The only overlong case the file had was the zero-sample fixture in
+    ``test_sar_coherence_reports_an_empty_labeling_as_a_length_mismatch``,
+    which is overlong by accident of covering ``0 == 0``.
+
+    Matched on both counts rather than on the exception type or one number: a
+    pattern naming only the sample count also passes when the entry count is
+    reported wrongly.
+    """
+    with pytest.raises(ValueError, match="activity has 2 entries but the "
+                                         "clustering has 4 samples"):
         oecluster.sar_coherence([0, 0, 1, 1], [1.0, 2.0])
+
+    with pytest.raises(ValueError, match="activity has 4 entries but the "
+                                         "clustering has 3 samples"):
+        oecluster.sar_coherence([0, 0, 1], [1.0, 2.0, 3.0, 4.0])
+
+    # The ClusteringResult overload measures against ``result.num_samples``
+    # rather than a coerced label vector, so it is a second check and needs its
+    # own overlong case.
+    result = ClusteringResult([0, 0, 1], [[0, 1], [2]])
+
+    with pytest.raises(ValueError, match="activity has 4 entries but the "
+                                         "clustering has 3 samples"):
+        oecluster.sar_coherence(result, [1.0, 2.0, 3.0, 4.0])
 
 
 def test_sar_coherence_reports_an_empty_labeling_as_a_length_mismatch():
@@ -402,6 +482,32 @@ def test_the_row_tables_survive_the_native_result():
         label="B", num_members=1, fraction_same_class=0.0)
 
 
+def test_the_row_tables_are_ordered_by_first_appearance():
+    """Ascending fixtures cannot tell first appearance from sorted order.
+
+    Every other fixture in this file numbers its clusters and names its classes
+    in ascending order, where the documented contract and a
+    ``sorted(rows, key=label)`` implementation agree row for row. These labels
+    descend, so the two disagree: sorting would report ``[1, 5]`` and
+    ``["A", "Z"]``.
+
+    A statistic is asserted beside each label list so the rows are shown to
+    travel with their labels rather than the labels merely being in some order.
+    """
+    coherence = oecluster.sar_coherence([5, 1, 5, 1], [1.0, 2.0, 3.0, 4.0])
+
+    assert [row.label for row in coherence.clusters] == [5, 1]
+    # Cluster 5 holds samples 0 and 2 and cluster 1 holds 1 and 3, so the means
+    # swap under a sort too and the two rows are not interchangeable.
+    assert [row.mean_activity for row in coherence.clusters] == [2.0, 3.0]
+
+    report = oecluster.modelability(_line_dm([0.0, 1.0, 2.0, 3.0]),
+                                    ["Z", "A", "Z", "Z"])
+
+    assert [row.label for row in report.classes] == ["Z", "A"]
+    assert [row.num_members for row in report.classes] == [3, 1]
+
+
 def test_activity_landscape_matches_a_hand_fixture():
     """SALI is |da| / d: 1/0.25, 3/0.5 and 2/0.25 -- 4, 6 and 8.
 
@@ -454,6 +560,37 @@ def test_activity_landscape_separates_its_three_missing_data_counts():
     assert landscape.max_sali == 12.0
     assert landscape.mean_sali == 12.0
     assert landscape.activity_stddev == 1.5
+
+
+def test_activity_landscape_undefines_every_metric_below_two_scored():
+    """One scored sample leaves no pair, and all five metrics go undefined.
+
+    ``num_pairs_scored`` is zero, so the cliff density has no denominator and
+    no pair has a SALI; a population spread over a single value is not defined
+    either, and that takes RMODI with it, the band being measured in that
+    spread.
+
+    Every other landscape fixture in this file keeps at least two scored
+    samples, so a projection mapping NaN to 0.0 on the way out of the native
+    result is invisible across the rest of the file -- and it would publish a
+    zero cliff density and a zero RMODI, both ordinary readings, for a call
+    that scored no pair at all.
+
+    The three counts are pinned beside the NaNs so the fixture is shown to have
+    reached the entry point with three samples rather than having been emptied
+    or refused.
+    """
+    landscape = oecluster.activity_landscape(
+        _line_dm([0.0, 0.1, 0.25]), [1.0, float("nan"), float("nan")])
+
+    assert landscape.num_samples == 3
+    assert landscape.num_scored == 1
+    assert landscape.num_pairs_scored == 0
+    assert math.isnan(landscape.cliff_density)
+    assert math.isnan(landscape.max_sali)
+    assert math.isnan(landscape.mean_sali)
+    assert math.isnan(landscape.rmodi)
+    assert math.isnan(landscape.activity_stddev)
 
 
 def test_activity_landscape_counts_zero_distance_pairs_apart_from_sali():
@@ -551,6 +688,56 @@ def test_activity_landscape_rmodi_delta_moves_rmodi():
                                                           abs=1e-12)
 
 
+def test_the_zero_boundary_of_a_threshold_is_forwarded_and_not_clamped():
+    """Accepting zero is not the same as reading it.
+
+    The boundary loop in
+    ``test_activity_landscape_refuses_every_bad_threshold_as_value_error``
+    asserts ``num_samples``, which no threshold can move, so clamping either
+    keyword to a small positive floor on the way into the options struct --
+    ``max(distance_value, 0.1)``, ``max(rmodi_value, 0.05)`` -- leaves it
+    passing. ``activity_threshold=0.0`` is already read for its effect by
+    ``test_a_zero_distance_pair_is_a_cliff_at_or_above_the_activity_threshold``;
+    these are the other two.
+
+    Each keyword is scored at zero and at the floor it would be clamped to, on
+    a fixture where the two disagree, so what is asserted is the value that
+    reached the metric rather than the call having been accepted. The
+    ``rmodi_delta`` pair is the sharper of the two, because the band is
+    ``rmodi_delta`` times ``activity_stddev`` either side of a molecule's own
+    activity: a zero band admits only exactly-equal activities, so zero is not
+    merely a small setting but a qualitatively different one.
+    """
+    # The nearer pair is 0.05 apart, inside a 0.1 threshold and outside a zero
+    # one, with 5.0 log units between their activities.
+    cliff_dm = _line_dm([0.0, 0.05, 1.0])
+    cliff_activity = [0.0, 5.0, 9.0]
+
+    assert oecluster.activity_landscape(
+        cliff_dm, cliff_activity, distance_threshold=0.0).num_cliffs == 0
+    assert oecluster.activity_landscape(
+        cliff_dm, cliff_activity, distance_threshold=0.1).num_cliffs == 1
+
+    band_dm = _line_dm([0.0, 0.1, 0.25])
+    band_activity = [0.0, 0.1, 5.0]
+
+    at_zero = oecluster.activity_landscape(band_dm, band_activity,
+                                           rmodi_delta=0.0)
+    widened = oecluster.activity_landscape(band_dm, band_activity,
+                                           rmodi_delta=0.05)
+
+    # No two activities are equal, so the zero band is empty for every molecule
+    # and none of the three is counted. At 0.05 the band spans 0.117 either
+    # side, which puts the first two inside each other's.
+    assert at_zero.rmodi == 0.0
+    assert widened.rmodi == pytest.approx(2.0 / 3.0, abs=1e-12)
+
+    # The keyword moves the band and not the data, as in the test above.
+    assert at_zero.activity_stddev == pytest.approx(2.333809475228573,
+                                                    abs=1e-12)
+    assert widened.activity_stddev == at_zero.activity_stddev
+
+
 def test_a_zero_distance_pair_is_a_cliff_at_or_above_the_activity_threshold():
     """The pair is counted as zero-distance either way; whether it is also a
     cliff still depends on the activity difference.
@@ -615,8 +802,23 @@ def test_activity_landscape_rejects_sparse_storage():
 
 
 def test_activity_landscape_rejects_a_length_mismatch():
-    with pytest.raises(ValueError, match="3 samples"):
-        oecluster.activity_landscape(_line_dm(_SALI_COORDS), [1.0, 2.0])
+    """Both directions, because ``!=`` is the only comparison catching both.
+
+    Short and long are separate checks: weakening this one to ``<`` keeps
+    refusing a short activity and lets an overlong one reach native code, where
+    it surfaces as ``RuntimeError`` rather than the documented ``ValueError``.
+    Matched on both counts, since a pattern naming only the sample count passes
+    whatever entry count is reported.
+    """
+    dm = _line_dm(_SALI_COORDS)
+
+    with pytest.raises(ValueError, match="activity has 2 entries but the "
+                                         "matrix covers 3 samples"):
+        oecluster.activity_landscape(dm, [1.0, 2.0])
+
+    with pytest.raises(ValueError, match="activity has 4 entries but the "
+                                         "matrix covers 3 samples"):
+        oecluster.activity_landscape(dm, [1.0, 2.0, 3.0, 4.0])
 
 
 def test_activity_landscape_rejects_an_empty_activity():
@@ -683,6 +885,12 @@ def test_activity_landscape_refuses_every_bad_threshold_as_value_error():
 
     # Zero is the boundary and has to be accepted. Without this, a validator
     # that refused all three keywords outright would satisfy the block above.
+    # Acceptance is all this shows: num_samples is the one reported number no
+    # threshold can move. That each accepted zero is also forwarded rather than
+    # clamped is pinned in
+    # test_the_zero_boundary_of_a_threshold_is_forwarded_and_not_clamped and,
+    # for activity_threshold,
+    # test_a_zero_distance_pair_is_a_cliff_at_or_above_the_activity_threshold.
     for _, call in thresholds:
         assert call(0.0).num_samples == 3
 
@@ -812,8 +1020,23 @@ def test_modelability_rejects_a_non_string_class():
 
 
 def test_modelability_rejects_a_length_mismatch():
-    with pytest.raises(ValueError, match="4 samples"):
-        oecluster.modelability(_line_dm(_MODI_COORDS), ["A", "B"])
+    """Both directions, on the same terms as the landscape case: ``!=`` is the
+    only comparison that catches a short annotation and an overlong one alike,
+    and an overlong one weakened past this check reaches native code and
+    returns ``RuntimeError`` instead of ``ValueError``.
+
+    This check is per entry point, so the landscape's coverage does not stand
+    in for it. Matched on both counts for the reason given there.
+    """
+    dm = _line_dm(_MODI_COORDS)
+
+    with pytest.raises(ValueError, match="activity_classes has 2 entries but "
+                                         "the matrix covers 4 samples"):
+        oecluster.modelability(dm, ["A", "B"])
+
+    with pytest.raises(ValueError, match="activity_classes has 5 entries but "
+                                         "the matrix covers 4 samples"):
+        oecluster.modelability(dm, ["A", "B", "A", "B", "A"])
 
 
 def test_modelability_rejects_empty_activity_classes():
