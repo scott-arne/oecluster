@@ -1392,6 +1392,24 @@ TEST(ModelabilityTest, RejectsABadDistanceEvenWithOneClass) {
         EXPECT_NE(std::string(error.what()).find("0 and 2"), std::string::npos);
     }
 
+    // A finite negative distance is the guard's other clause, and nothing else
+    // reaches it here: the only other negative fixture for modelability is
+    // annotated with two classes, so the concordance sweep refuses it before
+    // the serial scan is ever entered. Without this case the serial scan could
+    // lose its negative test and a one-class call over a negative matrix would
+    // return the same NaN that a legitimate single-class call returns.
+    OECluster::DenseStorage negative(3);
+    FillStorage(negative, {0.5, -0.25, 0.125});
+
+    try {
+        OECluster::modelability(negative, {"A", "A", "A"});
+        FAIL() << "expected a negative distance to be rejected";
+    } catch (const std::invalid_argument& error) {
+        const std::string message = error.what();
+        EXPECT_NE(message.find("0 and 2"), std::string::npos);
+        EXPECT_NE(message.find("finite and non-negative"), std::string::npos);
+    }
+
     // The dropped sample takes its distances out of the scan with it: sample 1
     // is unannotated, so the infinity at (0, 2) is still the pair that bites,
     // while a corrupt entry touching only sample 1 would not be read at all.
