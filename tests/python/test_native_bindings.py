@@ -10,8 +10,14 @@ values are chosen to be exact in binary so the bare == is deliberate.
 
 import math
 import pathlib
+import re
 
 import pytest
+
+# Both comment forms SWIG honours. Stripped before the interface file is
+# searched, so a directive that is only present inside a comment does not
+# satisfy a check that it is present.
+_SWIG_COMMENT = re.compile(r"/\*.*?\*/|//[^\n]*", re.DOTALL)
 
 
 @pytest.fixture
@@ -445,24 +451,26 @@ def test_the_new_entry_points_release_the_gil():
     """All three sweeps are O(n^2) or O(N) over native data and must not hold
     the interpreter while they run.
 
-    Asserted against the interface file rather than at runtime. A timing test
-    cannot separate "released the GIL" from "finished quickly" without a
-    fixture large enough to hold the lock for a measurable stretch, and the
-    only way to build one here is an O(n^2) Python loop that costs more suite
-    time than the assertion buys.
+    Asserted against the interface file rather than at runtime.
 
-    Position is asserted as well as presence, and the position is the half that
-    matters. ``%exception`` binds only to declarations SWIG parses after the
-    invocation, so an invocation sitting below the ``%include`` that declares
-    the function reaches nothing: the release disappears from every generated
-    wrapper, SWIG says nothing about it, and a presence-only check stays green.
+    Two ways a directive can be present but inert are both caught. Position:
+    ``%exception`` binds only to declarations SWIG parses after the invocation,
+    so an invocation sitting below the ``%include`` that declares the function
+    reaches nothing. Commenting out: a ``//`` or a ``/* */`` around the
+    invocation has the same effect. Either one removes the release from every
+    generated wrapper and SWIG says nothing about it, so comments are stripped
+    before the search and both anchors are measured on the stripped text.
 
-    What this cannot see: it reads the interface source, not the built
-    extension, so it passes against a stale ``_oecluster.so`` whose wrappers
-    predate the invocations. Only a rebuild rules that out.
+    The limit of reading the source is that it describes the interface, not the
+    artifact: a stale ``_oecluster.so`` whose wrappers predate the directives
+    passes, as does a correctly placed directive naming a function that does
+    not exist, which SWIG also accepts silently. Timing a call from a second
+    thread would cover the first, but cannot separate "released the GIL" from
+    "finished quickly" without a fixture large enough to hold the lock for a
+    measurable stretch; the source is the better trade.
     """
     interface = pathlib.Path(__file__).resolve().parents[2] / "swig" / "oecluster.i"
-    text = interface.read_text(encoding="utf-8")
+    text = _SWIG_COMMENT.sub("", interface.read_text(encoding="utf-8"))
 
     include = '%include "oecluster/clustering/SARCoherence.h"'
     assert text.count(include) == 1, "the position check needs an unambiguous anchor"
