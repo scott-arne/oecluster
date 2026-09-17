@@ -251,6 +251,30 @@ def test_sar_coherence_rejects_a_string_activity_value():
         oecluster.sar_coherence([0, 0], ["1.0", "2.0"])
 
 
+def test_the_activity_entry_points_reject_a_bytes_like_activity():
+    """b"12" iterates as ints, so without the guard it scores as [49.0, 50.0].
+
+    The bare-str guard beside it catches the text form of the same mistake;
+    modelability already refuses bytes through its per-item str requirement.
+    """
+    for bad in (b"12", bytearray(b"12"), memoryview(b"12")):
+        with pytest.raises(TypeError, match="not a bytes-like object"):
+            oecluster.sar_coherence([0, 0], bad)
+    with pytest.raises(TypeError, match="not a bytes-like object"):
+        oecluster.activity_landscape(_line_dm(_SALI_COORDS), b"123")
+
+
+def test_sar_coherence_accepts_any_iterable_of_activity_values():
+    tuple_form = oecluster.sar_coherence(
+        _COHERENCE_LABELS, tuple(_COHERENCE_ACTIVITY))
+    generator_form = oecluster.sar_coherence(
+        _COHERENCE_LABELS, (value for value in _COHERENCE_ACTIVITY))
+
+    for coherence in (tuple_form, generator_form):
+        assert coherence.eta_squared == pytest.approx(0.9142857142857143,
+                                                      abs=1e-12)
+
+
 def test_sar_coherence_rejects_a_misspelled_keyword():
     """A typo'd keyword must refuse rather than tune nothing.
 
@@ -442,6 +466,20 @@ def test_activity_landscape_rmodi_delta_moves_rmodi():
                                                           abs=1e-12)
 
 
+def test_a_zero_distance_pair_is_a_cliff_only_above_the_activity_threshold():
+    """The pair is counted as zero-distance either way; whether it is also a
+    cliff still depends on the activity difference."""
+    dm = _line_dm([0.0, 0.0, 1.0])
+
+    equal = oecluster.activity_landscape(dm, [5.0, 5.0, 9.0])
+    differing = oecluster.activity_landscape(dm, [5.0, 9.0, 9.0])
+
+    assert equal.num_zero_distance_pairs == 1
+    assert differing.num_zero_distance_pairs == 1
+    assert equal.num_cliffs == 0
+    assert differing.num_cliffs == 1
+
+
 def test_activity_landscape_to_table_and_repr():
     landscape = oecluster.activity_landscape(_line_dm(_SALI_COORDS),
                                              _SALI_ACTIVITY)
@@ -541,6 +579,12 @@ def test_activity_landscape_refuses_every_bad_threshold_as_value_error():
             with pytest.raises(ValueError, match=f"{keyword} {expected}"):
                 call(bad)
 
+    # An int beyond double range fails in the cast rather than at isfinite, and
+    # would otherwise leave as OverflowError.
+    for keyword, call in thresholds:
+        with pytest.raises(ValueError, match=f"{keyword} must be finite"):
+            call(10 ** 1000)
+
     # Zero is the boundary and has to be accepted. Without this, a validator
     # that refused all three keywords outright would satisfy the block above.
     for _, call in thresholds:
@@ -635,6 +679,36 @@ def test_modelability_rejects_a_bare_str():
     """A str is iterable, so without the guard "AAB" is three annotations."""
     with pytest.raises(TypeError, match="not a single str"):
         oecluster.modelability(_line_dm([0.0, 0.1, 0.5]), "AAB")
+
+
+def test_modelability_accepts_any_iterable_of_class_strings():
+    """The other half of "reject str only": a tuple, a one-shot generator and a
+    NumPy object array are all accepted, and all score the same as the list."""
+    dm, _ = _thread_fixture()
+    block = ["A"] * 30 + ["B"] * 30
+    expected = 0.9666666666666667
+
+    assert oecluster.modelability(dm, block).modi == pytest.approx(
+        expected, abs=1e-12)
+    assert oecluster.modelability(dm, tuple(block)).modi == pytest.approx(
+        expected, abs=1e-12)
+    assert oecluster.modelability(
+        dm, (label for label in block)).modi == pytest.approx(
+            expected, abs=1e-12)
+    numpy = pytest.importorskip("numpy")
+    assert oecluster.modelability(
+        dm, numpy.array(block, dtype=object)).modi == pytest.approx(
+            expected, abs=1e-12)
+
+
+def test_modelability_refuses_a_non_matrix_and_a_negative_thread_count():
+    """Both guards are documented on the signature and neither was pinned;
+    without them the caller gets AttributeError and a SWIG OverflowError."""
+    with pytest.raises(TypeError, match="expects a SymmetricDistanceMatrix"):
+        oecluster.modelability([[0.0]], _MODI_CLASSES)
+    with pytest.raises(ValueError, match="num_threads must be non-negative"):
+        oecluster.modelability(_line_dm(_MODI_COORDS), _MODI_CLASSES,
+                               num_threads=-1)
 
 
 def test_modelability_rejects_a_non_string_class():
@@ -750,13 +824,20 @@ def test_the_matrix_metrics_agree_across_thread_counts():
     assert all(math.isfinite(value) for _, value in one.to_table())
 
     assert one.to_table() == many.to_table()
+
+    # The block annotation, not the alternating one: the alternating annotation
+    # scores exactly 0.0, which a threaded path that computed nothing would also
+    # return, so an equality over it agrees about silence. Pinning the
+    # single-thread value first makes the equality an agreement about a number.
+    block = ["A"] * 30 + ["B"] * 30
+    one_thread = oecluster.modelability(dm, block, num_threads=1).modi
+    assert one_thread == pytest.approx(0.9666666666666667, abs=1e-12)
+    assert one_thread == oecluster.modelability(dm, block, num_threads=4).modi
+
+    # The degenerate annotation still agrees across thread counts, but it is no
+    # longer the only thing the modelability half of this test rests on.
     assert (oecluster.modelability(dm, ["A", "B"] * 30, num_threads=1).modi ==
             oecluster.modelability(dm, ["A", "B"] * 30, num_threads=4).modi)
-
-    # The alternating annotation scores 0.0, which a modelability that computed
-    # nothing would also return. The same matrix under a block annotation does
-    # not, so agreeing on 0.0 above is agreement rather than silence.
-    assert oecluster.modelability(dm, ["A"] * 30 + ["B"] * 30).modi > 0.9
 
 
 def test_the_matrix_metrics_are_safe_under_concurrent_calls():
@@ -769,7 +850,10 @@ def test_the_matrix_metrics_are_safe_under_concurrent_calls():
     ``tests/python/test_native_bindings.py``.
     """
     dm, activity = _thread_fixture()
-    classes = ["A", "B"] * 30
+    # The block annotation rather than an alternating one, for the reason given
+    # in the thread-count test: an alternating annotation scores exactly 0.0, so
+    # pooled calls that computed nothing would satisfy the final equality.
+    classes = ["A"] * 30 + ["B"] * 30
     expected = oecluster.activity_landscape(dm, activity).to_table()
     expected_modi = oecluster.modelability(dm, classes).modi
 
@@ -777,7 +861,7 @@ def test_the_matrix_metrics_are_safe_under_concurrent_calls():
     # about, so that a constant or empty answer cannot satisfy the equalities.
     assert dict(expected)["num_cliffs"] == 131
     assert all(math.isfinite(value) for _, value in expected)
-    assert oecluster.modelability(dm, ["A"] * 30 + ["B"] * 30).modi > 0.9
+    assert expected_modi == pytest.approx(0.9666666666666667, abs=1e-12)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
         futures = [pool.submit(oecluster.activity_landscape, dm, activity)
@@ -815,3 +899,15 @@ def test_native_refusals_surface_as_runtime_error():
 
     with pytest.raises(RuntimeError, match="finite and non-negative"):
         oecluster.modelability(negative, ["A", "A", "B"])
+
+
+def test_the_sar_coherence_surface_is_exported():
+    """Attribute access does not consult __all__, so every test above passes
+    with the names missing from it; star-import and API discovery do not."""
+    exported = ("sar_coherence", "activity_landscape", "modelability",
+                "SARCoherence", "ClusterActivity", "ActivityLandscape",
+                "Modelability", "ClassConcordance")
+
+    missing = [name for name in exported if name not in oecluster.__all__]
+    assert missing == []
+    assert all(hasattr(oecluster, name) for name in exported)
