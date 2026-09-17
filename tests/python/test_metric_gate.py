@@ -1422,17 +1422,24 @@ def test_require_comparable_refuses_subset_scored_without_an_override():
     assert "allow_nonmetric" not in message
 
 
-def test_require_comparable_has_no_override_keyword():
-    """An override cannot be passed in, whatever it is called and however it
-    is passed.
+def test_require_comparable_takes_no_override_argument():
+    """There is no argument a caller can pass that could carry an override.
 
-    ``test_..._refuses_subset_scored_without_an_override`` asserts the message
-    does not mention ``allow_nonmetric``; the three probes here close the three
-    routes by which an argument could reach the check and switch it off: the
-    keyword a caller would guess from ``require_metric``, any other keyword a
-    ``**kwargs`` catch-all would swallow, and a third positional, which is all
-    a renamed or positional-only override needs -- with or without a forged
-    ``__signature__``.
+    The gate has exactly its two documented parameters, which is what the
+    probes below establish: no third positional, no keyword-only parameter, no
+    ``*args`` and no ``**kwargs`` for an override to arrive through, and the
+    keyword a caller would guess from ``require_metric`` is rejected rather
+    than quietly ignored.
+
+    That leaves one family a shape assertion cannot reach: an override
+    smuggled through the *value* of a parameter the gate already takes -- a
+    caller name read as a magic word -- or one held in module state. Neither
+    changes the function's arity, so nothing asserted here would see it. They
+    are guarded instead by
+    ``test_require_comparable_refuses_subset_scored_without_an_override``,
+    which calls the gate on a default-state module under an ordinary caller
+    name and requires it to raise; that is the level at which an override of
+    any shape has to show itself.
     """
     parameters = inspect.signature(_gate.require_comparable).parameters
     assert "allow_nonmetric" not in parameters
@@ -1450,6 +1457,15 @@ def test_require_comparable_has_no_override_keyword():
     with pytest.raises(TypeError):
         _gate.require_comparable(dist, "activity_landscape",
                                  True)  # pyright: ignore[reportCallIssue]
+
+    # __signature__ is a forgeable attribute; __code__ is the shape of the
+    # function that actually runs, so this is the probe a forged signature
+    # cannot slip past.
+    code = _gate.require_comparable.__code__
+    assert code.co_argcount == 2
+    assert code.co_kwonlyargcount == 0
+    assert not code.co_flags & inspect.CO_VARARGS
+    assert not code.co_flags & inspect.CO_VARKEYWORDS
 
 
 def test_require_comparable_accepts_a_triangle_violation():
