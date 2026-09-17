@@ -4085,7 +4085,9 @@ def _activity_values(value, argument_name):
     :returns: A native DoubleVector.
     :raises TypeError: If the value is a bare str, a bytes-like object, a
         mapping, not iterable, or yields a str, a bytes-like object, or
-        something that is not a real number.
+        something that is not a real number. A memoryview is a bytes-like
+        object whatever its format, so a float buffer is refused with the rest;
+        pass ``np.asarray(view)`` to score one.
     :raises ValueError: If it yields a number too large to convert to a double,
         such as ``10 ** 1000``. A magnitude fault rather than a type fault, so
         it is not folded into the TypeError above. An infinity converts
@@ -4094,8 +4096,11 @@ def _activity_values(value, argument_name):
     if isinstance(value, str):
         raise TypeError(
             f"{argument_name} must be a sequence of floats, not a single str")
-    # bytes, bytearray and memoryview all iterate as ints, so b"12" would score
-    # as the activities [49.0, 50.0] rather than being refused.
+    # Refused whatever the buffer's format. bytes and bytearray iterate as
+    # ints, so b"12" would score as the activities [49.0, 50.0]; a numeric
+    # memoryview would convert correctly, but it is refused with them rather
+    # than branching on .format -- pass np.asarray(view) to score a float
+    # buffer.
     if isinstance(value, (bytes, bytearray, memoryview)):
         raise TypeError(
             f"{argument_name} must be a sequence of floats, not a bytes-like "
@@ -4115,9 +4120,12 @@ def _activity_values(value, argument_name):
         # float() rather than operator.index(), which _agreement_labels uses:
         # an activity is a measurement, so 7 and 7.0 are the same input and a
         # numpy float has to pass. str and every bytes-like spelling are
-        # refused explicitly because float() converts all four -- a column read
-        # from a CSV without conversion, or one whose entries survived a single
-        # layer of deserialization, would otherwise score as numbers.
+        # refused explicitly because float() converts str, bytes, bytearray and
+        # a byte-format memoryview -- a column read from a CSV without
+        # conversion, or one whose entries survived a single layer of
+        # deserialization, would otherwise score as numbers. A numeric
+        # memoryview is the one spelling float() does not convert; it is
+        # refused with them for consistency with the column guard above.
         if isinstance(item, (str, bytes, bytearray, memoryview)):
             raise TypeError(f"{argument_name} must be a sequence of floats")
         try:
@@ -4265,11 +4273,15 @@ def activity_landscape(distance_matrix, activity, *, distance_threshold=0.30,
         exceeds ``size_t`` raises ``OverflowError`` from the binding layer.
     :returns: An :class:`ActivityLandscape`.
     :raises TypeError: If ``distance_matrix`` is not a SymmetricDistanceMatrix,
-        or ``activity`` is not a sequence of floats.
+        ``activity`` is not a sequence of floats, or ``num_threads`` is a value
+        ``int()`` cannot accept at all, such as None or a complex. That
+        coercion runs before the non-negative check below.
     :raises ValueError: If the matrix uses sparse storage, the activity is
         empty, the activity holds a number too large to convert to a double,
         the activity and the matrix cover different numbers of samples,
         any of the three thresholds is non-finite or negative,
+        ``num_threads`` is a str ``int()`` cannot parse or a NaN, which the
+        same coercion refuses,
         ``num_threads`` truncates toward zero to a negative integer,
         or the gate refuses the matrix --
         similarity-valued, a non-zero self-distance, a non-finite entry, or
@@ -4379,11 +4391,15 @@ def modelability(distance_matrix, activity_classes, *, num_threads=0):
         raises ``OverflowError`` from the binding layer.
     :returns: A :class:`Modelability`.
     :raises TypeError: If ``distance_matrix`` is not a SymmetricDistanceMatrix,
-        or ``activity_classes`` is not a sequence of strings.
+        ``activity_classes`` is not a sequence of strings, or ``num_threads``
+        is a value ``int()`` cannot accept at all, on
+        :func:`activity_landscape`'s terms.
     :raises ValueError: On the same conditions as :func:`activity_landscape`,
         reading ``activity_classes`` for ``activity``, less the three threshold
         refusals and the oversized-value refusal: this function has no
-        thresholds, and a class string has no magnitude to overflow.
+        thresholds, and a class string has no magnitude to overflow. The
+        ``num_threads`` conditions carry over unchanged, the coercion failures
+        on a str or a NaN included.
     :raises RuntimeError: If a stored distance is negative, on the same terms
         as :func:`activity_landscape`.
 
