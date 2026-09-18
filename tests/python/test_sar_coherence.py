@@ -1486,7 +1486,7 @@ def test_rmodi_matches_the_published_definition():
     landscape = oecluster.activity_landscape(_line_dm(_PARITY_COORDS),
                                              _PARITY_ACTIVITY)
 
-    assert landscape.activity_stddev == pytest.approx(0.8225975119502044,
+    assert landscape.activity_stddev == pytest.approx(0.8225975119502045,
                                                       abs=1e-12)
     assert landscape.rmodi == pytest.approx(0.6666666666666666, abs=1e-12)
 

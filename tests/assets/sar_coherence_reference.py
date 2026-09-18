@@ -105,8 +105,9 @@ if __name__ == "__main__":
     CLASSES = ["A", "B", "A", "A", "B", "B"]
     print(modi(CONDENSED, CLASSES))
     # The parity tests pin the band's standard deviation as well, so print it
-    # rather than leave it buried inside rmodi. numpy's summation order puts
-    # this one ulp above the sqrt(4.06 / 6) that test pins, far inside its
-    # abs=1e-12 tolerance.
+    # rather than leave it buried inside rmodi. The exact population variance
+    # here is 4.06 / 6, and this is its correctly rounded square root, checked
+    # against the exact rational rather than inferred from two implementations
+    # agreeing.
     print(float(np.std(ACTIVITY)))
     print(rmodi(CONDENSED, ACTIVITY))
