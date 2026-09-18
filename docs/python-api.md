@@ -599,18 +599,20 @@ comparison has no content. The concordance sweep is skipped rather than run to
 a foregone answer -- the distances are still validated -- so the single row's
 `fraction_same_class` is `nan` as well, not 1.0.
 
-Nearest-neighbour ties resolve to the lowest scored index, so `modi` depends on
-the order the samples arrive in wherever distances tie: over a matrix whose
-off-diagonal distances are all equal, the classes `["A", "A", "B", "B"]` read
-0.5 where `["A", "B", "A", "B"]` read 0.25 on the same four samples. Two
-duplicate molecules are enough to produce such a tie, being equidistant from
-every third sample, so reordering rows can move the figure on a real matrix as
-well.
+Nearest-neighbour ties resolve to the lowest scored index, so `modi` and the
+`fraction_same_class` rows behind it depend on the order the samples arrive in
+wherever distances tie: over a matrix whose off-diagonal distances are all
+equal, the classes `["A", "A", "B", "B"]` read 0.5 where `["A", "B", "A", "B"]`
+read 0.25 on the same four samples, and across the six orderings of that data
+`modi` spans 0.25 to 0.5 where each class's fraction spans the whole 0.0 to
+1.0. Two duplicate molecules are enough to produce such a tie, being
+equidistant from every third sample, so reordering rows can move these figures
+on a real matrix as well.
 
 `modi` is not chance-corrected, and its chance level is not zero: random labels
 over N scored samples in K classes average about `(N - K) / (K * (N - 1))`,
-which approaches `1/K` as N grows and barely moves with the class balance. Read
-a `modi` against that figure rather than against 0.0.
+which approaches `1/K` as N grows and does not move with the class balance.
+Read a `modi` against that figure rather than against 0.0.
 
 The annotation is a sequence of strings, one per sample, and an empty string is
 missing data rather than a category -- the same reading `scaffold_agreement()`
