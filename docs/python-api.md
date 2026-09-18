@@ -439,6 +439,8 @@ vector across a labeling you already have. `activity_landscape()` and
 the question without clustering first:
 
 ```python
+import math
+
 activity = [...]   # one measurement per molecule, in the matrix's sample order
 
 coherence = oecluster.sar_coherence(butina_result, activity)
@@ -448,16 +450,24 @@ landscape = oecluster.activity_landscape(
     dm, activity, distance_threshold=0.30, activity_threshold=1.0)
 print(landscape.num_cliffs, landscape.cliff_density, landscape.max_sali)
 
-classes = ["active" if a >= 6.0 else "inactive" for a in activity]
+# The nan arm is not optional: nan >= 6.0 is False, so a comprehension
+# without it labels every missing measurement "inactive".
+classes = ["" if math.isnan(a) else "active" if a >= 6.0 else "inactive"
+           for a in activity]
 print(oecluster.modelability(dm, classes).modi)
 ```
 
 All three treat a `nan` activity -- or, for `modelability()`, an empty class
 string -- as missing rather than as a value. The sample is dropped, and every
 result reports `num_samples`, the length of the input, beside `num_scored`,
-how many of those samples carried a usable value. An undefined metric is `nan`,
-never a substituted number, on the same convention `cluster_report()` and
-`partition_agreement()` follow.
+how many of those samples entered the metric. For `activity_landscape()` and
+`modelability()` that is exactly the count that carried a usable value.
+`sar_coherence()` drops whatever `noise=` excludes as well, so under its
+`"excluded"` default a gap between the two figures can be noise rather than
+missing data: `sar_coherence([-1, 0, 0, 1, 1], [1.0, 2.0, 3.0, 4.0, 5.0])`
+reports `num_samples` 5 and `num_scored` 4 with every activity usable. An
+undefined metric is `nan`, never a substituted number, on the same convention
+`cluster_report()` and `partition_agreement()` follow.
 
 ### `sar_coherence()`
 
@@ -470,8 +480,10 @@ labeling explains less than chance would; η² cannot. Both are `nan` when fewer
 than two samples are scored, and both are `nan` when the scored activities have
 zero variance -- there is nothing to apportion. ω² has one further `nan` case of
 its own: when every scored sample is its own cluster there are no
-within-cluster degrees of freedom for the chance correction to divide by, so
-η² reads 1.0 there while ω² reads `nan`.
+within-cluster degrees of freedom for the chance correction to divide by. η²
+does not share that case. On an all-singleton labeling it reads 1.0 whenever
+the scored activities vary at all, and `nan` when they do not, the
+zero-variance rule above outranking everything else.
 
 `coherence.clusters` is a tuple of `ClusterActivity` rows -- `label`,
 `num_scored`, `mean_activity`, `stddev_activity` -- and it feeds
@@ -479,7 +491,18 @@ within-cluster degrees of freedom for the chance correction to divide by, so
 cluster that kept at least one scored sample, and no row for the others: a
 cluster whose every member was dropped as noise or as a missing measurement is
 absent from the table rather than present with `nan` statistics, and
-`num_clusters` counts the rows that are there. The rows follow the order in
+`num_clusters` counts the rows that are there. A row that is present is not
+therefore a row with complete statistics -- `stddev_activity` is `nan` for
+every cluster down to one scored member, a spread over one sample not being
+defined -- so `dropna()` over this table deletes the singleton clusters and
+not the absent ones. Nor is `label` a key: under `noise="singletons"` each
+promoted noise point becomes its own row and they all carry `-1`, so
+`sar_coherence([-1, -1, 0, 0], [1.0, 2.0, 3.0, 4.0], noise="singletons")`
+returns three rows labelled `[-1, -1, 0]`. A dict comprehension keyed by
+`label` silently keeps the last of them and reports two clusters where there
+are three, and `set_index("label").loc[-1]` hands back a frame rather than the
+row the caller was reaching for. Position distinguishes those rows; the label
+does not. The rows follow the order in
 which their labels first appear among the scored samples, not sorted label
 order, so a clustering result and a reordering of the same labels can list the
 same clusters in different positions. "Among the scored samples" is the
@@ -505,26 +528,42 @@ every pair of scored samples, so the reading is per-pair and comparable across
 sets of different size.
 
 `max_sali` and `mean_sali` summarise the SALI ratio `abs(delta) / distance`
-over the pairs where that ratio is defined. Identical structures with different
-activities make the ratio infinite, so zero-distance pairs are excluded from
-both and counted in `num_zero_distance_pairs` instead -- a non-zero count there
-is worth reading before the SALI figures, because a zero-distance pair whose
-activities differ sharply is the sharpest cliff there is and neither average
-sees it. Such a pair is still counted as a cliff, on the same
+over the pairs where that ratio is defined. At zero distance it is not: the
+ratio is infinite where the two activities differ and `0/0` where they agree.
+Zero-distance pairs are therefore excluded from both figures either way and
+counted in `num_zero_distance_pairs` instead -- a non-zero count there is worth
+reading before the SALI figures, because a zero-distance pair whose activities
+differ sharply is the sharpest cliff there is and neither figure sees it. Such
+a pair is still counted as a cliff, on the same
 `abs(delta) >= activity_threshold` test as any other -- a zero distance clears
 every permitted `distance_threshold` -- so `num_cliffs` and `cliff_density`
 include it.
 
-`rmodi` scores the landscape without a threshold at all. For each scored
-sample it finds the nearest neighbour whose activity is inside the sample's
-band and the nearest one outside it, where the band is `rmodi_delta` times the
-population standard deviation of the scored activities -- reported as
-`activity_stddev`, so the band is auditable. `rmodi` is the fraction of samples
-whose in-band neighbour is strictly nearer than the out-of-band one; 1.0 says
-distance tracks activity everywhere, 0.0 says it never does. The default
-`rmodi_delta=0.625` is the published one. Flat activity puts every sample in
-one band, no sample has an out-of-band neighbour, and `rmodi` is 1.0 --
-correctly, since nothing about the activity contradicts the distances.
+`rmodi` scores the landscape without a distance threshold at all. For each
+scored sample it finds the nearest neighbour whose activity is inside the
+sample's band and the nearest one outside it. A neighbour is inside the band
+when its activity differs from the sample's by at most `rmodi_delta *
+activity_stddev`, the comparison being inclusive; `rmodi_delta` is thus a
+half-width in standard deviations, reaching that far either side of the
+sample's own activity, and the band spans twice it. `activity_stddev` is the
+population standard
+deviation of the scored activities and is reported on the result, so the band
+is auditable. `rmodi` is the fraction of samples whose in-band neighbour is
+strictly nearer than the out-of-band one. The default `rmodi_delta=0.625` is
+the published one.
+
+Both extremes are reachable from the band width alone, so read `rmodi` against
+`activity_stddev` rather than as a verdict on the landscape. A sample with no
+in-band neighbour has its in-band minimum left at infinity and counts as
+discordant, so if every pair's activity difference exceeds the band then every
+sample is discordant and `rmodi` is 0.0 however faithfully distance tracks
+activity: five points whose pairwise distances equal their activity
+differences exactly -- the most coherent landscape there is -- score 0.0 at
+the default `rmodi_delta` and 1.0 at `rmodi_delta=1.0`. At the other end, flat
+activity collapses the band to zero width but puts every pair inside it, no
+sample has an out-of-band neighbour, and `rmodi` is 1.0 -- correctly, since
+nothing about the activity contradicts the distances. Sweep `rmodi_delta`
+before concluding anything from a value at either end.
 
 ### `modelability()`
 
@@ -540,8 +579,10 @@ scored samples rather than sorted by label. The distinction that bites
 `coherence.clusters` does not arise here: the only unscored sample is one whose
 class string is empty, and that is no class at all, so this is plain input
 order over the classes that exist. `modi` is `nan` when fewer than two classes
-are scored: one class means every neighbour matches by construction, and the
-number would say nothing.
+are scored: with one class no neighbour could carry a different one, so the
+comparison has no content. The concordance sweep is skipped rather than run to
+a foregone answer -- the distances are still validated -- so the single row's
+`fraction_same_class` is `nan` as well, not 1.0.
 
 The annotation is a sequence of strings, one per sample, and an empty string is
 missing data rather than a category -- the same reading `scaffold_agreement()`
@@ -555,10 +596,16 @@ against a weaker standard than the clustering entry points use. They rank
 distances against one another and compare them to a threshold; neither
 operation needs the triangle inequality, so a matrix a clustering algorithm
 would refuse is usually fine here and there is no `allow_nonmetric` parameter
-to pass. What they do refuse is a similarity, a measure whose self-distance
-does not vanish, a non-finite distance, and -- alone among the entry points in
-refusing it outright, with no override -- a matrix stamped
-`data_integrity == 'subset_scored'`:
+to pass. What they do refuse is sparse storage, a similarity, a measure whose
+self-distance does not vanish, a non-finite distance, and -- alone among the
+entry points in refusing it outright, with no override -- a matrix stamped
+`data_integrity == 'subset_scored'`.
+
+Sparse storage is the refusal most callers meet first, because `pdist(...,
+cutoff=...)` produces it as a matter of course. Both functions read every
+pairwise distance among the scored samples, which a matrix that kept only the
+distances below a cutoff cannot supply, so both raise `ValueError` from the
+Python layer before the gate runs. The rest are the gate's:
 
 ```python
 dm = oecluster.pdist(mols, "descriptor", missing="ignore")
@@ -572,6 +619,15 @@ operation here, so this one is not overridable; recompute with
 `missing='complete_case'`.
 
 ### Which exception you get
+
+Three exception types are in play, not two. `TypeError` comes first, for an
+argument of the wrong kind rather than the wrong value: a first argument that
+is not a `SymmetricDistanceMatrix`, a `result` that is neither a clustering
+result nor a sequence of ints, a bare `str` where a sequence of activities or
+of class strings is wanted, an activity element that is not a number, and a
+class element that is not a string. `num_threads` is the one argument that
+splits between the two: it goes through `int()`, so `None` or a list raises
+`TypeError` while a non-numeric string raises `ValueError`.
 
 Each of the three raises `ValueError` for whatever its own signature lets
 Python see for itself: a length mismatch, an empty labeling, an empty activity,
@@ -956,7 +1012,8 @@ Invalid arguments raise standard Python exceptions with a descriptive message.
 Among the causes: an unknown comparison or representative method name and a
 `"highest_neighborhood"` request without a `threshold` raise `ValueError`. A
 sparse matrix passed where complete distances are required splits by where the
-refusal lives. `hdbscan`, `agglomerative` and `cluster_report` check the storage
+refusal lives. `hdbscan`, `agglomerative`, `cluster_report`,
+`activity_landscape` and `modelability` check the storage
 in the Python layer and raise `ValueError`; `rank_representatives` and
 `select_representatives` have no such pre-check and refuse from the C++ layer
 with `RuntimeError`, which is also how a refusal from that layer usually

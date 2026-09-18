@@ -585,12 +585,16 @@ print(oecluster.modelability(dm, classes).modi)
 | `omega_squared` | Below 0.0 to 1.0, 0.0 by chance, or `nan` | The labeling explains no more activity variance than a random one of the same shape. Negative means less than chance |
 | `cliff_density` | 0.0 to 1.0, or `nan` | Few near-neighbour pairs differ sharply in activity: a smooth landscape at this threshold pair |
 | `max_sali`, `mean_sali` | 0.0 upward, or `nan` | No pair is both structurally close and far apart in activity. Zero-distance pairs are excluded from both and counted in `num_zero_distance_pairs` |
-| `rmodi` | 0.0 to 1.0, or `nan` | A sample's nearest neighbour is usually outside its activity band, so distance does not track activity |
-| `modi` | 0.0 to 1.0, or `nan` | A sample's nearest neighbour usually carries a different class, so the classes are not modelable from this matrix |
+| `rmodi` | 0.0 to 1.0, or `nan` | A sample's nearest neighbour is usually outside its activity band -- which reaches `rmodi_delta * activity_stddev` either side, so a narrow band lowers the figure on its own: five collinear points whose distances equal their activity gaps score 0.0 at the default `rmodi_delta`, and 1.0 at `rmodi_delta=1.0` |
+| `modi` | 0.0 to 1.0, or `nan` | A sample's nearest scored neighbour usually carries a different class, so the classes are not modelable from this matrix |
 
 A `nan` activity is missing data rather than a value, as is an empty class
 string, and every result reports `num_scored` beside `num_samples` so the
-difference is visible. See
+difference is visible. Only for `activity_landscape` and `modelability` is that
+difference entirely missing data: `sar_coherence` counts what `noise=` drops in
+it as well, so under its `"excluded"` default
+`sar_coherence([-1, 0, 0, 1, 1], [1.0, 2.0, 3.0, 4.0, 5.0])` reports
+`num_scored` 4 of 5 with every activity usable. See
 [docs/python-api.md](docs/python-api.md#sar-coherence) for the per-cluster and
 per-class tables, the `noise=` readings, and the one distance-matrix refusal
 these two entry points will not waive.

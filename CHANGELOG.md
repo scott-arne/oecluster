@@ -13,19 +13,25 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   removed, so it can be compared across labelings of different granularity.
   The input is a clustering result or a bare labeling, and a `nan` activity is
   missing data rather than a value. `SARCoherence.clusters` carries a
-  per-cluster mean and standard deviation.
+  per-cluster mean and standard deviation. `noise=` takes the same three
+  spellings as the 5.3.0 agreement metrics, but the default here is
+  `"excluded"` and not the `Singletons` reading that entry called "matching the
+  rest of the library": noise is not a structural hypothesis, and promoting
+  each noise point to a cluster of its own inflates eta_squared for a reason
+  that has nothing to do with the labeling under test.
 - `activity_landscape`, in C++ and Python, scoring the structure-activity
   landscape from a distance matrix with no clustering in between: the count and
   per-pair density of activity cliffs, the maximum and mean SALI over the pairs
   where the ratio is defined, and RMODI. Pairs at zero distance are excluded
-  from both SALI figures -- the ratio is infinite there -- and reported as
+  from both SALI figures -- the ratio is infinite where the two activities
+  differ and `0/0` where they agree -- and reported as
   `num_zero_distance_pairs`, while still counting as cliffs when their activity
   difference qualifies.
 - `modelability`, in C++ and Python, reporting MODI over a per-sample class
   annotation: the mean over classes of the fraction of each class's members
-  whose nearest neighbour shares their class, with a per-class breakdown. An
-  empty class string is missing data rather than a category, matching
-  `scaffold_agreement`.
+  whose nearest scored neighbour shares their class, with a per-class
+  breakdown. An empty class string is missing data rather than a category,
+  matching `scaffold_agreement`.
 - `OECluster::detail` activity helpers in `src/clustering/ActivityMetrics.h`,
   and the public surface in `include/oecluster/clustering/SARCoherence.h`,
   reachable through the `oecluster.h` umbrella header.
