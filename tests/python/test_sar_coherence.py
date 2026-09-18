@@ -1389,3 +1389,39 @@ def test_the_sar_coherence_surface_is_exported():
     missing = [name for name in exported if name not in oecluster.__all__]
     assert missing == []
     assert all(hasattr(oecluster, name) for name in exported)
+
+
+# The published-parity fixture. Six points on a line whose activity rises with
+# position, annotated into two classes that cut across that order.
+# tests/assets/sar_coherence_reference.py derives every literal below straight
+# from the published definitions; it is documentation, not a dependency.
+_PARITY_COORDS = [0.0, 0.60, 0.40, 0.45, 0.80, 0.85]
+_PARITY_ACTIVITY = [0.0, 0.2, 1.0, 1.2, 2.0, 2.2]
+_PARITY_CLASSES = ["A", "B", "A", "A", "B", "B"]
+
+
+def test_modelability_matches_the_published_definition():
+    """Sample 1's nearest neighbour is 3, the one class change among six.
+
+    So A scores 3/3, B scores 2/3, and the unweighted mean is 5/6.
+    """
+    report = oecluster.modelability(_line_dm(_PARITY_COORDS), _PARITY_CLASSES)
+
+    assert report.modi == pytest.approx(0.8333333333333333, abs=1e-12)
+    assert [row.label for row in report.classes] == ["A", "B"]
+    assert report.classes[0].fraction_same_class == pytest.approx(1.0,
+                                                                  abs=1e-12)
+    assert report.classes[1].fraction_same_class == pytest.approx(
+        0.6666666666666666, abs=1e-12)
+
+
+def test_rmodi_matches_the_published_definition():
+    """Samples 2 to 5 sit 0.05 from an in-band partner and further from every
+    out-of-band one; 0 and 1 do not, their only in-band partner being each
+    other at 0.60. Four of six."""
+    landscape = oecluster.activity_landscape(_line_dm(_PARITY_COORDS),
+                                             _PARITY_ACTIVITY)
+
+    assert landscape.activity_stddev == pytest.approx(0.8225975119502044,
+                                                      abs=1e-12)
+    assert landscape.rmodi == pytest.approx(0.6666666666666666, abs=1e-12)
