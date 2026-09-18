@@ -2,6 +2,8 @@
 
 import concurrent.futures
 import math
+import mmap
+from array import array
 
 import numpy as np
 import oecluster
@@ -430,14 +432,71 @@ def test_the_activity_entry_points_reject_an_oversized_activity_value():
 
 
 def test_sar_coherence_accepts_any_iterable_of_activity_values():
-    tuple_form = oecluster.sar_coherence(
-        _COHERENCE_LABELS, tuple(_COHERENCE_ACTIVITY))
-    generator_form = oecluster.sar_coherence(
-        _COHERENCE_LABELS, (value for value in _COHERENCE_ACTIVITY))
+    """A tuple, a generator and a numpy column all score the same.
 
-    for coherence in (tuple_form, generator_form):
+    The numpy forms are not decoration. A column is the shape a caller most
+    often holds, and the bytes-like guard names three concrete types rather
+    than testing for the buffer protocol precisely so that a numeric buffer is
+    read as numbers -- a guard that refused ``ndarray`` would satisfy every
+    other test in this file. Both dtypes appear because a float64 element
+    reaches ``float()`` through ``__float__`` while a uint8 element is an
+    integer scalar.
+    """
+    forms = (
+        tuple(_COHERENCE_ACTIVITY),
+        (value for value in _COHERENCE_ACTIVITY),
+        np.array(_COHERENCE_ACTIVITY),
+        np.array(_COHERENCE_ACTIVITY, dtype=np.uint8),
+    )
+
+    for activity in forms:
+        coherence = oecluster.sar_coherence(_COHERENCE_LABELS, activity)
         assert coherence.eta_squared == pytest.approx(0.9142857142857143,
                                                       abs=1e-12)
+
+
+def test_the_activity_guard_names_types_rather_than_testing_for_buffers():
+    """Exporting a buffer neither admits an activity column nor refuses one.
+
+    Refusing ``bytes``, ``bytearray`` and ``memoryview`` by name, rather than
+    testing for the buffer protocol, is the adjudicated behaviour: a uint8
+    measurement column cannot be told from misread text, so the boundary is
+    drawn at the three text-and-binary containers a caller has almost
+    certainly not meant as measurements. Two consequences follow, both
+    documented in ``_activity_values`` and neither pinned until now -- other
+    buffer exporters are admitted or refused on what they yield, and the
+    column and element positions read the same object differently.
+    """
+    # Column position: a byte-format column is iterated, so its bytes are the
+    # measurements. b"12" is refused by name; the same bytes held by an array
+    # are not, and score as 49 and 50.
+    for column in (array("B", b"12"), np.frombuffer(b"12", dtype="u1")):
+        assert oecluster.sar_coherence(
+            [0, 0], column).clusters[0].mean_activity == 49.5
+
+    # An mmap exports a buffer too and is refused all the same -- not for
+    # being one, but because iterating it yields bytes.
+    with mmap.mmap(-1, 2) as mapped:
+        mapped[:] = b"12"
+        with pytest.raises(TypeError, match="sequence of floats"):
+            oecluster.sar_coherence([0, 0], mapped)
+
+    # Element position: float() reads a numpy scalar numerically but parses a
+    # nested byte-format array as the text its bytes spell, so array("B", b"1")
+    # scores 1.0 here rather than the 49 its byte holds.
+    assert oecluster.sar_coherence(
+        [0, 0], [array("B", b"1"), array("B", b"2")],
+    ).clusters[0].mean_activity == 1.5
+    assert oecluster.sar_coherence(
+        [0, 0], [np.uint8(49), np.uint8(50)],
+    ).clusters[0].mean_activity == 49.5
+
+    # float() converts neither of these, so they are refused rather than
+    # silently misread.
+    with pytest.raises(TypeError, match="sequence of floats"):
+        oecluster.sar_coherence([0, 0], [array("d", [1.0]), array("d", [2.0])])
+    with pytest.raises(TypeError, match="sequence of floats"):
+        oecluster.sar_coherence([0, 0], np.array([[1.0, 2.0], [3.0, 4.0]]))
 
 
 def test_sar_coherence_rejects_a_misspelled_keyword():
@@ -473,6 +532,23 @@ def test_sar_coherence_to_table_and_repr():
     assert dict(table)["num_clusters"] == 3
     assert dict(table)["eta_squared"] == pytest.approx(0.9142857142857143,
                                                        abs=1e-12)
+
+    # Every cell, not a selection of them. The names above pin only the
+    # labels, so a projection publishing eta_squared's number under the
+    # omega_squared label satisfies both the list and the rendering below --
+    # and publishes a chance-corrected figure that is nothing of the kind. One
+    # NaN separates num_samples from num_scored, and no two cells of this
+    # fixture hold the same value, so no label paired with the wrong attribute
+    # survives.
+    assert oecluster.sar_coherence(
+        _COHERENCE_LABELS, [1.0, 3.0, 5.0, float("nan"), 9.0, 11.0],
+    ).to_table() == [
+        ("num_samples", 6),
+        ("num_scored", 5),
+        ("num_clusters", 3),
+        ("eta_squared", pytest.approx(0.9418604651162791, abs=1e-12)),
+        ("omega_squared", pytest.approx(0.8587570621468926, abs=1e-12)),
+    ]
 
     rendered = repr(coherence)
     assert rendered.splitlines()[0].startswith("metric")
@@ -827,6 +903,28 @@ def test_activity_landscape_to_table_and_repr():
     assert dict(table)["num_cliffs"] == 2
     assert dict(table)["cliff_density"] == pytest.approx(2.0 / 3.0, abs=1e-12)
 
+    # Every cell, for the reason given in
+    # test_sar_coherence_to_table_and_repr. The fixture above cannot carry
+    # that check: fully scored and three points wide, it reads 3 for
+    # num_samples, num_scored and num_pairs_scored alike. Two coincident
+    # points and one NaN drive all ten cells apart, so no label paired with
+    # the wrong attribute survives.
+    assert oecluster.activity_landscape(
+        _line_dm([0.0, 0.0, 0.3, 0.9, 2.0]),
+        [1.0, 1.0, 4.0, float("nan"), 5.0],
+    ).to_table() == [
+        ("num_samples", 5),
+        ("num_scored", 4),
+        ("num_pairs_scored", 6),
+        ("num_cliffs", 2),
+        ("cliff_density", pytest.approx(1.0 / 3.0, abs=1e-12)),
+        ("num_zero_distance_pairs", 1),
+        ("max_sali", pytest.approx(10.0, abs=1e-12)),
+        ("mean_sali", pytest.approx(4.91764705882353, abs=1e-12)),
+        ("rmodi", pytest.approx(0.75, abs=1e-12)),
+        ("activity_stddev", pytest.approx(1.7853571071357126, abs=1e-12)),
+    ]
+
     rendered = repr(landscape)
     assert "cliff_density" in rendered
     assert "0.6667" in rendered
@@ -1150,6 +1248,18 @@ def test_modelability_to_table_and_repr():
     # substring check below.
     assert dict(table)["num_classes"] == 2
     assert dict(table)["modi"] == pytest.approx(1.0 / 3.0, abs=1e-12)
+
+    # Every cell, for the reason given in
+    # test_sar_coherence_to_table_and_repr. One unannotated sample separates
+    # num_samples from num_scored, which the fixture above reads as 4 alike.
+    assert oecluster.modelability(
+        _line_dm(_MODI_COORDS), ["A", "", "B", "A"],
+    ).to_table() == [
+        ("num_samples", 4),
+        ("num_scored", 3),
+        ("num_classes", 2),
+        ("modi", 0.0),
+    ]
 
     rendered = repr(report)
     assert "modi" in rendered
