@@ -156,13 +156,16 @@ TEST(ActivityMetricsTest, PopulationStddevDoesNotLoseAnUlpOnAHandFixture) {
 }
 
 // The sum of squared deviations here is 0x1.0000000000004p-1022, which is
-// normal, so a guard placed on the sum admits it. The quotient is what has to
-// survive: dividing by the two samples lands in the subnormal range, and the
-// square root propagates the significand bits the division truncated, one ulp
-// low. The mean is exactly 0, so the exact population standard deviation is
-// |x|, and the scaled path returns it exactly -- the deviations are exactly
-// +/-1.0 once divided by the scale. Requiring the quotient rather than the sum
-// to be normal is what routes the fixture there.
+// normal, so a guard placed on the sum admits it. The variance is what has to
+// survive. Each squared deviation is 0x0.8000000000002p-1022 -- one binary
+// order below DBL_MIN, so the multiply rounded it onto the subnormal grid and
+// kept 52 significand bits instead of 53. The sum of the two and the division
+// by two are both exact, so nothing after the multiply adds any error and
+// nothing removes the error it made; the square root simply carries it
+// through, one ulp low. The mean is exactly 0, so the exact population
+// standard deviation is |x|, and the scaled path returns it exactly -- the
+// deviations are exactly +/-1.0 once divided by the scale. Requiring a normal
+// variance rather than a normal sum is what routes the fixture there.
 TEST(ActivityMetricsTest, PopulationStddevSurvivesASubnormalVariance) {
     EXPECT_EQ(OECluster::detail::population_stddev(
                   {0x1.6a09e667f3bd0p-512, -0x1.6a09e667f3bd0p-512}),
@@ -171,10 +174,11 @@ TEST(ActivityMetricsTest, PopulationStddevSurvivesASubnormalVariance) {
 
 // The same defect with the sample count turned up, which is what shows its
 // magnitude. A thousand alternating values sum to 0x1.00000000001f8p-1022 --
-// normal again -- but the quotient now sits about ten binary orders below
-// DBL_MIN instead of one, and the unscaled result is 253 ulps low rather than
-// one. The cost of dividing into the subnormal range grows with the divisor,
-// so a floor that does not scale with the sample count understates it.
+// normal again -- but each squared deviation now sits about ten binary orders
+// below DBL_MIN instead of one, keeping 43 significand bits instead of 52, and
+// the result is 253 ulps low rather than one. That is the reason the floor
+// scales with the count: the more terms a normal sum is spread across, the
+// further below DBL_MIN each of them may have been formed.
 TEST(ActivityMetricsTest, PopulationStddevSurvivesASubnormalVarianceAtSize) {
     std::vector<double> values;
     values.reserve(1000);

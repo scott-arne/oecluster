@@ -153,19 +153,32 @@ inline double population_stddev(const std::vector<double>& values) {
         const double difference = value - refined_mean;
         unscaled += difference * difference;
     }
-    // The lower bound is a floor on the quotient rather than on the sum,
-    // because the division by the sample count is where the bits are lost: a
-    // normal sum can divide down into the subnormal range, and the square root
-    // then propagates a significand that has already been truncated. That is
-    // why the floor scales with the sample count. Underflow here is gradual,
-    // so the loss is silent -- squared deviations that enter the subnormal
-    // range keep almost none of their significant bits yet still pass a
-    // "> 0.0" test. Deviations on the order of 2^-537 sum to two subnormal
-    // units, which then divide and square-root their way back to exactly 0.0,
-    // the very collapse the scaling exists to prevent. Requiring a normal
-    // quotient bounds what subnormal terms can cost: each is off by at most
-    // half a subnormal ulp against a quotient of at least DBL_MIN, which is
-    // the scale of ordinary rounding.
+    // The bits are lost in the loop above, not below it. A squared deviation
+    // that lands in the subnormal range is rounded onto the subnormal grid the
+    // moment it is formed, and nothing downstream can recover what the multiply
+    // discarded -- for both fixtures the regression tests use, the accumulation
+    // and the division that follow are exact, and the answer is still wrong.
+    // Underflow here is gradual, so that loss is silent: the product is neither
+    // zero nor flagged, it is simply short of significand, and it passes a
+    // "> 0.0" test intact. At the extreme, deviations on the order of 2^-537
+    // square to a single subnormal unit or to nothing at all, and the total
+    // square-roots its way back to exactly 0.0 -- the very collapse the scaling
+    // exists to prevent.
+    //
+    // So the quantity worth testing is the variance, because it is the average
+    // of those terms and therefore their scale. A floor on the sum says nothing
+    // about that scale, which is the defect this bound fixes -- n terms that
+    // each lost bits still add to a normal total, and the larger n is the
+    // further below DBL_MIN each of them may have been formed. The floor
+    // therefore has to scale with the sample count.
+    //
+    // What that buys is a bound rather than exactness. The multiplies are the
+    // only operations here that can round below DBL_MIN, and each is off by at
+    // most half a subnormal ulp, 2^-1075. Over n terms that is an accumulated
+    // 2^-1075 * n against a total of at least DBL_MIN * n, so a relative error
+    // of at most 2^-53. Everything after the loop rounds at normal magnitudes,
+    // where half an ulp is the ordinary cost of the arithmetic rather than a
+    // symptom of underflow.
     //
     // The bound is exact, not approximate. DBL_MIN is a power of two, so
     // DBL_MIN * n is exact for every count that converts exactly to double,
