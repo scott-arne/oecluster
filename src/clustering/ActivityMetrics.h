@@ -113,14 +113,27 @@ inline double population_stddev(const std::vector<double>& values) {
     }
     const double refined_mean = mean + correction / static_cast<double>(values.size());
 
-    // Squaring before dividing is what loses the small end. A deviation of
-    // 1e-163 squares to zero, so a naive accumulation reports a spread of
-    // exactly 0.0 for data that has one -- and 0.0 is not a small answer here,
-    // it is the answer that collapses the RMODI band and makes every sample
-    // in-band. Dividing each deviation by the largest one first puts the
-    // biggest term at exactly 1.0, so the sum can neither underflow nor
-    // overflow, and multiplying the scale back in after the square root keeps
-    // it out of the squaring entirely.
+    // Two accumulations in preference order. The unscaled sum of squared
+    // deviations below is tried first because it rounds once. Dividing every
+    // deviation by the largest one before squaring and multiplying the scale
+    // back in after the square root rounds twice, and that second rounding can
+    // land an ulp below a value the unscaled sum reaches exactly. The ulp is
+    // not cosmetic: RMODI's band test is inclusive, so a standard deviation one
+    // ulp low turns it exclusive and drops the neighbours sitting
+    // mathematically on the boundary. Neither path is correctly rounded in
+    // general, and the preference is not an improvement on every input: over
+    // random small-integer fixtures the unscaled path is off by an ulp roughly
+    // half as often, but it is off on inputs the scaled one gets right. It is
+    // the better default, not an exact one.
+    //
+    // The scaling still owns the two ends it was written for, and both reach it
+    // by falling through the guard below. A deviation of 1e-163 squares off the
+    // bottom of the double range, so an unscaled accumulation reports a spread
+    // of 0.0 for data that has one -- and 0.0 is not a small answer here, it is
+    // the answer that collapses the RMODI band and makes every sample in-band.
+    // At the far end the unscaled sum overflows to an infinity. Scaled, the
+    // biggest term is exactly 1.0, so the sum can neither underflow nor
+    // overflow, and the squaring never sees the magnitude at all.
     double scale = 0.0;
     for (const double value : values) {
         const double magnitude = std::fabs(value - refined_mean);
@@ -133,6 +146,27 @@ inline double population_stddev(const std::vector<double>& values) {
     }
     if (scale == 0.0) {
         return 0.0;
+    }
+
+    double unscaled = 0.0;
+    for (const double value : values) {
+        const double difference = value - refined_mean;
+        unscaled += difference * difference;
+    }
+    // The lower bound is the smallest normal, not zero, because underflow here
+    // is gradual: squared deviations enter the subnormal range and lose their
+    // significant bits there well before they vanish, so a sum of a handful of
+    // subnormal units carries almost no information yet still passes a "> 0.0"
+    // test. Deviations on the order of 2^-537 sum to two subnormal units, which
+    // then divide and square-root their way back to exactly 0.0 -- the very
+    // collapse the scaling exists to prevent. Requiring a normal sum bounds
+    // what subnormal terms can cost: each is off by at most half a subnormal
+    // ulp against a total of at least DBL_MIN, which is the scale of ordinary
+    // rounding. NaN fails this comparison as well, though it cannot arise: a
+    // NaN among the values leaves scale at 0.0 and the guard above has already
+    // returned.
+    if (unscaled >= std::numeric_limits<double>::min() && !std::isinf(unscaled)) {
+        return std::sqrt(unscaled / static_cast<double>(values.size()));
     }
 
     double deviation = 0.0;

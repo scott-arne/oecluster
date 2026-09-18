@@ -141,6 +141,20 @@ TEST(ActivityMetricsTest, PopulationStddevMatchesAHandValue) {
                 2.23606797749979, 1e-12);
 }
 
+// The activity of ActivityLandscapeTest.CountsANeighbourExactlyOnTheBand,
+// whose exact population standard deviation is 1.6 and representable. The
+// equality is deliberate where the fixture above uses EXPECT_NEAR: an ulp of
+// tolerance is what this test exists to reject, because an ulp below 1.6 is
+// what turns that fixture's inclusive RMODI band exclusive. Dividing each
+// deviation by the largest before squaring and multiplying the scale back in
+// after the square root rounds twice and lands there; accumulating the squared
+// deviations directly rounds once and hits 1.6. Neither arrangement is exact in
+// general, so this pins the fixture rather than a guarantee.
+TEST(ActivityMetricsTest, PopulationStddevDoesNotLoseAnUlpOnAHandFixture) {
+    EXPECT_EQ(OECluster::detail::population_stddev({-6.0, -6.0, -4.0, -3.0, -2.0}),
+              1.6);
+}
+
 TEST(ActivityMetricsTest, PopulationStddevIsUndefinedBelowTwoValues) {
     EXPECT_TRUE(std::isnan(OECluster::detail::population_stddev({})));
     EXPECT_TRUE(std::isnan(OECluster::detail::population_stddev({4.0})));
@@ -825,6 +839,26 @@ TEST(ActivityLandscapeTest, EqualBandMinimaAtANonzeroDistanceDoNotCount) {
 
     // A non-strict comparison would report 0.75 here.
     EXPECT_DOUBLE_EQ(landscape.rmodi, 0.5);
+}
+
+// The band test is inclusive, and this is the fixture that can tell. Five
+// points on a line at 0, 1, 2, 3 and 4; the activity's exact population
+// standard deviation is 1.6, so the default 0.625-sigma band is exactly 1.0 and
+// the -4/-3 and -3/-2 pairs sit exactly on it. Samples 0, 3 and 4 count and 1
+// and 2 tie, so rmodi is 0.6. A standard deviation one ulp below 1.6 narrows
+// the band below 1.0, makes the inclusive test exclusive, leaves samples 2, 3
+// and 4 with no in-band neighbour at all and drops rmodi to 0.2 -- which is
+// what the scaled accumulation in population_stddev returned before it became
+// a fallback. Nothing else in the suite reaches the boundary.
+TEST(ActivityLandscapeTest, CountsANeighbourExactlyOnTheBand) {
+    OECluster::DenseStorage storage(5);
+    FillStorage(storage, {1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, 1.0, 2.0, 1.0});
+
+    const ActivityLandscape landscape =
+        OECluster::activity_landscape(storage, {-6.0, -6.0, -4.0, -3.0, -2.0});
+
+    EXPECT_EQ(landscape.activity_stddev, 1.6);
+    EXPECT_DOUBLE_EQ(landscape.rmodi, 0.6);
 }
 
 TEST(ActivityLandscapeTest, MissingActivitiesLeaveTheirPairsUnscored) {

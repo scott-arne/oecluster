@@ -1491,6 +1491,38 @@ def test_rmodi_matches_the_published_definition():
     assert landscape.rmodi == pytest.approx(0.6666666666666666, abs=1e-12)
 
 
+# The RMODI boundary fixture, the case the published-parity one above cannot
+# reach. Five points on a line at 0, 1, 2, 3 and 4, with an activity whose
+# exact population standard deviation is 1.6 -- so the default 0.625-sigma band
+# is exactly 1.0 and two pairs sit exactly on it. Both literals below are
+# derived by hand from the published definitions, the way the parity literals
+# are, rather than by importing the reference module.
+_BOUNDARY_COORDS = [0.0, 1.0, 2.0, 3.0, 4.0]
+_BOUNDARY_ACTIVITY = [-6.0, -6.0, -4.0, -3.0, -2.0]
+
+
+def test_rmodi_counts_a_neighbour_exactly_on_the_band():
+    """Samples 0, 3 and 4 count and 1 and 2 tie, so three of five.
+
+    Sample 0's only in-band partner is 1, at distance 1 and an activity gap of
+    0, and its nearest out-of-band partner is 2 at distance 2. Samples 3 and 4
+    reach an in-band partner at distance 1 across a gap of exactly 1.0, the
+    edge of the band, against a nearest out-of-band partner at distance 2.
+    Samples 1 and 2 have both minima at distance 1, and the strict
+    ``same_min < diff_min`` comparison excludes a tie.
+
+    The band test is inclusive, so the two pairs on the edge are what this
+    pins. An activity standard deviation one ulp below 1.6 narrows the band
+    below 1.0, turns the inclusive test exclusive, leaves samples 2, 3 and 4
+    with no in-band neighbour and moves rmodi from 0.6 to 0.2.
+    """
+    landscape = oecluster.activity_landscape(_line_dm(_BOUNDARY_COORDS),
+                                             _BOUNDARY_ACTIVITY)
+
+    assert landscape.activity_stddev == 1.6
+    assert landscape.rmodi == pytest.approx(0.6, abs=1e-12)
+
+
 _DELTA_COORDS = [0.5, 0.7, 0.8, 1.0, 1.2]
 _DELTA_ACTIVITY = [1.2, 1.6, 1.4, 2.0, 2.3]
 
