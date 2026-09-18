@@ -78,6 +78,12 @@ inline ScoredActivity gather_scored(const std::vector<double>& activity,
 /// Returns +inf when the mean or the deviation sum overflows, which only
 /// happens outside the supported numeric domain; the caller turns that into a
 /// throw rather than reporting it.
+///
+/// A NaN among two or more values is a precondition violation rather than a
+/// reported case: every deviation is then NaN, none compares greater than the
+/// initial scale of zero, and the result is 0.0. Both callers run
+/// mark_missing_activity and gather_scored before getting here, so the
+/// guarantee lives entirely in the caller, which is why it is written down.
 inline double population_stddev(const std::vector<double>& values) {
     if (values.size() < 2) {
         return std::numeric_limits<double>::quiet_NaN();
@@ -137,10 +143,11 @@ inline double population_stddev(const std::vector<double>& values) {
     // The scaling rescues the small end, and it would rescue the large end too
     // -- {-1e300, 1e300} has a perfectly representable spread of 1e300 even
     // though its sum of squared deviations does not fit. That is a wider domain
-    // than §3.3 declares, and widening it is not this task's decision to make:
-    // sums_of_squares refuses the same input, and the two must not disagree
-    // about what is in range. deviation is at least 1.0 by construction, so this
-    // product is infinite exactly when the unscaled sum would have been.
+    // than this header declares, and widening it is not this task's decision to
+    // make: sums_of_squares refuses the same input, and the two must not
+    // disagree about what is in range. deviation is at least 1.0 by
+    // construction, so this product is infinite exactly when the unscaled sum
+    // would have been.
     if (std::isinf(scale * scale * deviation)) {
         return std::numeric_limits<double>::infinity();
     }
@@ -252,11 +259,12 @@ inline SumsOfSquares sums_of_squares(const std::vector<std::uint32_t>& group_ids
         const double difference = (value - refined_grand_mean) / ss.scale;
         ss.total += difference * difference;
     }
-    // The guard is on the sum in the caller's units, which is the quantity
-    // §3.3's domain is stated over. Squaring the scale first is deliberate:
-    // the scaled total is at least 1.0, so the true total is at least the
-    // scale squared, and an overflow in that product is therefore an overflow
-    // in the truth rather than an artifact of the multiplication order.
+    // The guard is on the sum in the caller's units, which is the quantity the
+    // refusal below states the supported range over. Squaring the scale first
+    // is deliberate: the scaled total is at least 1.0, so the true total is at
+    // least the scale squared, and an overflow in that product is therefore an
+    // overflow in the truth rather than an artifact of the multiplication
+    // order.
     if (std::isinf(ss_total(ss))) {
         throw std::invalid_argument(
             caller +
@@ -340,8 +348,12 @@ inline double eta_squared(const SumsOfSquares& ss) {
 /// order protects the division, the scaled sums protect the squaring that
 /// produced them.
 inline double omega_squared(const SumsOfSquares& ss) {
+    // num_scored <= num_groups, not just ==: a direct caller can declare more
+    // groups than there are values, and the negative df_within that follows
+    // would have this return a number rather than the NaN the undefined case
+    // calls for.
     if (ss.num_scored < 2 || ss.total == 0.0 ||
-        ss.num_scored == ss.num_groups) {
+        ss.num_scored <= ss.num_groups) {
         return std::numeric_limits<double>::quiet_NaN();
     }
     const double eta2 = ss.between / ss.total;

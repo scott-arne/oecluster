@@ -203,7 +203,10 @@ struct ActivityLandscape {
  * :returns: The landscape summary.
  * :raises std::invalid_argument: If storage is incomplete, activity is empty
  *     or mismatched or holds an infinity, an option is negative or non-finite,
- *     a distance is negative or non-finite, or an accumulator overflows.
+ *     a distance is negative or non-finite, or an accumulator overflows. The
+ *     distance check is part of the pair sweep, which is skipped when fewer
+ *     than two samples are scored, so below that a corrupt matrix is reported
+ *     as undefined metrics rather than refused.
  */
 ActivityLandscape activity_landscape(const StorageBackend& storage,
                                      const std::vector<double>& activity,
@@ -267,7 +270,11 @@ struct Modelability {
  * :param options: See ModelabilityOptions.
  * :returns: MODI and the per-class table.
  * :raises std::invalid_argument: If storage is incomplete, activity_classes is
- *     empty or mismatched, or a distance is negative or non-finite.
+ *     empty or mismatched, or a distance is negative or non-finite. The
+ *     distance check needs a pair to read, so it runs only when at least two
+ *     samples are scored; below that a corrupt matrix is reported as undefined
+ *     metrics rather than refused. One class with two or more scored samples
+ *     is still checked.
  */
 Modelability modelability(const StorageBackend& storage,
                           const std::vector<std::string>& activity_classes,

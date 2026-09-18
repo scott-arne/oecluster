@@ -222,9 +222,10 @@ ActivityLandscape activity_landscape(const StorageBackend& storage,
     // Capped at the row count before the pool is built. The cap defends
     // against an explicitly oversized num_threads: it is a size_t on a public
     // options struct, so the only thing standing between a caller and
-    // ThreadPool trying to spawn 2^61 OS threads is this line. The cap is also
-    // what makes 8 * threads below safe to form: a matrix with n rows needs
-    // n^2/2 doubles, so n is nowhere near the value at which the multiplication
+    // ThreadPool trying to spawn 2^61 OS threads is this line. It is not what
+    // makes 8 * threads below safe to form: the next statement bounds threads
+    // by n whatever the pool reports, and a matrix with n rows needs n^2/2
+    // doubles, so n is nowhere near the value at which that multiplication
     // could wrap. A num_threads of 0 bypasses the cap by design, because it
     // means "use the hardware concurrency" -- so a small n still spawns that
     // many workers for what is a single chunk, matching how HDBSCAN and
@@ -435,12 +436,13 @@ Modelability modelability(const StorageBackend& storage,
 
     // Capped at the row count for the same reason as in `activity_landscape`:
     // `num_threads` is a size_t on a public options struct, so without this an
-    // absurd value has ThreadPool try to create that many OS threads, and
-    // `8 * threads` below wraps to zero. Reaching here means num_ids >= 2 and
-    // so n >= 2, which is what keeps the cap from turning an explicit request
-    // into the zero the pool reads as "use the hardware concurrency"; a
-    // num_threads of 0 is the caller asking for exactly that, and passes
-    // through unchanged.
+    // absurd value has ThreadPool try to create that many OS threads. The cap
+    // has no part in keeping `8 * threads` below from wrapping: the next
+    // statement bounds threads by n whatever the pool reports, so the product
+    // is at most 8n. Reaching here means num_ids >= 2 and so n >= 2, which is
+    // what keeps the cap from turning an explicit request into the zero the
+    // pool reads as "use the hardware concurrency"; a num_threads of 0 is the
+    // caller asking for exactly that, and passes through unchanged.
     ThreadPool pool(std::min<std::size_t>(options.num_threads, n));
     const std::size_t threads =
         std::max<std::size_t>(1, std::min<std::size_t>(pool.NumThreads(), n));
