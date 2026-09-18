@@ -1391,10 +1391,12 @@ def test_the_sar_coherence_surface_is_exported():
     assert all(hasattr(oecluster, name) for name in exported)
 
 
-# The published-parity fixture. Six points on a line whose activity rises with
-# position, annotated into two classes that cut across that order.
-# tests/assets/sar_coherence_reference.py derives every literal below straight
-# from the published definitions; it is documentation, not a dependency.
+# The published-parity fixture. Six points on a line, listed in ascending
+# activity rather than ascending position -- sample 1 sits at 0.60, between
+# samples 3 and 4 -- and annotated into two classes that cut across the listing
+# order. tests/assets/sar_coherence_reference.py derives every literal below
+# straight from the published definitions; it is documentation, not a
+# dependency.
 _PARITY_COORDS = [0.0, 0.60, 0.40, 0.45, 0.80, 0.85]
 _PARITY_ACTIVITY = [0.0, 0.2, 1.0, 1.2, 2.0, 2.2]
 _PARITY_CLASSES = ["A", "B", "A", "A", "B", "B"]
@@ -1403,7 +1405,11 @@ _PARITY_CLASSES = ["A", "B", "A", "A", "B", "B"]
 def test_modelability_matches_the_published_definition():
     """Sample 1's nearest neighbour is 3, the one class change among six.
 
-    So A scores 3/3, B scores 2/3, and the unweighted mean is 5/6.
+    So A scores 3/3, B scores 2/3, and the unweighted mean is 5/6. Three A's
+    and three B's make that mean coincide with the sample-weighted rate, so
+    what pins the unweighted form is the unbalanced fixture in
+    test_modelability_matches_a_hand_fixture -- 1/3 against 0.5 -- not this
+    one.
     """
     report = oecluster.modelability(_line_dm(_PARITY_COORDS), _PARITY_CLASSES)
 
