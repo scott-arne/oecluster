@@ -4085,12 +4085,15 @@ def _activity_values(value, argument_name):
     :returns: A native DoubleVector.
     :raises TypeError: If the value is a bare str, a ``bytes``, a ``bytearray``
         or a ``memoryview``, a mapping, not iterable, or yields one of those
-        four or something that is not a real number. Those three binary
-        containers are named one by one rather than tested for as buffers, so
-        every other buffer exporter -- a byte-format ``array.array``, a numpy
-        ``uint8`` column -- is accepted and read as the numbers it holds. A
-        memoryview is refused whatever its format, so a float buffer is refused
-        with the rest; pass ``np.asarray(view)`` to score one.
+        four or an element ``float()`` refuses. Those three binary containers
+        are named one by one rather than tested for as buffers, so a
+        byte-format ``array.array`` or a numpy ``uint8`` column is iterated
+        like any other sequence and read as the numbers it holds:
+        ``array("B", b"12")`` scores ``[49.0, 50.0]``. Exporting a buffer is
+        neither what admits a value nor what refuses one -- an ``mmap`` is
+        refused because it yields ``bytes``, and a memoryview is refused
+        whatever its format, so a float buffer is refused with the rest; pass
+        ``np.asarray(view)`` to score one.
     :raises ValueError: If it yields a number too large to convert to a double,
         such as ``10 ** 1000``. A magnitude fault rather than a type fault, so
         it is not folded into the TypeError above. An infinity converts
@@ -4134,12 +4137,13 @@ def _activity_values(value, argument_name):
         # conversion, or one whose entries survived a single layer of
         # deserialization, would otherwise score as numbers. These four are
         # named concretely rather than tested for as buffers, for the reason
-        # the column guard gives, and the element position is where the cost
-        # shows: float() parses any other buffer exporter as text, so an
-        # element of array("B", b"1") scores 1.0 -- the digit its byte spells
-        # -- rather than the 49 the array holds. A numeric memoryview is the
-        # one spelling float() does not convert; it is refused with them for
-        # consistency with that guard.
+        # the column guard gives, and they are the whole of the type test:
+        # every other element is handed to float(), which reads a numpy scalar
+        # numerically, parses a nested byte-format array.array as text -- such
+        # an element of array("B", b"1") scores 1.0, the digit its byte spells,
+        # rather than the 49 the array holds -- and refuses the rest. Among the
+        # four, a numeric memoryview is the one spelling float() does not
+        # convert; it is refused with them for consistency with that guard.
         if isinstance(item, (str, bytes, bytearray, memoryview)):
             raise TypeError(f"{argument_name} must be a sequence of floats")
         try:
