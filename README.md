@@ -566,6 +566,35 @@ Every metric is `nan` when fewer than two samples survive noise handling. See
 [docs/python-api.md](docs/python-api.md#partition-agreement) for the `noise=`
 readings and the divergences from scikit-learn.
 
+### Structure-activity coherence
+
+`sar_coherence` decomposes an activity vector across a labeling.
+`activity_landscape` and `modelability` score the structure-activity
+relationship straight from a distance matrix, with no clustering in between.
+
+```python
+coherence = oecluster.sar_coherence(butina_result, activity)
+landscape = oecluster.activity_landscape(dm, activity)
+print(coherence.omega_squared, landscape.cliff_density, landscape.rmodi)
+print(oecluster.modelability(dm, classes).modi)
+```
+
+| Metric | Range | A low value means |
+|--------|-------|-------------------|
+| `eta_squared` | 0.0 to 1.0, or `nan` | Activity varies as much inside the clusters as between them. Rises with the cluster count on its own, so compare it only across labelings of the same granularity |
+| `omega_squared` | Below 0.0 to 1.0, 0.0 by chance, or `nan` | The labeling explains no more activity variance than a random one of the same shape. Negative means less than chance |
+| `cliff_density` | 0.0 to 1.0, or `nan` | Few near-neighbour pairs differ sharply in activity: a smooth landscape at this threshold pair |
+| `max_sali`, `mean_sali` | 0.0 upward, or `nan` | No pair is both structurally close and far apart in activity. Zero-distance pairs are excluded from both and counted in `num_zero_distance_pairs` |
+| `rmodi` | 0.0 to 1.0, or `nan` | A sample's nearest neighbour is usually outside its activity band, so distance does not track activity |
+| `modi` | 0.0 to 1.0, or `nan` | A sample's nearest neighbour usually carries a different class, so the classes are not modelable from this matrix |
+
+A `nan` activity is missing data rather than a value, as is an empty class
+string, and every result reports `num_scored` beside `num_samples` so the
+difference is visible. See
+[docs/python-api.md](docs/python-api.md#sar-coherence) for the per-cluster and
+per-class tables, the `noise=` readings, and the one distance-matrix refusal
+these two entry points will not waive.
+
 ---
 
 ## Scaling Guidance

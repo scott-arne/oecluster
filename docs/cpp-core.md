@@ -115,9 +115,15 @@ their option/result types:
 
 `ClusterTypes.h` defines the shared cluster representation, `ClusterReport.h`
 defines the method-agnostic quality scorecard exposed in Python as
-`cluster_report()`/`compare_reports()`, and `PartitionAgreement.h` defines the
+`cluster_report()`/`compare_reports()`, `PartitionAgreement.h` defines the
 labels-only agreement metrics exposed as
-`partition_agreement()`/`scaffold_agreement()`.
+`partition_agreement()`/`scaffold_agreement()`, and `SARCoherence.h` defines
+the structure-activity coherence metrics exposed as
+`sar_coherence()`/`activity_landscape()`/`modelability()`. `SARCoherence.h`
+is the one of the four that reads activity data as well as structure:
+`sar_coherence` decomposes an activity vector across a labeling, while
+`activity_landscape` and `modelability` sweep a distance matrix directly and
+need no clustering at all.
 
 ### Internal validity indices
 
