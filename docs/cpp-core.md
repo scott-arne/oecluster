@@ -192,6 +192,42 @@ distinction into its cells, rendering an unasked cell as `None` -- printed as
 `None` when the report carries the threshold but answered nothing at it, as when
 the clustering has no clusters and both coverage curves come back empty.
 
+### SAR coherence
+
+The three functions are four entry points: `sar_coherence` is overloaded on how
+the labels arrive, taking a `const ClusteringResult&` or a `const
+std::vector<ClusterLabel>&` and then `const std::vector<double>& activity`.
+`activity_landscape` takes `const StorageBackend& storage` and the same
+activity vector; `modelability` takes that storage and `const
+std::vector<std::string>& activity_classes`. Each ends with its own options
+struct, by const reference and defaulted, and returns its result by value.
+
+`SARCoherenceOptions::noise_handling` defaults to `NoiseHandling::Excluded`,
+where `PartitionAgreementOptions` -- whose header declares the enum -- defaults
+to `Singletons`. `ActivityLandscapeOptions` carries `distance_threshold` 0.30,
+`activity_threshold` 1.0, `rmodi_delta` 0.625 (the RMODI band half-width, in
+activity standard deviations) and `num_threads` 0; `ModelabilityOptions`
+carries `num_threads` 0 alone. Zero selects the hardware concurrency.
+
+Each result carries `num_samples`, the length of the input vector, and
+`num_scored`, how much of it entered the metric. `SARCoherence` adds
+`num_clusters`, `eta_squared`, `omega_squared` and
+`std::vector<ClusterActivity> clusters` -- `label`, `num_scored`,
+`mean_activity`, `stddev_activity`. `ActivityLandscape` adds
+`num_pairs_scored`, `num_cliffs`, `cliff_density`, `num_zero_distance_pairs`,
+`max_sali`, `mean_sali`, `rmodi`, `activity_stddev`. `Modelability` adds
+`num_classes`, `modi` and `std::vector<ClassConcordance> classes` -- `label`,
+`num_members`, `fraction_same_class`.
+
+Every `double` above is NaN where undefined, never a substituted value.
+`eta_squared` is NaN when fewer than two samples were scored or the activity
+has no variance, `omega_squared` in those cases and when every scored sample is
+its own cluster; `cliff_density` when `num_pairs_scored` is 0; `max_sali` and
+`mean_sali` when no scored pair has a nonzero distance; `rmodi` and
+`activity_stddev` when `num_scored < 2`, as is a row's `stddev_activity` when
+its own `num_scored < 2`; `modi` when `num_classes < 2`, and a row's
+`fraction_same_class` when its class is the only scored class.
+
 ## Partition Agreement
 
 `PartitionAgreement.h` scores two labelings of the same samples against each
