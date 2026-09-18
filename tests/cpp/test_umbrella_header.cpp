@@ -96,8 +96,8 @@ TEST(UmbrellaHeaderTest, ReachesTheClusteringHeaders) {
 
 // ClusterReport.h was absent from the umbrella header until 5.3.0, so A1's
 // entire public surface was unreachable through the entry point the
-// documentation names. Both quality headers are covered here so the omission
-// cannot recur for either.
+// documentation names. All three quality headers are covered here so the
+// omission cannot recur for any of them.
 TEST(UmbrellaHeaderTest, ReachesTheClusterQualityHeaders) {
     const OECluster::ClusterReportOptions report_options;
     EXPECT_TRUE(report_options.treat_noise_as_singletons);
@@ -106,4 +106,16 @@ TEST(UmbrellaHeaderTest, ReachesTheClusterQualityHeaders) {
     EXPECT_EQ(agreement_options.noise_handling,
               OECluster::NoiseHandling::Singletons);
     EXPECT_FALSE(agreement_options.compute_adjusted_mutual_information);
+
+    const OECluster::SARCoherenceOptions coherence_options;
+    EXPECT_EQ(coherence_options.noise_handling,
+              OECluster::NoiseHandling::Excluded);
+
+    const OECluster::ActivityLandscapeOptions landscape_options;
+    EXPECT_DOUBLE_EQ(landscape_options.distance_threshold, 0.30);
+    EXPECT_DOUBLE_EQ(landscape_options.activity_threshold, 1.0);
+    EXPECT_DOUBLE_EQ(landscape_options.rmodi_delta, 0.625);
+
+    const OECluster::ModelabilityOptions model_options;
+    EXPECT_EQ(model_options.num_threads, 0u);
 }

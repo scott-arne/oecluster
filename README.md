@@ -566,6 +566,39 @@ Every metric is `nan` when fewer than two samples survive noise handling. See
 [docs/python-api.md](docs/python-api.md#partition-agreement) for the `noise=`
 readings and the divergences from scikit-learn.
 
+### Structure-activity coherence
+
+`sar_coherence` decomposes an activity vector across a labeling.
+`activity_landscape` and `modelability` score the structure-activity
+relationship straight from a distance matrix, with no clustering in between.
+
+```python
+coherence = oecluster.sar_coherence(butina_result, activity)
+landscape = oecluster.activity_landscape(dm, activity)
+print(coherence.omega_squared, landscape.cliff_density, landscape.rmodi)
+print(oecluster.modelability(dm, classes).modi)
+```
+
+| Metric | Range | A low value means |
+|--------|-------|-------------------|
+| `eta_squared` | 0.0 to 1.0, or `nan` | Activity varies as much inside the clusters as between them. Rises with the cluster count on its own, so compare it only across labelings of the same granularity |
+| `omega_squared` | Below 0.0 to 1.0, about 0.0 by chance, or `nan` | The labeling explains no more activity variance than a random one of the same shape. Negative means less than chance. Read that chance level as approximately rather than exactly zero: it lifts when the clusters are mostly singletons and the activity variance is concentrated in a few samples -- conditions a tight `butina()` threshold on screening data meets together. One active among 99 inactives under one 11-member cluster plus 89 singletons has an exact chance expectation of 0.075, and five actives among 95 have 0.014, where balanced clusterings of two to fifty clusters stay below 0.0002 on those same activities. Distinct values are no protection: 100 distinct activities spanning 1e-6 to 1.0 reach 0.075 again |
+| `cliff_density` | 0.0 to 1.0, or `nan` | Few of the scored pairs are both near and sharply different in activity. The denominator is every scored pair, not the near ones, so a low value is no evidence of a smooth neighbourhood: 100 samples whose only near pair is a cliff read 0.000202 |
+| `max_sali`, `mean_sali` | 0.0 upward, or `nan` | For `max_sali`, no pair is both structurally close and far apart in activity. For `mean_sali`, only that the typical scored pair is not: it averages over every pair with a defined ratio, so a lone cliff contributes just its own ratio divided by that count and a low mean can sit beside a high `max_sali`. Zero-distance pairs are excluded from both and counted in `num_zero_distance_pairs` |
+| `rmodi` | 0.0 to 1.0, or `nan` | A sample's nearest neighbour is usually outside its activity band -- which reaches `rmodi_delta * activity_stddev` either side. Either end of the range is reachable from the band width alone, so read the figure against the reported `activity_stddev` and sweep `rmodi_delta` before concluding anything from it |
+| `modi` | 0.0 to 1.0, or `nan` | Some class's members usually have a nearest scored neighbour of another class. It is the mean over classes of each class's same-class fraction, not a per-sample rate, so one small class holds it down however well the rest separate: 100 evenly spaced class-A points with one class-B point half a step past the end read 0.495 -- about what random labels at those class counts would score -- while 98% of samples do have a same-class nearest neighbour. `report.classes` carries the per-class fractions |
+
+A `nan` activity is missing data rather than a value, as is an empty class
+string, and every result reports `num_scored` beside `num_samples` so the
+difference is visible. Only for `activity_landscape` and `modelability` is that
+difference entirely missing data: `sar_coherence` counts what `noise=` drops in
+it as well, so under its `"excluded"` default
+`sar_coherence([-1, 0, 0, 1, 1], [1.0, 2.0, 3.0, 4.0, 5.0])` reports
+`num_scored` 4 of 5 with every activity usable. See
+[docs/python-api.md](docs/python-api.md#sar-coherence) for the per-cluster and
+per-class tables, the `noise=` readings, and the one distance-matrix refusal
+these two entry points will not waive.
+
 ---
 
 ## Scaling Guidance

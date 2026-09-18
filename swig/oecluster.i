@@ -29,6 +29,7 @@
 #include "oecluster/clustering/Representative.h"
 #include "oecluster/clustering/ClusterReport.h"
 #include "oecluster/clustering/PartitionAgreement.h"
+#include "oecluster/clustering/SARCoherence.h"
 #include "oefp/batch.h"
 #include "oefp/oefp.h"
 
@@ -762,6 +763,13 @@ OECLUSTER_GIL_EXCEPTION(OECluster::bitbirch_refine, bitbirch_refine)
 OECLUSTER_GIL_EXCEPTION(OECluster::partition_agreement, partition_agreement)
 OECLUSTER_GIL_EXCEPTION(OECluster::scaffold_agreement, scaffold_agreement)
 
+// activity_landscape and modelability sweep every pair of a precomputed
+// matrix; sar_coherence is linear but still runs over native data with no
+// Python object in reach.
+OECLUSTER_GIL_EXCEPTION(OECluster::sar_coherence, sar_coherence)
+OECLUSTER_GIL_EXCEPTION(OECluster::activity_landscape, activity_landscape)
+OECLUSTER_GIL_EXCEPTION(OECluster::modelability, modelability)
+
 // ============================================================================
 // Ignore problematic members before %include
 //
@@ -1023,6 +1031,14 @@ public:
 %template(ClusterRecordVector) std::vector<OECluster::ClusterRecord>;
 %include "oecluster/clustering/ClusterReport.h"
 %include "oecluster/clustering/PartitionAgreement.h"
+// Declared ahead of their header, as ClusterRecordVector is above: both name
+// a vector that appears as a member of a result struct in the header that
+// follows. SWIG accepts either order here -- it emits the same wrapper, only
+// positioned differently in the generated module -- so this is a convention
+// rather than a requirement.
+%template(ClusterActivityVector) std::vector<OECluster::ClusterActivity>;
+%template(ClassConcordanceVector) std::vector<OECluster::ClassConcordance>;
+%include "oecluster/clustering/SARCoherence.h"
 %include "oecluster/clustering/DBSCAN.h"
 %include "oecluster/clustering/HDBSCAN.h"
 %include "oecluster/clustering/Agglomerative.h"
@@ -1032,12 +1048,12 @@ public:
 // Version macros
 // ============================================================================
 #define OECLUSTER_VERSION_MAJOR 5
-#define OECLUSTER_VERSION_MINOR 3
+#define OECLUSTER_VERSION_MINOR 4
 #define OECLUSTER_VERSION_PATCH 0
 
 // ============================================================================
 // Module-level Python convenience code
 // ============================================================================
 %pythoncode %{
-__version__ = "5.3.0"
+__version__ = "5.4.0"
 %}

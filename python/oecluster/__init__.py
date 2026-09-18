@@ -27,8 +27,8 @@ from typing import Any, ClassVar, NamedTuple
 
 import numpy as np
 
-__version__ = "5.3.0"
-__version_info__ = (5, 3, 0)
+__version__ = "5.4.0"
+__version_info__ = (5, 4, 0)
 
 
 _OPENEYE_COMPAT_PRELOAD_PATHS: list[str] = []
@@ -54,10 +54,18 @@ __all__ = [  # noqa: RUF022
     "ClusterReportRequested",
     "PartitionAgreement",
     "PartitionAgreementRequested",
+    "SARCoherence",
+    "ClusterActivity",
+    "ActivityLandscape",
+    "Modelability",
+    "ClassConcordance",
     "cluster_report",
     "compare_reports",
     "partition_agreement",
     "scaffold_agreement",
+    "sar_coherence",
+    "activity_landscape",
+    "modelability",
     "ButinaResult",
     "DBSCANResult",
     "HDBSCANResult",
@@ -3442,32 +3450,39 @@ def _agreement_labels(value, argument_name):
     return vector
 
 
-def _agreement_scaffolds(value, argument_name):
-    """Coerce a sequence of scaffold strings to a native StringVector."""
-    # A bare str is iterable, so without this guard a single scaffold string
+def _string_vector(value, argument_name, noun):
+    """Coerce a sequence of strings to a native StringVector.
+
+    :param value: The caller's sequence.
+    :param argument_name: Name of the argument, for the messages.
+    :param noun: Plural noun for what the strings are, e.g. ``"scaffold
+        strings"``. Two entry points annotate samples with strings and each
+        wants its own word in the refusal; the rules are identical.
+    :returns: A native StringVector.
+    :raises TypeError: If the value is a bare str, a mapping, not iterable, or
+        yields a non-str.
+    """
+    # A bare str is iterable, so without this guard a single annotation string
     # would silently become one annotation per character.
     if isinstance(value, str):
         raise TypeError(
-            f"{argument_name} must be a sequence of scaffold strings, not a "
-            f"single str")
+            f"{argument_name} must be a sequence of {noun}, not a single str")
     # As in _agreement_labels: a Mapping's iteration yields its keys, which
     # would score something the caller did not pass.
     if isinstance(value, collections.abc.Mapping):
         raise TypeError(
-            f"{argument_name} must be a sequence of scaffold strings, not a "
-            f"mapping")
+            f"{argument_name} must be a sequence of {noun}, not a mapping")
     vector = _oecluster.StringVector()
     try:
         iterator = iter(value)
     except TypeError as error:
         raise TypeError(
-            f"{argument_name} must be a sequence of scaffold strings") from error
+            f"{argument_name} must be a sequence of {noun}") from error
     for label in iterator:
         # Require actual strings. str() would coerce None, numbers, etc.,
         # publishing a wrong metric instead of raising.
         if not isinstance(label, str):
-            raise TypeError(
-                f"{argument_name} must be a sequence of scaffold strings")
+            raise TypeError(f"{argument_name} must be a sequence of {noun}")
         try:
             # A str SWIG cannot encode to UTF-8 -- a lone surrogate, which
             # surrogateescape decoding of a mis-encoded file produces -- is
@@ -3477,9 +3492,13 @@ def _agreement_scaffolds(value, argument_name):
             vector.push_back(label)
         except TypeError as error:
             raise TypeError(
-                f"{argument_name} must be a sequence of scaffold strings"
-            ) from error
+                f"{argument_name} must be a sequence of {noun}") from error
     return vector
+
+
+def _agreement_scaffolds(value, argument_name):
+    """Coerce a sequence of scaffold strings to a native StringVector."""
+    return _string_vector(value, argument_name, "scaffold strings")
 
 
 def cluster_report(result, distance_matrix, *, preset="default",
@@ -3770,6 +3789,692 @@ def scaffold_agreement(result, scaffold_labels, *, noise="singletons",
     options = _agreement_options(noise, adjusted_mutual_information)
     return PartitionAgreement(
         _oecluster.scaffold_agreement(labels, scaffolds, options))
+
+
+class _Scorecard:
+    """Fixed-width table rendering shared by the three SAR-coherence results.
+
+    :class:`PartitionAgreement` is deliberately not folded onto this. Its
+    ``to_table`` consults ``_OPT_IN_SCALARS`` to keep "nobody asked" apart from
+    "asked and undefined", and none of these three has an opt-in scalar, so
+    sharing a base would put a branch in it for a case one subclass has.
+    """
+
+    __slots__ = ()
+
+    # The rows to_table() emits, in order. Each subclass overrides it.
+    _TABLE_FIELDS: ClassVar[tuple[str, ...]] = ()
+
+    def to_table(self):
+        """Return ``(metric_name, value)`` rows, one per reported scalar.
+
+        The per-row tables -- :attr:`SARCoherence.clusters` and
+        :attr:`Modelability.classes` -- are not rows here. They are read as
+        sequences; a table nested in a table cell does not render.
+
+        :returns: A list of ``(str, value)`` pairs.
+        """
+        return [(name, getattr(self, name)) for name in self._TABLE_FIELDS]
+
+    def __repr__(self):
+        return _format_metric_table(self.to_table(), ("value",))
+
+
+class ClusterActivity(NamedTuple):
+    """One row of a :class:`SARCoherence`'s per-cluster table.
+
+    A ``NamedTuple`` for the same reasons as :class:`ClusterRecord`: immutable
+    without a hand-written ``__setattr__``, and it feeds
+    ``pandas.DataFrame(coherence.clusters)`` directly. pandas is not a
+    dependency.
+
+    Every field defaults, mirroring the C++ struct value for value. The two
+    statistics default to NaN rather than 0.0, because a zero mean activity is
+    a real measurement rather than the absence of one.
+
+    :ivar label: The cluster's label. Under ``noise="grouped"`` the merged noise
+        row reports -1; under ``noise="singletons"`` each noise sample keeps its
+        own label, so several rows may share a label and are distinguished by
+        position. Keying the table by label -- ``{row.label: row for row in
+        coherence.clusters}`` -- silently discards all but the last of them.
+    :ivar num_scored: Samples in this cluster with a finite activity.
+    :ivar mean_activity: Their mean activity.
+    :ivar stddev_activity: Their population standard deviation, NaN for every
+        row whose num_scored is below 2, whatever kind of row it is: a spread
+        over one sample is not defined. That covers the singleton noise rows
+        and both routes an ordinary cluster takes there -- holding a single
+        member, or having missing activity thin it down to one.
+    """
+
+    label: int = 0
+    num_scored: int = 0
+    mean_activity: float = float("nan")
+    stddev_activity: float = float("nan")
+
+
+class SARCoherence(_Scorecard):
+    """How much of an activity's variance a clustering explains.
+
+    Construct these with :func:`sar_coherence` rather than by calling
+    ``__init__`` directly. The attributes are read-only by convention;
+    assigning to one changes this object and nothing else.
+
+    :ivar num_samples: Length of the input activity vector.
+    :ivar num_scored: Samples with a finite activity that survived noise
+        handling. Both effect sizes are NaN when this is below two.
+    :ivar num_clusters: Clusters retaining at least one scored sample.
+    :ivar eta_squared: ``SS_between / SS_total``: the share of activity
+        variance the clustering accounts for. It rises with the cluster count
+        even when activity is independent of the labels, by roughly
+        ``(K - 1) / (n - 1)``, so it does not compare across clusterings that
+        differ in cluster count. NaN when the activity has no variance.
+    :ivar omega_squared: The chance-corrected counterpart, which does compare
+        across cluster counts. Negative when the clustering explains less than
+        chance would; that is a reading, not an error. NaN wherever
+        :attr:`eta_squared` is, and also when every scored sample is its own
+        cluster, which leaves no within-cluster variance to correct against.
+    :ivar clusters: A tuple of :class:`ClusterActivity`, one per cluster with a
+        scored member, ordered by where the cluster's label first appears among
+        the scored samples rather than in the raw input. Under
+        ``noise="singletons"`` several rows carry the label -1; see
+        :class:`ClusterActivity`.
+    """
+
+    # Field order mirrors the C++ SARCoherence struct and the :ivar: list
+    # above; alphabetizing would desynchronize both from the native layout.
+    __slots__ = (  # noqa: RUF023
+        "num_samples",
+        "num_scored",
+        "num_clusters",
+        "eta_squared",
+        "omega_squared",
+        "clusters",
+    )
+
+    _TABLE_FIELDS: ClassVar[tuple[str, ...]] = (
+        "num_samples",
+        "num_scored",
+        "num_clusters",
+        "eta_squared",
+        "omega_squared",
+    )
+
+    def __init__(self, native_coherence):
+        """
+        Construct a coherence scorecard from the native result.
+
+        :param native_coherence: Native object returned by the extension.
+        """
+        self.num_samples = int(native_coherence.num_samples)
+        self.num_scored = int(native_coherence.num_scored)
+        self.num_clusters = int(native_coherence.num_clusters)
+        self.eta_squared = float(native_coherence.eta_squared)
+        self.omega_squared = float(native_coherence.omega_squared)
+        # Every row is copied out into a plain Python record while the native
+        # result is still alive. The member vector is owned by that result, so
+        # a scorecard holding the vector itself would read as empty the moment
+        # the caller let the native object go -- and for the common
+        # ``sar_coherence(...).clusters`` spelling, that is before the caller
+        # ever sees it.
+        self.clusters = tuple(
+            ClusterActivity(
+                label=int(row.label),
+                num_scored=int(row.num_scored),
+                mean_activity=float(row.mean_activity),
+                stddev_activity=float(row.stddev_activity),
+            )
+            for row in native_coherence.clusters
+        )
+
+
+class ActivityLandscape(_Scorecard):
+    """Activity-cliff structure over a precomputed distance matrix.
+
+    Construct these with :func:`activity_landscape`. The attributes are
+    read-only by convention.
+
+    :ivar num_samples: Length of the input activity vector.
+    :ivar num_scored: Samples with a finite activity.
+    :ivar num_pairs_scored: ``num_scored * (num_scored - 1) / 2``; zero below
+        two scored samples.
+    :ivar num_cliffs: Pairs at or below ``distance_threshold`` whose activity
+        differs by at least ``activity_threshold``.
+    :ivar cliff_density: ``num_cliffs / num_pairs_scored``. NaN when no pair
+        was scored.
+    :ivar num_zero_distance_pairs: Pairs at exactly zero distance. Their SALI
+        is undefined, so they are counted here and left out of
+        :attr:`max_sali` and :attr:`mean_sali` -- but they are still eligible to
+        count as cliffs, and do whenever their activity difference reaches
+        ``activity_threshold``, because two identical structures with different
+        activities are the sharpest cliff there is. The comparison is ``>=``,
+        so a zero-distance pair whose activities agree is counted here and is
+        also a cliff exactly when ``activity_threshold`` is zero.
+    :ivar max_sali: Largest ``|activity difference| / distance`` over the pairs
+        at non-zero distance. NaN when there are none.
+    :ivar mean_sali: Their mean. NaN on the same condition.
+    :ivar rmodi: The regression modelability index: the fraction of scored
+        samples whose nearest neighbour inside the activity band is strictly
+        closer than their nearest neighbour outside it. The band reaches
+        ``rmodi_delta`` standard deviations either side of a molecule's own
+        activity, so it spans twice that. NaN below two scored samples.
+    :ivar activity_stddev: Population standard deviation of the scored
+        activity, the quantity the band is measured in. NaN below two scored
+        samples.
+    """
+
+    __slots__ = (  # noqa: RUF023
+        "num_samples",
+        "num_scored",
+        "num_pairs_scored",
+        "num_cliffs",
+        "cliff_density",
+        "num_zero_distance_pairs",
+        "max_sali",
+        "mean_sali",
+        "rmodi",
+        "activity_stddev",
+    )
+
+    # Exact rather than a second copy: every one of this scorecard's fields is
+    # a scalar metric row, unlike the other two, whose row tables are slots and
+    # not rows.
+    _TABLE_FIELDS: ClassVar[tuple[str, ...]] = __slots__
+
+    def __init__(self, native_landscape):
+        """
+        Construct a landscape scorecard from the native result.
+
+        :param native_landscape: Native object returned by the extension.
+        """
+        self.num_samples = int(native_landscape.num_samples)
+        self.num_scored = int(native_landscape.num_scored)
+        self.num_pairs_scored = int(native_landscape.num_pairs_scored)
+        self.num_cliffs = int(native_landscape.num_cliffs)
+        self.cliff_density = float(native_landscape.cliff_density)
+        self.num_zero_distance_pairs = int(
+            native_landscape.num_zero_distance_pairs)
+        self.max_sali = float(native_landscape.max_sali)
+        self.mean_sali = float(native_landscape.mean_sali)
+        self.rmodi = float(native_landscape.rmodi)
+        self.activity_stddev = float(native_landscape.activity_stddev)
+
+
+class ClassConcordance(NamedTuple):
+    """One row of a :class:`Modelability`'s per-class table.
+
+    A ``NamedTuple`` on the same terms as :class:`ClusterActivity`.
+
+    :ivar label: The class string, as it appears in the input.
+    :ivar num_members: Scored samples carrying it -- those with a non-empty
+        class string.
+    :ivar fraction_same_class: The fraction of those whose nearest scored
+        neighbour shares the class. NaN when this is the only scored class,
+        where no molecule has a neighbour that could differ.
+    """
+
+    label: str = ""
+    num_members: int = 0
+    fraction_same_class: float = float("nan")
+
+
+class Modelability(_Scorecard):
+    """Whether a descriptor separates the activity classes at all.
+
+    Construct these with :func:`modelability`. The attributes are read-only by
+    convention.
+
+    :ivar num_samples: Length of the input class vector.
+    :ivar num_scored: Samples with a non-empty class string.
+    :ivar num_classes: Distinct non-empty class strings.
+    :ivar modi: The unweighted mean of :attr:`ClassConcordance.
+        fraction_same_class` over the classes. A low value says no classifier
+        is likely to learn this dataset from this descriptor. NaN below two
+        classes, where no molecule has a neighbour that could differ.
+    :ivar classes: A tuple of :class:`ClassConcordance`, ordered by where each
+        class string first appears among the scored samples. Only the empty
+        string is unscored, so over the classes that exist this is input order.
+    """
+
+    __slots__ = (  # noqa: RUF023
+        "num_samples",
+        "num_scored",
+        "num_classes",
+        "modi",
+        "classes",
+    )
+
+    _TABLE_FIELDS: ClassVar[tuple[str, ...]] = (
+        "num_samples",
+        "num_scored",
+        "num_classes",
+        "modi",
+    )
+
+    def __init__(self, native_modelability):
+        """
+        Construct a modelability scorecard from the native result.
+
+        :param native_modelability: Native object returned by the extension.
+        """
+        self.num_samples = int(native_modelability.num_samples)
+        self.num_scored = int(native_modelability.num_scored)
+        self.num_classes = int(native_modelability.num_classes)
+        self.modi = float(native_modelability.modi)
+        # Copied out while the native result is alive, for the reason given in
+        # SARCoherence.__init__.
+        self.classes = tuple(
+            ClassConcordance(
+                label=str(row.label),
+                num_members=int(row.num_members),
+                fraction_same_class=float(row.fraction_same_class),
+            )
+            for row in native_modelability.classes
+        )
+
+
+def _activity_classes(value, argument_name):
+    """Coerce a sequence of activity-class strings to a native StringVector."""
+    return _string_vector(value, argument_name, "class strings")
+
+
+def _activity_values(value, argument_name):
+    """Coerce a sequence of activity measurements to a native DoubleVector.
+
+    :param value: The caller's sequence; NaN marks a missing measurement.
+    :param argument_name: Name of the argument, for the messages.
+    :returns: A native DoubleVector.
+    :raises TypeError: If the value is a bare str, a ``bytes``, a ``bytearray``
+        or a ``memoryview``, a mapping, not iterable, or yields one of those
+        four or an element ``float()`` refuses. Those three binary containers
+        are named one by one rather than tested for as buffers, so a
+        byte-format ``array.array`` or a numpy ``uint8`` column is iterated
+        like any other sequence and read as the numbers it holds:
+        ``array("B", b"12")`` scores ``[49.0, 50.0]``. Exporting a buffer is
+        neither what admits a value nor what refuses one -- an ``mmap`` is
+        refused because it yields ``bytes``, and a memoryview is refused
+        whatever its format, so a float buffer is refused with the rest; pass
+        ``np.asarray(view)`` to score one.
+    :raises ValueError: If it yields a number too large to convert to a double,
+        such as ``10 ** 1000``. A magnitude fault rather than a type fault, so
+        it is not folded into the TypeError above. An infinity converts
+        perfectly well and is refused in C++ instead.
+    """
+    if isinstance(value, str):
+        raise TypeError(
+            f"{argument_name} must be a sequence of floats, not a single str")
+    # Refused whatever the buffer's format. bytes and bytearray iterate as
+    # ints, so b"12" would score as the activities [49.0, 50.0]; a numeric
+    # memoryview would convert correctly, but it is refused with them rather
+    # than branching on .format -- pass np.asarray(view) to score a float
+    # buffer. Three concrete types are named here rather than the buffer
+    # protocol tested for, and that closes the reinterpretation for these three
+    # only: a buffer test cannot tell a uint8 measurement column from misread
+    # text, so array("B", b"12") and np.frombuffer(b"12", "u1") are accepted and
+    # read as the numbers they hold. The three named types earn the refusal by
+    # being the text-and-binary containers, which a caller holding one has
+    # almost certainly not meant as a column of measurements.
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        raise TypeError(
+            f"{argument_name} must be a sequence of floats, not a bytes-like "
+            "object")
+    # As in _agreement_labels: a Mapping iterates its keys, so
+    # {0: 5.4, 1: 6.1} would score the indices and report a plausible number.
+    if isinstance(value, collections.abc.Mapping):
+        raise TypeError(
+            f"{argument_name} must be a sequence of floats, not a mapping")
+    vector = _oecluster.DoubleVector()
+    try:
+        iterator = iter(value)
+    except TypeError as error:
+        raise TypeError(
+            f"{argument_name} must be a sequence of floats") from error
+    for item in iterator:
+        # float() rather than operator.index(), which _agreement_labels uses:
+        # an activity is a measurement, so 7 and 7.0 are the same input and a
+        # numpy float has to pass. str, bytes, bytearray and memoryview are
+        # refused explicitly because float() converts str, bytes, bytearray and
+        # a byte-format memoryview -- a column read from a CSV without
+        # conversion, or one whose entries survived a single layer of
+        # deserialization, would otherwise score as numbers. These four are
+        # named concretely rather than tested for as buffers, for the reason
+        # the column guard gives, and they are the whole of the type test:
+        # every other element is handed to float(), which reads a numpy scalar
+        # numerically, parses a nested byte-format array.array as text -- such
+        # an element of array("B", b"1") scores 1.0, the digit its byte spells,
+        # rather than the 49 the array holds -- and refuses the rest. Among the
+        # four, a numeric memoryview is the one spelling float() does not
+        # convert; it is refused with them for consistency with that guard.
+        if isinstance(item, (str, bytes, bytearray, memoryview)):
+            raise TypeError(f"{argument_name} must be a sequence of floats")
+        try:
+            vector.push_back(float(item))
+        except OverflowError as error:
+            # float() admits any Python int until the cast itself, so a value
+            # beyond double range only fails inside it, never at the type check
+            # above. Folding it into the clause below would report a type
+            # problem, which is false: the magnitude is the only thing wrong.
+            raise ValueError(
+                f"{argument_name} must contain values that fit a "
+                f"double") from error
+        except (TypeError, ValueError) as error:
+            raise TypeError(
+                f"{argument_name} must be a sequence of floats") from error
+    return vector
+
+
+def sar_coherence(result, activity, *, noise="excluded"):
+    """
+    Score how much of an activity's variance a clustering explains.
+
+    Takes labels and measurements and nothing else -- no distance matrix,
+    unlike :func:`activity_landscape` -- so it answers the question for a
+    clustering computed any way at all, including one read in from elsewhere.
+
+    Read ``omega_squared`` when comparing clusterings that differ in cluster
+    count, and ``eta_squared`` only within a fixed count: the raw ratio rises
+    with the number of clusters even when activity is independent of the
+    labels.
+
+    :param result: A clustering result, or a sequence of ints fitting the
+        native 32-bit signed label type. Negative labels are noise.
+    :param activity: One measurement per sample. NaN marks a missing
+        measurement, and those samples are dropped rather than refused.
+    :param noise: How negatively-labelled samples are treated: ``"excluded"``
+        (the default, dropped), ``"grouped"`` (all noise forms one cluster) or
+        ``"singletons"`` (each noise sample is its own cluster). The default
+        differs from :func:`partition_agreement`'s, because a noise point
+        promoted to a singleton has a group mean equal to its own value and so
+        reads as perfectly explained variance.
+    :returns: A :class:`SARCoherence`.
+    :raises TypeError: If ``result`` is neither a clustering result nor a
+        sequence of ints, or ``activity`` is not a sequence of floats.
+    :raises ValueError: If ``activity`` is empty, differs in length from the
+        labeling, or holds a number too large to convert to a double; if a
+        label does not fit the native 32-bit signed label type,
+        or a clustering result carries a member index that does not fit a
+        native ``size_t``, a negative one being the reachable case; or if
+        ``noise`` is not one of the three accepted strings.
+    :raises RuntimeError: If an activity value is infinite, in which case the
+        message names the offending index; or if the magnitudes are large enough
+        that a mean or a sum of squares overflows, in which case it names the
+        quantity that overflowed rather than an index, no single sample being
+        responsible. These are refusals raised in C++, and SWIG maps every
+        native exception to ``RuntimeError``.
+
+    Example::
+
+        result = oecluster.butina(dm, threshold=0.35)
+        coherence = oecluster.sar_coherence(result, activity)
+        print(coherence.eta_squared, coherence.omega_squared)
+        print(coherence.clusters[0].mean_activity)
+    """
+    values = _activity_values(activity, "activity")
+    # Ahead of the overload split, because emptiness is the one refusal both
+    # branches would otherwise disagree about. A length check alone lets
+    # ClusteringResult([], []) with an empty activity through -- 0 == 0 -- and
+    # the native refusal that catches it downstream arrives as RuntimeError,
+    # contradicting the ValueError this function documents.
+    if len(values) == 0:
+        raise ValueError("sar_coherence() requires a non-empty activity")
+
+    options = _oecluster.SARCoherenceOptions()
+    options.noise_handling = _noise_handling(noise)
+
+    # A ClusteringResult takes the native overload that reads the result;
+    # anything else goes through the shared label coercion to the overload that
+    # reads a label vector. The split exists so a caller holding a result does
+    # not have to take it apart, and one holding bare labels does not have to
+    # build a result around them.
+    if isinstance(result, ClusteringResult):
+        if len(values) != result.num_samples:
+            raise ValueError(
+                f"activity has {len(values)} entries but the clustering has "
+                f"{result.num_samples} samples")
+        # ClusteringResult stores its labels and its member indices as intp
+        # arrays without range validation, so a value too wide for either native
+        # vector -- an IntVector of labels, a SizeTVector of members -- reaches
+        # _native_clustering_result and surfaces as OverflowError. The bare-label
+        # branch already reports the label case as a ValueError, and the two
+        # overloads must not disagree about which exception a caller catches.
+        # The message names both fields because OverflowError does not say which
+        # vector rejected the value, and a negative member index is the easier
+        # of the two to hit.
+        try:
+            native_result = _native_clustering_result(result)
+        except OverflowError as error:
+            raise ValueError(
+                "result must contain labels that fit a 32-bit signed int and "
+                "member indices that fit a native size_t") from error
+        native = _oecluster.sar_coherence(native_result, values, options)
+    else:
+        labels = _agreement_labels(result, "result")
+        # No separate emptiness refusal here. The activity is already known to
+        # be non-empty, so an empty labeling is always a length mismatch, and
+        # the comparison below reports it with the same message the
+        # ClusteringResult branch gives for the same input shape.
+        if len(values) != len(labels):
+            raise ValueError(
+                f"activity has {len(values)} entries but the clustering has "
+                f"{len(labels)} samples")
+        native = _oecluster.sar_coherence(labels, values, options)
+    # Bound to a local, never scored inline: the scorecard reads the result's
+    # member vector, which the result owns and frees with itself.
+    return SARCoherence(native)
+
+
+def activity_landscape(distance_matrix, activity, *, distance_threshold=0.30,
+                       activity_threshold=1.0, rmodi_delta=0.625,
+                       num_threads=0):
+    """
+    Measure the activity cliffs in a precomputed distance matrix.
+
+    Answers a different question from :func:`sar_coherence`: not whether a
+    clustering groups molecules that behave alike, but whether the descriptor
+    itself puts similar activities near one another. A high cliff density says
+    small structural changes swing the activity, which is what makes a series
+    hard to model and interesting to a chemist.
+
+    :param distance_matrix: Complete SymmetricDistanceMatrix. SparseStorage is
+        refused: a nearest neighbour read off a partial matrix is not one.
+    :param activity: One measurement per sample; NaN marks a missing one.
+    :param distance_threshold: Pairs at or below this are structurally near.
+        Shares :func:`cluster_report`'s boundary default of 0.30, because it
+        encodes the same judgement about fingerprint distance.
+    :param activity_threshold: Activity differences at or above this are
+        sharp. One log unit by default.
+    :param rmodi_delta: Half-width of the RMODI activity band, in standard
+        deviations. 0.625 is the published value.
+    :param num_threads: 0 selects the hardware concurrency. The result does not
+        depend on this value, bit for bit. Truncated toward zero, so 1.9 selects
+        one thread and -0.5 truncates to 0 and therefore selects the hardware
+        concurrency, like every other value that truncates there.
+        ``OverflowError`` has two sources, with different causes and different
+        moments: an infinite value has no integer to truncate to and fails
+        inside ``int()``, before the non-negative check runs at all, while a
+        finite but oversized value coerces cleanly there and fails later, in the
+        binding layer's ``size_t`` assignment.
+    :returns: An :class:`ActivityLandscape`.
+    :raises TypeError: If ``distance_matrix`` is not a SymmetricDistanceMatrix,
+        ``activity`` is not a sequence of floats, or ``num_threads`` is a value
+        ``int()`` cannot accept at all, such as None or a complex. That
+        coercion runs before the non-negative check below.
+    :raises ValueError: If the matrix uses sparse storage, the activity is
+        empty, the activity holds a number too large to convert to a double,
+        the activity and the matrix cover different numbers of samples,
+        any of the three thresholds is non-finite or negative,
+        ``num_threads`` is a str ``int()`` cannot parse or a NaN, which the
+        same coercion refuses,
+        ``num_threads`` truncates toward zero to a negative integer,
+        or the gate refuses the matrix --
+        similarity-valued, a non-zero self-distance, a non-finite entry, or
+        scored on a per-pair feature subset.
+    :raises RuntimeError: If an activity value is infinite, or a stored distance
+        is negative; or if the activity magnitudes are large enough that
+        ``activity_stddev`` or a SALI accumulator overflows to infinity, in
+        which case the message names the quantity that overflowed rather than an
+        index. These are refusals raised in C++, and SWIG maps every native
+        exception to ``RuntimeError``. A negative distance reaches C++ because
+        the gate measures finiteness, not sign.
+    :raises OverflowError: If ``num_threads`` is an infinity or coerces to an
+        integer too large for a ``size_t``.
+
+    Example::
+
+        landscape = oecluster.activity_landscape(
+            dm, activity, distance_threshold=0.30, activity_threshold=1.0)
+        print(landscape.num_cliffs, landscape.cliff_density)
+        print(landscape.max_sali, landscape.rmodi)
+    """
+    if not isinstance(distance_matrix, SymmetricDistanceMatrix):
+        raise TypeError(
+            "activity_landscape() expects a SymmetricDistanceMatrix")
+
+    # ValueError, not TypeError: the argument's type is right, its storage is
+    # not. Ahead of the gate, whose remedies cannot rescue a sparse matrix.
+    if isinstance(distance_matrix.storage, SparseStorage):
+        raise ValueError(  # noqa: TRY004
+            "activity_landscape requires complete pairwise distances; "
+            "SparseStorage is not supported")
+
+    values = _activity_values(activity, "activity")
+    # Ahead of the length check for the same reason as in sar_coherence(): a
+    # zero-sample matrix is constructible, so 0 == 0 agrees and the emptiness
+    # would only be caught in C++, arriving as RuntimeError.
+    if len(values) == 0:
+        raise ValueError("activity_landscape() requires a non-empty activity")
+
+    if len(values) != distance_matrix.num_samples:
+        raise ValueError(
+            f"activity has {len(values)} entries but the matrix covers "
+            f"{distance_matrix.num_samples} samples")
+
+    # Mirrors validate_landscape_options() in src/clustering/SARCoherence.cpp:
+    # the same three thresholds in the same order, each tested for finiteness
+    # before sign. Refused here rather than left to that function because SWIG
+    # maps every native exception to RuntimeError, and a threshold Python can
+    # inspect for itself belongs in the ValueError this signature documents.
+    # isfinite rather than isnan: an infinite distance_threshold would call
+    # every pair structurally near instead of failing.
+    checked = []
+    for name, value in (("distance_threshold", distance_threshold),
+                        ("activity_threshold", activity_threshold),
+                        ("rmodi_delta", rmodi_delta)):
+        try:
+            coerced = float(value)
+        except OverflowError as error:
+            # An int beyond double range is the same condition isfinite() is
+            # there to refuse; it just fails one step earlier, in the cast.
+            raise ValueError(f"{name} must be finite") from error
+        if not math.isfinite(coerced):
+            raise ValueError(f"{name} must be finite")
+        if coerced < 0.0:
+            raise ValueError(f"{name} must be non-negative")
+        checked.append(coerced)
+    distance_value, activity_value, rmodi_value = checked
+
+    num_threads_int = int(num_threads)
+    # num_threads reaches a size_t option field, where a negative value raises
+    # OverflowError below the gate. Zero stays legal: it means "choose for me".
+    if num_threads_int < 0:
+        raise ValueError("num_threads must be non-negative")
+
+    _gate.require_comparable(distance_matrix, "activity_landscape")
+
+    options = _oecluster.ActivityLandscapeOptions()
+    options.distance_threshold = distance_value
+    options.activity_threshold = activity_value
+    options.rmodi_delta = rmodi_value
+    options.num_threads = num_threads_int
+    # Bound rather than scored inline, on the same terms as sar_coherence().
+    # This result carries no member vector today; keeping the three entry
+    # points identical means adding one later cannot quietly reintroduce a read
+    # off a freed parent.
+    native = _oecluster.activity_landscape(
+        distance_matrix.storage, values, options)
+    return ActivityLandscape(native)
+
+
+def modelability(distance_matrix, activity_classes, *, num_threads=0):
+    """
+    Score how well a descriptor separates activity classes.
+
+    The MODI index of Golbraikh et al. (2014), generalized to K classes: the
+    mean over classes of the fraction of members whose nearest neighbour shares
+    the class. Run it before fitting a classifier, to find out whether the
+    descriptor carries the signal at all.
+
+    :param distance_matrix: Complete SymmetricDistanceMatrix. SparseStorage is
+        refused, on the same grounds as :func:`activity_landscape`.
+    :param activity_classes: One class string per sample. An empty string is a
+        missing annotation rather than a category, and its sample is dropped.
+    :param num_threads: 0 selects the hardware concurrency. Nearest-neighbour
+        ties resolve to the lowest scored index, so the result does not depend
+        on this value. Truncated toward zero on :func:`activity_landscape`'s
+        terms: 1.9 selects one thread, -0.5 truncates to 0 and therefore
+        selects the hardware concurrency, and ``OverflowError`` arrives from
+        the same two places -- an infinite value out of ``int()``, a finite but
+        oversized one out of the binding layer's ``size_t`` assignment.
+    :returns: A :class:`Modelability`.
+    :raises TypeError: If ``distance_matrix`` is not a SymmetricDistanceMatrix,
+        ``activity_classes`` is not a sequence of strings, or ``num_threads``
+        is a value ``int()`` cannot accept at all, on
+        :func:`activity_landscape`'s terms.
+    :raises ValueError: On the same conditions as :func:`activity_landscape`,
+        reading ``activity_classes`` for ``activity``, less the three threshold
+        refusals and the oversized-value refusal: this function has no
+        thresholds, and a class string has no magnitude to overflow. Every
+        ``num_threads`` condition carries over unchanged, including the ones
+        the coercion raises: a str ``int()`` cannot parse and a NaN as the
+        ValueError this clause describes, an infinite value as the
+        ``OverflowError`` the parameter above sets out.
+    :raises RuntimeError: If a stored distance is negative, on the same terms
+        as :func:`activity_landscape`.
+    :raises OverflowError: If ``num_threads`` is an infinity or coerces to an
+        integer too large for a ``size_t``.
+
+    Example::
+
+        # nan >= 6.0 is False, so without the nan arm every missing
+        # measurement would be annotated "inactive" rather than dropped.
+        classes = ["" if math.isnan(a) else "active" if a >= 6.0 else "inactive"
+                   for a in activity]
+        report = oecluster.modelability(dm, classes)
+        print(report.modi, report.num_classes)
+        print(report.classes[0].label, report.classes[0].fraction_same_class)
+    """
+    if not isinstance(distance_matrix, SymmetricDistanceMatrix):
+        raise TypeError("modelability() expects a SymmetricDistanceMatrix")
+
+    if isinstance(distance_matrix.storage, SparseStorage):
+        raise ValueError(  # noqa: TRY004
+            "modelability requires complete pairwise distances; "
+            "SparseStorage is not supported")
+
+    classes = _activity_classes(activity_classes, "activity_classes")
+    # See activity_landscape(): the length check alone lets a zero-sample
+    # matrix with an empty annotation through.
+    if len(classes) == 0:
+        raise ValueError(
+            "modelability() requires a non-empty activity_classes")
+
+    if len(classes) != distance_matrix.num_samples:
+        raise ValueError(
+            f"activity_classes has {len(classes)} entries but the matrix "
+            f"covers {distance_matrix.num_samples} samples")
+
+    num_threads_int = int(num_threads)
+    if num_threads_int < 0:
+        raise ValueError("num_threads must be non-negative")
+
+    _gate.require_comparable(distance_matrix, "modelability")
+
+    options = _oecluster.ModelabilityOptions()
+    options.num_threads = num_threads_int
+    # Bound rather than scored inline: the scorecard copies this result's
+    # per-class rows, which the result owns and frees with itself.
+    native = _oecluster.modelability(
+        distance_matrix.storage, classes, options)
+    return Modelability(native)
 
 
 def descriptor_statistics(mols, *, sources=None, columns=None, groups=None,

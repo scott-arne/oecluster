@@ -115,9 +115,15 @@ their option/result types:
 
 `ClusterTypes.h` defines the shared cluster representation, `ClusterReport.h`
 defines the method-agnostic quality scorecard exposed in Python as
-`cluster_report()`/`compare_reports()`, and `PartitionAgreement.h` defines the
+`cluster_report()`/`compare_reports()`, `PartitionAgreement.h` defines the
 labels-only agreement metrics exposed as
-`partition_agreement()`/`scaffold_agreement()`.
+`partition_agreement()`/`scaffold_agreement()`, and `SARCoherence.h` defines
+the structure-activity coherence metrics exposed as
+`sar_coherence()`/`activity_landscape()`/`modelability()`. `SARCoherence.h`
+is the one of the four that reads activity data as well as structure:
+`sar_coherence` decomposes an activity vector across a labeling, while
+`activity_landscape` and `modelability` sweep a distance matrix directly and
+need no clustering at all.
 
 ### Internal validity indices
 
@@ -185,6 +191,44 @@ distinction into its cells, rendering an unasked cell as `None` -- printed as
 `--` -- and reserving `nan` for asked and undefined. A coverage cell is also
 `None` when the report carries the threshold but answered nothing at it, as when
 the clustering has no clusters and both coverage curves come back empty.
+
+### SAR coherence
+
+The three functions are four entry points. `sar_coherence` is overloaded on
+how the labels arrive, taking `const ClusteringResult&` or `const
+std::vector<ClusterLabel>&`, then `const std::vector<double>& activity`.
+`activity_landscape` takes `const StorageBackend& storage` and the same
+activity vector; `modelability` takes that storage and `const
+std::vector<std::string>& activity_classes`. Each also takes a defaulted
+options struct by const reference and returns by value. All four raise
+`std::invalid_argument` on an empty or mismatched input vector, the two taking
+storage also on anything short of complete pairwise distances: `SparseStorage`
+derives from `StorageBackend`, so the signature admits what the runtime
+refuses.
+
+`SARCoherenceOptions::noise_handling` defaults to `NoiseHandling::Excluded`,
+where `PartitionAgreementOptions`, whose header declares the enum, defaults to
+`Singletons`. `ActivityLandscapeOptions` carries `distance_threshold` 0.30,
+`activity_threshold` 1.0, `rmodi_delta` 0.625 (the RMODI band half-width, in
+activity standard deviations) and `num_threads` 0; `ModelabilityOptions`
+carries `num_threads` 0 alone, and zero selects the hardware concurrency.
+
+Each result carries `num_samples`, the input length, and `num_scored`, how
+much entered the metric. `SARCoherence` adds `num_clusters`, `eta_squared`,
+`omega_squared` and `std::vector<ClusterActivity> clusters`: `label`,
+`num_scored`, `mean_activity`, `stddev_activity`. `ActivityLandscape` adds
+`num_pairs_scored`, `num_cliffs`, `cliff_density`, `num_zero_distance_pairs`,
+`max_sali`, `mean_sali`, `rmodi`, `activity_stddev`. `Modelability` adds
+`num_classes`, `modi` and `std::vector<ClassConcordance> classes`: `label`,
+`num_members`, `fraction_same_class`.
+
+Every `double` above is NaN where undefined, never substituted: `eta_squared`
+when `num_scored < 2` or the activity has no variance, `omega_squared` also
+when every scored sample is its own cluster, `cliff_density` when
+`num_pairs_scored` is 0, `max_sali` and `mean_sali` when no scored pair has a
+nonzero distance, `rmodi`, `activity_stddev` and a row's `stddev_activity` when
+the `num_scored` each reads is below 2, `modi` when `num_classes < 2`, and a
+row's `fraction_same_class` when its class is the only one scored.
 
 ## Partition Agreement
 

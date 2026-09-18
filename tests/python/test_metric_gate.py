@@ -1,3 +1,4 @@
+import inspect
 import json
 import math
 
@@ -9,6 +10,20 @@ from oecluster.oecluster import butina_cluster as _butina_cluster
 from openeye import oechem
 
 SMILES = ["CCO", "CCC", "CCCC", "c1ccccc1", "CCN", "CCOC"]
+
+
+# The three refusals require_comparable inherits from require_metric and never
+# waives. Each acceptance test replays all three against its waived fact, so a
+# tier-1 check that gets reordered behind a waiver is caught rather than passing
+# on whichever fault that test happened to pick.
+_TIER1_FAULTS = [
+    ("is_distance", lambda d: d._facts.__setitem__('is_distance', False),
+     "requires distances"),
+    ("zero_self", lambda d: d._facts.__setitem__('zero_self', False),
+     "zero self-distance"),
+    ("non_finite", lambda d: d.condensed.__setitem__(0, math.nan),
+     "non-finite entries"),
+]
 
 
 def _mols(smiles_list=None):
@@ -1364,3 +1379,144 @@ def test_butina_dbscan_hdbscan_still_accept_chunk_size_zero():
     assert len(oecluster.butina(dist, 0.5, chunk_size=0).labels) == 6
     assert len(oecluster.dbscan(dist, 0.5, chunk_size=0).labels) == 6
     assert len(oecluster.hdbscan(dist, min_cluster_size=2, chunk_size=0).labels) == 6
+
+
+def test_require_comparable_refuses_a_similarity():
+    dist = oecluster.pdist(_mols(), "fingerprint")
+    dist._facts['is_distance'] = False
+
+    with pytest.raises(ValueError, match="requires distances"):
+        _gate.require_comparable(dist, "activity_landscape")
+
+
+def test_require_comparable_refuses_a_nonzero_self_distance():
+    dist = oecluster.pdist(_mols(), "fingerprint")
+    dist._facts['zero_self'] = False
+
+    with pytest.raises(ValueError, match="zero self-distance"):
+        _gate.require_comparable(dist, "activity_landscape")
+
+
+def test_require_comparable_refuses_a_non_finite_entry():
+    dist = oecluster.pdist(_mols(), "fingerprint")
+    dist.condensed[0] = math.nan
+
+    with pytest.raises(ValueError, match="non-finite entries"):
+        _gate.require_comparable(dist, "modelability")
+
+
+def test_require_comparable_refuses_subset_scored_without_an_override():
+    """The one tier-2 check that still bites. Ranking a nearest neighbour or
+    thresholding a cliff compares two distances against each other, and under
+    missing='ignore' the two answer different questions."""
+    dist = oecluster.pdist(_mols(), "fingerprint")
+    dist._facts['data_integrity'] = "subset_scored"
+
+    with pytest.raises(ValueError) as excinfo:
+        _gate.require_comparable(dist, "activity_landscape")
+
+    message = str(excinfo.value)
+    assert "not mutually comparable" in message
+    assert "missing='complete_case'" in message
+    assert "cannot be overridden" in message
+    assert "allow_nonmetric" not in message
+
+
+def test_require_comparable_takes_no_override_argument():
+    """There is no argument a caller can pass that could carry an override.
+
+    The gate has exactly its two documented parameters, which is what the
+    probes below establish: no third positional, no keyword-only parameter, no
+    ``*args`` and no ``**kwargs`` for an override to arrive through, and the
+    keyword a caller would guess from ``require_metric`` is rejected rather
+    than quietly ignored. The probes also pin the two things that make those
+    claims mean anything -- that the name is bound to a real function, and
+    that the function closes over nothing.
+
+    Together those exhaust what a shape assertion can settle: everything a
+    Python function reads comes from its arguments, its closure, or its
+    globals, and the first two are now pinned. Globals are module state, which
+    no assertion about a function's shape can see -- nor can one see an
+    override riding on the *value* of a parameter the gate already takes, a
+    caller name read as a magic word. Both are guarded instead by
+    ``test_require_comparable_refuses_subset_scored_without_an_override``,
+    which calls the gate on a default-state module under an ordinary caller
+    name and requires it to raise; that is the level at which an override of
+    any shape has to show itself.
+    """
+    parameters = inspect.signature(_gate.require_comparable).parameters
+    assert "allow_nonmetric" not in parameters
+
+    dist = oecluster.pdist(_mols(), "fingerprint")
+    dist._facts['data_integrity'] = "subset_scored"
+    # The calls below are intentionally invalid to verify the function rejects
+    # an override argument rather than silently accepting it.
+    with pytest.raises(TypeError):
+        _gate.require_comparable(dist, "activity_landscape",
+                                 allow_nonmetric=True)  # pyright: ignore[reportCallIssue]
+
+    dist = oecluster.pdist(_mols(), "fingerprint")
+    dist._facts['data_integrity'] = "subset_scored"
+    with pytest.raises(TypeError):
+        _gate.require_comparable(dist, "activity_landscape",
+                                 True)  # pyright: ignore[reportCallIssue]
+
+    # __signature__ is a forgeable attribute; a function's __code__ is not --
+    # rebinding it rebinds what the function runs. That holds only for a real
+    # function, though: any other callable can carry a __code__ copied from a
+    # two-argument decoy while its __call__ takes an override. So the premise
+    # is asserted before the probe that rests on it.
+    assert inspect.isfunction(_gate.require_comparable)
+    code = _gate.require_comparable.__code__
+    assert code.co_argcount == 2
+    assert code.co_kwonlyargcount == 0
+    assert not code.co_flags & inspect.CO_VARARGS
+    assert not code.co_flags & inspect.CO_VARKEYWORDS
+    # Arguments, closure, globals: a function reads from nowhere else. The
+    # assertions above pin the first; this pins the second to empty.
+    assert not code.co_freevars
+
+
+def test_require_comparable_accepts_a_triangle_violation():
+    """These metrics never assume a metric: they rank and threshold distances,
+    and a triangle-inequality violation leaves both operations meaningful.
+
+    Asserts that the gate accepts the violation, then proves the gate is
+    actually enforcing all three tier-1 checks by injecting each fault into
+    a fresh matrix with the waived fact present."""
+    dist = oecluster.pdist(_mols(), "fingerprint")
+    dist._facts['triangle'] = False
+
+    assert _gate.require_comparable(dist, "activity_landscape") is None
+
+    for name, apply_fault, message in _TIER1_FAULTS:
+        dist = oecluster.pdist(_mols(), "fingerprint")
+        dist._facts['triangle'] = False
+        apply_fault(dist)
+        with pytest.raises(ValueError, match=message):
+            _gate.require_comparable(dist, "activity_landscape")
+
+
+def test_require_comparable_accepts_a_proven_probe_violation():
+    """These metrics never assume a metric: they rank and threshold distances,
+    and a proven triangle inequality violation (via probe sampling) leaves both
+    operations meaningful.
+
+    Asserts that the gate accepts the violation, then proves the gate is
+    actually enforcing all three tier-1 checks by injecting each fault into
+    a fresh matrix with the waived fact present."""
+    dist = oecluster.pdist(_mols(), "fingerprint")
+    dist._facts['metric_probe'] = "violations_found"
+    dist._facts['probe_violations'] = 3
+    dist._facts['probe_sampled'] = 100
+
+    assert _gate.require_comparable(dist, "modelability") is None
+
+    for name, apply_fault, message in _TIER1_FAULTS:
+        dist = oecluster.pdist(_mols(), "fingerprint")
+        dist._facts['metric_probe'] = "violations_found"
+        dist._facts['probe_violations'] = 3
+        dist._facts['probe_sampled'] = 100
+        apply_fault(dist)
+        with pytest.raises(ValueError, match=message):
+            _gate.require_comparable(dist, "modelability")

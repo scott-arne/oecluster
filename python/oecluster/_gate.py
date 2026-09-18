@@ -229,6 +229,40 @@ def require_metric(distance_matrix, caller, *, allow_nonmetric=False):
             f"Pass allow_nonmetric=True to proceed anyway.")
 
 
+def require_comparable(distance_matrix, caller):
+    """
+    Refuse a matrix whose distances cannot be ranked or thresholded.
+
+    The SAR-coherence metrics do not assume a metric. They rank distances
+    against one another -- a nearest neighbour, a band minimum -- and compare
+    them against a threshold, and a triangle-inequality violation leaves both
+    operations meaningful. So this gate keeps ``require_metric``'s three tier-1
+    refusals (orientation, the diagonal, non-finite entries) and waives the
+    tier-2 ones, with a single exception.
+
+    That exception is ``data_integrity == "subset_scored"``. A matrix computed
+    with ``missing='ignore'`` scores each pair on whatever features that pair
+    happens to share, so two of its distances answer different questions and
+    the smaller one is not necessarily the nearer pair. Ranking is exactly what
+    these metrics do, so the refusal is not overridable: there is no reading of
+    the result that would be correct.
+
+    :param distance_matrix: The matrix about to be scored.
+    :param caller: Name of the calling entry point, used in the messages.
+    :raises ValueError: If a check refuses.
+    """
+    require_metric(distance_matrix, caller, allow_nonmetric=True)
+
+    if distance_matrix.facts['data_integrity'] == "subset_scored":
+        raise ValueError(
+            f"this matrix was scored on a per-pair subset of features "
+            f"(missing='ignore'), so its distances are not mutually "
+            f"comparable; {caller} ranks and thresholds distances against one "
+            f"another. Recompute with missing='complete_case'. This cannot be "
+            f"overridden: a nearest neighbour picked out of incomparable "
+            f"distances is not a nearest neighbour.")
+
+
 def condensed_lookup(condensed, n, i, j):
     """
     Look up ``d(i, j)`` in a condensed distance array, vectorized.
