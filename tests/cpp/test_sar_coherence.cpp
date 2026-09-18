@@ -155,6 +155,38 @@ TEST(ActivityMetricsTest, PopulationStddevDoesNotLoseAnUlpOnAHandFixture) {
               1.6);
 }
 
+// The sum of squared deviations here is 0x1.0000000000004p-1022, which is
+// normal, so a guard placed on the sum admits it. The quotient is what has to
+// survive: dividing by the two samples lands in the subnormal range, and the
+// square root propagates the significand bits the division truncated, one ulp
+// low. The mean is exactly 0, so the exact population standard deviation is
+// |x|, and the scaled path returns it exactly -- the deviations are exactly
+// +/-1.0 once divided by the scale. Requiring the quotient rather than the sum
+// to be normal is what routes the fixture there.
+TEST(ActivityMetricsTest, PopulationStddevSurvivesASubnormalVariance) {
+    EXPECT_EQ(OECluster::detail::population_stddev(
+                  {0x1.6a09e667f3bd0p-512, -0x1.6a09e667f3bd0p-512}),
+              0x1.6a09e667f3bd0p-512);
+}
+
+// The same defect with the sample count turned up, which is what shows its
+// magnitude. A thousand alternating values sum to 0x1.00000000001f8p-1022 --
+// normal again -- but the quotient now sits about ten binary orders below
+// DBL_MIN instead of one, and the unscaled result is 253 ulps low rather than
+// one. The cost of dividing into the subnormal range grows with the divisor,
+// so a floor that does not scale with the sample count understates it.
+TEST(ActivityMetricsTest, PopulationStddevSurvivesASubnormalVarianceAtSize) {
+    std::vector<double> values;
+    values.reserve(1000);
+    for (std::size_t i = 0; i < 1000; ++i) {
+        values.push_back(i % 2 == 0 ? 0x1.030dc4ea03c6ep-516
+                                    : -0x1.030dc4ea03c6ep-516);
+    }
+
+    EXPECT_EQ(OECluster::detail::population_stddev(values),
+              0x1.030dc4ea03c6ep-516);
+}
+
 TEST(ActivityMetricsTest, PopulationStddevIsUndefinedBelowTwoValues) {
     EXPECT_TRUE(std::isnan(OECluster::detail::population_stddev({})));
     EXPECT_TRUE(std::isnan(OECluster::detail::population_stddev({4.0})));
@@ -859,6 +891,27 @@ TEST(ActivityLandscapeTest, CountsANeighbourExactlyOnTheBand) {
 
     EXPECT_EQ(landscape.activity_stddev, 1.6);
     EXPECT_DOUBLE_EQ(landscape.rmodi, 0.6);
+}
+
+// The same inclusive band, at the magnitude where the standard deviation is
+// itself at risk. Two samples, activities +/-x, so the only activity gap in
+// the fixture is exactly 2x; with rmodi_delta at 2.0 the band is exactly 2x
+// too, and the inclusive test has to count the pair, which makes rmodi 1.0.
+// One ulp off the standard deviation narrows the band below the gap, the test
+// becomes exclusive, each sample's only partner moves out of band, and rmodi
+// inverts to 0.0. That ulp is what a normality guard on the sum of squared
+// deviations lets through and one on the variance does not.
+TEST(ActivityLandscapeTest, CountsANeighbourOnTheBandAtASubnormalVariance) {
+    OECluster::DenseStorage storage(2);
+    FillStorage(storage, {0.0});
+    ActivityLandscapeOptions options;
+    options.rmodi_delta = 2.0;
+
+    const ActivityLandscape landscape = OECluster::activity_landscape(
+        storage, {0x1.6a09e667f3bd0p-512, -0x1.6a09e667f3bd0p-512}, options);
+
+    EXPECT_EQ(landscape.activity_stddev, 0x1.6a09e667f3bd0p-512);
+    EXPECT_DOUBLE_EQ(landscape.rmodi, 1.0);
 }
 
 TEST(ActivityLandscapeTest, MissingActivitiesLeaveTheirPairsUnscored) {

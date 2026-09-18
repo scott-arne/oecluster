@@ -153,19 +153,33 @@ inline double population_stddev(const std::vector<double>& values) {
         const double difference = value - refined_mean;
         unscaled += difference * difference;
     }
-    // The lower bound is the smallest normal, not zero, because underflow here
-    // is gradual: squared deviations enter the subnormal range and lose their
-    // significant bits there well before they vanish, so a sum of a handful of
-    // subnormal units carries almost no information yet still passes a "> 0.0"
-    // test. Deviations on the order of 2^-537 sum to two subnormal units, which
-    // then divide and square-root their way back to exactly 0.0 -- the very
-    // collapse the scaling exists to prevent. Requiring a normal sum bounds
-    // what subnormal terms can cost: each is off by at most half a subnormal
-    // ulp against a total of at least DBL_MIN, which is the scale of ordinary
-    // rounding. NaN fails this comparison as well, though it cannot arise: a
-    // NaN among the values leaves scale at 0.0 and the guard above has already
-    // returned.
-    if (unscaled >= std::numeric_limits<double>::min() && !std::isinf(unscaled)) {
+    // The lower bound is a floor on the quotient rather than on the sum,
+    // because the division by the sample count is where the bits are lost: a
+    // normal sum can divide down into the subnormal range, and the square root
+    // then propagates a significand that has already been truncated. That is
+    // why the floor scales with the sample count. Underflow here is gradual,
+    // so the loss is silent -- squared deviations that enter the subnormal
+    // range keep almost none of their significant bits yet still pass a
+    // "> 0.0" test. Deviations on the order of 2^-537 sum to two subnormal
+    // units, which then divide and square-root their way back to exactly 0.0,
+    // the very collapse the scaling exists to prevent. Requiring a normal
+    // quotient bounds what subnormal terms can cost: each is off by at most
+    // half a subnormal ulp against a quotient of at least DBL_MIN, which is
+    // the scale of ordinary rounding.
+    //
+    // The bound is exact, not approximate. DBL_MIN is a power of two, so
+    // DBL_MIN * n is exact for every count that converts exactly to double,
+    // and it cannot overflow -- DBL_MIN times the largest size_t is about
+    // 4e-289. So a sum at or above it has an exact quotient of at least
+    // DBL_MIN, and rounding to nearest cannot carry a value at or above a
+    // representable DBL_MIN below it. This guarantees a normal quotient rather
+    // than merely making one likely; it does not make either path correctly
+    // rounded. Infinity passes >= and is rejected separately. NaN fails the
+    // comparison, though it cannot arise: a NaN among the values leaves scale
+    // at 0.0 and the guard above has already returned.
+    const double normal_floor =
+        std::numeric_limits<double>::min() * static_cast<double>(values.size());
+    if (unscaled >= normal_floor && !std::isinf(unscaled)) {
         return std::sqrt(unscaled / static_cast<double>(values.size()));
     }
 

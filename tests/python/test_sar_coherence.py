@@ -1482,12 +1482,18 @@ def test_modelability_matches_the_published_definition():
 def test_rmodi_matches_the_published_definition():
     """Samples 2 to 5 sit 0.05 from an in-band partner and further from every
     out-of-band one; 0 and 1 do not, their only in-band partner being each
-    other at 0.60. Four of six."""
+    other at 0.60. Four of six.
+
+    The standard deviation is asserted exactly because the literal exists to
+    pin the bit: it is the correctly rounded square root of the variance of the
+    six binary64 activities, and a tolerance wide enough to admit an ulp pins
+    nothing this test is about. ``rmodi`` keeps its tolerance -- 2/3 is not
+    representable.
+    """
     landscape = oecluster.activity_landscape(_line_dm(_PARITY_COORDS),
                                              _PARITY_ACTIVITY)
 
-    assert landscape.activity_stddev == pytest.approx(0.8225975119502045,
-                                                      abs=1e-12)
+    assert landscape.activity_stddev == 0.8225975119502045
     assert landscape.rmodi == pytest.approx(0.6666666666666666, abs=1e-12)
 
 
