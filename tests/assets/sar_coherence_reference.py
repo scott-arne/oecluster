@@ -64,13 +64,13 @@ def rmodi(condensed, activity, delta=0.625):
 
     The ``np.inf`` sentinels decide the cases the publication does not cover:
     a sample with no in-band neighbour does not count, one with no out-of-band
-    neighbour does, and one with neither does not. That is A3's extension.
+    neighbour does, and one with neither does not.
     ``include/oecluster/clustering/SARCoherence.h`` documents the same choice
     for the two one-sided cases -- a molecule with no neighbour on one side
     keeps that side's minimum at +infinity and the comparison still decides --
     so parity there would confirm the library's convention rather than the
-    published definition. The third case is different. It is reachable only
-    with a single scored sample, since any second sample is either in-band or
+    published definition. The third case is different. This function reaches
+    it only with a single sample, since any second sample is either in-band or
     out of it, and there the two disagree: this function returns 0.0 while the
     library returns NaN, because the C++ stops before the sweep when fewer
     than two samples are scored. The fixture the parity tests use reaches none
