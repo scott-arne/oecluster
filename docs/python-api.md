@@ -655,7 +655,11 @@ in any of them is ordering: a `set` of labels is accepted, and its members are
 paired to the activities in the set's own iteration order, which need not be
 the order they were written in. `{5, 3, 1, 0}` gives label 0 the first activity
 where `[5, 3, 1, 0]` gives it the last, and neither is an error, so pass a
-sequence when the pairing matters. All four numeric options behave alike here,
+sequence when the pairing matters. The same silence in the activity position
+costs more than a pairing: `sar_coherence([0, 0, 1, 1], [10., 20., 30., 40.])`
+reports an `eta_squared` of 0.8, and the same call with those four values as a
+`set`, which iterates `40.0, 10.0, 20.0, 30.0`, reports 0.0 -- a shift that
+runs high as often as it runs low. All four numeric options behave alike here,
 each being coerced before it is range-checked:
 `None` or a list raises `TypeError` from that coercion for any of
 `distance_threshold`, `activity_threshold`, `rmodi_delta` and `num_threads`,
