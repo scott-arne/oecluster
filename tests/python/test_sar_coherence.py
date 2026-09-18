@@ -5,6 +5,7 @@ import inspect
 import math
 import mmap
 from array import array
+from fractions import Fraction
 
 import numpy as np
 import oecluster
@@ -256,6 +257,59 @@ def test_sar_coherence_publishes_a_weaker_than_chance_omega_squared():
                                                   abs=1e-12)
     assert coherence.omega_squared == pytest.approx(-0.1428571428571428,
                                                     abs=1e-12)
+
+
+def test_the_published_omega_squared_chance_expectations_hold():
+    """Pin the two chance levels ``README.md`` and ``docs/python-api.md`` quote.
+
+    Both pages tell the reader to read ``omega_squared``'s chance level as
+    approximately rather than exactly zero, and back that with two figures for
+    a 100-sample labeling of one 11-member cluster plus 89 singletons: 0.075
+    for one active among 99 inactives, 0.014 for five actives among 95. No
+    other test computes them, so a change to the effect-size arithmetic would
+    falsify both pages without failing anything.
+
+    Neither figure is sampled. One active has only two distinguishable
+    placements, and five actives is a hypergeometric over how many of the five
+    land inside the cluster, so both expectations are exact enumerations
+    through :func:`oecluster.sar_coherence` itself.
+    """
+    n, size = 100, 11
+    labels = [0] * size + [i + 1 for i in range(n - size)]
+
+    def omega(activity):
+        return oecluster.sar_coherence(labels, activity).omega_squared
+
+    in_cluster = [1.0] + [0.0] * (n - 1)
+    singleton = [0.0] * size + [1.0] + [0.0] * (n - size - 1)
+
+    # The two placements have to land far apart, or the weighted means below
+    # would reproduce the published figures even from a metric that had
+    # collapsed to one value for every configuration.
+    assert omega(singleton) == 1.0
+    assert omega(in_cluster) < -7.0
+
+    one_active = (size / n) * omega(in_cluster) + ((n - size) / n) * omega(
+        singleton)
+    assert math.isclose(one_active, 0.074852817493694879, rel_tol=1e-12)
+
+    # Exact rational weights, so the only floating-point error is in the omega
+    # values themselves and in the final sum.
+    total = Fraction(0)
+    for inside in range(6):
+        weight = Fraction(
+            math.comb(size, inside) * math.comb(n - size, 5 - inside),
+            math.comb(n, 5))
+        activity = ([1.0] * inside + [0.0] * (size - inside)
+                    + [1.0] * (5 - inside)
+                    + [0.0] * (n - size - (5 - inside)))
+        total += weight * Fraction(omega(activity))
+    five_actives = float(total)
+    assert math.isclose(five_actives, 0.0140780123310651, rel_tol=1e-12)
+
+    # These two are the numbers the prose on both pages actually prints.
+    assert round(one_active, 3) == 0.075
+    assert round(five_actives, 3) == 0.014
 
 
 def test_sar_coherence_reports_its_two_undefined_effect_sizes():

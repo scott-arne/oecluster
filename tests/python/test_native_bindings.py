@@ -5,7 +5,9 @@ they fail loudly when an interface-file edit silently drops a symbol, which is
 otherwise only visible as an AttributeError deep inside a builder. A few of them
 do pin exact values, where reading the number back is the only way to show that
 a typemap carried real data across rather than a zero-initialized struct; those
-values are chosen to be exact in binary so the bare == is deliberate.
+values are either exact in binary or, as with ``distance_threshold``, the
+nearest double to the same decimal literal the header writes, so the bare == is
+deliberate.
 """
 
 import math

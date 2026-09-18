@@ -2,6 +2,7 @@
 
 #include <cfloat>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
@@ -156,12 +157,12 @@ TEST(ActivityMetricsTest, PopulationStddevReportsAnUnformableMean) {
 
 // The scaled accumulation could return a finite 1e300 here -- the spread is
 // representable even though the sum of squared deviations is not -- and that is
-// exactly what must not happen: §3.3 puts this input outside the supported
-// domain, sums_of_squares throws on it, and the two helpers have to agree about
-// where the domain ends. This is the unit-level half of
-// ActivityLandscapeTest.RejectsAnOverflowingSpread; without it, a scaling
-// change can silently widen the domain and only a much later integration test
-// would notice.
+// exactly what must not happen: a sum of squared deviations that does not fit
+// in a double is outside the supported domain, sums_of_squares throws on it,
+// and the two helpers have to agree about where the domain ends. This is the
+// unit-level half of ActivityLandscapeTest.RejectsAnOverflowingSpread;
+// without it, a scaling change can silently widen the domain and only a much
+// later integration test would notice.
 TEST(ActivityMetricsTest, PopulationStddevReportsAnUnrepresentableSpread) {
     const double spread = OECluster::detail::population_stddev({-1e300, 1e300});
     EXPECT_TRUE(std::isinf(spread));
@@ -191,13 +192,14 @@ TEST(ActivityMetricsTest, SumsOfSquaresDecomposesAHandFixture) {
     EXPECT_EQ(ss.num_scored, 6u);
     EXPECT_EQ(ss.num_groups, 3u);
 
-    // The two general invariants, at the two different strengths §5.2
-    // guarantees them. The bounds are exact because between is clamped into
-    // them; the additivity is not, because between is derived by a subtraction
-    // that rounds, so asserting bitwise equality here would be asserting
-    // something the derivation does not deliver. Checking these on the hand
-    // fixture is what makes them invariants rather than three lucky numbers:
-    // the expected values above would still pass if the clamp were dropped.
+    // The two general invariants, at the two different strengths
+    // sums_of_squares documents. The bounds are exact because between is
+    // clamped into them; the additivity is not, because between is derived by
+    // a subtraction that rounds, so asserting bitwise equality here would be
+    // asserting something the derivation does not deliver. Checking these on
+    // the hand fixture is what makes them invariants rather than three lucky
+    // numbers: the expected values above would still pass if the clamp were
+    // dropped.
     EXPECT_GE(ss.between, 0.0);
     EXPECT_LE(ss.between, ss.total);
     EXPECT_NEAR(ss.between + ss.within, ss.total,
@@ -320,8 +322,8 @@ TEST(ActivityMetricsTest, OmegaSquaredSurvivesTheUnderflowEnd) {
 // at 2^-539 a squared deviation is below the smallest subnormal and flushes to
 // zero, and it does so for SS_within before SS_total, so the unscaled
 // arithmetic reports eta squared as exactly 1.0 -- perfect separation -- on a
-// fixture whose true value is 18/31. Both fixtures are inside §3.3's domain:
-// every value, difference and sum here is a finite double. The expected
+// fixture whose true value is 18/31. Both fixtures are inside the supported
+// domain: every value, difference and sum here is a finite double. The expected
 // numbers are exact rationals, so a tolerance would hide a partial fix.
 TEST(ActivityMetricsTest, EffectSizesSurviveSquaredDeviationUnderflow) {
     const double x = std::ldexp(1.0, -539);
@@ -1085,10 +1087,11 @@ TEST(ActivityLandscapeTest, IsInvariantUnderTheThreadCount) {
 }
 
 // num_threads is a size_t, so "more threads than the machine could ever run"
-// is a value a caller can pass. Two things have to survive it: ThreadPool must
-// not be asked to create that many OS threads, and `8 * threads` must not wrap
-// to zero and turn the chunk-size division into division by zero. The cap at
-// the row count handles both, and the answer must be the single-threaded one.
+// is a value a caller can pass. The cap at the row count is what keeps
+// ThreadPool from being asked to create that many OS threads, and the answer
+// must still be the single-threaded one. The chunk-size division is safe for a
+// separate reason: the thread count it divides by is itself bounded by the row
+// count, not by num_threads.
 TEST(ActivityLandscapeTest, CapsAnAbsurdThreadCount) {
     OECluster::DenseStorage storage(4);
     FillStorage(storage, {0.1, 0.2, 0.3, 0.15, 0.25, 0.35});
@@ -1507,15 +1510,45 @@ TEST(ModelabilityTest, IsInvariantUnderTheThreadCount) {
             storage.Set(i, j, static_cast<double>((i * 37 + j * 11) % 100) / 100.0);
         }
     }
+    // The class must not be a function of i mod 4. A stored distance is zero
+    // when 37p + 11q is a multiple of 100 for the ordered pair (p, q) the loop
+    // above filled, which puts row i's zero-distance partner at 33i modulo 100
+    // when the partner is the larger index and at 97i modulo 100 when it is the
+    // smaller. Both multipliers are congruent to 1 modulo 4 and 100 is a
+    // multiple of 4, so either way the partner falls in row i's own residue
+    // class modulo 4. A class read off i mod 4 therefore makes every row
+    // concordant and drives modi and all four fractions to exactly 1.0, which
+    // no longer tells a correct threaded sweep apart from one that never
+    // compared a neighbour's label. Dividing by 7 before the stride breaks
+    // that alignment.
     std::vector<std::string> classes(SAMPLES);
     for (std::size_t i = 0; i < SAMPLES; ++i) {
-        classes[i] = "class" + std::to_string((i * 7) % 4);
+        classes[i] = "class" + std::to_string(((i / 7) * 3) % 4);
     }
 
     ModelabilityOptions single;
     single.num_threads = 1;
     const Modelability reference =
         OECluster::modelability(storage, classes, single);
+
+    // Pin the single-threaded answer before comparing the others against it.
+    // Without this the loop below only establishes that the threaded paths
+    // agree with each other, which a branch that never looked at the
+    // neighbour's label would also satisfy.
+    EXPECT_EQ(reference.modi, 0.24894108586830957);
+    ASSERT_EQ(reference.classes.size(), 4u);
+    EXPECT_EQ(reference.classes[0].label, "class0");
+    EXPECT_EQ(reference.classes[0].num_members, 53u);
+    EXPECT_EQ(reference.classes[0].fraction_same_class, 0.30188679245283018);
+    EXPECT_EQ(reference.classes[1].label, "class3");
+    EXPECT_EQ(reference.classes[1].num_members, 49u);
+    EXPECT_EQ(reference.classes[1].fraction_same_class, 0.32653061224489793);
+    EXPECT_EQ(reference.classes[2].label, "class2");
+    EXPECT_EQ(reference.classes[2].num_members, 49u);
+    EXPECT_EQ(reference.classes[2].fraction_same_class, 0.16326530612244897);
+    EXPECT_EQ(reference.classes[3].label, "class1");
+    EXPECT_EQ(reference.classes[3].num_members, 49u);
+    EXPECT_EQ(reference.classes[3].fraction_same_class, 0.20408163265306123);
 
     for (const std::size_t threads : {2u, 4u, 8u}) {
         ModelabilityOptions options;
@@ -1534,8 +1567,8 @@ TEST(ModelabilityTest, IsInvariantUnderTheThreadCount) {
 }
 
 // The same cap as `activity_landscape`, tested the same way: an absurd
-// num_threads must neither be handed to ThreadPool as a thread count nor wrap
-// `8 * threads` to zero, and the answer must not change.
+// num_threads must not be handed to ThreadPool as a thread count, and the
+// answer must not change.
 TEST(ModelabilityTest, CapsAnAbsurdThreadCount) {
     OECluster::DenseStorage storage(4);
     FillStorage(storage, {0.1, 0.8, 0.9, 0.7, 0.6, 0.2});
