@@ -165,20 +165,20 @@ inline double population_stddev(const std::vector<double>& values) {
     // square-roots its way back to exactly 0.0 -- the very collapse the scaling
     // exists to prevent.
     //
-    // So the quantity worth testing is the variance, because it is the average
-    // of those terms and therefore their scale. A floor on the sum says nothing
-    // about that scale, which is the defect this bound fixes -- n terms that
-    // each lost bits still add to a normal total, and the larger n is the
-    // further below DBL_MIN each of them may have been formed. The floor
-    // therefore has to scale with the sample count.
+    // So the floor belongs on the variance, which is the average of those
+    // terms, rather than on their sum. A normal sum says nothing about the
+    // magnitude the terms were formed at -- n of them that each lost bits still
+    // add to a normal total, and the larger n is the further below DBL_MIN each
+    // may have sat. The average does say something, which is why the floor
+    // scales with the sample count.
     //
-    // What that buys is a bound rather than exactness. The multiplies are the
-    // only operations here that can round below DBL_MIN, and each is off by at
-    // most half a subnormal ulp, 2^-1075. Over n terms that is an accumulated
-    // 2^-1075 * n against a total of at least DBL_MIN * n, so a relative error
-    // of at most 2^-53. Everything after the loop rounds at normal magnitudes,
-    // where half an ulp is the ordinary cost of the arithmetic rather than a
-    // symptom of underflow.
+    // It is a necessary condition and not a sufficient one. A normal variance
+    // still admits individual squared deviations of any smallness, and the
+    // additions in the loop above round at normal magnitudes like any other
+    // arithmetic. What the floor rules out is the regime this guard exists for:
+    // a whole fixture whose terms were formed below DBL_MIN. It does not make
+    // either path correctly rounded, and the paragraph above the accumulation
+    // says as much.
     //
     // The bound is exact, not approximate. DBL_MIN is a power of two, so
     // DBL_MIN * n is exact for every count that converts exactly to double,

@@ -160,9 +160,9 @@ TEST(ActivityMetricsTest, PopulationStddevDoesNotLoseAnUlpOnAHandFixture) {
 // survive. Each squared deviation is 0x0.8000000000002p-1022 -- one binary
 // order below DBL_MIN, so the multiply rounded it onto the subnormal grid and
 // kept 52 significand bits instead of 53. The sum of the two and the division
-// by two are both exact, so nothing after the multiply adds any error and
-// nothing removes the error it made; the square root simply carries it
-// through, one ulp low. The mean is exactly 0, so the exact population
+// by two are both exact, so the variance handed to the square root is that
+// already-short product, and its correctly rounded root lands one ulp below
+// |x|. The mean is exactly 0, so the exact population
 // standard deviation is |x|, and the scaled path returns it exactly -- the
 // deviations are exactly +/-1.0 once divided by the scale. Requiring a normal
 // variance rather than a normal sum is what routes the fixture there.
