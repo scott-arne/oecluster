@@ -1439,22 +1439,21 @@ _DELTA_ACTIVITY = [1.2, 1.6, 1.4, 2.0, 2.3]
 
 
 def test_the_default_rmodi_delta_is_the_published_value():
-    """0.625 is the published band half-width, and no test pinned it upward.
+    """0.625 is the published band half-width, and small drift went uncaught.
 
     Before this test, changing the wrapper's default from 0.625 to 0.7 left
-    the whole Python tree green. The gap was directional rather than total:
-    dropping the default to 0.55 or to 0.45 already failed
-    test_activity_landscape_rmodi_delta_moves_rmodi and
-    test_activity_landscape_to_table_and_repr, so downward drift had cover
-    and upward drift had none. The signature check pins the literal in either
-    direction, and the fixture proves the omitted argument reaches the band
-    rather than the literal merely sitting in the declaration.
+    the whole Python tree green. The gap was a neighbourhood rather than a
+    direction: other tests in this file already failed when the default was
+    moved to 0.45, 0.55, 1.0 or 2.5, but none of them noticed 0.7. The
+    signature check pins the literal exactly, and the fixture proves the
+    omitted argument reaches the band rather than the literal merely sitting
+    in the declaration.
 
     That fixture has an activity standard deviation of exactly 0.4, so the
-    0.625-sigma band is 0.25 and falls between the two smallest activity gaps,
-    0.2 and 0.3. A delta of 0.45 narrows the band to 0.18, which leaves even
-    the 0.2 gaps outside it -- no sample has an in-band neighbour at all and
-    rmodi drops to 0.
+    0.625-sigma band is 0.25 and falls between the two smallest distinct
+    activity gaps, 0.2 and 0.3. A delta of 0.45 narrows the band to 0.18,
+    which leaves even the 0.2 gaps outside it -- no sample has an in-band
+    neighbour at all and rmodi drops to 0.
 
     A delta of 0.8 widens the band to 0.32 and pulls in the sole 0.3 gap, the
     2.0/2.3 pair, giving samples 3 and 4 the in-band partner each lacked. Only
