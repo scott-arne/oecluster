@@ -4315,6 +4315,8 @@ def activity_landscape(distance_matrix, activity, *, distance_threshold=0.30,
         index. These are refusals raised in C++, and SWIG maps every native
         exception to ``RuntimeError``. A negative distance reaches C++ because
         the gate measures finiteness, not sign.
+    :raises OverflowError: If ``num_threads`` is an infinity or coerces to an
+        integer too large for a ``size_t``.
 
     Example::
 
@@ -4427,6 +4429,8 @@ def modelability(distance_matrix, activity_classes, *, num_threads=0):
         ``OverflowError`` the parameter above sets out.
     :raises RuntimeError: If a stored distance is negative, on the same terms
         as :func:`activity_landscape`.
+    :raises OverflowError: If ``num_threads`` is an infinity or coerces to an
+        integer too large for a ``size_t``.
 
     Example::
 

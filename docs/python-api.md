@@ -1075,12 +1075,13 @@ Most users do not need this section. The generated SWIG wrapper is available as
 `oecluster.oecluster` and the compiled extension as `oecluster._oecluster` for
 users who need direct access to the C++ options and classes. The comparison
 wrappers -- `DescriptorComparison`, `FingerprintComparison`, `RMSDComparison`,
-`ROCSComparison` and `SuperposeComparison` -- are on the top-level package, as
-are most of the option structs (`PDistOptions`, `ButinaOptions`,
-`FingerprintOptions` and the rest). Four are not: `ClusterReportOptions`,
-`DescriptorOptions`, `DescriptorStatisticsOptions` and `RMSDOptions`. Reach
-those through `oecluster.oecluster`, or let the wrapper build them from
-keywords. To check the split against the version you have installed:
+`ROCSComparison` and `SuperposeComparison` -- are on the top-level package, and
+so are many of the option structs, among them `PDistOptions`, `ButinaOptions`
+and `FingerprintOptions`. Others are not, `ClusterReportOptions` and
+`RMSDOptions` among them. Reach those through `oecluster.oecluster`, or let the
+wrapper build them from keywords. Which structs fall on which side moves as new
+metrics are added, so read the split off the installed package rather than off
+a list here:
 
 ```python
 import oecluster
