@@ -563,11 +563,11 @@ sample is discordant and `rmodi` is 0.0 however faithfully distance tracks
 activity. Five points whose pairwise distances equal their activity
 differences exactly do that when they are also equally spaced: activities
 `[1, 2, 3, 4, 5]` score 0.0 at the default `rmodi_delta` and 1.0 at
-`rmodi_delta=1.0`. The equal spacing is doing that work, not the agreement
-between distance and activity -- a uniform gap puts every nearest neighbour
-the same short step outside a band scaled to the whole spread, and the same
-construction over `[1, 2, 4, 8, 16]` reads 0.6 and 0.8 at those two widths
-because its closest pairs now fall inside the band. At the other end, flat
+`rmodi_delta=1.0`. Read that as one five-point fixture rather than as a rule
+about even spacing. The band is scaled to the whole spread, so lengthening the
+run widens it while leaving the gap alone, and `[1, 2, 3, 4, 5, 6]` already
+reads 1.0 at the default; the same construction over `[1, 2, 4, 8, 16]` reads
+0.6 and 0.8 at those two widths. At the other end, flat
 activity collapses the band to zero width but puts every pair inside it, no
 sample has an out-of-band neighbour, and `rmodi` is 1.0 -- correctly, since
 nothing about the activity contradicts the distances. Sweep `rmodi_delta`
@@ -631,19 +631,32 @@ operation here, so this one is not overridable; recompute with
 Four exception types are in play, not two. The order they are described in
 below is the order of this prose and not a precedence rule, and the three
 functions do not share one order between them either. `activity_landscape` and
-`modelability` check their first argument's type, then its storage, then
-everything else, so `activity_landscape(sparse_dm, "abc")` reports the sparse
-`ValueError` and never looks at the activity. `sar_coherence` refuses a bare
-`str` activity before it judges `result`, so `sar_coherence(3.5, "bad")` names
-the activity rather than the result. Catch on the exception type rather than
-on the check you expect to run first.
+`modelability` check their first argument's type, then whether its storage is
+sparse, then everything else, so `activity_landscape(sparse_dm, "abc")` reports
+the sparse `ValueError` and never looks at the activity. The `subset_scored`
+refusal is not in that early position: the activity and the options are read
+first, so against a `missing='ignore'` matrix a bad one of those is what you
+see, and the type does not tell them apart either -- that refusal, a length
+mismatch and a rejected option all raise `ValueError`. `sar_coherence` checks
+the activity's type, whether its elements convert to a double, and whether it
+is empty, all before it judges `result`, so `sar_coherence(3.5, "bad")` names
+the activity rather than the result and `sar_coherence(3.5, [])` raises
+`ValueError` over a `result` `TypeError` already pending. The length check runs
+the other way about, after `result` rather than before it. Catch on the
+exception type rather than on the check you expect to run first.
 
 `TypeError` is for an argument of the wrong kind rather than the wrong value:
 a first argument that is not a `SymmetricDistanceMatrix`, a `result` that is
-neither a clustering result nor a sequence of ints, a bare `str` where a
-sequence of activities or of class strings is wanted, an activity element that
-is not a number, and a class element that is not a string. All four numeric
-options behave alike here, each being coerced before it is range-checked:
+neither a clustering result nor an iterable of ints, an activity element that
+is not a number, and a class element that is not a string. A bare `str` and a
+mapping are both refused rather than iterated in any of the three iterable
+positions -- `result`, the activity, the class annotation. What is not checked
+in any of them is ordering: a `set` of labels is accepted, and its members are
+paired to the activities in the set's own iteration order, which need not be
+the order they were written in. `{5, 3, 1, 0}` gives label 0 the first activity
+where `[5, 3, 1, 0]` gives it the last, and neither is an error, so pass a
+sequence when the pairing matters. All four numeric options behave alike here,
+each being coerced before it is range-checked:
 `None` or a list raises `TypeError` from that coercion for any of
 `distance_threshold`, `activity_threshold`, `rmodi_delta` and `num_threads`,
 while a string the coercion cannot parse raises `ValueError` from the same
