@@ -1,6 +1,7 @@
 """Tests for the SAR coherence metrics."""
 
 import concurrent.futures
+import inspect
 import math
 import mmap
 from array import array
@@ -1431,3 +1432,39 @@ def test_rmodi_matches_the_published_definition():
     assert landscape.activity_stddev == pytest.approx(0.8225975119502044,
                                                       abs=1e-12)
     assert landscape.rmodi == pytest.approx(0.6666666666666666, abs=1e-12)
+
+
+_DELTA_COORDS = [0.5, 0.7, 0.8, 1.0, 1.2]
+_DELTA_ACTIVITY = [1.2, 1.6, 1.4, 2.0, 2.3]
+
+
+def test_the_default_rmodi_delta_is_the_published_value():
+    """0.625 is the published band half-width, and nothing pinned it.
+
+    Before this test, changing the wrapper's default from 0.625 to 0.7 left
+    the whole Python tree green: every other test either passes rmodi_delta
+    explicitly or sits on a fixture whose rmodi is flat across the plausible
+    range. The signature check pins the literal, and the fixture proves the
+    omitted argument reaches the band rather than the literal merely sitting
+    in the declaration.
+
+    That fixture has an activity standard deviation of exactly 0.4, so the
+    0.625-sigma band is 0.25 and falls between the two smallest activity gaps,
+    0.2 and 0.3. A delta of 0.45 leaves the 0.2 gaps outside the band and
+    rmodi drops to 0; a delta of 0.8 pulls the 0.3 gap in and it rises to 0.6.
+    """
+    assert inspect.signature(oecluster.activity_landscape).parameters[
+        "rmodi_delta"].default == 0.625
+
+    distance_matrix = _line_dm(_DELTA_COORDS)
+    defaulted = oecluster.activity_landscape(distance_matrix, _DELTA_ACTIVITY)
+
+    assert defaulted.activity_stddev == pytest.approx(0.4, abs=1e-12)
+    assert defaulted.rmodi == oecluster.activity_landscape(
+        distance_matrix, _DELTA_ACTIVITY, rmodi_delta=0.625).rmodi
+    assert defaulted.rmodi == pytest.approx(0.4, abs=1e-12)
+    assert oecluster.activity_landscape(
+        distance_matrix, _DELTA_ACTIVITY, rmodi_delta=0.45).rmodi == 0.0
+    assert oecluster.activity_landscape(
+        distance_matrix, _DELTA_ACTIVITY, rmodi_delta=0.8,
+    ).rmodi == pytest.approx(0.6, abs=1e-12)

@@ -62,6 +62,15 @@ def rmodi(condensed, activity, delta=0.625):
     ``delta`` population standard deviations of its own activity -- is strictly
     closer than its nearest neighbour outside it.
 
+    The ``np.inf`` sentinels decide the cases the publication does not cover:
+    a sample with no in-band neighbour does not count, one with no out-of-band
+    neighbour does, and one with neither does not. That is A3's extension, and
+    ``include/oecluster/clustering/SARCoherence.h`` documents the same choice
+    for the C++ -- so parity at those boundaries would confirm the library's
+    convention rather than the published definition. The fixture the parity
+    tests use reaches none of them: every sample there has one in-band and
+    four out-of-band partners.
+
     :param condensed: Condensed upper-triangle distances.
     :param activity: One measurement per sample.
     :param delta: Band half-width in population standard deviations.
