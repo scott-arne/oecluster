@@ -494,15 +494,18 @@ absent from the table rather than present with `nan` statistics, and
 `num_clusters` counts the rows that are there. A row that is present is not
 therefore a row with complete statistics -- `stddev_activity` is `nan` for
 every cluster down to one scored member, a spread over one sample not being
-defined -- so `dropna()` over this table deletes the singleton clusters and
-not the absent ones. Nor is `label` a key: under `noise="singletons"` each
-promoted noise point becomes its own row and they all carry `-1`, so
+defined -- so `dropna()` over this table deletes every cluster with one scored
+member, which need not be a cluster with one member, and not the absent ones.
+Nor is `label` a key: under `noise="singletons"` each promoted noise point
+becomes its own row carrying the negative label it arrived with, and nothing
+stops two of those from being equal, so
 `sar_coherence([-1, -1, 0, 0], [1.0, 2.0, 3.0, 4.0], noise="singletons")`
-returns three rows labelled `[-1, -1, 0]`. A dict comprehension keyed by
-`label` silently keeps the last of them and reports two clusters where there
-are three, and `set_index("label").loc[-1]` hands back a frame rather than the
-row the caller was reaching for. Position distinguishes those rows; the label
-does not. The rows follow the order in
+returns three rows labelled `[-1, -1, 0]`, where the same call over
+`[-1, -2, 0, 0]` returns `[-1, -2, 0]` and repeats nothing. A dict
+comprehension keyed by `label` silently keeps the last of any repeat and
+reports two clusters where there are three, and `set_index("label").loc[-1]`
+hands back a frame rather than the row the caller was reaching for. Position
+distinguishes those rows; the label does not. The rows follow the order in
 which their labels first appear among the scored samples, not sorted label
 order, so a clustering result and a reordering of the same labels can list the
 same clusters in different positions. "Among the scored samples" is the
@@ -557,9 +560,14 @@ Both extremes are reachable from the band width alone, so read `rmodi` against
 in-band neighbour has its in-band minimum left at infinity and counts as
 discordant, so if every pair's activity difference exceeds the band then every
 sample is discordant and `rmodi` is 0.0 however faithfully distance tracks
-activity: five points whose pairwise distances equal their activity
-differences exactly -- the most coherent landscape there is -- score 0.0 at
-the default `rmodi_delta` and 1.0 at `rmodi_delta=1.0`. At the other end, flat
+activity. Five points whose pairwise distances equal their activity
+differences exactly do that when they are also equally spaced: activities
+`[1, 2, 3, 4, 5]` score 0.0 at the default `rmodi_delta` and 1.0 at
+`rmodi_delta=1.0`. The equal spacing is doing that work, not the agreement
+between distance and activity -- a uniform gap puts every nearest neighbour
+the same short step outside a band scaled to the whole spread, and the same
+construction over `[1, 2, 4, 8, 16]` reads 0.6 and 0.8 at those two widths
+because its closest pairs now fall inside the band. At the other end, flat
 activity collapses the band to zero width but puts every pair inside it, no
 sample has an out-of-band neighbour, and `rmodi` is 1.0 -- correctly, since
 nothing about the activity contradicts the distances. Sweep `rmodi_delta`
@@ -620,14 +628,23 @@ operation here, so this one is not overridable; recompute with
 
 ### Which exception you get
 
-Three exception types are in play, not two. `TypeError` comes first, for an
-argument of the wrong kind rather than the wrong value: a first argument that
-is not a `SymmetricDistanceMatrix`, a `result` that is neither a clustering
-result nor a sequence of ints, a bare `str` where a sequence of activities or
-of class strings is wanted, an activity element that is not a number, and a
-class element that is not a string. `num_threads` is the one argument that
-splits between the two: it goes through `int()`, so `None` or a list raises
-`TypeError` while a non-numeric string raises `ValueError`.
+Four exception types are in play, not two. The order they are described in
+below is the order of this prose and not a precedence rule: each function
+checks the type of its first argument first, the two taking a matrix check its
+storage next, and everything else follows, so
+`activity_landscape(sparse_dm, "abc")` reports the sparse `ValueError` and
+never looks at the activity.
+
+`TypeError` is for an argument of the wrong kind rather than the wrong value:
+a first argument that is not a `SymmetricDistanceMatrix`, a `result` that is
+neither a clustering result nor a sequence of ints, a bare `str` where a
+sequence of activities or of class strings is wanted, an activity element that
+is not a number, and a class element that is not a string. All four numeric
+options behave alike here, each being coerced before it is range-checked:
+`None` or a list raises `TypeError` from that coercion for any of
+`distance_threshold`, `activity_threshold`, `rmodi_delta` and `num_threads`,
+while a string the coercion cannot parse raises `ValueError` from the same
+call.
 
 Each of the three raises `ValueError` for whatever its own signature lets
 Python see for itself: a length mismatch, an empty labeling, an empty activity,
@@ -649,6 +666,17 @@ bindings map every native exception to `RuntimeError`, the same way
 `cluster_report()` already does. The negative distance is the one worth knowing
 about: the matrix check tests that entries are finite, which a negative number
 is, so nothing catches it until the sweep reads it.
+
+The fourth type is `OverflowError`, and it derives from `ArithmeticError`, so
+an `except ValueError` does not catch it. Only `num_threads` reaches it, in
+both functions that take one, by two routes: `float("inf")` fails in `int()`
+with "cannot convert float infinity to integer", and a finite value past the
+native `size_t` -- `1e300`, or `10**30`, though not `2**64 - 1` -- fails where
+the bindings assign it to the options struct. The three `float()` options
+cannot reach it at all, each being finiteness-guarded before use, so
+`distance_threshold=float("inf")` is
+`ValueError: distance_threshold must be finite`; and a `nan` is a `ValueError`
+for all four.
 
 ## Metric Requirements
 

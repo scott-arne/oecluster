@@ -585,8 +585,8 @@ print(oecluster.modelability(dm, classes).modi)
 | `omega_squared` | Below 0.0 to 1.0, 0.0 by chance, or `nan` | The labeling explains no more activity variance than a random one of the same shape. Negative means less than chance |
 | `cliff_density` | 0.0 to 1.0, or `nan` | Few near-neighbour pairs differ sharply in activity: a smooth landscape at this threshold pair |
 | `max_sali`, `mean_sali` | 0.0 upward, or `nan` | No pair is both structurally close and far apart in activity. Zero-distance pairs are excluded from both and counted in `num_zero_distance_pairs` |
-| `rmodi` | 0.0 to 1.0, or `nan` | A sample's nearest neighbour is usually outside its activity band -- which reaches `rmodi_delta * activity_stddev` either side, so a narrow band lowers the figure on its own: five collinear points whose distances equal their activity gaps score 0.0 at the default `rmodi_delta`, and 1.0 at `rmodi_delta=1.0` |
-| `modi` | 0.0 to 1.0, or `nan` | A sample's nearest scored neighbour usually carries a different class, so the classes are not modelable from this matrix |
+| `rmodi` | 0.0 to 1.0, or `nan` | A sample's nearest neighbour is usually outside its activity band -- which reaches `rmodi_delta * activity_stddev` either side. Either end of the range is reachable from the band width alone, so read the figure against the reported `activity_stddev` and sweep `rmodi_delta` before concluding anything from it |
+| `modi` | 0.0 to 1.0, or `nan` | Some class's members usually have a nearest scored neighbour of another class. It is the mean over classes of each class's same-class fraction, not a per-sample rate, so one small class holds it down however well the rest separate: 100 class-A points with a single class-B point among them read 0.495 while 98% of samples do have a same-class nearest neighbour. `report.classes` carries the per-class fractions |
 
 A `nan` activity is missing data rather than a value, as is an empty class
 string, and every result reports `num_scored` beside `num_samples` so the

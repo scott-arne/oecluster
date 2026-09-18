@@ -4430,7 +4430,10 @@ def modelability(distance_matrix, activity_classes, *, num_threads=0):
 
     Example::
 
-        classes = ["active" if a >= 6.0 else "inactive" for a in activity]
+        # nan >= 6.0 is False, so without the nan arm every missing
+        # measurement would be annotated "inactive" rather than dropped.
+        classes = ["" if math.isnan(a) else "active" if a >= 6.0 else "inactive"
+                   for a in activity]
         report = oecluster.modelability(dm, classes)
         print(report.modi, report.num_classes)
         print(report.classes[0].label, report.classes[0].fraction_same_class)
