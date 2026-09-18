@@ -629,11 +629,14 @@ operation here, so this one is not overridable; recompute with
 ### Which exception you get
 
 Four exception types are in play, not two. The order they are described in
-below is the order of this prose and not a precedence rule: each function
-checks the type of its first argument first, the two taking a matrix check its
-storage next, and everything else follows, so
-`activity_landscape(sparse_dm, "abc")` reports the sparse `ValueError` and
-never looks at the activity.
+below is the order of this prose and not a precedence rule, and the three
+functions do not share one order between them either. `activity_landscape` and
+`modelability` check their first argument's type, then its storage, then
+everything else, so `activity_landscape(sparse_dm, "abc")` reports the sparse
+`ValueError` and never looks at the activity. `sar_coherence` refuses a bare
+`str` activity before it judges `result`, so `sar_coherence(3.5, "bad")` names
+the activity rather than the result. Catch on the exception type rather than
+on the check you expect to run first.
 
 `TypeError` is for an argument of the wrong kind rather than the wrong value:
 a first argument that is not a `SymmetricDistanceMatrix`, a `result` that is
