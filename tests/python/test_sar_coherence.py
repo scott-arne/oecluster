@@ -265,9 +265,11 @@ def test_the_published_omega_squared_chance_expectations_hold():
     Both pages tell the reader to read ``omega_squared``'s chance level as
     approximately rather than exactly zero, and back that with two figures for
     a 100-sample labeling of one 11-member cluster plus 89 singletons: 0.075
-    for one active among 99 inactives, 0.014 for five actives among 95. No
-    other test computes them, so a change to the effect-size arithmetic would
-    falsify both pages without failing anything.
+    for one active among 99 inactives, 0.014 for five actives among 95. Other
+    tests pin ``omega_squared``, but on fixtures of a handful of samples with
+    the variance spread across them; none reaches this shape, so a change that
+    moved only the singleton-heavy, concentrated-variance regime would falsify
+    both pages without failing anything.
 
     Neither figure is sampled. One active has only two distinguishable
     placements, and five actives is a hypergeometric over how many of the five
@@ -283,9 +285,10 @@ def test_the_published_omega_squared_chance_expectations_hold():
     in_cluster = [1.0] + [0.0] * (n - 1)
     singleton = [0.0] * size + [1.0] + [0.0] * (n - size - 1)
 
-    # The two placements have to land far apart, or the weighted means below
-    # would reproduce the published figures even from a metric that had
-    # collapsed to one value for every configuration.
+    # The one-active expectation below pins only a weighted mean of these two
+    # placements, which a compensating pair of wrong values satisfies just as
+    # well. Pin each placement as well, so the arm is checked at its endpoints
+    # and not only in aggregate.
     assert omega(singleton) == 1.0
     assert omega(in_cluster) < -7.0
 
