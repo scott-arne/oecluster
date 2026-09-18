@@ -485,15 +485,18 @@ establish that two labelings scored the same samples. ω² can go below zero,
 which says the labeling explains less than chance would; η² cannot. Read
 "chance" there as approximately rather than exactly zero. Two conditions
 together lift the chance level: the clusters are mostly singletons, so
-`num_scored - num_clusters` is small, and the activities are largely tied. Over
-activities `[1.0] + [0.0] * 99` a labeling of one 11-member cluster plus 89
-singletons has an exact chance expectation of 0.075, and five actives among 95
-inactives give 0.028 at the same shape. Neither condition acts alone: balanced
-clusterings average zero on those same activities to within 0.001, and
-continuous activities stay within noise of zero at either shape. A tight
-`butina()` threshold produces just such a singleton-heavy labeling, so on
-active/inactive data read a small positive ω² as unresolved rather than as weak
-signal. Both are
+`num_scored - num_clusters` is small, and the activity variance is concentrated
+in a few samples. Over activities `[1.0] + [0.0] * 99`, a labeling of one
+11-member cluster plus 89 singletons has an exact chance expectation of 0.075;
+five actives among 95 inactives give 0.014 at the same shape. Neither condition
+acts alone -- under balanced clusterings of two, four, ten, twenty and fifty
+clusters those same two activities have exact expectations of zero and of
+0.0000017 through 0.00016. Distinct values are not the protective property: the
+100 distinct activities `[1.0] + [i * 1e-6 for i in range(1, 100)]` reach 0.075
+again at the singleton-heavy shape, because what matters is where the variance
+sits, not whether the values are tied or discrete. A tight `butina()` threshold
+produces just such a singleton-heavy labeling, so on screening data read a
+small positive ω² as unresolved rather than as weak signal. Both are
 `nan` when fewer than two samples are scored, and both are `nan` when the
 scored activities have zero variance -- there is nothing to apportion. ω² has
 one further `nan` case of its own: when every scored sample is its own cluster
