@@ -475,14 +475,20 @@ undefined metric is `nan`, never a substituted number, on the same convention
 rather than within them, and `omega_squared` is the same quantity with the
 variance a random labeling would explain removed. η² rises with the number of
 clusters whether or not the clusters mean anything, so ω² is the one to compare
-across labelings of different granularity. ω² can go below zero, which says the
-labeling explains less than chance would; η² cannot. Both are `nan` when fewer
-than two samples are scored, and both are `nan` when the scored activities have
-zero variance -- there is nothing to apportion. ω² has one further `nan` case of
-its own: when every scored sample is its own cluster there are no
-within-cluster degrees of freedom for the chance correction to divide by. η²
-does not share that case. On an all-singleton labeling it reads 1.0 whenever
-the scored activities vary at all, and `nan` when they do not, the
+across labelings of different granularity. That comparison only means something
+across labelings that score the same samples, and under the `"excluded"` default
+two labelings of the same molecules need not: over activities
+`[0., 0., 10., 10., 0., 10.]`, the labelings `[0, 0, 1, 1, 0, -1]` and
+`[0, 0, 1, 1, -1, 0]` both report `num_scored` 5 and two clusters yet read ω²
+1.0 and 0.21875, having scored different fives. Equal `num_scored` does not
+establish that two labelings scored the same samples. ω² can go below zero,
+which says the labeling explains less than chance would; η² cannot. Both are
+`nan` when fewer than two samples are scored, and both are `nan` when the
+scored activities have zero variance -- there is nothing to apportion. ω² has
+one further `nan` case of its own: when every scored sample is its own cluster
+there are no within-cluster degrees of freedom for the chance correction to
+divide by. η² does not share that case. On an all-singleton labeling it reads
+1.0 whenever the scored activities vary at all, and `nan` when they do not, the
 zero-variance rule above outranking everything else.
 
 `coherence.clusters` is a tuple of `ClusterActivity` rows -- `label`,
@@ -569,9 +575,10 @@ run widens it while leaving the gap alone, and `[1, 2, 3, 4, 5, 6]` already
 reads 1.0 at the default; the same construction over `[1, 2, 4, 8, 16]` reads
 0.6 and 0.8 at those two widths. At the other end, flat
 activity collapses the band to zero width but puts every pair inside it, no
-sample has an out-of-band neighbour, and `rmodi` is 1.0 -- correctly, since
-nothing about the activity contradicts the distances. Sweep `rmodi_delta`
-before concluding anything from a value at either end.
+sample has an out-of-band neighbour, and `rmodi` is 1.0 from two scored samples
+up -- correctly, since nothing about the activity contradicts the distances --
+and `nan` below that. Sweep `rmodi_delta` before concluding anything from a
+value at either end.
 
 ### `modelability()`
 
@@ -591,6 +598,19 @@ are scored: with one class no neighbour could carry a different one, so the
 comparison has no content. The concordance sweep is skipped rather than run to
 a foregone answer -- the distances are still validated -- so the single row's
 `fraction_same_class` is `nan` as well, not 1.0.
+
+Nearest-neighbour ties resolve to the lowest scored index, so `modi` depends on
+the order the samples arrive in wherever distances tie: over a matrix whose
+off-diagonal distances are all equal, the classes `["A", "A", "B", "B"]` read
+0.5 where `["A", "B", "A", "B"]` read 0.25 on the same four samples. Two
+duplicate molecules are enough to produce such a tie, being equidistant from
+every third sample, so reordering rows can move the figure on a real matrix as
+well.
+
+`modi` is not chance-corrected, and its chance level is not zero: random labels
+over N scored samples in K classes average about `(N - K) / (K * (N - 1))`,
+which approaches `1/K` as N grows and barely moves with the class balance. Read
+a `modi` against that figure rather than against 0.0.
 
 The annotation is a sequence of strings, one per sample, and an empty string is
 missing data rather than a category -- the same reading `scaffold_agreement()`
@@ -658,9 +678,8 @@ where `[5, 3, 1, 0]` gives it the last, and neither is an error, so pass a
 sequence when the pairing matters. The same silence in the activity position
 costs more than a pairing: `sar_coherence([0, 0, 1, 1], [10., 20., 30., 40.])`
 reports an `eta_squared` of 0.8, and the same call with those four values as a
-`set`, which iterates `40.0, 10.0, 20.0, 30.0`, reports 0.0 -- a shift that
-runs high as often as it runs low. All four numeric options behave alike here,
-each being coerced before it is range-checked:
+`set`, which iterates `40.0, 10.0, 20.0, 30.0`, reports 0.0. All four numeric
+options behave alike here, each being coerced before it is range-checked:
 `None` or a list raises `TypeError` from that coercion for any of
 `distance_threshold`, `activity_threshold`, `rmodi_delta` and `num_threads`,
 while a string the coercion cannot parse raises `ValueError` from the same
@@ -669,23 +688,24 @@ call.
 Each of the three raises `ValueError` for whatever its own signature lets
 Python see for itself: a length mismatch, an empty labeling, an empty activity,
 an out-of-range label, an unknown `noise=` spelling, a non-finite or negative
-threshold, a negative `num_threads`, and every refusal above from the matrix
-check. The two overloads of `sar_coherence()` agree on all of the conditions
-they share, which is worth saying because they reach the native layer by
-different routes: an empty activity and a label too wide for the native 32-bit
-type are refused in Python on both routes, not left to whichever one happens to
-notice. The emptiness check runs ahead of the length check in all three
-functions, and that ordering is the whole of what makes the promise true: a
-zero-sample matrix and an empty clustering are both constructible, and against
-an empty annotation a length check compares 0 with 0 and agrees. Leave it out of
-any one of the three and that function alone reports the empty case as
-`RuntimeError`. Conditions only the C++ sweep can reach arrive as
-`RuntimeError` instead -- an infinite activity value, a negative stored
-distance, a mean or an accumulator that overflows to infinity -- because the
-bindings map every native exception to `RuntimeError`, the same way
-`cluster_report()` already does. The negative distance is the one worth knowing
-about: the matrix check tests that entries are finite, which a negative number
-is, so nothing catches it until the sweep reads it.
+threshold, a `num_threads` of -1 or below (`-0.5` truncates to 0 and is
+accepted, selecting the hardware concurrency rather than raising), and every
+refusal above from the matrix check. The two overloads of `sar_coherence()`
+agree on all of the conditions they share, which is worth saying because they
+reach the native layer by different routes: an empty activity and a label too
+wide for the native 32-bit type are refused in Python on both routes, not left
+to whichever one happens to notice. The emptiness check runs ahead of the
+length check in all three functions, and that ordering is the whole of what
+makes the promise true: a zero-sample matrix and an empty clustering are both
+constructible, and against an empty annotation a length check compares 0 with 0
+and agrees. Leave it out of any one of the three and that function alone
+reports the empty case as `RuntimeError`. Conditions only the C++ sweep can
+reach arrive as `RuntimeError` instead -- an infinite activity value, a
+negative stored distance, a mean or an accumulator that overflows to
+infinity -- because the bindings map every native exception to `RuntimeError`,
+the same way `cluster_report()` already does. The negative distance is the one
+worth knowing about: the matrix check tests that entries are finite, which a
+negative number is, so nothing catches it until the sweep reads it.
 
 The fourth type is `OverflowError`, and it derives from `ArithmeticError`, so
 an `except ValueError` does not catch it. Only `num_threads` reaches it, in
