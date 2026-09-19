@@ -2,6 +2,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <limits>
+#include <random>
 #include <stdexcept>
 #include <vector>
 
@@ -108,6 +111,243 @@ DenseStorage MakeDuplicateRowStorage() {
         }
     }
     return storage;
+}
+
+// Textbook PAM, carried by the test so the production loop has something
+// independent to match: for every (medoid, non-medoid) pair, reassign every
+// item from scratch and recompute the total. No caching of any kind.
+double NaiveTotalCost(const double* data, size_t n,
+                      const std::vector<size_t>& medoids) {
+    double total = 0.0;
+    for (size_t j = 0; j < n; ++j) {
+        double nearest = std::numeric_limits<double>::infinity();
+        for (const size_t medoid : medoids) {
+            const double distance = detail::dense_distance(data, n, j, medoid);
+            if (distance < nearest) {
+                nearest = distance;
+            }
+        }
+        total += nearest;
+    }
+    return total;
+}
+
+// The labels the medoid set implies, written out independently of the
+// production assignment cache. ``medoids`` is ascending, as the production
+// result's is, so "the first slot at the minimum" is the smaller-medoid-item
+// tie rule and the two label vectors are comparable element by element.
+std::vector<ClusterLabel> NaiveLabels(const double* data, size_t n,
+                                      const std::vector<size_t>& medoids) {
+    const size_t k = medoids.size();
+    std::vector<ClusterLabel> labels(n, 0);
+    for (size_t j = 0; j < n; ++j) {
+        size_t chosen = k;
+        double best = 0.0;
+        for (size_t slot = 0; slot < k; ++slot) {
+            // The self-assignment rule: a medoid belongs to its own slot even
+            // when a duplicate medoid sits at distance zero from it.
+            if (medoids[slot] == j) {
+                chosen = slot;
+                break;
+            }
+            const double distance =
+                detail::dense_distance(data, n, j, medoids[slot]);
+            if (chosen == k || distance < best) {
+                chosen = slot;
+                best = distance;
+            }
+        }
+        labels[j] = static_cast<ClusterLabel>(chosen);
+    }
+    return labels;
+}
+
+std::vector<size_t> NaivePamSwapPhase(const double* data, size_t n,
+                                      std::vector<size_t> medoids) {
+    const size_t k = medoids.size();
+    double current = NaiveTotalCost(data, n, medoids);
+
+    for (size_t iteration = 0; iteration < 1000; ++iteration) {
+        std::vector<bool> is_medoid(n, false);
+        for (const size_t medoid : medoids) {
+            is_medoid[medoid] = true;
+        }
+
+        bool found = false;
+        double best_total = 0.0;
+        size_t best_entering = 0;
+        size_t best_leaving_item = 0;
+        size_t best_slot = 0;
+
+        for (size_t h = 0; h < n; ++h) {
+            if (is_medoid[h]) {
+                continue;
+            }
+            for (size_t slot = 0; slot < k; ++slot) {
+                std::vector<size_t> trial = medoids;
+                trial[slot] = h;
+                const double total = NaiveTotalCost(data, n, trial);
+                if (!(total < current)) {
+                    continue;
+                }
+                // The same lexicographic key the production loop uses:
+                // (score, entering item, leaving medoid item).
+                const bool wins =
+                    !found || total < best_total ||
+                    (total == best_total &&
+                     (h < best_entering ||
+                      (h == best_entering && medoids[slot] < best_leaving_item)));
+                if (wins) {
+                    found = true;
+                    best_total = total;
+                    best_entering = h;
+                    best_leaving_item = medoids[slot];
+                    best_slot = slot;
+                }
+            }
+        }
+
+        if (!found) {
+            break;
+        }
+        medoids[best_slot] = best_entering;
+        current = best_total;
+    }
+
+    std::sort(medoids.begin(), medoids.end());
+    return medoids;
+}
+
+// Euclidean distances over random 2-D points: metric and continuous.
+DenseStorage MakeEuclideanStorage(size_t n, uint32_t seed, double scale) {
+    std::mt19937 engine(seed);
+    std::uniform_real_distribution<double> coordinate(0.0, 1.0);
+    std::vector<double> x(n);
+    std::vector<double> y(n);
+    for (size_t i = 0; i < n; ++i) {
+        x[i] = coordinate(engine);
+        y[i] = coordinate(engine);
+    }
+
+    DenseStorage storage(n);
+    for (size_t i = 0; i < n; ++i) {
+        for (size_t j = i + 1; j < n; ++j) {
+            const double dx = x[i] - x[j];
+            const double dy = y[i] - y[j];
+            storage.Set(i, j, scale * std::sqrt(dx * dx + dy * dy));
+        }
+    }
+    return storage;
+}
+
+// Random symmetric values with a zeroed diagonal, violating the triangle
+// inequality outright.
+DenseStorage MakeNonMetricStorage(size_t n, uint32_t seed, double scale) {
+    std::mt19937 engine(seed);
+    std::uniform_real_distribution<double> value(0.0, 1.0);
+
+    DenseStorage storage(n);
+    for (size_t i = 0; i < n; ++i) {
+        for (size_t j = i + 1; j < n; ++j) {
+            storage.Set(i, j, scale * value(engine));
+        }
+    }
+    return storage;
+}
+
+// The exactly representable family's metric half: Manhattan distances between
+// integer lattice points are integers and satisfy the triangle inequality, so
+// this one is a theorem *and* a metric. MakeSmallIntegerStorage below is the
+// non-metric half -- unconstrained symmetric integers violate the triangle
+// inequality freely -- and the spec asks for both.
+DenseStorage MakeIntegerLatticeStorage(size_t n, uint32_t seed) {
+    std::mt19937 engine(seed);
+    std::uniform_int_distribution<int> coordinate(0, 20);
+    std::vector<int> x(n);
+    std::vector<int> y(n);
+    for (size_t i = 0; i < n; ++i) {
+        x[i] = coordinate(engine);
+        y[i] = coordinate(engine);
+    }
+
+    DenseStorage storage(n);
+    for (size_t i = 0; i < n; ++i) {
+        for (size_t j = i + 1; j < n; ++j) {
+            // Differenced as doubles so <cmath>'s std::abs applies; the values
+            // are small integers, so every step is exact.
+            const double distance =
+                std::abs(static_cast<double>(x[i] - x[j])) +
+                std::abs(static_cast<double>(y[i] - y[j]));
+            storage.Set(i, j, distance);
+        }
+    }
+    return storage;
+}
+
+// Small integers in a double: every distance, partial sum and total is exactly
+// representable, so both cost expressions agree bit for bit and parity is a
+// theorem rather than an observation. Unconstrained, so this is the non-metric
+// instance of the family.
+DenseStorage MakeSmallIntegerStorage(size_t n, uint32_t seed) {
+    std::mt19937 engine(seed);
+    std::uniform_int_distribution<int> value(0, 9);
+
+    DenseStorage storage(n);
+    for (size_t i = 0; i < n; ++i) {
+        for (size_t j = i + 1; j < n; ++j) {
+            storage.Set(i, j, static_cast<double>(value(engine)));
+        }
+    }
+    return storage;
+}
+
+// Parity isolates the swap phase, so both sides must start from the same
+// medoids: PAM's answer depends on its seeds, and comparing a BUILD-seeded run
+// against a reference seeded some other way would test the initializer rather
+// than the kernel. The seeds are therefore handed in explicitly, and the
+// production call runs with init = Explicit so it performs no initialization
+// of its own.
+void ExpectParityFromSeeds(const DenseStorage& storage,
+                           const std::vector<size_t>& seeds) {
+    const size_t n = storage.NumSamples();
+    const double* data = storage.Data();
+
+    KMedoidsOptions options;
+    options.n_clusters = seeds.size();
+    options.init = KMedoidsInit::Explicit;
+    options.initial_medoids = seeds;
+
+    const KMedoidsResult result = k_medoids_cluster(storage, options);
+    const std::vector<size_t> reference = NaivePamSwapPhase(data, n, seeds);
+
+    EXPECT_EQ(result.Medoids(), reference);
+    // Labels as well as medoids: two runs can agree on the medoid set and still
+    // disagree on which cluster a tied item landed in, and the spec asserts all
+    // three of medoids, labels and cost.
+    EXPECT_EQ(result.Labels(), NaiveLabels(data, n, reference));
+    // EXPECT_EQ, not EXPECT_DOUBLE_EQ: the latter accepts a four-ULP
+    // difference, and the spec asks this test for a bit-identical cost. Both
+    // sides sum the same summands in ascending item order, so the result is
+    // exact and a tolerant comparison would only hide a real divergence in the
+    // delta algebra. This is the one assertion in the suite that pins the
+    // FastPAM1 arithmetic against a brute-force total; every other cost check
+    // recomputes its expectation differently and stays on EXPECT_DOUBLE_EQ.
+    EXPECT_EQ(result.Cost(), NaiveTotalCost(data, n, reference));
+}
+
+// Two independent seed sets per matrix: the first k items, and the test's own
+// MaxMin selection. Neither borrows anything from the production initializers,
+// so a bug in BUILD cannot hide a bug in the swap phase or vice versa.
+void ExpectParityWithNaivePam(const DenseStorage& storage, size_t k) {
+    std::vector<size_t> leading(k);
+    for (size_t slot = 0; slot < k; ++slot) {
+        leading[slot] = slot;
+    }
+    ExpectParityFromSeeds(storage, leading);
+
+    ExpectParityFromSeeds(
+        storage,
+        detail::maxmin_select_from(storage.Data(), storage.NumSamples(), k, 0));
 }
 
 }  // namespace
@@ -564,4 +804,91 @@ TEST(KMedoidsAssemblyTest, CostMatchesTheReturnedAssignment) {
                                            j, medoid);
     }
     EXPECT_DOUBLE_EQ(result.Cost(), expected);
+}
+
+TEST(KMedoidsParityTest, MatchesNaivePamOnMetricContinuousMatrices) {
+    for (const size_t n : {size_t{20}, size_t{31}, size_t{40}}) {
+        for (const size_t k : {size_t{2}, size_t{3}, size_t{5}}) {
+            ExpectParityWithNaivePam(
+                MakeEuclideanStorage(n, static_cast<uint32_t>(n * 31 + k), 1.0),
+                k);
+        }
+    }
+}
+
+// Random symmetric values violate the triangle inequality outright. Parity here
+// is the test that a metric assumption has not been smuggled into the kernel:
+// any pruning rule that appeals to the triangle inequality skips a candidate
+// naive PAM evaluates, and the two answers part company.
+TEST(KMedoidsParityTest, MatchesNaivePamOnNonMetricContinuousMatrices) {
+    for (const size_t n : {size_t{20}, size_t{31}, size_t{40}}) {
+        for (const size_t k : {size_t{2}, size_t{3}, size_t{5}}) {
+            ExpectParityWithNaivePam(
+                MakeNonMetricStorage(n, static_cast<uint32_t>(n * 17 + k), 1.0),
+                k);
+        }
+    }
+}
+
+// Exactly representable: no rounding exists, so identical output is a theorem.
+// Both instances of the family are covered -- lattice distances are metric,
+// unconstrained symmetric integers are not.
+TEST(KMedoidsParityTest, MatchesNaivePamOnSmallIntegerMetricMatrices) {
+    for (const size_t n : {size_t{20}, size_t{31}}) {
+        for (const size_t k : {size_t{2}, size_t{4}}) {
+            ExpectParityWithNaivePam(
+                MakeIntegerLatticeStorage(n, static_cast<uint32_t>(n * 13 + k)),
+                k);
+        }
+    }
+}
+
+TEST(KMedoidsParityTest, MatchesNaivePamOnSmallIntegerNonMetricMatrices) {
+    for (const size_t n : {size_t{20}, size_t{31}}) {
+        for (const size_t k : {size_t{2}, size_t{4}}) {
+            ExpectParityWithNaivePam(
+                MakeSmallIntegerStorage(n, static_cast<uint32_t>(n * 7 + k)), k);
+        }
+    }
+}
+
+TEST(KMedoidsParityTest, MatchesNaivePamOnDuplicateRowsAndAllZeros) {
+    ExpectParityWithNaivePam(MakeDuplicateRowStorage(), 2);
+    ExpectParityWithNaivePam(MakeDuplicateRowStorage(), 3);
+    ExpectParityWithNaivePam(MakeAllZeroStorage(8), 2);
+    ExpectParityWithNaivePam(MakeAllZeroStorage(8), 3);
+}
+
+TEST(KMedoidsSwapTest, ReachesTheOptimumFromADeliberatelyBadSeed) {
+    const DenseStorage storage = MakeTwoTriplesStorage();
+
+    KMedoidsOptions bad_seed;
+    bad_seed.n_clusters = 2;
+    bad_seed.init = KMedoidsInit::Explicit;
+    bad_seed.initial_medoids = {0, 1};
+
+    KMedoidsOptions from_build;
+    from_build.n_clusters = 2;
+
+    const KMedoidsResult recovered = k_medoids_cluster(storage, bad_seed);
+    const KMedoidsResult expected = k_medoids_cluster(storage, from_build);
+
+    EXPECT_EQ(recovered.Medoids(), expected.Medoids());
+    EXPECT_TRUE(recovered.Converged());
+    EXPECT_GT(recovered.NumIterations(), 0u);
+}
+
+TEST(KMedoidsSwapTest, PerformsNoIterationsWhenSeededAtTheOptimum) {
+    const DenseStorage storage = MakeTwoTriplesStorage();
+
+    KMedoidsOptions options;
+    options.n_clusters = 2;
+    options.init = KMedoidsInit::Explicit;
+    options.initial_medoids = {1, 4};
+
+    const KMedoidsResult result = k_medoids_cluster(storage, options);
+
+    EXPECT_EQ(result.Medoids(), std::vector<size_t>({1, 4}));
+    EXPECT_EQ(result.NumIterations(), 0u);
+    EXPECT_TRUE(result.Converged());
 }

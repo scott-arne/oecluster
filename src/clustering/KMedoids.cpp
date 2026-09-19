@@ -182,6 +182,177 @@ double total_cost(const std::vector<Assignment>& assignments) {
     return cost;
 }
 
+/**
+ * @brief One evaluated (leaving slot, entering item) swap.
+ *
+ * ``score`` is the predicted delta in the fast loop and the recomputed total
+ * in the verification pass. Both are minimized under the same key, so one
+ * comparator serves both.
+ */
+struct SwapCandidate {
+    double score = 0.0;
+    size_t entering_item = 0;
+    size_t leaving_item = 0;
+    size_t leaving_slot = 0;
+    bool valid = false;
+};
+
+// Lexicographic (score, entering item, leaving medoid item). The key is a
+// strict total order over distinct candidate pairs, so reducing chunk-local
+// winners in any order gives the same answer.
+bool is_better(const SwapCandidate& candidate, const SwapCandidate& incumbent) {
+    if (!candidate.valid) {
+        return false;
+    }
+    if (!incumbent.valid) {
+        return true;
+    }
+    if (candidate.score != incumbent.score) {
+        return candidate.score < incumbent.score;
+    }
+    if (candidate.entering_item != incumbent.entering_item) {
+        return candidate.entering_item < incumbent.entering_item;
+    }
+    return candidate.leaving_item < incumbent.leaving_item;
+}
+
+SwapCandidate best_predicted_swap(const double* data, size_t n,
+                                  const std::vector<size_t>& medoids,
+                                  const std::vector<Assignment>& assignments,
+                                  const std::vector<size_t>& slot_of,
+                                  size_t num_threads, size_t chunk_size) {
+    const size_t k = medoids.size();
+    const size_t chunk = effective_chunk_size(n, chunk_size);
+    const size_t total_chunks = (n + chunk - 1) / chunk;
+    std::vector<SwapCandidate> chunk_best(total_chunks);
+
+    ThreadPool pool(num_threads);
+    pool.ParallelFor(0, n, chunk, [&](size_t begin, size_t end) {
+        std::vector<double> correction(k, 0.0);
+        SwapCandidate local;
+
+        for (size_t h = begin; h < end; ++h) {
+            if (slot_of[h] != n) {
+                continue;
+            }
+
+            std::fill(correction.begin(), correction.end(), 0.0);
+            double shared = 0.0;
+            // A candidate's entire scan runs inside one chunk in ascending item
+            // order, so the summation order is fixed by the indexing rather
+            // than by the schedule and every delta is bit-identical whatever
+            // num_threads and chunk_size are.
+            for (size_t j = 0; j < n; ++j) {
+                const double d_hj = detail::dense_distance(data, n, h, j);
+                const Assignment& entry = assignments[j];
+                const double surviving =
+                    std::min(d_hj - entry.nearest_distance, 0.0);
+                shared += surviving;
+                const double leaving =
+                    std::min(entry.second_nearest_distance, d_hj) -
+                    entry.nearest_distance;
+                correction[entry.nearest_slot] += leaving - surviving;
+            }
+
+            for (size_t slot = 0; slot < k; ++slot) {
+                SwapCandidate candidate;
+                candidate.score = shared + correction[slot];
+                candidate.entering_item = h;
+                candidate.leaving_item = medoids[slot];
+                candidate.leaving_slot = slot;
+                candidate.valid = true;
+                if (is_better(candidate, local)) {
+                    local = candidate;
+                }
+            }
+        }
+
+        chunk_best[begin / chunk] = local;
+    });
+
+    SwapCandidate winner;
+    for (const SwapCandidate& candidate : chunk_best) {
+        if (is_better(candidate, winner)) {
+            winner = candidate;
+        }
+    }
+    return winner;
+}
+
+// The total cost of the configuration that replaces ``leaving_slot`` with
+// ``entering_item``, summed in ascending item order over the same summands
+// ``total_cost`` uses, so the comparison against the reported cost is exact.
+// The cache supplies each item's nearest surviving medoid distance: for an
+// item whose medoid survives that is d1, and for an item whose medoid leaves
+// it is d2 by definition.
+double recomputed_total(const double* data, size_t n,
+                        const std::vector<Assignment>& assignments,
+                        size_t leaving_slot, size_t entering_item) {
+    double total = 0.0;
+    for (size_t j = 0; j < n; ++j) {
+        const Assignment& entry = assignments[j];
+        const double surviving = entry.nearest_slot == leaving_slot
+                                     ? entry.second_nearest_distance
+                                     : entry.nearest_distance;
+        total += std::min(surviving,
+                          detail::dense_distance(data, n, j, entering_item));
+    }
+    return total;
+}
+
+// Textbook PAM's own scan, on recomputed totals rather than predicted deltas.
+// The fast loop is not allowed to declare convergence: a swap that genuinely
+// lowers the recomputed cost can be predicted at exactly zero, and exiting on
+// that prediction would assert a local optimum nothing had checked.
+SwapCandidate verification_pass(const double* data, size_t n,
+                                const std::vector<size_t>& medoids,
+                                const std::vector<Assignment>& assignments,
+                                const std::vector<size_t>& slot_of,
+                                double current_cost, size_t num_threads,
+                                size_t chunk_size) {
+    const size_t k = medoids.size();
+    const size_t chunk = effective_chunk_size(n, chunk_size);
+    const size_t total_chunks = (n + chunk - 1) / chunk;
+    std::vector<SwapCandidate> chunk_best(total_chunks);
+
+    ThreadPool pool(num_threads);
+    pool.ParallelFor(0, n, chunk, [&](size_t begin, size_t end) {
+        SwapCandidate local;
+
+        for (size_t h = begin; h < end; ++h) {
+            if (slot_of[h] != n) {
+                continue;
+            }
+            for (size_t slot = 0; slot < k; ++slot) {
+                const double total =
+                    recomputed_total(data, n, assignments, slot, h);
+                if (!(total < current_cost)) {
+                    continue;
+                }
+                SwapCandidate candidate;
+                candidate.score = total;
+                candidate.entering_item = h;
+                candidate.leaving_item = medoids[slot];
+                candidate.leaving_slot = slot;
+                candidate.valid = true;
+                if (is_better(candidate, local)) {
+                    local = candidate;
+                }
+            }
+        }
+
+        chunk_best[begin / chunk] = local;
+    });
+
+    SwapCandidate winner;
+    for (const SwapCandidate& candidate : chunk_best) {
+        if (is_better(candidate, winner)) {
+            winner = candidate;
+        }
+    }
+    return winner;
+}
+
 size_t global_medoid(const double* data, size_t n, size_t num_threads,
                      size_t chunk_size) {
     std::vector<double> sums(n, 0.0);
@@ -350,10 +521,76 @@ KMedoidsResult k_medoids_cluster(const StorageBackend& storage,
         return identity_partition(n);
     }
 
-    const std::vector<size_t> medoids = initialize_medoids(data, n, options);
+    std::vector<size_t> medoids = initialize_medoids(data, n, options);
 
-    return assemble(data, n, medoids, 0, false, options.num_threads,
-                    options.chunk_size);
+    std::vector<size_t> slot_of(n, n);
+    refresh_slot_map(slot_of, medoids);
+    std::vector<Assignment> assignments =
+        build_assignments(data, n, medoids, options.num_threads,
+                          options.chunk_size);
+    double cost = total_cost(assignments);
+
+    size_t iterations = 0;
+    bool converged = false;
+
+    while (iterations < options.max_iterations) {
+        const SwapCandidate predicted =
+            best_predicted_swap(data, n, medoids, assignments, slot_of,
+                                options.num_threads, options.chunk_size);
+
+        bool advanced = false;
+        if (predicted.valid && predicted.score < 0.0) {
+            const std::vector<size_t> previous = medoids;
+            medoids[predicted.leaving_slot] = predicted.entering_item;
+            refresh_slot_map(slot_of, medoids);
+            std::vector<Assignment> trial =
+                build_assignments(data, n, medoids, options.num_threads,
+                                  options.chunk_size);
+            const double trial_cost = total_cost(trial);
+
+            if (trial_cost < cost) {
+                // Every accepted configuration has a strictly smaller
+                // recomputed cost than its predecessor, computed by the
+                // identical expression in the identical order, so no
+                // configuration can repeat and the loop terminates.
+                assignments = std::move(trial);
+                cost = trial_cost;
+                ++iterations;
+                advanced = true;
+            } else {
+                // Prediction and recomputation disagree at rounding scale, so
+                // neither alone can say whether the loop is finished. Undo and
+                // let the verification pass decide.
+                medoids = previous;
+                refresh_slot_map(slot_of, medoids);
+            }
+        }
+
+        if (advanced) {
+            continue;
+        }
+
+        const SwapCandidate verified =
+            verification_pass(data, n, medoids, assignments, slot_of, cost,
+                              options.num_threads, options.chunk_size);
+        if (!verified.valid) {
+            converged = true;
+            break;
+        }
+
+        medoids[verified.leaving_slot] = verified.entering_item;
+        refresh_slot_map(slot_of, medoids);
+        assignments = build_assignments(data, n, medoids, options.num_threads,
+                                        options.chunk_size);
+        cost = total_cost(assignments);
+        ++iterations;
+    }
+
+    // Reaching the cap skips the verification pass deliberately: the pass
+    // exists to substantiate a local-optimality claim, and a capped run makes
+    // no such claim.
+    return assemble(data, n, medoids, iterations, converged,
+                    options.num_threads, options.chunk_size);
 }
 
 }  // namespace OECluster
