@@ -41,6 +41,23 @@ DenseStorage MakeAllZeroStorage(size_t n) {
     return storage;
 }
 
+// Four items at 0, 4, 9, 10: the pair (2, 3) is clustered together (distance 1.0)
+// while item 1 is midway between them. This fixture separates the MaxMin recurrence
+// from "farthest from the seed" — the nearest-distance update after selecting item 3
+// lowers item 2's distance from 9.0 to 1.0, which causes item 1 (at 4.0) to be picked
+// next instead of item 2. Without that update item 2 would be chosen. Every position
+// is an integer, so every distance is exact.
+DenseStorage MakeClusteredLineStorage() {
+    DenseStorage storage(4);
+    storage.Set(0, 1, 4.0);
+    storage.Set(0, 2, 9.0);
+    storage.Set(0, 3, 10.0);
+    storage.Set(1, 2, 5.0);
+    storage.Set(1, 3, 6.0);
+    storage.Set(2, 3, 1.0);
+    return storage;
+}
+
 }  // namespace
 
 TEST(MaxMinKernelTest, SelectsFarthestFirstFromTheSeed) {
@@ -50,6 +67,15 @@ TEST(MaxMinKernelTest, SelectsFarthestFirstFromTheSeed) {
         detail::maxmin_select_from(storage.Data(), storage.NumSamples(), 3, 0);
 
     EXPECT_EQ(selection, std::vector<size_t>({0, 3, 2}));
+}
+
+TEST(MaxMinKernelTest, LowersTheNearestDistanceAfterEachSelection) {
+    const DenseStorage storage = MakeClusteredLineStorage();
+
+    const std::vector<size_t> selection =
+        detail::maxmin_select_from(storage.Data(), storage.NumSamples(), 3, 0);
+
+    EXPECT_EQ(selection, std::vector<size_t>({0, 3, 1}));
 }
 
 TEST(MaxMinKernelTest, HonorsTheSeed) {
