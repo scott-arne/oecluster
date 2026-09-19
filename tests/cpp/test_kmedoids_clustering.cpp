@@ -314,6 +314,21 @@ TEST(KMedoidsValidationTest, RefusesAnOutOfRangeSeed) {
             error.what(),
             "K-medoids initial_medoids index is outside the storage range");
     }
+
+    // Verify that range is reported before uniqueness regardless of which
+    // problem appears first in the list. The duplicate appears at positions 0
+    // and 1, while the out-of-range index is at position 2.
+    options.n_clusters = 3;
+    options.initial_medoids = {3, 3, 9};
+
+    try {
+        k_medoids_cluster(MakeTwoTriplesStorage(), options);
+        FAIL() << "expected std::out_of_range";
+    } catch (const std::out_of_range& error) {
+        EXPECT_STREQ(
+            error.what(),
+            "K-medoids initial_medoids index is outside the storage range");
+    }
 }
 
 TEST(KMedoidsValidationTest, RefusesDuplicateSeeds) {

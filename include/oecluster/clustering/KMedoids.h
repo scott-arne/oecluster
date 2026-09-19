@@ -34,7 +34,7 @@ struct KMedoidsOptions {
     std::vector<size_t> initial_medoids;          ///< Starting medoids; required iff init == Explicit.
     size_t max_iterations = 100;                  ///< Swap iterations before giving up.
     size_t num_threads = 0;                       ///< Worker threads; 0 auto-detects hardware concurrency.
-    size_t chunk_size = 4096;                     ///< Chunk size for the parallelized swap scan.
+    size_t chunk_size = 4096;                     ///< Chunk size for parallelized scans (build, swap, assignment, global medoid).
 };
 
 /**
