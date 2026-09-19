@@ -403,6 +403,45 @@ TEST(KMedoidsInitializationTest, BothInitializersAgreeOnTheGlobalMedoid) {
     EXPECT_EQ(from_build.Medoids(), std::vector<size_t>({2}));
 }
 
+// The k == 1 case above cannot tell the two initializers apart: BUILD never
+// enters its gain loop and farthest-first never makes a MaxMin selection, so
+// both collapse to the global medoid. At k == 2 they diverge, and the divergence
+// is what pins each one's own rule.
+//
+// Both start at the global medoid, item 1 (items 1 and 2 tie at 20.5 total
+// distance and the smaller index wins). BUILD then scores candidates by the
+// total distance they remove: item 2 and item 3 both score exactly 19.0, so the
+// smaller index wins and BUILD takes item 2. Farthest-first instead takes the
+// item that is furthest from the selected set, which is item 3 at 10.5.
+//
+// Both answers cost 1.5, and both are global optima -- every pair straddling the
+// gap costs 1.5 -- so the swap loop Task 3 adds cannot move either one and these
+// expectations survive it.
+TEST(KMedoidsInitializationTest, TheTwoInitializersDivergeOnTheSecondMedoid) {
+    const DenseStorage storage = MakeLineStorage();
+
+    KMedoidsOptions build_options;
+    build_options.n_clusters = 2;
+    build_options.init = KMedoidsInit::Build;
+
+    KMedoidsOptions maxmin_options;
+    maxmin_options.n_clusters = 2;
+    maxmin_options.init = KMedoidsInit::FarthestFirst;
+
+    const KMedoidsResult from_build = k_medoids_cluster(storage, build_options);
+    const KMedoidsResult from_maxmin = k_medoids_cluster(storage, maxmin_options);
+
+    EXPECT_EQ(from_build.Medoids(), std::vector<size_t>({1, 2}));
+    EXPECT_EQ(from_maxmin.Medoids(), std::vector<size_t>({1, 3}));
+    EXPECT_NE(from_build.Medoids(), from_maxmin.Medoids());
+
+    // Equal cost, different medoids: the cost alone would not separate them.
+    EXPECT_DOUBLE_EQ(from_build.Cost(), 1.5);
+    EXPECT_DOUBLE_EQ(from_maxmin.Cost(), 1.5);
+    EXPECT_EQ(from_build.Labels(), std::vector<ClusterLabel>({0, 0, 1, 1}));
+    EXPECT_EQ(from_maxmin.Labels(), std::vector<ClusterLabel>({0, 0, 1, 1}));
+}
+
 // The all-zero matrix ties every gain, every MaxMin distance and every delta
 // at once. It is the single input that fails if the selected mask is dropped
 // from either initializer: the medoid list comes back with duplicates and one
@@ -430,6 +469,35 @@ TEST(KMedoidsDegenerateTest, AllZeroMatrixStillProducesDistinctMedoids) {
             EXPECT_DOUBLE_EQ(result.Cost(), 0.0);
         }
     }
+}
+
+// The nearest-medoid scan visits slots in order, so a tie is only resolved
+// correctly if an equal distance fails to displace the incumbent. Inverting that
+// comparison passes every other test in this file: no other test reads Labels()
+// on an input where a non-medoid is equidistant from two medoids. On an all-zero
+// matrix every non-medoid ties against every medoid, so each one must land in
+// the slot of the smallest medoid index; the inverted rule would send them all
+// to the largest instead.
+//
+// Note the scope: because assemble() sorts the medoids before assigning, medoid
+// item order and slot order always agree at this boundary, so this pins the
+// direction of the tie rule and not its key.
+TEST(KMedoidsTieRuleTest, EquidistantItemsTakeTheSmallestMedoidIndex) {
+    KMedoidsOptions two_options;
+    two_options.n_clusters = 2;
+    const KMedoidsResult two =
+        k_medoids_cluster(MakeAllZeroStorage(8), two_options);
+    EXPECT_EQ(two.Medoids(), std::vector<size_t>({0, 1}));
+    EXPECT_EQ(two.Labels(),
+              std::vector<ClusterLabel>({0, 1, 0, 0, 0, 0, 0, 0}));
+
+    KMedoidsOptions three_options;
+    three_options.n_clusters = 3;
+    const KMedoidsResult three =
+        k_medoids_cluster(MakeAllZeroStorage(8), three_options);
+    EXPECT_EQ(three.Medoids(), std::vector<size_t>({0, 1, 2}));
+    EXPECT_EQ(three.Labels(),
+              std::vector<ClusterLabel>({0, 1, 2, 0, 0, 0, 0, 0}));
 }
 
 // Duplicates at distance 0 are what the self-assignment rule exists for:
