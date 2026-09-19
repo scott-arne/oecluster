@@ -312,6 +312,19 @@ void ExpectParityFromSeeds(const DenseStorage& storage,
     const size_t n = storage.NumSamples();
     const double* data = storage.Data();
 
+    // The seed list is what distinguishes one call from the next within a
+    // single matrix, and these are EXPECT_ rather than ASSERT_ assertions, so
+    // without it a regression prints unlabeled vector diffs and then keeps
+    // going into unrelated cases. Traced here rather than in the test bodies so
+    // every caller inherits it.
+    testing::Message seed_trace;
+    seed_trace << "seeds = {";
+    for (size_t slot = 0; slot < seeds.size(); ++slot) {
+        seed_trace << (slot == 0 ? "" : ", ") << seeds[slot];
+    }
+    seed_trace << "}";
+    SCOPED_TRACE(seed_trace);
+
     KMedoidsOptions options;
     options.n_clusters = seeds.size();
     options.init = KMedoidsInit::Explicit;
@@ -332,13 +345,35 @@ void ExpectParityFromSeeds(const DenseStorage& storage,
     // delta algebra. This is the one assertion in the suite that pins the
     // FastPAM1 arithmetic against a brute-force total; every other cost check
     // recomputes its expectation differently and stays on EXPECT_DOUBLE_EQ.
+    //
+    // How much the assertion proves depends on the matrix, which matters when
+    // one day it fails. On the integer families every distance and partial sum
+    // is exactly representable, so ranking candidates by the predicted delta
+    // and ranking them by a brute-force total are the same ordering: agreement
+    // is a theorem there, and a failure is a kernel bug with nothing else to
+    // blame. On the continuous families it is a regression pin instead. The two
+    // orderings agree at these seeds because no near-tie happens to straddle a
+    // rounding boundary, not because they must, so a different libm, a
+    // different floating-point contraction setting or a new seed can part them
+    // with no code change at all. Diagnose a continuous-family failure as
+    // toolchain drift first and a kernel bug second; an integer-family failure
+    // admits no such excuse.
     EXPECT_EQ(result.Cost(), NaiveTotalCost(data, n, reference));
 }
 
-// Two independent seed sets per matrix: the first k items, and the test's own
-// MaxMin selection. Neither borrows anything from the production initializers,
-// so a bug in BUILD cannot hide a bug in the swap phase or vice versa.
+// Two seed sets per matrix: the first k items, and a MaxMin selection. The
+// second does call the production farthest-first kernel -- maxmin_select_from
+// is exactly what farthest_first_initialize delegates to -- but that does not
+// weaken the comparison, because the seed list is an *input* handed identically
+// to the production call and to NaivePamSwapPhase rather than an oracle for
+// either. A bug in maxmin_select_from moves where both sides start and still
+// cannot make a broken swap phase look correct; only the two swap phases are
+// under test. Two seed sets rather than one so the parity claim does not rest
+// on a single starting configuration.
 void ExpectParityWithNaivePam(const DenseStorage& storage, size_t k) {
+    SCOPED_TRACE(testing::Message()
+                 << "n = " << storage.NumSamples() << ", k = " << k);
+
     std::vector<size_t> leading(k);
     for (size_t slot = 0; slot < k; ++slot) {
         leading[slot] = slot;

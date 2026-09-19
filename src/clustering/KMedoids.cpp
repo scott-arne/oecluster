@@ -216,6 +216,22 @@ bool is_better(const SwapCandidate& candidate, const SwapCandidate& incumbent) {
     return candidate.leaving_item < incumbent.leaving_item;
 }
 
+/**
+ * @brief Best swap over every candidate, scored by the FastPAM1 predicted delta.
+ *
+ * The returned ``score`` is a **delta** -- the predicted change in the total,
+ * negative when the swap helps -- and not a total. ``verification_pass`` fills
+ * the same field with a recomputed total, so the two producers of a
+ * ``SwapCandidate`` mean different things by it and only the comparator is
+ * shared; reading one for the other is the easiest mistake to make here.
+ *
+ * The delta splits into a ``shared`` part that every leaving slot sees and a
+ * per-slot ``correction``, which is why one O(n) pass per entering item scores
+ * all k slots at once instead of k passes. The cached d1 and d2 are the entire
+ * speedup: no step appeals to the triangle inequality, because this library's
+ * dissimilarities are free to violate it, and every candidate that is not
+ * already a medoid is evaluated.
+ */
 SwapCandidate best_predicted_swap(const double* data, size_t n,
                                   const std::vector<size_t>& medoids,
                                   const std::vector<Assignment>& assignments,
@@ -540,7 +556,8 @@ KMedoidsResult k_medoids_cluster(const StorageBackend& storage,
 
         bool advanced = false;
         if (predicted.valid && predicted.score < 0.0) {
-            const std::vector<size_t> previous = medoids;
+            // One slot changes, so one value is the whole undo state.
+            const size_t displaced = medoids[predicted.leaving_slot];
             medoids[predicted.leaving_slot] = predicted.entering_item;
             refresh_slot_map(slot_of, medoids);
             std::vector<Assignment> trial =
@@ -561,7 +578,7 @@ KMedoidsResult k_medoids_cluster(const StorageBackend& storage,
                 // Prediction and recomputation disagree at rounding scale, so
                 // neither alone can say whether the loop is finished. Undo and
                 // let the verification pass decide.
-                medoids = previous;
+                medoids[predicted.leaving_slot] = displaced;
                 refresh_slot_map(slot_of, medoids);
             }
         }
