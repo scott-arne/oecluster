@@ -138,6 +138,7 @@ set(OECLUSTER_SOURCES
     src/clustering/HDBSCANTree.cpp
     src/clustering/HDBSCAN.cpp
     src/clustering/Agglomerative.cpp
+    src/clustering/KMedoids.cpp
     src/clustering/BitBirchKernels.cpp
     src/clustering/BitBirchTree.cpp
     src/clustering/BitBirch.cpp
