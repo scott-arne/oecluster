@@ -32,6 +32,7 @@ add_executable(oecluster_tests
     cpp/test_descriptor_statistics.cpp
     cpp/test_descriptor_comparison.cpp
     cpp/test_sar_coherence.cpp
+    cpp/test_kmedoids_clustering.cpp
     cpp/test_umbrella_header.cpp
 )
 
