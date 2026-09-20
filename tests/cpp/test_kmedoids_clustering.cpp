@@ -423,6 +423,27 @@ DenseStorage MakeFarMedianStorage() {
     return storage;
 }
 
+// Five unit-spaced items and one item a full 2^53 away from all of them. The
+// spacing is the point: ulp(2^53) is 2, so a unit addend lands exactly halfway
+// between two representable doubles and rounds to even. Accumulating the small
+// distances first and the large one last keeps them (they reach 2^53 + 4);
+// accumulating the large one first absorbs every one of them (the sum stays at
+// 2^53). No fixture built from small integers can tell those two orders apart,
+// which is what makes this one the only witness to the ascending-order
+// contract that total_cost and recomputed_total both promise.
+DenseStorage MakeOrderSensitiveSumStorage() {
+    const size_t n = 6;
+    const double far = 9007199254740992.0;  // 2^53
+    DenseStorage storage(n);
+    for (size_t i = 0; i < n - 1; ++i) {
+        for (size_t j = i + 1; j < n - 1; ++j) {
+            storage.Set(i, j, 1.0);
+        }
+        storage.Set(i, n - 1, far);
+    }
+    return storage;
+}
+
 // The three inputs the swap kernels take together, bundled so a white-box test
 // states its starting configuration once instead of repeating the build ritual.
 struct KernelState {
@@ -1300,4 +1321,9 @@ TEST(KMedoidsSwapKernelTest, RecomputedTotalIsBitIdenticalToARebuiltAssignmentCo
     // and the shortcut has to reach the same totals anyway.
     ExpectRecomputedTotalMatchesARebuild(MakeDuplicateRowStorage(), {0, 2});
     ExpectRecomputedTotalMatchesARebuild(MakeAllZeroStorage(6), {0, 1});
+
+    // The only fixture here whose sums are order-sensitive: every other one is
+    // small integers, which are exact in any accumulation order and so cannot
+    // witness the ascending-order contract at all.
+    ExpectRecomputedTotalMatchesARebuild(MakeOrderSensitiveSumStorage(), {0, 1});
 }
