@@ -1604,9 +1604,9 @@ TEST(KMedoidsSwapKernelTest, RecomputedTotalIsBitIdenticalToARebuiltAssignmentCo
     // The only fixtures here whose sums are order-sensitive: every other one is
     // small integers, which are exact in any accumulation order and so cannot
     // witness the ascending-order contract at all. The second is the matrix the
-    // speculative undo branch depends on, and the one whose two summation orders
-    // differ across a representable-unit boundary, so the shortcut and the
-    // rebuild agreeing on it is what lets
+    // speculative undo branch depends on, and its terms sit at 2^53, where any
+    // regrouping on either side would round whole units away, so the shortcut
+    // and the rebuild agreeing on it is what lets
     // KMedoidsDynamicRangeTest.HoldsParityWhenAPredictedImprovementIsUndone
     // state its precondition through the shortcut.
     ExpectRecomputedTotalMatchesARebuild(MakeOrderSensitiveSumStorage(), {0, 1});
@@ -1847,11 +1847,11 @@ TEST(KMedoidsDynamicRangeTest, HoldsParityWhenAPredictedImprovementIsUndone) {
     // because the prediction is negative, and the rebuild then declines it.
     //
     // These two are also load-bearing on their own, and not redundant with the
-    // end-to-end assertions below. They are the only place in the suite that
-    // pins the ascending accumulation order of `shared` and `correction` in
-    // best_predicted_swap: reversing that inner loop changes the answer here to
-    // score 0.0 entering item 3 while leaving every end-to-end result in this
-    // file unchanged.
+    // end-to-end assertions below. Together with the counterpart score
+    // assertion in the row after this one, they are all that pins the ascending
+    // accumulation order of `shared` and `correction` in best_predicted_swap:
+    // reversing that inner loop changes the answer here to score 0.0 entering
+    // item 3 while leaving every end-to-end result in this file unchanged.
     EXPECT_EQ(predicted.score, -2.0);
     EXPECT_EQ(predicted.entering_item, 5u);
     // Stated through the cached shortcut rather than through the rebuild the
@@ -1894,8 +1894,8 @@ TEST(KMedoidsDynamicRangeTest, HoldsParityWhenTheVerificationPassAppliesTheSwap)
     ASSERT_TRUE(predicted.valid);
     // The counterpart of the score assertion in the row above, and the other
     // half of what pins best_predicted_swap's accumulation order: reversing that
-    // inner loop turns this 0.0 into -2.0, and nothing else in the suite
-    // notices.
+    // inner loop turns this 0.0 into -2.0, and outside these two rows nothing in
+    // the suite notices.
     EXPECT_EQ(predicted.score, 0.0);
     EXPECT_EQ(detail::recomputed_total(storage.Data(), storage.NumSamples(),
                                        state.assignments, 1, 5),
