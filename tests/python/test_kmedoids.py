@@ -33,11 +33,10 @@ def _two_triples():
 def _asymmetric_pair():
     """Four points where BUILD and farthest-first initialization disagree.
 
-    Two tight pairs (0, 0.5) and (10, 11) separated by a large gap. For
-    k=2, BUILD picks the center of each pair → medoids (1, 2), while
-    farthest-first picks the two farthest points → medoids (1, 3). Both are
-    distance-symmetric, so the fixture is deliberately asymmetric to ensure
-    the two strategies provably differ.
+    Two pairs at unequal internal spacing: (0, 0.5) tight and (10, 11) loose.
+    For k=2, BUILD picks the center of each pair → medoids (1, 2), while
+    farthest-first picks the two farthest points → medoids (1, 3), so the
+    strategies provably differ.
     """
     positions = np.array([0.0, 0.5, 10.0, 11.0])
     return _dense_distance_matrix(np.abs(positions[:, None] - positions[None, :]))
@@ -46,10 +45,11 @@ def _asymmetric_pair():
 def _fractional_cost():
     """Four points whose optimal cost is not an integer.
 
-    Two pairs (0, 0.3) and (10, 10.7) with fractional separations, ensuring
-    the cost cannot pass through int(self._cost) unchanged.
+    Two pairs (0, 0.25) and (10, 10.25) separated by a large gap. Every
+    position is a dyadic rational, so the optimal cost is exactly 0.5 rather
+    than approximately so, and int(0.5) cannot pass as the real value.
     """
-    positions = np.array([0.0, 0.3, 10.0, 10.7])
+    positions = np.array([0.0, 0.25, 10.0, 10.25])
     return _dense_distance_matrix(np.abs(positions[:, None] - positions[None, :]))
 
 
@@ -303,19 +303,12 @@ def test_size_t_maximum_is_accepted():
 
     size_t_max = (1 << (8 * ctypes.sizeof(ctypes.c_size_t))) - 1
 
-    # Reaching the setter without OverflowError is the test.
-    # The call will fail at the gate (subset_scored) or elsewhere, but not
-    # on the bound check or the SWIG setter.
-    from openeye import oechem
-    mols = []
-    for smi in ["C", "CC", "CCC", "CCCC"]:
-        mol = oechem.OEGraphMol()
-        oechem.OESmilesToMol(mol, smi)
-        mols.append(mol)
-    dm = oecluster.pdist(mols, "descriptor", metric="euclidean", missing="ignore")
+    # End-to-end call on a comparable matrix succeeds with size_t maximum.
+    result = oecluster.k_medoids(_two_triples(), n_clusters=2, chunk_size=size_t_max)
 
-    with pytest.raises(ValueError, match="subset"):
-        oecluster.k_medoids(dm, n_clusters=2, chunk_size=size_t_max)
+    assert result.medoids == (1, 4)
+    assert result.cost == 1.0
+    assert result.converged is True
 
 
 def test_sparse_storage_is_refused():
@@ -464,14 +457,12 @@ def test_the_signature_is_pinned():
     sig = inspect.signature(oecluster.k_medoids)
     params = sig.parameters
 
-    # distance_matrix: positional-only would be an improvement but isn't
-    # the current shape; for now it's positional-or-keyword, first position.
     assert list(params.keys()) == [
         "distance_matrix", "n_clusters", "init", "initial_medoids",
         "max_iterations", "num_threads", "chunk_size"
     ]
 
-    # All except distance_matrix are keyword-only.
+    # distance_matrix is positional-or-keyword; all others are keyword-only.
     assert params["distance_matrix"].kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
     for name in ["n_clusters", "init", "initial_medoids", "max_iterations",
                  "num_threads", "chunk_size"]:
@@ -519,7 +510,7 @@ def test_positive_num_threads_and_chunk_size_are_forwarded(monkeypatch):
         def Converged(self):
             return True
 
-    def capture_and_return(storage, options):
+    def capture_and_return(_storage, options):
         captured_options.append(options)
         return MockResult()
 
