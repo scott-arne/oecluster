@@ -591,6 +591,88 @@ void ExpectRecomputedTotalMatchesARebuild(const DenseStorage& storage,
     }
 }
 
+// No (leaving slot, entering item) pair may have a from-scratch recomputed
+// total below the reported cost. This asserts the convergence contract
+// directly rather than through a proxy.
+void ExpectVerifiedLocalOptimum(const DenseStorage& storage,
+                                const KMedoidsResult& result) {
+    const size_t n = storage.NumSamples();
+    const double* data = storage.Data();
+    const std::vector<size_t>& medoids = result.Medoids();
+
+    std::vector<bool> is_medoid(n, false);
+    for (const size_t medoid : medoids) {
+        is_medoid[medoid] = true;
+    }
+
+    for (size_t h = 0; h < n; ++h) {
+        if (is_medoid[h]) {
+            continue;
+        }
+        for (size_t slot = 0; slot < medoids.size(); ++slot) {
+            std::vector<size_t> trial = medoids;
+            trial[slot] = h;
+            EXPECT_GE(NaiveTotalCost(data, n, trial), result.Cost())
+                << "swap (slot " << slot << ", item " << h << ") lowers the cost";
+        }
+    }
+}
+
+DenseStorage PermuteStorage(const DenseStorage& storage,
+                            const std::vector<size_t>& order) {
+    const size_t n = storage.NumSamples();
+    DenseStorage permuted(n);
+    for (size_t i = 0; i < n; ++i) {
+        for (size_t j = i + 1; j < n; ++j) {
+            permuted.Set(i, j,
+                         detail::dense_distance(storage.Data(), n,
+                                                order[i], order[j]));
+        }
+    }
+    return permuted;
+}
+
+// The whole thread-count by chunk-size cross product against a single-threaded
+// baseline. Held as a helper so more than one matrix can be put through it: the
+// kernel's reductions are documented as order-fixed, and how loudly a schedule
+// that broke that would show up depends on the matrix.
+void ExpectIdenticalAcrossSchedules(const DenseStorage& storage, size_t k) {
+    SCOPED_TRACE(testing::Message()
+                 << "n = " << storage.NumSamples() << ", k = " << k);
+
+    KMedoidsOptions baseline_options;
+    baseline_options.n_clusters = k;
+    baseline_options.num_threads = 1;
+    baseline_options.chunk_size = 4096;
+    const KMedoidsResult baseline = k_medoids_cluster(storage, baseline_options);
+
+    // SIZE_MAX is a legal chunk size -- validation only rejects zero -- and it
+    // is the value that overflows an unguarded (n + chunk_size - 1) ceiling to
+    // zero chunks. A scan that runs no chunk at all returns its
+    // default-initialized output: a single cluster at cost 0, reported as
+    // converged. This row is what fails if effective_chunk_size() is dropped.
+    for (const size_t threads : {size_t{1}, size_t{2}, size_t{4}, size_t{8}}) {
+        for (const size_t chunk : {size_t{1}, size_t{7}, size_t{4096},
+                                   std::numeric_limits<size_t>::max()}) {
+            SCOPED_TRACE(testing::Message() << "num_threads = " << threads
+                                            << ", chunk_size = " << chunk);
+            KMedoidsOptions options;
+            options.n_clusters = k;
+            options.num_threads = threads;
+            options.chunk_size = chunk;
+
+            const KMedoidsResult result = k_medoids_cluster(storage, options);
+
+            EXPECT_EQ(result.Medoids(), baseline.Medoids());
+            EXPECT_EQ(result.Labels(), baseline.Labels());
+            EXPECT_EQ(result.NumIterations(), baseline.NumIterations());
+            EXPECT_EQ(result.Converged(), baseline.Converged());
+            // Bit-identical, not merely close.
+            EXPECT_EQ(result.Cost(), baseline.Cost());
+        }
+    }
+}
+
 }  // namespace
 
 TEST(MaxMinKernelTest, SelectsFarthestFirstFromTheSeed) {
@@ -1396,4 +1478,290 @@ TEST(KMedoidsSwapKernelTest, RecomputedTotalIsBitIdenticalToARebuiltAssignmentCo
     // small integers, which are exact in any accumulation order and so cannot
     // witness the ascending-order contract at all.
     ExpectRecomputedTotalMatchesARebuild(MakeOrderSensitiveSumStorage(), {0, 1});
+}
+
+TEST(KMedoidsDeterminismTest, IsIdenticalAcrossThreadCountsAndChunkSizes) {
+    ExpectIdenticalAcrossSchedules(MakeEuclideanStorage(40, 4242, 1.0), 4);
+
+    // A continuous matrix on its own understates what this row claims. Its
+    // distances are all of one magnitude, so a reduction that did depend on the
+    // schedule would move the answer by a few last bits and might not move the
+    // selected medoids at all. MakeOrderSensitiveSumStorage spaces its summands
+    // at 2^53, where a unit addend either survives or is rounded away depending
+    // on what has already been added, so the same mistake changes the reported
+    // cost by whole units.
+    ExpectIdenticalAcrossSchedules(MakeOrderSensitiveSumStorage(), 2);
+}
+
+// Continuous distances only: a tied input is legitimately permutation-variant
+// under any index-based tie rule, so asserting invariance there would assert
+// something false.
+TEST(KMedoidsPermutationTest, TheMedoidSetSurvivesARowPermutation) {
+    const DenseStorage storage = MakeEuclideanStorage(30, 909, 1.0);
+    const std::vector<size_t> order = {
+        7,  22, 3,  18, 11, 0,  25, 14, 5,  29,
+        1,  16, 9,  23, 12, 27, 4,  19, 8,  21,
+        2,  26, 15, 6,  28, 10, 24, 13, 20, 17};
+
+    KMedoidsOptions options;
+    options.n_clusters = 4;
+    options.init = KMedoidsInit::FarthestFirst;
+
+    const KMedoidsResult original = k_medoids_cluster(storage, options);
+    const KMedoidsResult permuted =
+        k_medoids_cluster(PermuteStorage(storage, order), options);
+
+    std::vector<size_t> mapped;
+    mapped.reserve(permuted.Medoids().size());
+    for (const size_t medoid : permuted.Medoids()) {
+        mapped.push_back(order[medoid]);
+    }
+    std::sort(mapped.begin(), mapped.end());
+
+    EXPECT_EQ(mapped, original.Medoids());
+}
+
+// PAM guarantees only a local optimum in general, so this targets data where
+// local and global coincide.
+TEST(KMedoidsGlobalOptimumTest, MatchesExhaustiveSearchOnWellSeparatedData) {
+    const DenseStorage storage = MakeTwoTriplesStorage();
+    const size_t n = storage.NumSamples();
+    const double* data = storage.Data();
+
+    KMedoidsOptions options;
+    options.n_clusters = 2;
+    const KMedoidsResult result = k_medoids_cluster(storage, options);
+
+    double best = std::numeric_limits<double>::infinity();
+    for (size_t a = 0; a < n; ++a) {
+        for (size_t b = a + 1; b < n; ++b) {
+            const double total = NaiveTotalCost(data, n, {a, b});
+            if (total < best) {
+                best = total;
+            }
+        }
+    }
+
+    EXPECT_DOUBLE_EQ(result.Cost(), best);
+}
+
+// The expected medoids are written literally, so the suite cannot be
+// self-consistently wrong.
+TEST(KMedoidsKnownAnswerTest, FindsTheMedoidOfEachTightTriple) {
+    KMedoidsOptions options;
+    options.n_clusters = 2;
+
+    const KMedoidsResult result = k_medoids_cluster(MakeTwoTriplesStorage(), options);
+
+    EXPECT_EQ(result.Medoids(), std::vector<size_t>({1, 4}));
+    EXPECT_EQ(result.Labels(), std::vector<ClusterLabel>({0, 0, 0, 1, 1, 1}));
+    // 0.25 + 0 + 0.25 per triple, and every term is exactly representable.
+    EXPECT_DOUBLE_EQ(result.Cost(), 1.0);
+    EXPECT_TRUE(result.Converged());
+}
+
+TEST(KMedoidsCostTest, CostMatchesAnIndependentSumOverTheReturnedLabels) {
+    for (const uint32_t seed : {uint32_t{11}, uint32_t{12}, uint32_t{13}}) {
+        const DenseStorage storage = MakeNonMetricStorage(25, seed, 1.0);
+        KMedoidsOptions options;
+        options.n_clusters = 3;
+
+        const KMedoidsResult result = k_medoids_cluster(storage, options);
+
+        double expected = 0.0;
+        for (size_t j = 0; j < storage.NumSamples(); ++j) {
+            const size_t medoid =
+                result.Medoids()[static_cast<size_t>(result.Labels()[j])];
+            expected += detail::dense_distance(
+                storage.Data(), storage.NumSamples(), j, medoid);
+        }
+        EXPECT_DOUBLE_EQ(result.Cost(), expected);
+    }
+}
+
+TEST(KMedoidsCostTest, CostStrictlyDecreasesAcrossAcceptedIterations) {
+    const DenseStorage storage = MakeEuclideanStorage(30, 777, 1.0);
+
+    KMedoidsOptions options;
+    options.n_clusters = 3;
+    options.init = KMedoidsInit::Explicit;
+    options.initial_medoids = {0, 1, 2};
+
+    const KMedoidsResult converged_result = k_medoids_cluster(storage, options);
+    ASSERT_GT(converged_result.NumIterations(), 0u);
+
+    // Seeded with the cost of the untouched seeds rather than with infinity, so
+    // the cap == 1 comparison asserts that the first accepted iteration
+    // decreased the cost instead of passing vacuously.
+    double previous = NaiveTotalCost(storage.Data(), storage.NumSamples(),
+                                     {0, 1, 2});
+    for (size_t cap = 1; cap <= converged_result.NumIterations(); ++cap) {
+        KMedoidsOptions capped = options;
+        capped.max_iterations = cap;
+        const double cost = k_medoids_cluster(storage, capped).Cost();
+        EXPECT_LT(cost, previous);
+        previous = cost;
+    }
+}
+
+// Also the initialization-convergence row: both initializers must converge
+// inside the default cap on ordinary data. They may land on different local
+// optima -- PAM guarantees no more than that -- so the assertion is that each
+// result is a verified optimum, not that the two agree.
+TEST(KMedoidsConvergenceTest, EveryConvergedResultIsAVerifiedLocalOptimum) {
+    for (const KMedoidsInit init :
+         {KMedoidsInit::Build, KMedoidsInit::FarthestFirst}) {
+        for (const uint32_t seed : {uint32_t{31}, uint32_t{32}, uint32_t{33}}) {
+            for (const size_t k : {size_t{2}, size_t{4}}) {
+                const DenseStorage metric = MakeEuclideanStorage(28, seed, 1.0);
+                const DenseStorage non_metric =
+                    MakeNonMetricStorage(28, seed, 1.0);
+
+                KMedoidsOptions options;
+                options.n_clusters = k;
+                options.init = init;
+
+                const KMedoidsResult from_metric =
+                    k_medoids_cluster(metric, options);
+                ASSERT_TRUE(from_metric.Converged());
+                ExpectVerifiedLocalOptimum(metric, from_metric);
+
+                const KMedoidsResult from_non_metric =
+                    k_medoids_cluster(non_metric, options);
+                ASSERT_TRUE(from_non_metric.Converged());
+                ExpectVerifiedLocalOptimum(non_metric, from_non_metric);
+            }
+        }
+    }
+}
+
+// Predicted deltas and recomputed totals disagree at rounding scale, and the
+// scale sets how large that disagreement is in absolute terms. An
+// implementation that exits on predicted deltas alone passes every other row
+// in this file and fails here.
+TEST(KMedoidsDynamicRangeTest, HoldsParityAndOptimalityAtExtremeScales) {
+    for (const double scale : {1e-9, 1e6}) {
+        const DenseStorage metric = MakeEuclideanStorage(24, 5150, scale);
+        const DenseStorage non_metric = MakeNonMetricStorage(24, 5151, scale);
+
+        ExpectParityWithNaivePam(metric, 3);
+        ExpectParityWithNaivePam(non_metric, 3);
+
+        KMedoidsOptions options;
+        options.n_clusters = 3;
+        const KMedoidsResult result = k_medoids_cluster(metric, options);
+        ASSERT_TRUE(result.Converged());
+        ExpectVerifiedLocalOptimum(metric, result);
+    }
+}
+
+TEST(KMedoidsDynamicRangeTest, HoldsParityOnAMatrixMixingBothScales) {
+    DenseStorage storage(24);
+    const DenseStorage small = MakeEuclideanStorage(24, 6160, 1e-9);
+    const DenseStorage large = MakeEuclideanStorage(24, 6161, 1e6);
+    for (size_t i = 0; i < 24; ++i) {
+        for (size_t j = i + 1; j < 24; ++j) {
+            const DenseStorage& source = (i + j) % 2 == 0 ? small : large;
+            storage.Set(i, j, detail::dense_distance(source.Data(), 24, i, j));
+        }
+    }
+
+    ExpectParityWithNaivePam(storage, 3);
+
+    KMedoidsOptions options;
+    options.n_clusters = 3;
+    const KMedoidsResult result = k_medoids_cluster(storage, options);
+    ASSERT_TRUE(result.Converged());
+    ExpectVerifiedLocalOptimum(storage, result);
+}
+
+// Complements the exactly-k assertions already pinned in
+// KMedoidsDegenerateTest.AllZeroMatrixStillProducesDistinctMedoids: on a
+// matrix where every candidate swap has a delta of exactly zero, no swap
+// improves, so the run must stop at its seeds and still claim convergence.
+TEST(KMedoidsDegenerateTest, AllZeroMatrixConvergesAtTheInitializationSeeds) {
+    for (const KMedoidsInit init :
+         {KMedoidsInit::Build, KMedoidsInit::FarthestFirst}) {
+        for (const size_t k : {size_t{2}, size_t{3}, size_t{5}}) {
+            KMedoidsOptions options;
+            options.n_clusters = k;
+            options.init = init;
+
+            const KMedoidsResult result =
+                k_medoids_cluster(MakeAllZeroStorage(8), options);
+
+            EXPECT_EQ(result.NumIterations(), 0u);
+            EXPECT_TRUE(result.Converged());
+        }
+    }
+}
+
+TEST(KMedoidsCapTest, ReachingTheCapReportsAValidUnconvergedPartition) {
+    const DenseStorage storage = MakeEuclideanStorage(30, 777, 1.0);
+
+    KMedoidsOptions options;
+    options.n_clusters = 3;
+    options.init = KMedoidsInit::Explicit;
+    options.initial_medoids = {0, 1, 2};
+    options.max_iterations = 1;
+
+    const KMedoidsResult result = k_medoids_cluster(storage, options);
+
+    EXPECT_FALSE(result.Converged());
+    EXPECT_EQ(result.NumIterations(), 1u);
+    EXPECT_EQ(result.NumClusters(), 3u);
+    EXPECT_EQ(result.Medoids().size(), 3u);
+
+    double expected = 0.0;
+    for (size_t j = 0; j < storage.NumSamples(); ++j) {
+        const size_t medoid =
+            result.Medoids()[static_cast<size_t>(result.Labels()[j])];
+        expected += detail::dense_distance(storage.Data(),
+                                           storage.NumSamples(), j, medoid);
+    }
+    EXPECT_DOUBLE_EQ(result.Cost(), expected);
+
+    // The cap skips the verification pass, so this input is deliberately one
+    // that is not yet a local optimum: an improving swap still exists.
+    const std::vector<size_t>& medoids = result.Medoids();
+    bool improving_swap_exists = false;
+    for (size_t h = 0; h < storage.NumSamples(); ++h) {
+        for (size_t slot = 0; slot < medoids.size(); ++slot) {
+            std::vector<size_t> trial = medoids;
+            trial[slot] = h;
+            if (NaiveTotalCost(storage.Data(), storage.NumSamples(), trial) <
+                result.Cost()) {
+                improving_swap_exists = true;
+            }
+        }
+    }
+    EXPECT_TRUE(improving_swap_exists);
+}
+
+TEST(KMedoidsDegenerateTest, SingleClusterReturnsTheGlobalMedoid) {
+    const DenseStorage storage = MakeEuclideanStorage(25, 3131, 1.0);
+    const size_t n = storage.NumSamples();
+    const double* data = storage.Data();
+
+    KMedoidsOptions options;
+    options.n_clusters = 1;
+    const KMedoidsResult result = k_medoids_cluster(storage, options);
+
+    size_t expected = 0;
+    double best = std::numeric_limits<double>::infinity();
+    for (size_t candidate = 0; candidate < n; ++candidate) {
+        double sum = 0.0;
+        for (size_t j = 0; j < n; ++j) {
+            sum += detail::dense_distance(data, n, candidate, j);
+        }
+        if (sum < best) {
+            best = sum;
+            expected = candidate;
+        }
+    }
+
+    EXPECT_EQ(result.Medoids(), std::vector<size_t>({expected}));
+    EXPECT_EQ(result.NumIterations(), 0u);
+    EXPECT_TRUE(result.Converged());
+    EXPECT_EQ(result.NumClusters(), 1u);
 }
