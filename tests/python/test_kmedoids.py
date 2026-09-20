@@ -533,11 +533,12 @@ def test_an_absurd_num_threads_is_capped_at_the_item_count():
     what it accepts and reaches the native code intact: this exercises the cap
     rather than the representation check. Uncapped, this magnitude exceeds the
     thread vector's max_size, so the reserve throws before any thread is
-    created -- that is what this test observes. The cap matters more at the
-    magnitudes below it, which are too expensive to assert here: those are
-    genuinely attempted, so a six-item problem either spends unbounded time
-    creating threads or trips std::terminate while unwinding a vector of
-    joinable threads, killing the interpreter with no traceback. Capped, the
+    created and the exception escapes as a RuntimeError -- that is what this
+    test observes. The cap matters more at the magnitudes below it, which are
+    too expensive to assert here: those are genuinely attempted, so a six-item
+    problem may consume extreme resources or fail to return promptly, and a
+    creation that fails partway trips std::terminate while unwinding a vector
+    of joinable threads, killing the interpreter with no traceback. Capped, the
     answer is the single-threaded one.
     """
     import oecluster

@@ -248,7 +248,9 @@ KMedoidsResult k_medoids_cluster(const StorageBackend& storage,
     // Past the vector's max_size the reserve throws length_error before any
     // thread exists, which is the benign case because the exception escapes
     // normally. Below that the request is genuinely attempted, so a merely
-    // enormous count spends unbounded time and memory creating threads. Worst,
+    // enormous count may consume extreme resources or fail to return promptly;
+    // measured here, 100000 threads for a six-item problem did complete, while
+    // 2^20 had not returned after ten minutes. Worst,
     // a creation that fails partway unwinds a vector still holding joinable
     // threads, and destroying a joinable thread calls std::terminate -- leaving
     // no exception for a caller, or the Python layer above it, to report. Only
