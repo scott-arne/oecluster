@@ -6,7 +6,6 @@
 #include "oecluster/clustering/KMedoids.h"
 
 #include <algorithm>
-#include <limits>
 #include <stdexcept>
 #include <vector>
 
