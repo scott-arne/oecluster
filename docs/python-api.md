@@ -128,22 +128,22 @@ result.n_iterations   # swap iterations performed
 result.converged      # True when no single swap lowers the cost
 ```
 
-`init` selects the seeding strategy: `"build"` (the default; greedy PAM BUILD,
-which usually lands at or near the optimum the swap phase would reach anyway),
+`init` selects the seeding strategy: `"build"` (the default; greedy PAM BUILD),
 `"farthest_first"` (deterministic MaxMin from the global medoid, for
-spread-out seeds), or `"explicit"` with `initial_medoids`. Passing
+spread-out seeds), or `"explicit"` with `initial_medoids`. Passing a non-empty
 `initial_medoids` with any other `init` raises, rather than silently deciding
 which one you meant.
 
 Output is byte-identical across runs, `num_threads` values and `chunk_size`
-values; those two options change how long the call takes and nothing else.
+values; those two options change runtime and memory use but not the result.
 
 `converged` is a real guarantee, not a loop-exit flag: when it is `True`, no
-single medoid swap lowers the cost the result reports, checked by recomputing
-each candidate total rather than by trusting the optimizer's incremental
-arithmetic. Reaching `max_iterations` is not an error -- the partition and its
-medoids are valid -- but `converged` is then `False` and no optimality claim is
-made.
+single medoid swap lowers the cost the result reports. That claim is verified
+by recomputing each candidate total rather than by trusting the optimizer's
+incremental arithmetic (or holds vacuously when `n_clusters` equals the item
+count, which returns the identity partition). Reaching `max_iterations` is not
+an error -- the partition and its medoids are valid -- but `converged` is then
+`False` and no optimality claim is made.
 
 That guarantee is not free. The verification pass recomputes a full objective
 for each of the `n_clusters * (n - n_clusters)` candidate swaps, so it costs on

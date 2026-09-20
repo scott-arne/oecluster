@@ -22,10 +22,12 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   override. `cluster_report()` still requires the stronger gate, so a Dice
   matrix that clusters here may need `allow_nonmetric=True` there.
 - `converged` on a k-medoids result is a verified claim rather than a loop-exit
-  flag: it is only ever `True` after a terminal pass has recomputed the total
-  cost of every single-swap alternative from scratch and found none lower.
-  Reaching `max_iterations` reports `converged=False` and does not raise.
-  Output is byte-identical across runs, thread counts and chunk sizes.
+  flag: it is only ever `True` when no single medoid swap would lower the cost
+  -- verified for non-trivial cases (`n_clusters < n`) by recomputing every
+  candidate total from scratch, or holding vacuously when the identity
+  partition is returned (`n_clusters` equals the item count). Reaching
+  `max_iterations` reports `converged=False` and does not raise. Output is
+  byte-identical across runs, thread counts and chunk sizes.
 
 ## [5.4.0] - 2026-09-17
 
