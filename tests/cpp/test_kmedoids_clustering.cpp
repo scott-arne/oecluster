@@ -1255,30 +1255,57 @@ TEST(KMedoidsSwapKernelTest, ResolvesTiedDeltasToTheSmallestEnteringThenLeavingI
 }
 
 TEST(KMedoidsSwapKernelTest, VerificationPassSelectsTheExhaustiveMinimumTotal) {
-    const DenseStorage storage = MakeFarMedianStorage();
-    const KernelState state = MakeKernelState(storage, {0, 1});
+    {
+        // The medoid list ascending, which fixes the selected total and the
+        // winning entering item.
+        const DenseStorage storage = MakeFarMedianStorage();
+        const KernelState state = MakeKernelState(storage, {0, 1});
 
-    // Both medoids sit at the origin while items 2, 3 and 4 sit near 100, so
-    // the starting total is 0 + 0 + 99 + 105 + 102 = 306.
-    EXPECT_EQ(state.cost, 306.0);
+        // Both medoids sit at the origin while items 2, 3 and 4 sit near 100, so
+        // the starting total is 0 + 0 + 99 + 105 + 102 = 306.
+        EXPECT_EQ(state.cost, 306.0);
 
-    const detail::SwapCandidate verified = detail::verification_pass(
-        storage.Data(), 5, state.medoids, state.assignments, state.slot_of,
-        state.cost, KERNEL_THREADS, KERNEL_CHUNK);
+        const detail::SwapCandidate verified = detail::verification_pass(
+            storage.Data(), 5, state.medoids, state.assignments, state.slot_of,
+            state.cost, KERNEL_THREADS, KERNEL_CHUNK);
 
-    ASSERT_TRUE(verified.valid);
-    EXPECT_EQ(verified.entering_item, 4u);
-    EXPECT_EQ(verified.leaving_slot, 0u);
-    EXPECT_EQ(verified.leaving_item, 0u);
+        ASSERT_TRUE(verified.valid);
+        EXPECT_EQ(verified.entering_item, 4u);
+        EXPECT_EQ(verified.leaving_slot, 0u);
+        EXPECT_EQ(verified.leaving_item, 0u);
 
-    // This score is a TOTAL, not a delta: verification_pass ranks candidates by
-    // the recomputed cost of the whole configuration, which is what makes its
-    // comparison against the current cost bit-exact. Do not "fix" it to -299.
-    // Moving item 0 out for item 4 leaves medoids at positions 1 and 103, so
-    // the five items pay 1 + 0 + 3 + 3 + 0 = 7. Entering item 4 at the other
-    // slot totals 7 as well, and the four remaining pairs all total 10, so 7 is
-    // the exhaustive minimum and the smaller leaving item breaks the tie.
-    EXPECT_EQ(verified.score, 7.0);
+        // This score is a TOTAL, not a delta: verification_pass ranks candidates by
+        // the recomputed cost of the whole configuration, which is what makes its
+        // comparison against the current cost bit-exact. Do not "fix" it to -299.
+        // Moving item 0 out for item 4 leaves medoids at positions 1 and 103, so
+        // the five items pay 1 + 0 + 3 + 3 + 0 = 7. Entering item 4 at the other
+        // slot totals 7 as well, and the four remaining pairs all total 10, so 7 is
+        // the exhaustive minimum and the smaller leaving item breaks the tie.
+        EXPECT_EQ(verified.score, 7.0);
+    }
+
+    {
+        // The same fixture and the same medoid set, listed descending: slot 0
+        // holds item 1 and slot 1 holds item 0. Entering item 4 recomputes to 7
+        // whichever medoid leaves, so the leaving key decides, and a pass that
+        // ranked or recorded the leaving SLOT would answer slot 0 where the
+        // required item rule answers slot 1. The block above cannot tell those
+        // two apart, because {0, 1} makes every item index equal its slot index.
+        const DenseStorage storage = MakeFarMedianStorage();
+        const KernelState state = MakeKernelState(storage, {1, 0});
+
+        EXPECT_EQ(state.cost, 306.0);
+
+        const detail::SwapCandidate verified = detail::verification_pass(
+            storage.Data(), 5, state.medoids, state.assignments, state.slot_of,
+            state.cost, KERNEL_THREADS, KERNEL_CHUNK);
+
+        ASSERT_TRUE(verified.valid);
+        EXPECT_EQ(verified.entering_item, 4u);
+        EXPECT_EQ(verified.leaving_item, 0u);
+        EXPECT_EQ(verified.leaving_slot, 1u);
+        EXPECT_EQ(verified.score, 7.0);
+    }
 }
 
 TEST(KMedoidsSwapKernelTest, VerificationPassReturnsNoCandidateAtALocalOptimum) {
