@@ -423,6 +423,22 @@ DenseStorage MakeFarMedianStorage() {
     return storage;
 }
 
+// The mirror of MakeFarMedianStorage: five items on a line at 100, 0, 1, 99, 102,
+// where the far group is items 0, 3 and 4 and its unique median is item 0 -- the
+// LOWEST-index non-medoid under the intended seeding. MakeFarMedianStorage guards
+// the end of the candidate range, since its winner is the highest-index item; this
+// one guards the start, which a loop beginning one past its chunk would skip.
+DenseStorage MakeLowIndexMedianStorage() {
+    const double positions[5] = {100.0, 0.0, 1.0, 99.0, 102.0};
+    DenseStorage storage(5);
+    for (size_t i = 0; i < 5; ++i) {
+        for (size_t j = i + 1; j < 5; ++j) {
+            storage.Set(i, j, std::abs(positions[i] - positions[j]));
+        }
+    }
+    return storage;
+}
+
 // Five unit-spaced items and one item a full 2^53 away from all of them. The
 // spacing is the point: ulp(2^53) is 2, so a unit addend lands exactly halfway
 // between two representable doubles and rounds to even. Accumulating the small
@@ -1306,6 +1322,33 @@ TEST(KMedoidsSwapKernelTest, VerificationPassSelectsTheExhaustiveMinimumTotal) {
         EXPECT_EQ(verified.leaving_slot, 1u);
         EXPECT_EQ(verified.score, 7.0);
     }
+}
+
+TEST(KMedoidsSwapKernelTest, VerificationPassConsidersTheLowestIndexedItemAsAnEntrant) {
+    // Both medoids sit at the origin while items 0, 3 and 4 sit near 100, so the
+    // starting total is 99 + 0 + 0 + 98 + 101 = 298.
+    const DenseStorage storage = MakeLowIndexMedianStorage();
+    const KernelState state = MakeKernelState(storage, {1, 2});
+
+    EXPECT_EQ(state.cost, 298.0);
+
+    const detail::SwapCandidate verified = detail::verification_pass(
+        storage.Data(), 5, state.medoids, state.assignments, state.slot_of,
+        state.cost, KERNEL_THREADS, KERNEL_CHUNK);
+
+    // Item 0 is the unique best entrant, and it is item zero on purpose: a
+    // candidate loop that began one past the start of its chunk would skip it,
+    // answer item 3 at a total of 5, and still look like a successful
+    // verification. Every other verification-pass fixture seeds item 0 as a
+    // medoid, so this row is the only one where that mistake is visible.
+    ASSERT_TRUE(verified.valid);
+    EXPECT_EQ(verified.entering_item, 0u);
+    EXPECT_EQ(verified.score, 4.0);
+
+    // Removing either near medoid leaves the other one item away from its
+    // partner, so both slots tie at 4 and the smaller leaving ITEM decides.
+    EXPECT_EQ(verified.leaving_item, 1u);
+    EXPECT_EQ(verified.leaving_slot, 0u);
 }
 
 TEST(KMedoidsSwapKernelTest, VerificationPassReturnsNoCandidateAtALocalOptimum) {
