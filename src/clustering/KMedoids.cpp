@@ -210,16 +210,19 @@ KMedoidsResult identity_partition(size_t n) {
                           std::move(medoids), 0.0, 0, true);
 }
 
+// Takes the worker count as an argument rather than reading
+// options.num_threads, so the cap applied in k_medoids_cluster cannot be
+// bypassed by the initializers underneath.
 std::vector<size_t> initialize_medoids(const double* data, size_t n,
-                                       const KMedoidsOptions& options) {
+                                       const KMedoidsOptions& options,
+                                       size_t num_threads) {
     switch (options.init) {
         case KMedoidsInit::Build:
-            return build_initialize(data, n, options.n_clusters,
-                                    options.num_threads, options.chunk_size);
+            return build_initialize(data, n, options.n_clusters, num_threads,
+                                    options.chunk_size);
         case KMedoidsInit::FarthestFirst:
             return farthest_first_initialize(data, n, options.n_clusters,
-                                             options.num_threads,
-                                             options.chunk_size);
+                                             num_threads, options.chunk_size);
         case KMedoidsInit::Explicit:
             return options.initial_medoids;
     }
@@ -236,6 +239,21 @@ KMedoidsResult k_medoids_cluster(const StorageBackend& storage,
     const size_t n = storage.NumSamples();
     const double* data = storage.Data();
 
+    // Capped at the item count once here and then passed to every helper
+    // below, so no path from this entry point can hand ThreadPool the raw
+    // field. num_threads is a size_t on a public options struct, and uncapped
+    // an oversized request is attempted rather than refused:
+    // ThreadPool::ParallelFor asks the OS for exactly that many threads to run
+    // what may be a single chunk. The mild outcome is a call that never
+    // returns, and the severe one kills the process, because the vector being
+    // filled already holds joinable threads when a creation failure throws and
+    // destroying a joinable thread calls std::terminate -- leaving no exception
+    // for a caller, or the Python layer above it, to report. A num_threads of 0
+    // means "use the hardware concurrency" and has to keep meaning that;
+    // validation guarantees n >= n_clusters >= 1, so the minimum passes that 0
+    // through untouched and can never manufacture one from a nonzero request.
+    const size_t num_threads = std::min(options.num_threads, n);
+
     if (options.n_clusters == n) {
         // Every item is already a medoid, so the candidate set is empty and
         // there is no swap for the verification pass to examine. Without the
@@ -243,12 +261,13 @@ KMedoidsResult k_medoids_cluster(const StorageBackend& storage,
         return identity_partition(n);
     }
 
-    std::vector<size_t> medoids = initialize_medoids(data, n, options);
+    std::vector<size_t> medoids =
+        initialize_medoids(data, n, options, num_threads);
 
     std::vector<size_t> slot_of(n, n);
     detail::refresh_slot_map(slot_of, medoids);
     std::vector<detail::Assignment> assignments = detail::build_assignments(
-        data, n, medoids, options.num_threads, options.chunk_size);
+        data, n, medoids, num_threads, options.chunk_size);
     double cost = detail::total_cost(assignments);
 
     size_t iterations = 0;
@@ -256,7 +275,7 @@ KMedoidsResult k_medoids_cluster(const StorageBackend& storage,
 
     while (iterations < options.max_iterations) {
         const detail::SwapCandidate predicted = detail::best_predicted_swap(
-            data, n, medoids, assignments, slot_of, options.num_threads,
+            data, n, medoids, assignments, slot_of, num_threads,
             options.chunk_size);
 
         bool advanced = false;
@@ -266,7 +285,7 @@ KMedoidsResult k_medoids_cluster(const StorageBackend& storage,
             medoids[predicted.leaving_slot] = predicted.entering_item;
             detail::refresh_slot_map(slot_of, medoids);
             std::vector<detail::Assignment> trial = detail::build_assignments(
-                data, n, medoids, options.num_threads, options.chunk_size);
+                data, n, medoids, num_threads, options.chunk_size);
             const double trial_cost = detail::total_cost(trial);
 
             if (trial_cost < cost) {
@@ -292,7 +311,7 @@ KMedoidsResult k_medoids_cluster(const StorageBackend& storage,
         }
 
         const detail::SwapCandidate verified = detail::verification_pass(
-            data, n, medoids, assignments, slot_of, cost, options.num_threads,
+            data, n, medoids, assignments, slot_of, cost, num_threads,
             options.chunk_size);
         if (!verified.valid) {
             converged = true;
@@ -301,8 +320,8 @@ KMedoidsResult k_medoids_cluster(const StorageBackend& storage,
 
         medoids[verified.leaving_slot] = verified.entering_item;
         detail::refresh_slot_map(slot_of, medoids);
-        assignments = detail::build_assignments(
-            data, n, medoids, options.num_threads, options.chunk_size);
+        assignments = detail::build_assignments(data, n, medoids, num_threads,
+                                                options.chunk_size);
         cost = detail::total_cost(assignments);
         ++iterations;
     }
@@ -310,8 +329,8 @@ KMedoidsResult k_medoids_cluster(const StorageBackend& storage,
     // Reaching the cap skips the verification pass deliberately: the pass
     // exists to substantiate a local-optimality claim, and a capped run makes
     // no such claim.
-    return assemble(data, n, medoids, iterations, converged,
-                    options.num_threads, options.chunk_size);
+    return assemble(data, n, medoids, iterations, converged, num_threads,
+                    options.chunk_size);
 }
 
 }  // namespace OECluster

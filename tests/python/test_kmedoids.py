@@ -526,6 +526,31 @@ def test_positive_num_threads_and_chunk_size_are_forwarded(monkeypatch):
     assert opts.chunk_size == 1024
 
 
+def test_an_absurd_num_threads_is_capped_at_the_item_count():
+    """An oversized worker request must be capped, not attempted.
+
+    The Python layer only rejects values above size_t, so 2^61 is well inside
+    what it accepts and reaches the native code intact: this exercises the cap
+    rather than the representation check. Uncapped, ThreadPool tries to create
+    that many OS threads for a six-item problem, which at this magnitude
+    aborts the run and at a merely enormous one hangs it or trips
+    std::terminate while unwinding a vector of joinable threads, killing the
+    interpreter with no traceback. Capped, the answer is the single-threaded
+    one.
+    """
+    import oecluster
+
+    dm = _two_triples()
+    reference = oecluster.k_medoids(dm, n_clusters=2, num_threads=1)
+
+    result = oecluster.k_medoids(dm, n_clusters=2, num_threads=1 << 61)
+
+    assert result.medoids == reference.medoids
+    assert result.labels.tolist() == reference.labels.tolist()
+    assert result.cost == reference.cost
+    assert result.converged == reference.converged
+
+
 def _mols():
     """Six molecules, copied from tests/python/test_metric_gate.py:30.
 

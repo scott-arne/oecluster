@@ -1674,6 +1674,36 @@ TEST(KMedoidsDeterminismTest, IsIdenticalAcrossThreadCountsAndChunkSizes) {
     ExpectIdenticalAcrossSchedules(MakeOrderSensitiveSumStorage(), 1);
 }
 
+// num_threads is a size_t on a public options struct, so "more threads than
+// the machine could ever run" is a value a caller can simply pass, and
+// uncapped ThreadPool attempts it. What that costs depends on the magnitude,
+// which is why this row does not assert a particular failure: 2^61 aborts the
+// run when the thread vector is reserved, a merely enormous count instead
+// spends unbounded time creating threads for what is a single chunk, and a
+// creation that fails partway destroys threads still joinable in that vector,
+// which calls std::terminate and takes the process with it. Capping at the
+// item count removes all three, and the answer must equal the single-threaded
+// one because nothing in the algorithm depends on how many workers ran.
+TEST(KMedoidsThreadCapTest, CapsAnAbsurdThreadCount) {
+    const DenseStorage storage = MakeTwoTriplesStorage();
+
+    KMedoidsOptions single;
+    single.n_clusters = 2;
+    single.num_threads = 1;
+    const KMedoidsResult reference = k_medoids_cluster(storage, single);
+
+    KMedoidsOptions absurd;
+    absurd.n_clusters = 2;
+    absurd.num_threads = std::size_t{1} << 61;
+    const KMedoidsResult result = k_medoids_cluster(storage, absurd);
+
+    EXPECT_EQ(result.Medoids(), reference.Medoids());
+    EXPECT_EQ(result.Labels(), reference.Labels());
+    EXPECT_EQ(result.Converged(), reference.Converged());
+    // Bit-identical, not merely close.
+    EXPECT_EQ(result.Cost(), reference.Cost());
+}
+
 // Continuous distances only: a tied input is legitimately permutation-variant
 // under any index-based tie rule, so asserting invariance there would assert
 // something false.
