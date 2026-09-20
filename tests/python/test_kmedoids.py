@@ -524,3 +524,149 @@ def test_positive_num_threads_and_chunk_size_are_forwarded(monkeypatch):
     opts = captured_options[0]
     assert opts.num_threads == 4
     assert opts.chunk_size == 1024
+
+
+def _mols():
+    """Six molecules, copied from tests/python/test_metric_gate.py:30.
+
+    Fingerprints need no coordinates, so these come straight from SMILES as
+    OEGraphMol rather than through Omega.
+    """
+    from openeye import oechem
+
+    smiles = ["CCO", "CCC", "CCCC", "c1ccccc1", "CCN", "CCOC"]
+    mols = []
+    for idx, smi in enumerate(smiles):
+        mol = oechem.OEGraphMol()
+        oechem.OESmilesToMol(mol, smi)
+        mol.SetTitle(f"mol{idx}")
+        mols.append(mol)
+    return mols
+
+
+# At a converged PAM solution every medoid is also the within-cluster medoid of
+# its own cluster: otherwise swapping in the better member would lower the total
+# and the verification pass would have taken that swap. This cross-checks two
+# independently written implementations.
+def test_every_medoid_is_its_own_cluster_s_representative():
+    import oecluster
+
+    dm = _two_triples()
+    result = oecluster.k_medoids(dm, n_clusters=2)
+    assert result.converged is True
+
+    for label, cluster in enumerate(result.clusters):
+        chosen = oecluster.representative(list(cluster), dm, method="medoid")
+        assert chosen == result.medoids[label]
+
+
+def test_single_cluster_agrees_with_the_global_representative():
+    import oecluster
+
+    dm = _two_triples()
+    result = oecluster.k_medoids(dm, n_clusters=1)
+
+    assert result.medoids[0] == oecluster.representative(
+        list(range(dm.num_samples)), dm, method="medoid")
+
+
+# Dice is the repo's canonical non-metric fingerprint distance. This is the test
+# that pins the require_comparable decision: if someone later "fixes" the gate to
+# require_metric for consistency with the other clustering entry points, this is
+# what tells them they changed the contract.
+def test_a_non_metric_matrix_clusters_with_no_flag_at_all():
+    import oecluster
+
+    dm = oecluster.pdist(_mols(), "fingerprint", metric="dice")
+    assert dm.metric_capabilities == {'zero_self': True, 'triangle': False}
+
+    result = oecluster.k_medoids(dm, n_clusters=2)
+
+    assert len(result.labels) == 6
+    assert result.num_clusters == 2
+
+
+# The parameter does not exist, and that is deliberate: there is no triangle
+# assumption for it to override.
+def test_allow_nonmetric_is_not_a_parameter():
+    import oecluster
+
+    dm = _two_triples()
+    with pytest.raises(TypeError, match="allow_nonmetric"):
+        oecluster.k_medoids(dm, n_clusters=2, allow_nonmetric=True)
+
+
+def test_a_similarity_matrix_is_refused():
+    import oecluster
+
+    dm = oecluster.pdist(_mols(), "fingerprint", similarity=True)
+    with pytest.raises(ValueError, match="similarity=False"):
+        oecluster.k_medoids(dm, n_clusters=2)
+
+
+# A tier-1 refusal require_comparable keeps and never waives, poked the way
+# tests/python/test_metric_gate.py:24 pokes it.
+def test_a_matrix_holding_non_finite_entries_is_refused():
+    import math
+
+    import oecluster
+
+    dm = oecluster.pdist(_mols(), "fingerprint")
+    dm.condensed[0] = math.nan
+
+    with pytest.raises(ValueError, match="non-finite entries"):
+        oecluster.k_medoids(dm, n_clusters=2)
+
+
+# The other tier-1 refusal, and the one PAM depends on most directly: BUILD
+# and every swap evaluation assume an item's distance to itself is the smallest
+# it can be, so a nonzero diagonal would let a medoid lose its own cluster.
+# Stamped directly, following tests/python/test_metric_gate.py:22.
+def test_a_non_zero_self_distance_matrix_is_refused():
+    import oecluster
+
+    dm = oecluster.pdist(_mols(), "fingerprint")
+    dm._facts['zero_self'] = False
+
+    with pytest.raises(ValueError, match="zero self-distance"):
+        oecluster.k_medoids(dm, n_clusters=2)
+
+
+# The one refusal require_comparable keeps beyond the tier-1 checks, and the
+# one that matters most here: PAM adds incomparable distances together rather
+# than merely ranking them. Stamped directly, following
+# tests/python/test_metric_gate.py:1413.
+def test_a_subset_scored_matrix_is_refused():
+    import oecluster
+
+    dm = oecluster.pdist(_mols(), "fingerprint", metric="dice")
+    dm._facts['data_integrity'] = "subset_scored"
+
+    with pytest.raises(ValueError, match="subset"):
+        oecluster.k_medoids(dm, n_clusters=2)
+
+
+# The asymmetry from the design: k_medoids accepts a Dice matrix that
+# cluster_report refuses, because the internal validity indices do lean on
+# metric behavior where PAM does not. Tested so it stays documented behavior
+# rather than an accident.
+def test_cluster_report_still_requires_the_stronger_gate():
+    import oecluster
+
+    dm = oecluster.pdist(_mols(), "fingerprint", metric="dice")
+    result = oecluster.k_medoids(dm, n_clusters=2)
+
+    with pytest.raises(ValueError, match="triangle inequality"):
+        oecluster.cluster_report(result, dm)
+    oecluster.cluster_report(result, dm, allow_nonmetric=True)
+
+
+def test_cluster_report_accepts_a_metric_k_medoids_result():
+    import oecluster
+
+    dm = oecluster.pdist(_mols(), "fingerprint")
+    result = oecluster.k_medoids(dm, n_clusters=2)
+
+    report = oecluster.cluster_report(result, dm)
+
+    assert report.num_clusters == 2
