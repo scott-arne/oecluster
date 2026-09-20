@@ -12,6 +12,7 @@
 #include "oecluster/clustering/ClusterTypes.h"
 #include "oecluster/clustering/KMedoids.h"
 
+#include "../../src/clustering/KMedoidsSwapKernel.h"
 #include "../../src/clustering/MaxMinKernel.h"
 
 using namespace OECluster;
@@ -383,6 +384,174 @@ void ExpectParityWithNaivePam(const DenseStorage& storage, size_t k) {
     ExpectParityFromSeeds(
         storage,
         detail::maxmin_select_from(storage.Data(), storage.NumSamples(), k, 0));
+}
+
+// The KMedoidsOptions defaults, restated so a white-box call exercises the same
+// chunking the public entry point does.
+constexpr size_t KERNEL_THREADS = 0;
+constexpr size_t KERNEL_CHUNK = 4096;
+
+// Five items on a line at 0, 1, 2, 20, 21. The three-item group has an odd
+// size, so its median is the single item 1 rather than a tied pair -- which is
+// what lets the winning swap below be unique. An even-sized group on a line has
+// two optimal medians and every such swap ties, which is useful for the tie-rule
+// test and useless for a test that wants one winner.
+DenseStorage MakeSkewedLineStorage() {
+    const double positions[5] = {0.0, 1.0, 2.0, 20.0, 21.0};
+    DenseStorage storage(5);
+    for (size_t i = 0; i < 5; ++i) {
+        for (size_t j = i + 1; j < 5; ++j) {
+            storage.Set(i, j, std::abs(positions[i] - positions[j]));
+        }
+    }
+    return storage;
+}
+
+// Five items on a line at 0, 1, 100, 106, 103. Items 0 and 1 are the intended
+// medoid pair for this fixture and sit together at the origin; the far group is
+// items 2, 3 and 4, and its unique median is deliberately item 4 -- the
+// highest-index non-medoid. Any candidate loop that stops early, or that prunes
+// by distance from the current medoids, misses precisely the winner here.
+DenseStorage MakeFarMedianStorage() {
+    const double positions[5] = {0.0, 1.0, 100.0, 106.0, 103.0};
+    DenseStorage storage(5);
+    for (size_t i = 0; i < 5; ++i) {
+        for (size_t j = i + 1; j < 5; ++j) {
+            storage.Set(i, j, std::abs(positions[i] - positions[j]));
+        }
+    }
+    return storage;
+}
+
+// The three inputs the swap kernels take together, bundled so a white-box test
+// states its starting configuration once instead of repeating the build ritual.
+struct KernelState {
+    std::vector<size_t> medoids;
+    std::vector<size_t> slot_of;
+    std::vector<detail::Assignment> assignments;
+    double cost = 0.0;
+};
+
+// Built through the production helpers on purpose: a hand-rolled Assignment
+// cache would be testing the test's own arithmetic, and the d2 field in
+// particular is easy to get subtly wrong.
+KernelState MakeKernelState(const DenseStorage& storage,
+                            std::vector<size_t> medoids) {
+    const size_t n = storage.NumSamples();
+
+    KernelState state;
+    state.medoids = std::move(medoids);
+    state.slot_of.assign(n, n);
+    detail::refresh_slot_map(state.slot_of, state.medoids);
+    state.assignments = detail::build_assignments(
+        storage.Data(), n, state.medoids, KERNEL_THREADS, KERNEL_CHUNK);
+    state.cost = detail::total_cost(state.assignments);
+    return state;
+}
+
+// The end-to-end statement that the fast kernel selects what an exhaustive
+// recomputation would: its predicted delta is the recomputed difference, and no
+// other pair recomputes to a smaller total. EXPECT_EQ on the delta is only
+// legitimate on the exactly representable families -- see the long note in
+// ExpectParityFromSeeds -- so this helper takes integer fixtures only.
+void ExpectPredictedDeltaMatchesRecomputation(
+    const DenseStorage& storage, const std::vector<size_t>& medoids) {
+    const size_t n = storage.NumSamples();
+    const double* data = storage.Data();
+
+    SCOPED_TRACE(testing::Message() << "n = " << n << ", k = " << medoids.size());
+
+    const KernelState state = MakeKernelState(storage, medoids);
+    const detail::SwapCandidate winner = detail::best_predicted_swap(
+        data, n, state.medoids, state.assignments, state.slot_of, KERNEL_THREADS,
+        KERNEL_CHUNK);
+    ASSERT_TRUE(winner.valid);
+
+    const double winning_total = detail::recomputed_total(
+        data, n, state.assignments, winner.leaving_slot, winner.entering_item);
+    EXPECT_EQ(winner.score, winning_total - state.cost);
+
+    for (size_t slot = 0; slot < state.medoids.size(); ++slot) {
+        for (size_t h = 0; h < n; ++h) {
+            if (state.slot_of[h] != n) {
+                continue;
+            }
+            SCOPED_TRACE(testing::Message()
+                         << "leaving slot = " << slot << ", entering item = " << h);
+            EXPECT_GE(detail::recomputed_total(data, n, state.assignments, slot, h),
+                      winning_total);
+        }
+    }
+}
+
+// The continuous counterpart of ExpectPredictedDeltaMatchesRecomputation. The
+// predicted delta and a recomputed total sum the same quantities in different
+// orders, so on a continuous matrix they may differ in the last bits and the
+// bit-exact assertion above would measure the toolchain rather than the kernel.
+// What survives is the selection: whichever pair the kernel returns recomputes
+// to the exhaustive minimum, so a near-tie resolved the other way still passes.
+void ExpectSelectedPairIsAnExhaustiveMinimum(
+    const DenseStorage& storage, const std::vector<size_t>& medoids) {
+    const size_t n = storage.NumSamples();
+    const double* data = storage.Data();
+
+    SCOPED_TRACE(testing::Message() << "n = " << n << ", k = " << medoids.size());
+
+    const KernelState state = MakeKernelState(storage, medoids);
+    const detail::SwapCandidate winner = detail::best_predicted_swap(
+        data, n, state.medoids, state.assignments, state.slot_of, KERNEL_THREADS,
+        KERNEL_CHUNK);
+    ASSERT_TRUE(winner.valid);
+
+    double exhaustive = std::numeric_limits<double>::infinity();
+    for (size_t slot = 0; slot < state.medoids.size(); ++slot) {
+        for (size_t h = 0; h < n; ++h) {
+            if (state.slot_of[h] != n) {
+                continue;
+            }
+            exhaustive = std::min(
+                exhaustive,
+                detail::recomputed_total(data, n, state.assignments, slot, h));
+        }
+    }
+
+    EXPECT_DOUBLE_EQ(
+        detail::recomputed_total(data, n, state.assignments, winner.leaving_slot,
+                                 winner.entering_item),
+        exhaustive);
+}
+
+// Every (leaving slot, entering item) pair on one fixture, checking that the
+// cached shortcut and a full rebuild agree bit for bit.
+void ExpectRecomputedTotalMatchesARebuild(const DenseStorage& storage,
+                                          const std::vector<size_t>& medoids) {
+    const size_t n = storage.NumSamples();
+    const double* data = storage.Data();
+
+    SCOPED_TRACE(testing::Message() << "n = " << n << ", k = " << medoids.size());
+
+    const KernelState state = MakeKernelState(storage, medoids);
+
+    for (size_t slot = 0; slot < state.medoids.size(); ++slot) {
+        for (size_t h = 0; h < n; ++h) {
+            // Skipping existing medoids is not a shortcut: a trial set holding
+            // the same item twice has fewer than k distinct medoids, which is
+            // not a configuration the swap phase can ever reach.
+            if (state.slot_of[h] != n) {
+                continue;
+            }
+            SCOPED_TRACE(testing::Message()
+                         << "leaving slot = " << slot << ", entering item = " << h);
+
+            std::vector<size_t> trial = state.medoids;
+            trial[slot] = h;
+            const double rebuilt = detail::total_cost(detail::build_assignments(
+                data, n, trial, KERNEL_THREADS, KERNEL_CHUNK));
+
+            EXPECT_EQ(detail::recomputed_total(data, n, state.assignments, slot, h),
+                      rebuilt);
+        }
+    }
 }
 
 }  // namespace
@@ -926,4 +1095,209 @@ TEST(KMedoidsSwapTest, PerformsNoIterationsWhenSeededAtTheOptimum) {
     EXPECT_EQ(result.Medoids(), std::vector<size_t>({1, 4}));
     EXPECT_EQ(result.NumIterations(), 0u);
     EXPECT_TRUE(result.Converged());
+}
+
+// The rows below call the swap kernels directly. k_medoids_cluster runs the
+// fast prediction and the verification pass one after the other, and either
+// alone reproduces the naive reference, so an end-to-end test cannot tell
+// whether the fast kernel ran at all -- disabling it costs a factor of k in
+// speed and nothing in output. Reaching the kernels from here is what makes
+// that observable.
+
+TEST(KMedoidsSwapKernelTest, PredictsTheExactDeltaForTheWinningSwap) {
+    const DenseStorage storage = MakeSkewedLineStorage();
+    const KernelState state = MakeKernelState(storage, {0, 3});
+
+    // Items sit at 0, 1, 2, 20, 21 and the medoids are items 0 and 3, so every
+    // item pays its distance to the nearer of positions 0 and 20:
+    // 0 + 1 + 2 + 0 + 1 = 4.
+    EXPECT_EQ(state.cost, 4.0);
+
+    const detail::SwapCandidate candidate = detail::best_predicted_swap(
+        storage.Data(), 5, state.medoids, state.assignments, state.slot_of,
+        KERNEL_THREADS, KERNEL_CHUNK);
+
+    ASSERT_TRUE(candidate.valid);
+    EXPECT_EQ(candidate.entering_item, 1u);
+    EXPECT_EQ(candidate.leaving_slot, 0u);
+    EXPECT_EQ(candidate.leaving_item, 0u);
+
+    // Derived from the definition of the swap rather than from the kernel's
+    // algebra. Moving slot 0 from item 0 to item 1 puts the medoids at
+    // positions 1 and 20, so the five items pay 1 + 0 + 1 + 0 + 1 = 3 against
+    // the 4 above, a delta of -1. The five rival pairs are worse by hand too:
+    // {2, 20} and {0, 21} both total 4 (delta 0), {0, 2} totals 38, {0, 1}
+    // totals 40 and {21, 20} totals 57, so the winner is unique.
+    EXPECT_EQ(candidate.score, -1.0);
+}
+
+TEST(KMedoidsSwapKernelTest, PredictedDeltaEqualsTheExactRecomputedDifference) {
+    ExpectPredictedDeltaMatchesRecomputation(MakeSkewedLineStorage(), {0, 3});
+    ExpectPredictedDeltaMatchesRecomputation(MakeFarMedianStorage(), {0, 1});
+    ExpectPredictedDeltaMatchesRecomputation(MakeSmallIntegerStorage(12, 3),
+                                             {0, 1, 2});
+    ExpectPredictedDeltaMatchesRecomputation(MakeIntegerLatticeStorage(12, 5),
+                                             {0, 1, 2});
+
+    const DenseStorage wide_integers = MakeSmallIntegerStorage(20, 9);
+    ExpectPredictedDeltaMatchesRecomputation(
+        wide_integers, detail::maxmin_select_from(wide_integers.Data(), 20, 4, 0));
+
+    const DenseStorage wide_lattice = MakeIntegerLatticeStorage(20, 21);
+    ExpectPredictedDeltaMatchesRecomputation(
+        wide_lattice, detail::maxmin_select_from(wide_lattice.Data(), 20, 4, 0));
+
+    // Continuous matrices get the selection claim without the bit-exact delta.
+    ExpectSelectedPairIsAnExhaustiveMinimum(MakeEuclideanStorage(16, 4, 1.0),
+                                            {0, 1, 2});
+    ExpectSelectedPairIsAnExhaustiveMinimum(MakeNonMetricStorage(16, 8, 1.0),
+                                            {0, 1, 2});
+}
+
+TEST(KMedoidsSwapKernelTest, ScoresEveryNonMedoidCandidate) {
+    const DenseStorage storage = MakeFarMedianStorage();
+    const KernelState state = MakeKernelState(storage, {0, 1});
+
+    // Item 4 is the last item the candidate loop reaches and is also the only
+    // winner: entering it costs 7 against 10 for items 2 and 3. Chunk sizes 1
+    // and 2 split the candidate range across several chunks, so the answer also
+    // has to survive the serial reduction over chunk winners.
+    for (const size_t chunk : {size_t{1}, size_t{2}, KERNEL_CHUNK}) {
+        SCOPED_TRACE(testing::Message() << "chunk_size = " << chunk);
+        const detail::SwapCandidate candidate = detail::best_predicted_swap(
+            storage.Data(), 5, state.medoids, state.assignments, state.slot_of,
+            KERNEL_THREADS, chunk);
+
+        ASSERT_TRUE(candidate.valid);
+        EXPECT_EQ(candidate.entering_item, 4u);
+        EXPECT_EQ(state.slot_of[candidate.entering_item], 5u);
+    }
+
+    // The entering item is never one of the current medoids, on fixtures large
+    // enough that an off-by-one in the candidate filter could hide.
+    const DenseStorage integers = MakeSmallIntegerStorage(20, 9);
+    const std::vector<size_t> seeds =
+        detail::maxmin_select_from(integers.Data(), 20, 4, 0);
+    const KernelState wide = MakeKernelState(integers, seeds);
+    const detail::SwapCandidate candidate = detail::best_predicted_swap(
+        integers.Data(), 20, wide.medoids, wide.assignments, wide.slot_of,
+        KERNEL_THREADS, KERNEL_CHUNK);
+
+    ASSERT_TRUE(candidate.valid);
+    EXPECT_EQ(wide.slot_of[candidate.entering_item], 20u);
+}
+
+TEST(KMedoidsSwapKernelTest, ResolvesTiedDeltasToTheSmallestEnteringThenLeavingItem) {
+    {
+        // Two symmetric triples: shifting either medoid one step inward saves
+        // exactly the same 0.25, so entering item 1 and entering item 4 tie and
+        // the smaller entering item has to win.
+        const DenseStorage storage = MakeTwoTriplesStorage();
+        const KernelState state = MakeKernelState(storage, {0, 3});
+        const double* data = storage.Data();
+
+        EXPECT_EQ(detail::recomputed_total(data, 6, state.assignments, 0, 1),
+                  detail::recomputed_total(data, 6, state.assignments, 1, 4));
+
+        const detail::SwapCandidate candidate = detail::best_predicted_swap(
+            data, 6, state.medoids, state.assignments, state.slot_of,
+            KERNEL_THREADS, KERNEL_CHUNK);
+
+        ASSERT_TRUE(candidate.valid);
+        EXPECT_EQ(candidate.score, -0.25);
+        EXPECT_EQ(candidate.entering_item, 1u);
+        EXPECT_EQ(candidate.leaving_slot, 0u);
+    }
+
+    {
+        // Both medoids sit at the origin, so entering item 4 saves the same
+        // amount whichever of them leaves and the leaving key decides. The
+        // medoid list is descending on purpose: slot 0 holds item 1 and slot 1
+        // holds item 0, so a tie rule written on the slot index would answer
+        // slot 0 while the required item rule answers slot 1.
+        const DenseStorage storage = MakeFarMedianStorage();
+        const KernelState state = MakeKernelState(storage, {1, 0});
+        const double* data = storage.Data();
+
+        EXPECT_EQ(detail::recomputed_total(data, 5, state.assignments, 0, 4),
+                  detail::recomputed_total(data, 5, state.assignments, 1, 4));
+
+        const detail::SwapCandidate candidate = detail::best_predicted_swap(
+            data, 5, state.medoids, state.assignments, state.slot_of,
+            KERNEL_THREADS, KERNEL_CHUNK);
+
+        ASSERT_TRUE(candidate.valid);
+        EXPECT_EQ(candidate.entering_item, 4u);
+        EXPECT_EQ(candidate.leaving_item, 0u);
+        EXPECT_EQ(candidate.leaving_slot, 1u);
+    }
+}
+
+TEST(KMedoidsSwapKernelTest, VerificationPassSelectsTheExhaustiveMinimumTotal) {
+    const DenseStorage storage = MakeFarMedianStorage();
+    const KernelState state = MakeKernelState(storage, {0, 1});
+
+    // Both medoids sit at the origin while items 2, 3 and 4 sit near 100, so
+    // the starting total is 0 + 0 + 99 + 105 + 102 = 306.
+    EXPECT_EQ(state.cost, 306.0);
+
+    const detail::SwapCandidate verified = detail::verification_pass(
+        storage.Data(), 5, state.medoids, state.assignments, state.slot_of,
+        state.cost, KERNEL_THREADS, KERNEL_CHUNK);
+
+    ASSERT_TRUE(verified.valid);
+    EXPECT_EQ(verified.entering_item, 4u);
+    EXPECT_EQ(verified.leaving_slot, 0u);
+    EXPECT_EQ(verified.leaving_item, 0u);
+
+    // This score is a TOTAL, not a delta: verification_pass ranks candidates by
+    // the recomputed cost of the whole configuration, which is what makes its
+    // comparison against the current cost bit-exact. Do not "fix" it to -299.
+    // Moving item 0 out for item 4 leaves medoids at positions 1 and 103, so
+    // the five items pay 1 + 0 + 3 + 3 + 0 = 7. Entering item 4 at the other
+    // slot totals 7 as well, and the four remaining pairs all total 10, so 7 is
+    // the exhaustive minimum and the smaller leaving item breaks the tie.
+    EXPECT_EQ(verified.score, 7.0);
+}
+
+TEST(KMedoidsSwapKernelTest, VerificationPassReturnsNoCandidateAtALocalOptimum) {
+    const DenseStorage storage = MakeFarMedianStorage();
+    const KernelState state = MakeKernelState(storage, {0, 4});
+    const double* data = storage.Data();
+
+    // {0, 4} is the exhaustive optimum over all ten pairs of these five items.
+    EXPECT_EQ(state.cost, 7.0);
+
+    // {1, 4} recomputes to exactly 7 as well, which is what makes the strict
+    // inequality observable: accepting an equal-cost swap here would send the
+    // loop between two configurations of the same cost forever.
+    EXPECT_EQ(detail::recomputed_total(data, 5, state.assignments, 0, 1), 7.0);
+
+    const detail::SwapCandidate verified = detail::verification_pass(
+        data, 5, state.medoids, state.assignments, state.slot_of, state.cost,
+        KERNEL_THREADS, KERNEL_CHUNK);
+
+    EXPECT_FALSE(verified.valid);
+}
+
+TEST(KMedoidsSwapKernelTest, RecomputedTotalIsBitIdenticalToARebuiltAssignmentCost) {
+    // The speculative undo in the optimization loop and the convergence
+    // argument both rest on this: the cached shortcut must agree with a full
+    // rebuild to the bit, or an accepted swap could report a cost the returned
+    // labels do not produce.
+    ExpectRecomputedTotalMatchesARebuild(MakeFarMedianStorage(), {0, 1});
+    ExpectRecomputedTotalMatchesARebuild(MakeSmallIntegerStorage(12, 31),
+                                         {0, 1, 2});
+    ExpectRecomputedTotalMatchesARebuild(MakeIntegerLatticeStorage(12, 17),
+                                         {0, 1, 2, 3});
+
+    const DenseStorage integers = MakeSmallIntegerStorage(14, 47);
+    ExpectRecomputedTotalMatchesARebuild(
+        integers, detail::maxmin_select_from(integers.Data(), 14, 4, 0));
+
+    // Degenerate matrices exercise the self-assignment rule inside the rebuild:
+    // a medoid keeps its own slot even when a duplicate sits at distance zero,
+    // and the shortcut has to reach the same totals anyway.
+    ExpectRecomputedTotalMatchesARebuild(MakeDuplicateRowStorage(), {0, 2});
+    ExpectRecomputedTotalMatchesARebuild(MakeAllZeroStorage(6), {0, 1});
 }
