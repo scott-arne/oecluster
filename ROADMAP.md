@@ -22,8 +22,8 @@ they are not recoveries of the original intent.
 | A1 | Internal indices, per-cluster record table, `noise_coverage_at` | shipped 5.1.0, 5.2.0 |
 | A2 | Partition agreement: ARI/AMI/NMI/V-measure/Fowlkes-Mallows, scaffold-ARI | shipped 5.3.0 |
 | A3 | SAR coherence: eta-squared, omega-squared, SALI, cliff density, MODI/RMODI | shipped 5.4.0 |
-| D1 | k-medoids/PAM: exactly `k` clusters with real-member centers | next |
-| C | Chemistry-native clustering: Murcko scaffold and MCS partitioning | planned |
+| D1 | k-medoids/PAM: exactly `k` clusters with real-member centers | shipped 5.5.0 |
+| C | Chemistry-native clustering: Murcko scaffold and MCS partitioning | next |
 | E | Diversity metrics and library-scale selection | planned |
 | D2 | Graph and leader algorithms: Leiden, Jarvis-Patrick, leader/DISE | planned |
 | B | Fingerprint-native O(N) counterparts of the A metrics | planned |

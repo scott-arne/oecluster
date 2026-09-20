@@ -104,11 +104,61 @@ The available algorithms and their key parameters:
 | `dbscan(dm, eps, ...)` | `DistanceMatrix` | `eps`, `min_samples` |
 | `hdbscan(dm, ...)` | `DistanceMatrix` | `min_cluster_size`, `min_samples`, `cluster_selection_method` |
 | `agglomerative(dm, ...)` | `DistanceMatrix` | `n_clusters`, `distance_threshold`, `linkage` |
+| `k_medoids(dm, ...)` | `DistanceMatrix` | `n_clusters`, `init`, `initial_medoids` |
 | `bitbirch(fingerprints, ...)` | `oefp.OEFPBatch` | `threshold`, `branching_factor`, `merge_criterion` |
 
 Algorithm-specific outputs live on the specific result subclass — for example
 `DBSCANResult.core_sample_indices` or `BitBirchResult.centroids` — so a result
 never carries fields that do not apply to its algorithm.
+
+### k-medoids
+
+`k_medoids()` places exactly `n_clusters` centers, each of which is a real
+member of the input rather than a synthetic average, and chooses them by
+minimizing the sum of every item's distance to its assigned center. It is the
+algorithm to reach for when the cluster count is a requirement and the centers
+have to be orderable compounds.
+
+```python
+result = oecluster.k_medoids(dm, n_clusters=10)
+
+result.medoids        # (17, 42, ...) one item index per cluster, ascending
+result.cost           # sum of each item's distance to its medoid
+result.n_iterations   # swap iterations performed
+result.converged      # True when no single swap lowers the cost
+```
+
+`init` selects the seeding strategy: `"build"` (the default; greedy PAM BUILD,
+which usually lands at or near the optimum the swap phase would reach anyway),
+`"farthest_first"` (deterministic MaxMin from the global medoid, for
+spread-out seeds), or `"explicit"` with `initial_medoids`. Passing
+`initial_medoids` with any other `init` raises, rather than silently deciding
+which one you meant.
+
+Output is byte-identical across runs, `num_threads` values and `chunk_size`
+values; those two options change how long the call takes and nothing else.
+
+`converged` is a real guarantee, not a loop-exit flag: when it is `True`, no
+single medoid swap lowers the cost the result reports, checked by recomputing
+each candidate total rather than by trusting the optimizer's incremental
+arithmetic. Reaching `max_iterations` is not an error -- the partition and its
+medoids are valid -- but `converged` is then `False` and no optimality claim is
+made.
+
+That guarantee is not free. The verification pass recomputes a full objective
+for each of the `n_clusters * (n - n_clusters)` candidate swaps, so it costs on
+the order of `n^2 * n_clusters` distance lookups and on large inputs can take
+longer than the swap phase it verifies. The cheaper incremental check was
+rejected deliberately: recomputing from scratch is what makes the comparison
+independent of the optimizer's own accumulated arithmetic.
+
+One consequence worth knowing: at a converged solution every medoid
+minimizes the distance sum within its own cluster, so
+`representative(result.clusters[i], dm, method="medoid")` returns
+`result.medoids[i]` whenever that minimum is unique. Where two members of a
+cluster tie on within-cluster distance sum, both are minimizers and the two
+functions may name different ones; the medoid the result reports is still a
+minimizer.
 
 ### BitBirch Variants
 
@@ -739,9 +789,21 @@ for all four.
 `butina()`, `dbscan()`, `hdbscan()`, `agglomerative()`, and `cluster_report()`
 assume their input is a metric: an item's distance to itself is zero, and the
 triangle inequality holds. Those five are the entry points that check.
-`activity_landscape()` and `modelability()` check a weaker standard described
-below -- they rank and threshold distances but never assume the triangle
-inequality. `representative()`, `rank_representatives()`, and
+`k_medoids()`, `activity_landscape()` and `modelability()` check a weaker
+standard described below -- they rank, threshold and add distances but never
+assume the triangle inequality. `k_medoids()` is the one *clustering* algorithm
+in that weaker group, which is not an oversight: PAM's objective is a sum of
+distances and its swap step compares two such sums, so nothing in it appeals to
+the triangle inequality and it takes no `allow_nonmetric` parameter because
+there is no assumption for a flag to override.
+
+That produces one asymmetry worth expecting. A Dice matrix that `k_medoids()`
+clusters without complaint will be refused by `cluster_report()` unless you pass
+`allow_nonmetric=True`, because the internal validity indices do lean on metric
+behavior where PAM does not. Both calls are behaving correctly; it is the
+sequence that surprises.
+
+`representative()`, `rank_representatives()`, and
 `select_representatives()` also take a distance matrix, and consult none of
 these facts. Not every comparison produces a metric, so each matrix records
 what its comparison actually guarantees:

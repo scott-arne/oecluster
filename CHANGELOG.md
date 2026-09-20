@@ -2,6 +2,31 @@
 
 This file starts at 5.0.0; earlier releases are not recorded here.
 
+## [5.5.0] - 2026-09-20
+
+### Added
+
+- `k_medoids`, in C++ and Python, placing exactly `n_clusters` medoids -- real
+  members of the input rather than synthetic averages -- by minimizing the sum
+  of every item's distance to its assigned medoid. Initialization is greedy PAM
+  BUILD (the default), deterministic farthest-first from the global medoid, or
+  caller-supplied indices; the swap phase is FastPAM1, an exact algebraic
+  reformulation of textbook PAM that gets all `k` deltas for a candidate in one
+  scan rather than one scan per pair. `KMedoidsResult` carries `medoids`,
+  `cost`, `n_iterations` and `converged`.
+- `k_medoids()` is the first clustering entry point that does not assume a
+  metric. Its objective is a sum of distances and its swap step compares two
+  such sums, so no step appeals to the triangle inequality; it uses the same
+  weaker gate as `activity_landscape()` and `modelability()` and takes no
+  `allow_nonmetric` parameter, because there is no assumption for a flag to
+  override. `cluster_report()` still requires the stronger gate, so a Dice
+  matrix that clusters here may need `allow_nonmetric=True` there.
+- `converged` on a k-medoids result is a verified claim rather than a loop-exit
+  flag: it is only ever `True` after a terminal pass has recomputed the total
+  cost of every single-swap alternative from scratch and found none lower.
+  Reaching `max_iterations` reports `converged=False` and does not raise.
+  Output is byte-identical across runs, thread counts and chunk sizes.
+
 ## [5.4.0] - 2026-09-17
 
 ### Added
