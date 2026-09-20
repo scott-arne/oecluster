@@ -71,6 +71,7 @@ __all__ = [  # noqa: RUF022
     "HDBSCANResult",
     "AgglomerativeResult",
     "BitBirchResult",
+    "KMedoidsResult",
     "RepresentativeMetrics",
     "ClusterRepresentative",
     "pdist",
@@ -85,6 +86,7 @@ __all__ = [  # noqa: RUF022
     "bitbirch",
     "bitbirch_recluster",
     "bitbirch_refine",
+    "k_medoids",
     "ButinaOptions",
     "RepresentativeOptions",
     "RepresentativeWeights",
@@ -94,6 +96,7 @@ __all__ = [  # noqa: RUF022
     "BitBirchOptions",
     "BitBirchReclusteringOptions",
     "BitBirchRefinementOptions",
+    "KMedoidsOptions",
     "FingerprintComparison",
     "ROCSComparison",
     "SuperposeComparison",
@@ -623,6 +626,7 @@ try:
         BitBirchOptions,
         BitBirchReclusteringOptions,
         BitBirchRefinementOptions,
+        KMedoidsOptions,
         pdist as _cpp_pdist,
         cdist_into_address as _cpp_cdist_into_address,
         cluster_report as _cluster_report,
@@ -636,6 +640,7 @@ try:
         bitbirch_cluster as _bitbirch_cluster,
         bitbirch_recluster as _bitbirch_recluster,
         bitbirch_refine as _bitbirch_refine,
+        k_medoids_cluster as _k_medoids_cluster,
     )
 except ImportError as e:
     raise ImportError(
@@ -1880,6 +1885,50 @@ class BitBirchResult(ClusteringResult):
         return "bitbirch"
 
 
+class KMedoidsResult(ClusteringResult):
+    """k-medoids clustering result with medoids and the objective value.
+
+    Medoids are real members of the input, one per cluster, sorted ascending by
+    item index so that label ``i`` always belongs to ``medoids[i]``. ``cost`` is
+    the sum of every item's distance to its assigned medoid, recomputed from the
+    returned assignment rather than accumulated from the optimizer's deltas.
+    """
+
+    def __init__(self, labels, clusters, *, medoids=(), cost=0.0,
+                 n_iterations=0, converged=False, native_owner=None):
+        super().__init__(labels, clusters, native_owner=native_owner)
+        self._medoids = tuple(int(medoid) for medoid in medoids)
+        self._cost = float(cost)
+        self._n_iterations = int(n_iterations)
+        self._converged = bool(converged)
+
+    @property
+    def medoids(self):
+        """Medoid item index per cluster, ascending and aligned with labels."""
+        return self._medoids
+
+    @property
+    def cost(self):
+        """Sum of each item's distance to its assigned medoid."""
+        return self._cost
+
+    @property
+    def n_iterations(self):
+        """Swap iterations performed."""
+        return self._n_iterations
+
+    @property
+    def converged(self):
+        """True when no single medoid swap lowers the reported cost.
+
+        False means ``max_iterations`` was reached; the partition is valid but
+        no local-optimality claim is made about it.
+        """
+        return self._converged
+
+    @property
+    def method(self):
+        return "k_medoids"
 
 
 def pdist(items,
@@ -2703,6 +2752,176 @@ def agglomerative(distance_matrix, *, n_clusters=2, distance_threshold=None,
         children=children,
         distances=result.Distances(),
         cluster_sizes=result.ClusterSizes(),
+    )
+
+
+def k_medoids(distance_matrix, *, n_clusters=2, init="build",
+              initial_medoids=None, max_iterations=100,
+              num_threads=0, chunk_size=4096):
+    """
+    Cluster a precomputed distance matrix with k-medoids (PAM).
+
+    Places exactly ``n_clusters`` medoids, each a real member of the input,
+    minimizing the sum of every item's distance to its assigned medoid. Every
+    item receives a label; ``-1`` is never emitted.
+
+    Unlike :func:`butina`, :func:`dbscan`, :func:`hdbscan` and
+    :func:`agglomerative`, this function does **not** require a metric and takes
+    no ``allow_nonmetric`` parameter. PAM's objective is a sum of distances and
+    its swap step compares two such sums, so no step appeals to the triangle
+    inequality and there is nothing for a flag to override. A Dice or Tanimoto
+    matrix clusters here with no override at all.
+
+    That creates one asymmetry worth knowing about in advance:
+    :func:`cluster_report` *does* assume a metric, so a matrix this function
+    accepted may be refused by the report unless you pass
+    ``allow_nonmetric=True`` there.
+
+    :param distance_matrix: SymmetricDistanceMatrix returned by :func:`pdist`.
+    :param n_clusters: Number of medoids to place; must be in [1, item count].
+    :param init: Initialization strategy: "build" (greedy PAM BUILD),
+        "farthest_first" (deterministic MaxMin), or "explicit"
+        (use ``initial_medoids``). Case-insensitive.
+    :param initial_medoids: Starting medoid indices; required when
+        ``init="explicit"`` and refused otherwise.
+    :param max_iterations: Swap iterations before giving up. Reaching the cap
+        is not an error: the result is valid and ``converged`` is False.
+    :param num_threads: Worker threads; 0 auto-detects hardware concurrency.
+    :param chunk_size: Items per work unit in the parallelized swap scan.
+    :returns: KMedoidsResult with labels, clusters, medoids, cost, iteration
+        count, and convergence.
+    :raises TypeError: If distance_matrix is not a SymmetricDistanceMatrix, or
+        an integer argument is not an integer.
+    :raises ValueError: If options are invalid, the matrix uses sparse storage,
+        or the matrix is not comparable.
+    :raises IndexError: If an explicit medoid index is outside the matrix.
+
+    Example::
+
+        dm = oecluster.pdist(mols, "fingerprint", metric="dice")
+        result = oecluster.k_medoids(dm, n_clusters=10)
+        for label, medoid in enumerate(result.medoids):
+            print(label, mols[medoid].GetTitle())
+    """
+    if not isinstance(distance_matrix, SymmetricDistanceMatrix):
+        raise TypeError("k_medoids() expects a SymmetricDistanceMatrix")
+
+    # An unrecognized init is deliberately NOT rejected here. Its row is the
+    # last one in the native table, so rejecting it first would make
+    # k_medoids(dm, init="bogus", chunk_size=0) report the init while the
+    # native call reports the chunk size -- the divergence the complete mirror
+    # exists to prevent. An unrecognized name is carried as "not Explicit",
+    # which is exactly what an unrecognized enumerator is to the native switch,
+    # and reported below in its own place.
+    init_map = {
+        "build": _oecluster.KMedoidsInit_Build,
+        "farthest_first": _oecluster.KMedoidsInit_FarthestFirst,
+        "explicit": _oecluster.KMedoidsInit_Explicit,
+    }
+    init_key = str(init).lower()
+
+    # Coerce caller arguments before the gate so that an invalid type is reported
+    # ahead of an advisory refusal that names a remedy which cannot rescue it.
+    # operator.index() accepts int, bool and numpy integers and rejects
+    # float/str/None; int() would silently truncate 2.5 to two clusters.
+    n_clusters_int = operator.index(n_clusters)
+    max_iterations_int = operator.index(max_iterations)
+    num_threads_int = operator.index(num_threads)
+    chunk_size_int = operator.index(chunk_size)
+
+    if initial_medoids is None:
+        seeds = []
+    else:
+        try:
+            seeds = [operator.index(index) for index in initial_medoids]
+        except TypeError as error:
+            raise TypeError(
+                "k_medoids() initial_medoids must be a sequence of ints"
+            ) from error
+
+    # All four reach size_t option fields, where a negative value raises
+    # OverflowError below the gate. Zero stays legal for num_threads: it means
+    # "choose for me".
+    if n_clusters_int < 0:
+        raise ValueError("K-medoids n_clusters must be non-negative")
+    if max_iterations_int < 0:
+        raise ValueError("K-medoids max_iterations must be non-negative")
+    if num_threads_int < 0:
+        raise ValueError("num_threads must be non-negative")
+    if chunk_size_int < 0:
+        raise ValueError("chunk_size must be non-negative")
+    if any(index < 0 for index in seeds):
+        raise ValueError("K-medoids initial_medoids must be non-negative")
+
+    # Every native check below is mirrored here, in the order
+    # k_medoids_cluster() applies them, and before the gate. That is stronger
+    # than agglomerative()'s partial mirror and deliberately so: the GIL wrapper
+    # collapses every native exception to RuntimeError, so a check left to the
+    # native layer loses both its type and its place in the order, and a caller
+    # could not write one except clause for "you passed me something invalid".
+
+    # ValueError, not TypeError: the argument's type is right, its storage is not.
+    if isinstance(distance_matrix.storage, SparseStorage):
+        raise ValueError(  # noqa: TRY004
+            "K-medoids clustering requires complete pairwise "
+            "distances; SparseStorage is not supported")
+    if chunk_size_int == 0:
+        raise ValueError("K-medoids chunk_size must be at least one")
+    if max_iterations_int == 0:
+        raise ValueError("K-medoids max_iterations must be at least one")
+    if n_clusters_int == 0:
+        raise ValueError("K-medoids n_clusters must be at least one")
+    if n_clusters_int > distance_matrix.num_samples:
+        raise ValueError(
+            "K-medoids n_clusters must be at most "
+            f"the item count ({distance_matrix.num_samples})")
+    if init_key != "explicit":
+        if seeds:
+            raise ValueError(
+                "K-medoids initial_medoids requires an explicit initialization")
+    else:
+        if len(seeds) != n_clusters_int:
+            raise ValueError(
+                "K-medoids initial_medoids must hold exactly n_clusters indices")
+        for index in seeds:
+            if index >= distance_matrix.num_samples:
+                raise IndexError(
+                    "K-medoids initial_medoids index is outside "
+                    "the storage range")
+        if len(set(seeds)) != len(seeds):
+            raise ValueError("K-medoids initial_medoids must be unique")
+    # Last, mirroring the last row of the native table.
+    if init_key not in init_map:
+        raise ValueError(
+            f"Unknown k-medoids init: {init!r}; expected 'build', "
+            "'farthest_first', or 'explicit'")
+
+    # require_comparable, not require_metric: PAM never appeals to the triangle
+    # inequality, so refusing a matrix for violating it would be over-refusal.
+    # The subset_scored refusal it keeps matters more here than for the ranking
+    # metrics that motivated it, because PAM adds the incomparable numbers up.
+    _gate.require_comparable(distance_matrix, "k_medoids")
+
+    options = KMedoidsOptions()
+    options.n_clusters = n_clusters_int
+    options.init = init_map[init_key]
+    if seeds:
+        native_seeds = _oecluster.SizeTVector()
+        for index in seeds:
+            native_seeds.push_back(index)
+        options.initial_medoids = native_seeds
+    options.max_iterations = max_iterations_int
+    options.num_threads = num_threads_int
+    options.chunk_size = chunk_size_int
+
+    result = _k_medoids_cluster(distance_matrix.storage, options)
+    return KMedoidsResult(
+        result.Labels(),
+        result.Members(),
+        medoids=result.Medoids(),
+        cost=result.Cost(),
+        n_iterations=result.NumIterations(),
+        converged=result.Converged(),
     )
 
 
