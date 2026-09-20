@@ -439,6 +439,22 @@ DenseStorage MakeLowIndexMedianStorage() {
     return storage;
 }
 
+// MakeFarMedianStorage with its last two items exchanged, so the far group's
+// unique median moves from item 4 to item 3. The two existing median fixtures
+// both place their winner at an EVEN index, which leaves a candidate loop that
+// stepped two at a time indistinguishable from one that stepped by one. Here
+// such a loop never evaluates the winner at all.
+DenseStorage MakeOddIndexMedianStorage() {
+    const double positions[5] = {0.0, 1.0, 100.0, 103.0, 106.0};
+    DenseStorage storage(5);
+    for (size_t i = 0; i < 5; ++i) {
+        for (size_t j = i + 1; j < 5; ++j) {
+            storage.Set(i, j, std::abs(positions[i] - positions[j]));
+        }
+    }
+    return storage;
+}
+
 // Five unit-spaced items and one item a full 2^53 away from all of them. The
 // spacing is the point: ulp(2^53) is 2, so a unit addend lands exactly halfway
 // between two representable doubles and rounds to even. Accumulating the small
@@ -1492,6 +1508,39 @@ TEST(KMedoidsSwapKernelTest, VerificationPassConsidersTheLowestIndexedItemAsAnEn
     // partner, so both slots tie at 4 and the smaller leaving ITEM decides.
     EXPECT_EQ(verified.leaving_item, 1u);
     EXPECT_EQ(verified.leaving_slot, 0u);
+}
+
+TEST(KMedoidsSwapKernelTest, VerificationPassConsidersAnOddIndexedEntrantInEveryChunk) {
+    // Medoids at 0 and 1 with items 2, 3 and 4 near 100, so the starting total
+    // is 0 + 0 + 99 + 102 + 105 = 306.
+    const DenseStorage storage = MakeOddIndexMedianStorage();
+    const KernelState state = MakeKernelState(storage, {0, 1});
+
+    EXPECT_EQ(state.cost, 306.0);
+
+    // num_threads = 1 fixes the order chunks are claimed in, which is what makes
+    // the per-chunk staging observable: with one worker the chunks run in
+    // ascending order, so a pass that wrote every chunk's local winner to the
+    // same slot would report the LAST chunk's winner rather than the best one.
+    // Chunk sizes 1 and 2 put the winner in chunk 3 of 5 and chunk 1 of 3
+    // respectively -- never in chunk zero, and never in the final chunk.
+    for (const size_t chunk : {size_t{1}, size_t{2}, KERNEL_CHUNK}) {
+        SCOPED_TRACE(testing::Message() << "chunk_size = " << chunk);
+
+        const detail::SwapCandidate verified = detail::verification_pass(
+            storage.Data(), 5, state.medoids, state.assignments, state.slot_of,
+            state.cost, 1, chunk);
+
+        // Item 3 is the unique best entrant, and its index is odd on purpose:
+        // both other median fixtures put their winner at an even index, so a
+        // candidate loop advancing two at a time would answer item 2 at a total
+        // of 10 on all of them and still look like a successful verification.
+        ASSERT_TRUE(verified.valid);
+        EXPECT_EQ(verified.entering_item, 3u);
+        EXPECT_EQ(verified.score, 7.0);
+        EXPECT_EQ(verified.leaving_item, 0u);
+        EXPECT_EQ(verified.leaving_slot, 0u);
+    }
 }
 
 TEST(KMedoidsSwapKernelTest, VerificationPassReturnsNoCandidateAtALocalOptimum) {
