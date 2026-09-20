@@ -560,6 +560,11 @@ def test_every_medoid_is_its_own_cluster_s_representative():
         assert chosen == result.medoids[label]
 
 
+# The global optimum here is a tie: items 2 and 3 both sum to 30.0 across the
+# whole set. That makes this a sharper check than a unique-minimum fixture would
+# be, because it pins that k_medoids and representative resolve a tie the same
+# way -- to the smaller item index -- rather than merely agreeing on an answer
+# that was never in doubt.
 def test_single_cluster_agrees_with_the_global_representative():
     import oecluster
 
@@ -593,7 +598,9 @@ def test_allow_nonmetric_is_not_a_parameter():
 
     dm = _two_triples()
     with pytest.raises(TypeError, match="allow_nonmetric"):
-        oecluster.k_medoids(dm, n_clusters=2, allow_nonmetric=True)
+        oecluster.k_medoids(
+            dm, n_clusters=2,
+            allow_nonmetric=True)  # pyright: ignore[reportCallIssue]
 
 
 def test_a_similarity_matrix_is_refused():
