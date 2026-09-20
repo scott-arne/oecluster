@@ -531,12 +531,14 @@ def test_an_absurd_num_threads_is_capped_at_the_item_count():
 
     The Python layer only rejects values above size_t, so 2^61 is well inside
     what it accepts and reaches the native code intact: this exercises the cap
-    rather than the representation check. Uncapped, ThreadPool tries to create
-    that many OS threads for a six-item problem, which at this magnitude
-    aborts the run and at a merely enormous one hangs it or trips
-    std::terminate while unwinding a vector of joinable threads, killing the
-    interpreter with no traceback. Capped, the answer is the single-threaded
-    one.
+    rather than the representation check. Uncapped, this magnitude exceeds the
+    thread vector's max_size, so the reserve throws before any thread is
+    created -- that is what this test observes. The cap matters more at the
+    magnitudes below it, which are too expensive to assert here: those are
+    genuinely attempted, so a six-item problem either spends unbounded time
+    creating threads or trips std::terminate while unwinding a vector of
+    joinable threads, killing the interpreter with no traceback. Capped, the
+    answer is the single-threaded one.
     """
     import oecluster
 

@@ -242,16 +242,21 @@ KMedoidsResult k_medoids_cluster(const StorageBackend& storage,
     // Capped at the item count once here and then passed to every helper
     // below, so no path from this entry point can hand ThreadPool the raw
     // field. num_threads is a size_t on a public options struct, and uncapped
-    // an oversized request is attempted rather than refused:
-    // ThreadPool::ParallelFor asks the OS for exactly that many threads to run
-    // what may be a single chunk. The mild outcome is a call that never
-    // returns, and the severe one kills the process, because the vector being
-    // filled already holds joinable threads when a creation failure throws and
-    // destroying a joinable thread calls std::terminate -- leaving no exception
-    // for a caller, or the Python layer above it, to report. A num_threads of 0
-    // means "use the hardware concurrency" and has to keep meaning that;
-    // validation guarantees n >= n_clusters >= 1, so the minimum passes that 0
-    // through untouched and can never manufacture one from a nonzero request.
+    // an oversized request is attempted rather than refused: ParallelFor
+    // reserves a vector of that many threads and then fills it, to run what may
+    // be a single chunk. Which way that goes wrong depends on the magnitude.
+    // Past the vector's max_size the reserve throws length_error before any
+    // thread exists, which is the benign case because the exception escapes
+    // normally. Below that the request is genuinely attempted, so a merely
+    // enormous count spends unbounded time and memory creating threads. Worst,
+    // a creation that fails partway unwinds a vector still holding joinable
+    // threads, and destroying a joinable thread calls std::terminate -- leaving
+    // no exception for a caller, or the Python layer above it, to report. Only
+    // the first of the three is what the regression tests observe; the cap
+    // exists for the other two. A num_threads of 0 means "use the hardware
+    // concurrency" and has to keep meaning that; validation guarantees
+    // n >= n_clusters >= 1, so the minimum passes that 0 through untouched and
+    // can never manufacture one from a nonzero request.
     const size_t num_threads = std::min(options.num_threads, n);
 
     if (options.n_clusters == n) {

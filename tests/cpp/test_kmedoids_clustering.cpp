@@ -1677,13 +1677,17 @@ TEST(KMedoidsDeterminismTest, IsIdenticalAcrossThreadCountsAndChunkSizes) {
 // num_threads is a size_t on a public options struct, so "more threads than
 // the machine could ever run" is a value a caller can simply pass, and
 // uncapped ThreadPool attempts it. What that costs depends on the magnitude,
-// which is why this row does not assert a particular failure: 2^61 aborts the
-// run when the thread vector is reserved, a merely enormous count instead
-// spends unbounded time creating threads for what is a single chunk, and a
-// creation that fails partway destroys threads still joinable in that vector,
-// which calls std::terminate and takes the process with it. Capping at the
-// item count removes all three, and the answer must equal the single-threaded
-// one because nothing in the algorithm depends on how many workers ran.
+// which is why this row does not assert a particular failure. The 2^61 used
+// here exceeds the thread vector's max_size, so uncapped it aborts the run at
+// the reserve, before any thread is created -- that is the mechanism this test
+// actually observes. The cap earns its place at the magnitudes below that one,
+// which the suite cannot exercise cheaply: a merely enormous count is genuinely
+// attempted and spends unbounded time creating threads for what is a single
+// chunk, and a creation that fails partway destroys threads still joinable in
+// that vector, which calls std::terminate and takes the process with it.
+// Capping at the item count removes all three, and the answer must equal the
+// single-threaded one because nothing in the algorithm depends on how many
+// workers ran.
 TEST(KMedoidsThreadCapTest, CapsAnAbsurdThreadCount) {
     const DenseStorage storage = MakeTwoTriplesStorage();
 
