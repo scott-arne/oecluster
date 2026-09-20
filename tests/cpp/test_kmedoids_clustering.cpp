@@ -348,17 +348,22 @@ void ExpectParityFromSeeds(const DenseStorage& storage,
     // recomputes its expectation differently and stays on EXPECT_DOUBLE_EQ.
     //
     // How much the assertion proves depends on the matrix, which matters when
-    // one day it fails. On the integer families every distance and partial sum
-    // is exactly representable, so ranking candidates by the predicted delta
-    // and ranking them by a brute-force total are the same ordering: agreement
-    // is a theorem there, and a failure is a kernel bug with nothing else to
-    // blame. On the continuous families it is a regression pin instead. The two
-    // orderings agree at these seeds because no near-tie happens to straddle a
-    // rounding boundary, not because they must, so a different libm, a
-    // different floating-point contraction setting or a new seed can part them
-    // with no code change at all. Diagnose a continuous-family failure as
-    // toolchain drift first and a kernel bug second; an integer-family failure
-    // admits no such excuse.
+    // one day it fails. On the small-integer families every distance and
+    // partial sum is exactly representable, so ranking candidates by the
+    // predicted delta and ranking them by a brute-force total are the same
+    // ordering: agreement is a theorem there, and a failure is a kernel bug
+    // with nothing else to blame. On the continuous families it is a regression
+    // pin instead. The two orderings agree at these seeds because no near-tie
+    // happens to straddle a rounding boundary, not because they must, so a
+    // different libm, a different floating-point contraction setting or a new
+    // seed can part them with no code change at all. Diagnose a
+    // continuous-family failure as toolchain drift first and a kernel bug
+    // second; a small-integer-family failure admits no such excuse.
+    //
+    // The 2^53 fixtures are the exception on both counts. Their distances are
+    // integers, but they are placed exactly where partial sums stop being
+    // exactly representable, so agreement is not a theorem there either and the
+    // toolchain-drift diagnosis applies -- see MakeCancellingSwapStorage.
     EXPECT_EQ(result.Cost(), NaiveTotalCost(data, n, reference));
 }
 
@@ -455,6 +460,9 @@ DenseStorage MakeOddIndexMedianStorage() {
     return storage;
 }
 
+constexpr double TWO_POW_53 = 9007199254740992.0;
+constexpr double TWO_POW_54 = 18014398509481984.0;
+
 // Five unit-spaced items and one item a full 2^53 away from all of them. The
 // spacing is the point: ulp(2^53) is 2, so a unit addend lands exactly halfway
 // between two representable doubles and rounds to even. Accumulating the small
@@ -465,19 +473,15 @@ DenseStorage MakeOddIndexMedianStorage() {
 // contract that total_cost and recomputed_total both promise.
 DenseStorage MakeOrderSensitiveSumStorage() {
     const size_t n = 6;
-    const double far = 9007199254740992.0;  // 2^53
     DenseStorage storage(n);
     for (size_t i = 0; i < n - 1; ++i) {
         for (size_t j = i + 1; j < n - 1; ++j) {
             storage.Set(i, j, 1.0);
         }
-        storage.Set(i, n - 1, far);
+        storage.Set(i, n - 1, TWO_POW_53);
     }
     return storage;
 }
-
-constexpr double TWO_POW_53 = 9007199254740992.0;
-constexpr double TWO_POW_54 = 18014398509481984.0;
 
 // Seven items, laid out so the predicted delta and the from-scratch
 // recomputation of the same swap disagree by exactly two units.
@@ -490,6 +494,12 @@ constexpr double TWO_POW_54 = 18014398509481984.0;
 // corrections, and a total accumulated over per-item minima -- add them in
 // different orders. Every 2^54 entry is a "never relevant" filler: it is large
 // enough that the item it belongs to can never be drawn to that partner.
+//
+// Both fixtures below assume the default rounding mode and no reassociation of
+// the kernel's sums. Neither accumulation contains a multiply, so FMA
+// contraction cannot reach them, and the build sets no fast-math flag; but a
+// failure here should still be diagnosed as a floating-point-flag change before
+// it is diagnosed as a kernel bug.
 //
 // :param medoid_gap: d(0, 6). Moves the second nearest distance of the two
 //     medoids, which is what decides whether the disagreement lands on the
@@ -1518,12 +1528,19 @@ TEST(KMedoidsSwapKernelTest, VerificationPassConsidersAnOddIndexedEntrantInEvery
 
     EXPECT_EQ(state.cost, 306.0);
 
-    // num_threads = 1 fixes the order chunks are claimed in, which is what makes
-    // the per-chunk staging observable: with one worker the chunks run in
-    // ascending order, so a pass that wrote every chunk's local winner to the
-    // same slot would report the LAST chunk's winner rather than the best one.
-    // Chunk sizes 1 and 2 put the winner in chunk 3 of 5 and chunk 1 of 3
-    // respectively -- never in chunk zero, and never in the final chunk.
+    // This loop carries two unrelated claims, so prune it with care.
+    //
+    // Per-chunk staging: num_threads = 1 fixes the order chunks are claimed in,
+    // so with one worker the chunks run in ascending order and a pass that wrote
+    // every chunk's local winner to the same slot would report the LAST chunk's
+    // winner rather than the best one. Chunk sizes 1 and 2 put the winner in
+    // chunk 3 of 5 and chunk 1 of 3 respectively -- never in chunk zero, and
+    // never in the final chunk. KERNEL_CHUNK is a single chunk and says nothing
+    // about staging.
+    //
+    // Candidate stride: chunk size 1 holds one candidate per chunk, so a loop
+    // stepping two at a time is invisible there; only chunk size 2 and
+    // KERNEL_CHUNK witness it.
     for (const size_t chunk : {size_t{1}, size_t{2}, KERNEL_CHUNK}) {
         SCOPED_TRACE(testing::Message() << "chunk_size = " << chunk);
 
@@ -1584,23 +1601,41 @@ TEST(KMedoidsSwapKernelTest, RecomputedTotalIsBitIdenticalToARebuiltAssignmentCo
     ExpectRecomputedTotalMatchesARebuild(MakeDuplicateRowStorage(), {0, 2});
     ExpectRecomputedTotalMatchesARebuild(MakeAllZeroStorage(6), {0, 1});
 
-    // The only fixture here whose sums are order-sensitive: every other one is
+    // The only fixtures here whose sums are order-sensitive: every other one is
     // small integers, which are exact in any accumulation order and so cannot
-    // witness the ascending-order contract at all.
+    // witness the ascending-order contract at all. The second is the matrix the
+    // speculative undo branch depends on, and the one whose two summation orders
+    // differ across a representable-unit boundary, so the shortcut and the
+    // rebuild agreeing on it is what lets
+    // KMedoidsDynamicRangeTest.HoldsParityWhenAPredictedImprovementIsUndone
+    // state its precondition through the shortcut.
     ExpectRecomputedTotalMatchesARebuild(MakeOrderSensitiveSumStorage(), {0, 1});
+    ExpectRecomputedTotalMatchesARebuild(MakeSpeculativeUndoStorage(), {0, 6});
 }
 
 TEST(KMedoidsDeterminismTest, IsIdenticalAcrossThreadCountsAndChunkSizes) {
     ExpectIdenticalAcrossSchedules(MakeEuclideanStorage(40, 4242, 1.0), 4);
 
     // A continuous matrix on its own understates what this row claims. Its
-    // distances are all of one magnitude, so a reduction that did depend on the
-    // schedule would move the answer by a few last bits and might not move the
-    // selected medoids at all. MakeOrderSensitiveSumStorage spaces its summands
-    // at 2^53, where a unit addend either survives or is rounded away depending
-    // on what has already been added, so the same mistake changes the reported
-    // cost by whole units.
-    ExpectIdenticalAcrossSchedules(MakeOrderSensitiveSumStorage(), 2);
+    // distances are all of one magnitude, so a reduction whose order depended on
+    // the schedule would move the answer by a few last bits and might not move
+    // the selected medoids at all.
+    //
+    // k = 1 on MakeOrderSensitiveSumStorage is the one configuration of that
+    // fixture where the 2^53 term reaches the reported cost: the single medoid
+    // is item 0, item 5 stays a non-medoid, and the total is four unit-sized
+    // terms plus 2^53. Ascending that sums to 2^53 + 4; adding the far term
+    // first absorbs all four units and leaves 2^53, so a reduction that summed
+    // in a schedule-dependent order would report different whole-unit costs at
+    // different chunk sizes rather than differing in the last bits. At any
+    // larger k the far item is itself selected as a medoid and the cost is a sum
+    // of small integers, exact in every order and blind to this.
+    //
+    // A reduction that is merely in the wrong FIXED order moves every run in
+    // this cross product together and cannot be caught here at all; that is
+    // pinned by the EXPECT_EQ(predicted.score, ...) assertions in the two
+    // KMedoidsDynamicRangeTest rows.
+    ExpectIdenticalAcrossSchedules(MakeOrderSensitiveSumStorage(), 1);
 }
 
 // Continuous distances only: a tied input is legitimately permutation-variant
@@ -1791,9 +1826,14 @@ TEST(KMedoidsDynamicRangeTest, HoldsParityOnAMatrixMixingBothScales) {
 // unvisited. These last two rows are built to separate them, one in each
 // direction. They are the only rows in the suite that reach either branch.
 
-// A predicted improvement that is not one. Deleting the trial rebuild -- taking
-// the prediction at its word -- reports medoids {0, 5} after one iteration
-// here, which is a worse partition than the one it started from.
+// A predicted improvement that is not one. What the undo protects is the
+// strict-improvement invariant the termination argument rests on: an accepted
+// configuration must have a strictly smaller recomputed cost than its
+// predecessor, which is what makes a configuration impossible to revisit.
+// Deleting the trial rebuild -- taking the prediction at its word -- bills a
+// zero-improvement move as progress and reports {0, 5} at 2^53 + 10 after one
+// iteration where the loop should report {0, 6} at 2^53 + 10 after none. The
+// two partitions cost exactly the same; it is the accounting that breaks.
 TEST(KMedoidsDynamicRangeTest, HoldsParityWhenAPredictedImprovementIsUndone) {
     const DenseStorage storage = MakeSpeculativeUndoStorage();
     const std::vector<size_t> seeds = {0, 6};
@@ -1805,8 +1845,19 @@ TEST(KMedoidsDynamicRangeTest, HoldsParityWhenAPredictedImprovementIsUndone) {
     ASSERT_TRUE(predicted.valid);
     // The precondition for the branch under test: the fast path is entered
     // because the prediction is negative, and the rebuild then declines it.
+    //
+    // These two are also load-bearing on their own, and not redundant with the
+    // end-to-end assertions below. They are the only place in the suite that
+    // pins the ascending accumulation order of `shared` and `correction` in
+    // best_predicted_swap: reversing that inner loop changes the answer here to
+    // score 0.0 entering item 3 while leaving every end-to-end result in this
+    // file unchanged.
     EXPECT_EQ(predicted.score, -2.0);
     EXPECT_EQ(predicted.entering_item, 5u);
+    // Stated through the cached shortcut rather than through the rebuild the
+    // loop itself performs. The two agree on this matrix, and
+    // RecomputedTotalIsBitIdenticalToARebuiltAssignmentCost pins that agreement
+    // on this exact fixture rather than leaving it to the general claim.
     EXPECT_EQ(detail::recomputed_total(storage.Data(), storage.NumSamples(),
                                        state.assignments,
                                        predicted.leaving_slot,
@@ -1841,6 +1892,10 @@ TEST(KMedoidsDynamicRangeTest, HoldsParityWhenTheVerificationPassAppliesTheSwap)
         storage.Data(), storage.NumSamples(), state.medoids, state.assignments,
         state.slot_of, KERNEL_THREADS, KERNEL_CHUNK);
     ASSERT_TRUE(predicted.valid);
+    // The counterpart of the score assertion in the row above, and the other
+    // half of what pins best_predicted_swap's accumulation order: reversing that
+    // inner loop turns this 0.0 into -2.0, and nothing else in the suite
+    // notices.
     EXPECT_EQ(predicted.score, 0.0);
     EXPECT_EQ(detail::recomputed_total(storage.Data(), storage.NumSamples(),
                                        state.assignments, 1, 5),
