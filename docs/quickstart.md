@@ -126,6 +126,7 @@ The other algorithms follow the same shape:
 db = oecluster.dbscan(dm, eps=0.35, min_samples=5)
 hdb = oecluster.hdbscan(dm, min_cluster_size=5)
 agg = oecluster.agglomerative(dm, n_clusters=10)
+km = oecluster.k_medoids(dm, n_clusters=10)
 ```
 
 BitBirch clusters OEFP binary fingerprint batches directly, without

@@ -92,15 +92,18 @@ private:
  *   the iteration cap was reached and no such claim is made.
  *
  * Output is byte-identical across runs, ``num_threads`` values and
- * ``chunk_size`` values; those two options change how long the call takes and
- * nothing else.
+ * ``chunk_size`` values; those two options change runtime and memory use but
+ * not the result.
  *
- * Two preconditions are assumed rather than checked, matching every other
+ * Three preconditions are assumed rather than checked, matching every other
  * algorithm in the library. Distances must be finite -- a NaN produces
  * undefined clusters -- and non-negative, which the exactly-k guarantee leans
  * on because it makes a medoid's zero self-distance the smallest value any
- * item can see. The Python entry point's gate enforces the first by scanning
- * the stored data.
+ * item can see. Finally, the sums that compute the objective must be
+ * representable; finite per-entry distances whose accumulated cost overflows
+ * to infinity silently change the chosen medoid while reporting
+ * ``cost=inf, converged=True``. The Python entry point's gate enforces the
+ * finiteness precondition by scanning the stored data.
  *
  * No step of this algorithm appeals to the triangle inequality, so a
  * non-metric dissimilarity is a legitimate input.

@@ -273,6 +273,8 @@ inline SwapCandidate best_predicted_swap(
             }
         }
 
+        // Index arithmetic assumes ParallelFor hands out uniform chunk-start
+        // offsets; guided or split-tail chunking would write past the end.
         chunk_best[begin / chunk] = local;
     });
 
@@ -371,6 +373,8 @@ inline SwapCandidate verification_pass(
             }
         }
 
+        // Index arithmetic assumes ParallelFor hands out uniform chunk-start
+        // offsets; guided or split-tail chunking would write past the end.
         chunk_best[begin / chunk] = local;
     });
 

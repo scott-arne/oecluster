@@ -2866,11 +2866,14 @@ def k_medoids(distance_matrix, *, n_clusters=2, init="build",
         raise ValueError("K-medoids initial_medoids must be non-negative")
 
     # Every native check below is mirrored here, in the order
-    # k_medoids_cluster() applies them, and before the gate. That is stronger
-    # than agglomerative()'s partial mirror and deliberately so: the GIL wrapper
-    # collapses every native exception to RuntimeError, so a check left to the
-    # native layer loses both its type and its place in the order, and a caller
-    # could not write one except clause for "you passed me something invalid".
+    # k_medoids_cluster() applies them, and before the gate, except the
+    # null-data guard (no Python-reachable way to construct storage with null
+    # data today, so that would surface as RuntimeError from the GIL wrapper
+    # rather than ValueError). That is stronger than agglomerative()'s partial
+    # mirror and deliberately so: the GIL wrapper collapses every native
+    # exception to RuntimeError, so a check left to the native layer loses both
+    # its type and its place in the order, and a caller could not write one
+    # except clause for "you passed me something invalid".
 
     # ValueError, not TypeError: the argument's type is right, its storage is not.
     if isinstance(distance_matrix.storage, SparseStorage):
