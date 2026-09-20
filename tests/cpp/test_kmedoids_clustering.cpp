@@ -469,8 +469,11 @@ constexpr double TWO_POW_54 = 18014398509481984.0;
 // distances first and the large one last keeps them (they reach 2^53 + 4);
 // accumulating the large one first absorbs every one of them (the sum stays at
 // 2^53). No fixture built from small integers can tell those two orders apart,
-// which is what makes this one the only witness to the ascending-order
-// contract that total_cost and recomputed_total both promise.
+// which is what this one is built to do: witness the ascending-order contract
+// that total_cost and recomputed_total both promise. It is the deliberate
+// witness rather than the only one -- MakeSpeculativeUndoStorage below turns
+// out to witness the same contract on one of its trial configurations, as a
+// side effect of the arithmetic it was built for.
 DenseStorage MakeOrderSensitiveSumStorage() {
     const size_t n = 6;
     DenseStorage storage(n);
@@ -493,9 +496,9 @@ DenseStorage MakeOrderSensitiveSumStorage() {
 // in, and the two summations here -- a delta accumulated over per-item
 // corrections, and a total accumulated over per-item minima -- add them in
 // different orders. The 2^54 entries are sentinels that keep every candidate
-// other than the one under test unattractive, and the way they do it is by
-// becoming those candidates' minima: entering item 2 while leaving slot 0, for
-// instance, gives medoids {2, 6} and leaves item 1 paying 2^54, which is
+// other than the one under test unattractive, sometimes by becoming those
+// candidates' minima: entering item 2 while leaving slot 0, for instance,
+// gives medoids {2, 6} and leaves item 1 paying 2^54, which is
 // min(d(1, 2), d(1, 6)). They are load-bearing, not padding.
 //
 // Both fixtures below assume the default rounding mode and no reassociation of
@@ -1031,7 +1034,7 @@ TEST(KMedoidsValidationTest, RefusesAnEmptyMatrix) {
 // work against O(1), and no observable the public API exposes can see it -- the
 // kernels take storage.Data() as a raw pointer, so a counting StorageBackend
 // cannot measure distance reads either. Measured: with the short circuit
-// removed the whole suite passes 608/608. Treat that as known, not as a gap
+// removed the whole suite still passes. Treat that as known, not as a gap
 // this file can close; catching it needs a complexity guard rather than a
 // behavioral assertion.
 TEST(KMedoidsDegenerateTest, ReturnsTheIdentityPartitionWhenEveryItemIsAMedoid) {
@@ -1617,19 +1620,29 @@ TEST(KMedoidsSwapKernelTest, RecomputedTotalIsBitIdenticalToARebuiltAssignmentCo
     ExpectRecomputedTotalMatchesARebuild(MakeDuplicateRowStorage(), {0, 2});
     ExpectRecomputedTotalMatchesARebuild(MakeAllZeroStorage(6), {0, 1});
 
-    // The only fixture here whose sums are order-sensitive: every other one is
-    // small integers, which are exact in any accumulation order and so cannot
-    // witness the ascending-order contract at all.
+    // The two fixtures below are the ones whose sums are order-sensitive here.
+    // Everything above is small integers or a degenerate matrix, exact in any
+    // accumulation order, and so cannot witness the ascending-order contract at
+    // all. Measured by reversing recomputed_total's accumulation loop: the
+    // focused suite then loses exactly two rows, this one and
+    // KMedoidsDynamicRangeTest.HoldsParityWhenAPredictedImprovementIsUndone,
+    // and inside this one only the two fixtures below report a pair.
+    //
+    // MakeOrderSensitiveSumStorage is built for that and fails six pairs under
+    // the reversal, each reporting 2^53 from the shortcut against 2^53 + 4 from
+    // the rebuild.
     ExpectRecomputedTotalMatchesARebuild(MakeOrderSensitiveSumStorage(), {0, 1});
 
-    // The undo fixture is here for a different reason, and not because its
-    // totals are delicate: at medoids {0, 6} the per-item minima are 0, 2^53, 4,
-    // 4, 2, 0, 0, every small term is even and ulp(2^53) is 2, so 2^53 + 10 is
-    // reached exactly in any grouping. That fixture's rounding sensitivity lives
-    // in the delta accumulation, which this helper does not touch. It belongs
-    // here because it is the one matrix the speculative undo branch depends on,
-    // and pinning that the shortcut and the rebuild produce a bit-identical
-    // total on it is what lets
+    // The undo fixture fails exactly one pair -- leaving slot 1, entering item
+    // 5, reporting 2^53 + 8 against a rebuilt 2^53 + 10 -- and that pair is the
+    // swap the speculative undo branch turns on. Note which sum is the delicate
+    // one: at the base medoids {0, 6} the per-item minima are 0, 2^53, 4, 4, 2,
+    // 0, 0, every small term even against ulp(2^53) = 2, so the base total is
+    // exact in any order and this helper never asserts it anyway. At the trial
+    // set {0, 5} the minima are 0, 0, 1, 1, 2, 0, 2^53 + 6, two odd units
+    // against the 2^53 term, and ascending and reversed genuinely differ. That
+    // is the total the helper compares, and pinning that the shortcut and the
+    // rebuild agree on it is what lets
     // KMedoidsDynamicRangeTest.HoldsParityWhenAPredictedImprovementIsUndone
     // state its precondition through the shortcut instead of through the rebuild
     // the swap loop actually performs.
@@ -1804,14 +1817,14 @@ TEST(KMedoidsConvergenceTest, EveryConvergedResultIsAVerifiedLocalOptimum) {
 }
 
 // Parity and verified local optimality at the two extremes of absolute scale,
-// nine orders of magnitude apart. That is the whole claim: these matrices are
-// randomly generated, and on them the predicted delta and the recomputed total
-// agree about which swaps improve, so no improvement decision here turns on the
-// disagreement between the two. An implementation that terminated on predicted
-// deltas alone still passes this row -- measured: with the swap loop's
-// verification result replaced by a default-constructed candidate, so that the
-// loop converges on the fast path alone, the focused suite is 56/57 and the
-// single failure is
+// fifteen orders of magnitude apart. That is the whole claim: these matrices
+// are randomly generated, and on them the predicted delta and the recomputed
+// total agree about which swaps improve, so no improvement decision here turns
+// on the disagreement between the two. An implementation that terminated on
+// predicted deltas alone still passes this row -- measured: with the swap
+// loop's verification result replaced by a default-constructed candidate, so
+// that the loop converges on the fast path alone, the only failure in the
+// focused suite is
 // KMedoidsDynamicRangeTest.HoldsParityWhenTheVerificationPassAppliesTheSwap,
 // which is handcrafted for exactly that purpose.
 TEST(KMedoidsDynamicRangeTest, HoldsParityAndOptimalityAtExtremeScales) {
