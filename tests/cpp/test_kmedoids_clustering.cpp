@@ -460,6 +460,67 @@ DenseStorage MakeOrderSensitiveSumStorage() {
     return storage;
 }
 
+constexpr double TWO_POW_53 = 9007199254740992.0;
+constexpr double TWO_POW_54 = 18014398509481984.0;
+
+// Seven items, laid out so the predicted delta and the from-scratch
+// recomputation of the same swap disagree by exactly two units.
+//
+// Items 0 and 6 are the medoids and items 2, 3 and 4 are their near neighbours;
+// item 5 is the entrant under test and item 1 is a distant item that pins the
+// running sum at 2^53, where ulp is 2 and a unit addend rounds to even. Which
+// of the unit-sized terms survive therefore depends on the order they are added
+// in, and the two summations here -- a delta accumulated over per-item
+// corrections, and a total accumulated over per-item minima -- add them in
+// different orders. Every 2^54 entry is a "never relevant" filler: it is large
+// enough that the item it belongs to can never be drawn to that partner.
+//
+// :param medoid_gap: d(0, 6). Moves the second nearest distance of the two
+//     medoids, which is what decides whether the disagreement lands on the
+//     favourable or the unfavourable side.
+// :param entrant_distance: d(2, 5) and d(3, 5), the entrant's pull on the two
+//     items it would capture.
+DenseStorage MakeCancellingSwapStorage(double medoid_gap,
+                                       double entrant_distance) {
+    DenseStorage storage(7);
+    storage.Set(0, 1, TWO_POW_53);
+    storage.Set(0, 2, 4.0);
+    storage.Set(0, 3, 1000.0);
+    storage.Set(0, 4, 2.0);
+    storage.Set(0, 5, 0.0);
+    storage.Set(0, 6, medoid_gap);
+    storage.Set(1, 2, TWO_POW_54);
+    storage.Set(1, 3, TWO_POW_54);
+    storage.Set(1, 4, TWO_POW_54);
+    storage.Set(1, 5, 0.0);
+    storage.Set(1, 6, TWO_POW_54);
+    storage.Set(2, 3, TWO_POW_54);
+    storage.Set(2, 4, TWO_POW_54);
+    storage.Set(2, 5, entrant_distance);
+    storage.Set(2, 6, 1000.0);
+    storage.Set(3, 4, TWO_POW_54);
+    storage.Set(3, 5, entrant_distance);
+    storage.Set(3, 6, 4.0);
+    storage.Set(4, 5, TWO_POW_54);
+    storage.Set(4, 6, TWO_POW_53 + 102.0);
+    storage.Set(5, 6, TWO_POW_54);
+    return storage;
+}
+
+// From medoids {0, 6} the predicted delta for (enter 5, leave slot 1) is -2,
+// but rebuilding the assignment from scratch returns the unchanged cost, so the
+// speculative swap has to be undone.
+DenseStorage MakeSpeculativeUndoStorage() {
+    return MakeCancellingSwapStorage(TWO_POW_53 + 6.0, 1.0);
+}
+
+// The mirror image: from medoids {0, 6} no predicted delta is negative, yet
+// (enter 5, leave slot 1) does lower the recomputed total by two, so only the
+// verification pass can find it.
+DenseStorage MakeMissedImprovementStorage() {
+    return MakeCancellingSwapStorage(TWO_POW_53, 3.0);
+}
+
 // The three inputs the swap kernels take together, bundled so a white-box test
 // states its starting configuration once instead of repeating the build ritual.
 struct KernelState {
@@ -1672,6 +1733,82 @@ TEST(KMedoidsDynamicRangeTest, HoldsParityOnAMatrixMixingBothScales) {
     options.n_clusters = 3;
     const KMedoidsResult result = k_medoids_cluster(storage, options);
     ASSERT_TRUE(result.Converged());
+    ExpectVerifiedLocalOptimum(storage, result);
+}
+
+// The randomly generated dynamic-range matrices never actually separate the
+// predicted delta from the recomputed total: on every one of them the two agree
+// on which swaps improve, so the swap loop's two correction branches stay
+// unvisited. These last two rows are built to separate them, one in each
+// direction. They are the only rows in the suite that reach either branch.
+
+// A predicted improvement that is not one. Deleting the trial rebuild -- taking
+// the prediction at its word -- reports medoids {0, 5} after one iteration
+// here, which is a worse partition than the one it started from.
+TEST(KMedoidsDynamicRangeTest, HoldsParityWhenAPredictedImprovementIsUndone) {
+    const DenseStorage storage = MakeSpeculativeUndoStorage();
+    const std::vector<size_t> seeds = {0, 6};
+
+    const KernelState state = MakeKernelState(storage, seeds);
+    const detail::SwapCandidate predicted = detail::best_predicted_swap(
+        storage.Data(), storage.NumSamples(), state.medoids, state.assignments,
+        state.slot_of, KERNEL_THREADS, KERNEL_CHUNK);
+    ASSERT_TRUE(predicted.valid);
+    // The precondition for the branch under test: the fast path is entered
+    // because the prediction is negative, and the rebuild then declines it.
+    EXPECT_EQ(predicted.score, -2.0);
+    EXPECT_EQ(predicted.entering_item, 5u);
+    EXPECT_EQ(detail::recomputed_total(storage.Data(), storage.NumSamples(),
+                                       state.assignments,
+                                       predicted.leaving_slot,
+                                       predicted.entering_item),
+              state.cost);
+
+    ExpectParityFromSeeds(storage, seeds);
+
+    KMedoidsOptions options;
+    options.n_clusters = 2;
+    options.init = KMedoidsInit::Explicit;
+    options.initial_medoids = seeds;
+    const KMedoidsResult result = k_medoids_cluster(storage, options);
+
+    EXPECT_EQ(result.Medoids(), std::vector<size_t>({0, 6}));
+    EXPECT_EQ(result.Cost(), TWO_POW_53 + 10.0);
+    // The undone swap must not be billed as progress.
+    EXPECT_EQ(result.NumIterations(), 0u);
+    EXPECT_TRUE(result.Converged());
+    ExpectVerifiedLocalOptimum(storage, result);
+}
+
+// The reverse: no predicted delta is negative, so the fast path declines, and
+// only the terminal verification pass sees the improvement. Deleting that pass
+// reports medoids {0, 6} at cost 2^53 + 10 and calls it converged.
+TEST(KMedoidsDynamicRangeTest, HoldsParityWhenTheVerificationPassAppliesTheSwap) {
+    const DenseStorage storage = MakeMissedImprovementStorage();
+    const std::vector<size_t> seeds = {0, 6};
+
+    const KernelState state = MakeKernelState(storage, seeds);
+    const detail::SwapCandidate predicted = detail::best_predicted_swap(
+        storage.Data(), storage.NumSamples(), state.medoids, state.assignments,
+        state.slot_of, KERNEL_THREADS, KERNEL_CHUNK);
+    ASSERT_TRUE(predicted.valid);
+    EXPECT_EQ(predicted.score, 0.0);
+    EXPECT_EQ(detail::recomputed_total(storage.Data(), storage.NumSamples(),
+                                       state.assignments, 1, 5),
+              TWO_POW_53 + 8.0);
+
+    ExpectParityFromSeeds(storage, seeds);
+
+    KMedoidsOptions options;
+    options.n_clusters = 2;
+    options.init = KMedoidsInit::Explicit;
+    options.initial_medoids = seeds;
+    const KMedoidsResult result = k_medoids_cluster(storage, options);
+
+    EXPECT_EQ(result.Medoids(), std::vector<size_t>({0, 5}));
+    EXPECT_EQ(result.Cost(), TWO_POW_53 + 8.0);
+    EXPECT_EQ(result.NumIterations(), 1u);
+    EXPECT_TRUE(result.Converged());
     ExpectVerifiedLocalOptimum(storage, result);
 }
 
