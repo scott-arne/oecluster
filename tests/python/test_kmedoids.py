@@ -172,6 +172,8 @@ def test_non_integer_seeds_raise_type_error():
     ({"max_iterations": -1}, "max_iterations must be non-negative"),
     ({"num_threads": -1}, "num_threads must be non-negative"),
     ({"chunk_size": -1}, "chunk_size must be non-negative"),
+    ({"n_clusters": 2, "init": "explicit", "initial_medoids": [-1, 0]},
+     "initial_medoids must be non-negative"),
 ])
 def test_negative_integer_arguments_raise_value_error(kwargs, message):
     import oecluster
@@ -256,6 +258,35 @@ def test_duplicate_seeds_are_refused():
     with pytest.raises(ValueError, match="must be unique"):
         oecluster.k_medoids(
             _two_triples(), n_clusters=2, init="explicit", initial_medoids=[3, 3])
+
+
+# Multiple simultaneous failures report the first one in native row order.
+# A reordering that leaves single-failure tests green surfaces here.
+@pytest.mark.parametrize("kwargs,exc_type,message", [
+    ({"n_clusters": 0, "max_iterations": 0, "chunk_size": 0},
+     ValueError, "chunk_size must be at least one"),
+    ({"n_clusters": 0, "max_iterations": 0},
+     ValueError, "max_iterations must be at least one"),
+    ({"n_clusters": 7, "chunk_size": 0},
+     ValueError, "chunk_size must be at least one"),
+    ({"n_clusters": 2, "init": "explicit", "initial_medoids": [6, 6]},
+     IndexError, "outside the storage range"),
+])
+def test_the_first_reported_failure_matches_the_native_row_order(kwargs, exc_type, message):
+    import oecluster
+
+    with pytest.raises(exc_type, match=message):
+        oecluster.k_medoids(_two_triples(), **kwargs)
+
+
+def test_sparse_storage_outranks_scalar_checks():
+    import oecluster
+
+    storage = oecluster.SparseStorage(4, 0.5)
+    dm = oecluster.SymmetricDistanceMatrix(storage, "test", list("abcd"), {})
+
+    with pytest.raises(ValueError, match="SparseStorage is not supported"):
+        oecluster.k_medoids(dm, n_clusters=0, chunk_size=0)
 
 
 # A missed mirror surfaces as RuntimeError. Nothing here may raise one.
