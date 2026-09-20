@@ -561,18 +561,26 @@ def test_every_medoid_is_its_own_cluster_s_representative():
 
 
 # The global optimum here is a tie: items 2 and 3 both sum to 30.0 across the
-# whole set. That makes this a sharper check than a unique-minimum fixture would
-# be, because it pins that k_medoids and representative resolve a tie the same
-# way -- to the smaller item index -- rather than merely agreeing on an answer
-# that was never in doubt.
+# whole set. The two implementations land on the same item by different rules --
+# k_medoids breaks ties toward the smaller item index, while representative
+# stable-sorts on score and so returns whichever tied item came first in the
+# caller's list -- so they coincide only because the list passed here ascends.
+# Each index is therefore asserted outright rather than merely against the
+# other: a bare equality survives a fixture drifting out of the tie, since both
+# implementations would then agree on whatever the new sole winner was.
 def test_single_cluster_agrees_with_the_global_representative():
     import oecluster
 
     dm = _two_triples()
     result = oecluster.k_medoids(dm, n_clusters=1)
 
-    assert result.medoids[0] == oecluster.representative(
-        list(range(dm.num_samples)), dm, method="medoid")
+    assert result.medoids[0] == 2
+    assert oecluster.representative(
+        list(range(dm.num_samples)), dm, method="medoid") == 2
+    # Reversing the input proves the rules really are distinct, so the comment
+    # above cannot quietly rot into describing a shared index rule.
+    assert oecluster.representative(
+        list(reversed(range(dm.num_samples))), dm, method="medoid") == 3
 
 
 # Dice is the repo's canonical non-metric fingerprint distance. This is the test
