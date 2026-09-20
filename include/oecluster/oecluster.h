@@ -49,9 +49,9 @@ class DistanceMatrix;
 #include "oecluster/clustering/HDBSCAN.h"
 #include "oecluster/clustering/Agglomerative.h"
 #include "oecluster/clustering/BitBirch.h"
+#include "oecluster/clustering/KMedoids.h"
 #include "oecluster/clustering/ClusterReport.h"
 #include "oecluster/clustering/PartitionAgreement.h"
 #include "oecluster/clustering/SARCoherence.h"
-#include "oecluster/clustering/KMedoids.h"
 
 #endif  // OECLUSTER_OECLUSTER_H

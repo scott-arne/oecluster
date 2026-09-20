@@ -758,8 +758,9 @@ OECLUSTER_GIL_EXCEPTION(OECluster::bitbirch_cluster, bitbirch_cluster)
 OECLUSTER_GIL_EXCEPTION(OECluster::bitbirch_recluster, bitbirch_recluster)
 OECLUSTER_GIL_EXCEPTION(OECluster::bitbirch_refine, bitbirch_refine)
 
-// The swap loop sweeps every pair of a precomputed matrix once per iteration
-// and touches no Python object.
+// BUILD initialization at O(k N^2) and the swap loop's per-iteration pass both
+// sweep a precomputed matrix, and the ThreadPool workers the call spawns run
+// entirely on native data with no Python object in reach.
 OECLUSTER_GIL_EXCEPTION(OECluster::k_medoids_cluster, k_medoids_cluster)
 
 // The AMI path is the library's one second-scale computation, so it must not
