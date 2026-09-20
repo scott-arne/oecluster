@@ -105,6 +105,8 @@ __all__ = [  # noqa: RUF022
     "descriptor_statistics",
 ]
 
+# Maximum value for size_t fields forwarded to C++
+_SIZE_T_MAX = (1 << (8 * ctypes.sizeof(ctypes.c_size_t))) - 1
 
 
 def _user_cache_root():
@@ -2782,8 +2784,8 @@ def k_medoids(distance_matrix, *, n_clusters=2, init="build",
     :param init: Initialization strategy: "build" (greedy PAM BUILD),
         "farthest_first" (deterministic MaxMin), or "explicit"
         (use ``initial_medoids``). Case-insensitive.
-    :param initial_medoids: Starting medoid indices; required when
-        ``init="explicit"`` and refused otherwise.
+    :param initial_medoids: Starting medoid indices; a non-empty sequence is
+        required when ``init="explicit"`` and refused otherwise.
     :param max_iterations: Swap iterations before giving up. Reaching the cap
         is not an error: the result is valid and ``converged`` is False.
     :param num_threads: Worker threads; 0 auto-detects hardware concurrency.
@@ -2792,8 +2794,9 @@ def k_medoids(distance_matrix, *, n_clusters=2, init="build",
         count, and convergence.
     :raises TypeError: If distance_matrix is not a SymmetricDistanceMatrix, or
         an integer argument is not an integer.
-    :raises ValueError: If options are invalid, the matrix uses sparse storage,
-        or the matrix is not comparable.
+    :raises ValueError: If options are invalid (including negative or oversized
+        integers for max_iterations/num_threads/chunk_size), the matrix uses
+        sparse storage, or the matrix is not comparable.
     :raises IndexError: If an explicit medoid index is outside the matrix.
 
     Example::
@@ -2839,17 +2842,26 @@ def k_medoids(distance_matrix, *, n_clusters=2, init="build",
                 "k_medoids() initial_medoids must be a sequence of ints"
             ) from error
 
-    # All four reach size_t option fields, where a negative value raises
-    # OverflowError below the gate. Zero stays legal for num_threads: it means
-    # "choose for me".
+    # All four reach size_t option fields, where a negative value or an oversized
+    # positive raises OverflowError below the gate. Zero stays legal for
+    # num_threads: it means "choose for me". The upper-bound checks are
+    # representation constraints about what a size_t can hold, so they live here
+    # with the negativity checks rather than in the mirror, and they fire before
+    # the gate so an oversized value cannot hide behind an advisory refusal.
     if n_clusters_int < 0:
         raise ValueError("K-medoids n_clusters must be non-negative")
     if max_iterations_int < 0:
         raise ValueError("K-medoids max_iterations must be non-negative")
+    if max_iterations_int > _SIZE_T_MAX:
+        raise ValueError("K-medoids max_iterations exceeds size_t maximum")
     if num_threads_int < 0:
         raise ValueError("num_threads must be non-negative")
+    if num_threads_int > _SIZE_T_MAX:
+        raise ValueError("num_threads exceeds size_t maximum")
     if chunk_size_int < 0:
         raise ValueError("chunk_size must be non-negative")
+    if chunk_size_int > _SIZE_T_MAX:
+        raise ValueError("chunk_size exceeds size_t maximum")
     if any(index < 0 for index in seeds):
         raise ValueError("K-medoids initial_medoids must be non-negative")
 
