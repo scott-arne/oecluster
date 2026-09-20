@@ -36,6 +36,7 @@ set(_OECLUSTER_SWIG_DEPENDS
     ${CMAKE_SOURCE_DIR}/include/oecluster/clustering/HDBSCAN.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/clustering/Agglomerative.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/clustering/BitBirch.h
+    ${CMAKE_SOURCE_DIR}/include/oecluster/clustering/KMedoids.h
 )
 
 set_source_files_properties(oecluster.i PROPERTIES

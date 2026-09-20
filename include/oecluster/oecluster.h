@@ -52,5 +52,6 @@ class DistanceMatrix;
 #include "oecluster/clustering/ClusterReport.h"
 #include "oecluster/clustering/PartitionAgreement.h"
 #include "oecluster/clustering/SARCoherence.h"
+#include "oecluster/clustering/KMedoids.h"
 
 #endif  // OECLUSTER_OECLUSTER_H

@@ -30,6 +30,7 @@
 #include "oecluster/clustering/ClusterReport.h"
 #include "oecluster/clustering/PartitionAgreement.h"
 #include "oecluster/clustering/SARCoherence.h"
+#include "oecluster/clustering/KMedoids.h"
 #include "oefp/batch.h"
 #include "oefp/oefp.h"
 
@@ -757,6 +758,10 @@ OECLUSTER_GIL_EXCEPTION(OECluster::bitbirch_cluster, bitbirch_cluster)
 OECLUSTER_GIL_EXCEPTION(OECluster::bitbirch_recluster, bitbirch_recluster)
 OECLUSTER_GIL_EXCEPTION(OECluster::bitbirch_refine, bitbirch_refine)
 
+// The swap loop sweeps every pair of a precomputed matrix once per iteration
+// and touches no Python object.
+OECLUSTER_GIL_EXCEPTION(OECluster::k_medoids_cluster, k_medoids_cluster)
+
 // The AMI path is the library's one second-scale computation, so it must not
 // hold the GIL. The override is chosen at wrap time and cannot see the option
 // value, so it wraps every overload of the name rather than branching.
@@ -1043,6 +1048,7 @@ public:
 %include "oecluster/clustering/HDBSCAN.h"
 %include "oecluster/clustering/Agglomerative.h"
 %include "oecluster/clustering/BitBirch.h"
+%include "oecluster/clustering/KMedoids.h"
 
 // ============================================================================
 // Version macros
