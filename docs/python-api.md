@@ -202,10 +202,13 @@ index = oecluster.representative(clustering.clusters[0], dm,
 ```
 
 Molecules are taken as given: there is no salt stripping and no largest-component
-selection, so a two-component record yields one `.`-joined scaffold that will not
-match the same compound recorded as a free base. Strip salts first if you want
-the parent scaffold. Stereochemistry is dropped and explicit hydrogens are
-suppressed, so scaffold identity does not depend on how a molecule was read.
+selection. This matters less than it sounds, because an acyclic counter-ion has
+no ring system and so contributes no scaffold region -- a hydrochloride, a
+sodium salt and a mesylate all give the same scaffold as the free base. Only a
+counter-ion that carries its own ring, such as a tosylate, adds a `.`-joined
+component that will not match the free base. Stereochemistry is dropped and
+explicit hydrogens are suppressed, so scaffold identity does not depend on how a
+molecule was read.
 
 ### BitBirch Variants
 

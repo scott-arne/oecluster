@@ -23,7 +23,9 @@ This file starts at 5.0.0; earlier releases are not recorded here.
 ### Notes
 
 - Molecules are taken as given: no salt stripping and no largest-component
-  selection, so a multi-component record produces one `.`-joined scaffold.
+  selection. An acyclic counter-ion carries no ring system and so contributes
+  no scaffold region, which makes the usual salt forms come out identical to
+  the free base; only a ring-bearing counter-ion adds a `.`-joined component.
   Stereochemistry is dropped and explicit hydrogens are suppressed, so scaffold
   identity does not depend on how a molecule was read.
 - Extraction parallelizes across molecules only when the OpenEye memory-pool
