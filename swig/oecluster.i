@@ -31,6 +31,7 @@
 #include "oecluster/clustering/PartitionAgreement.h"
 #include "oecluster/clustering/SARCoherence.h"
 #include "oecluster/clustering/KMedoids.h"
+#include "oecluster/clustering/MurckoScaffold.h"
 #include "oefp/batch.h"
 #include "oefp/oefp.h"
 
@@ -763,6 +764,12 @@ OECLUSTER_GIL_EXCEPTION(OECluster::bitbirch_refine, bitbirch_refine)
 // entirely on native data with no Python object in reach.
 OECLUSTER_GIL_EXCEPTION(OECluster::k_medoids_cluster, k_medoids_cluster)
 
+// Extraction spawns ThreadPool workers that touch only OEChem data, and the
+// canonical SMILES it builds never reaches a Python object, so the GIL is
+// released for both entry points.
+OECLUSTER_GIL_EXCEPTION(OECluster::murcko_scaffolds, murcko_scaffolds)
+OECLUSTER_GIL_EXCEPTION(OECluster::murcko_cluster, murcko_cluster)
+
 // The AMI path is the library's one second-scale computation, so it must not
 // hold the GIL. The override is chosen at wrap time and cannot see the option
 // value, so it wraps every overload of the name rather than branching.
@@ -1050,6 +1057,7 @@ public:
 %include "oecluster/clustering/Agglomerative.h"
 %include "oecluster/clustering/BitBirch.h"
 %include "oecluster/clustering/KMedoids.h"
+%include "oecluster/clustering/MurckoScaffold.h"
 
 // ============================================================================
 // Version macros

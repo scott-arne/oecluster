@@ -72,6 +72,7 @@ __all__ = [  # noqa: RUF022
     "AgglomerativeResult",
     "BitBirchResult",
     "KMedoidsResult",
+    "MurckoResult",
     "RepresentativeMetrics",
     "ClusterRepresentative",
     "pdist",
@@ -87,6 +88,8 @@ __all__ = [  # noqa: RUF022
     "bitbirch_recluster",
     "bitbirch_refine",
     "k_medoids",
+    "murcko",
+    "murcko_scaffolds",
     "ButinaOptions",
     "RepresentativeOptions",
     "RepresentativeWeights",
@@ -643,6 +646,8 @@ try:
         bitbirch_recluster as _bitbirch_recluster,
         bitbirch_refine as _bitbirch_refine,
         k_medoids_cluster as _k_medoids_cluster,
+        murcko_scaffolds as _murcko_scaffolds,
+        murcko_cluster as _murcko_cluster,
     )
 except ImportError as e:
     raise ImportError(
@@ -1933,6 +1938,38 @@ class KMedoidsResult(ClusteringResult):
         return "k_medoids"
 
 
+class MurckoResult(ClusteringResult):
+    """Murcko scaffold clustering result with the scaffold strings.
+
+    Clusters are scaffold identity classes: two molecules share a cluster
+    exactly when their scaffolds canonicalize to the same SMILES. Labels come
+    from sorting the distinct scaffold strings, so ``cluster_scaffolds`` is
+    ascending and ``cluster_scaffolds[i]`` names ``clusters[i]``. A molecule
+    with no ring system has an empty scaffold string and carries ``-1``.
+    """
+
+    def __init__(self, labels, clusters, *, scaffolds=(), cluster_scaffolds=(),
+                 native_owner=None):
+        super().__init__(labels, clusters, native_owner=native_owner)
+        self._scaffolds = tuple(str(scaffold) for scaffold in scaffolds)
+        self._cluster_scaffolds = tuple(
+            str(scaffold) for scaffold in cluster_scaffolds)
+
+    @property
+    def scaffolds(self):
+        """Per-item scaffold SMILES in input order; '' for an acyclic molecule."""
+        return self._scaffolds
+
+    @property
+    def cluster_scaffolds(self):
+        """Scaffold naming each cluster, ascending; entry i belongs to label i."""
+        return self._cluster_scaffolds
+
+    @property
+    def method(self):
+        return "murcko"
+
+
 def pdist(items,
           comparison,
           *,
@@ -2937,6 +2974,139 @@ def k_medoids(distance_matrix, *, n_clusters=2, init="build",
         cost=result.Cost(),
         n_iterations=result.NumIterations(),
         converged=result.Converged(),
+    )
+
+
+# Module level rather than function local, because both entry points share it.
+_SCAFFOLD_TYPES = {
+    "framework": _oecluster.ScaffoldType_Framework,
+    "generic": _oecluster.ScaffoldType_Generic,
+}
+
+
+def _murcko_options(mols, scaffold, num_threads, caller):
+    """Validate the Murcko keywords and build the native options struct.
+
+    The SWIG layer collapses every native exception to ``RuntimeError``, so the
+    native checks are mirrored here -- before the call -- to give callers the
+    exception type that actually describes what happened. Options are judged
+    before inputs, matching the native ordering.
+
+    :param mols: The caller's molecule sequence, judged only for emptiness.
+    :param scaffold: Scaffold level name; case-insensitive.
+    :param num_threads: Worker thread request.
+    :param caller: Public function name, for the messages.
+    :returns: A populated native ``MurckoOptions``.
+    :raises TypeError: If ``scaffold`` is not a string or ``num_threads`` is not
+        index-coercible.
+    :raises ValueError: If ``scaffold`` is not a known level, ``mols`` is empty,
+        or ``num_threads`` is negative or larger than a ``size_t``.
+    """
+    if not isinstance(scaffold, str):
+        raise TypeError(f"{caller}() scaffold must be a string")
+    key = scaffold.lower()
+    if key not in _SCAFFOLD_TYPES:
+        raise ValueError(
+            f"Unknown Murcko scaffold type: {scaffold!r}; "
+            "expected 'framework' or 'generic'")
+    if len(mols) == 0:
+        raise ValueError(f"{caller}() requires at least one molecule")
+
+    num_threads_int = operator.index(num_threads)
+    if num_threads_int < 0:
+        raise ValueError("num_threads must be non-negative")
+    if num_threads_int > _SIZE_T_MAX:
+        raise ValueError("num_threads exceeds size_t maximum")
+
+    options = _oecluster.MurckoOptions()
+    options.scaffold = _SCAFFOLD_TYPES[key]
+    options.num_threads = num_threads_int
+    return options
+
+
+def murcko_scaffolds(mols, *, scaffold="framework", num_threads=0):
+    """
+    Compute the Bemis-Murcko scaffold of each molecule.
+
+    Returns one canonical SMILES per molecule, in input order, suitable for
+    passing straight to :func:`scaffold_agreement` or to the
+    ``scaffold_labels=`` argument of the representative functions.
+
+    A molecule with no ring system yields ``''``, which is the "missing
+    scaffold" convention those consumers already use. A molecule that *has*
+    rings but from which no framework can be extracted is an error rather than
+    an empty string.
+
+    Three normalizations are applied, all of them so that scaffold identity is
+    string identity. Stereochemistry is dropped, because deleting sidechains can
+    orphan a stereocenter and leave a configuration that means nothing;
+    enantiomers and diastereomers therefore share a scaffold. Explicit hydrogens
+    are suppressed, so an SD-file molecule and the same molecule read from
+    SMILES agree. Nothing else is standardized: there is no salt stripping and
+    no largest-component selection, so a two-component record yields one
+    ``.``-joined scaffold that will not match the same drug recorded as a free
+    base. Strip salts first if you want the parent scaffold.
+
+    Input molecules are never modified.
+
+    :param mols: List of OEMolBase molecules.
+    :param scaffold: ``"framework"`` for the classic Bemis-Murcko scaffold --
+        ring systems plus their linkers -- or ``"generic"`` to reduce that
+        framework to its topology, every heavy atom carbon and every bond
+        single. Case-insensitive.
+    :param num_threads: Worker threads; 0 auto-detects hardware concurrency. An
+        over-large value is clamped, not refused. Extraction runs serially
+        whatever this value is when the OpenEye memory-pool mode is not
+        thread-safe.
+    :returns: Scaffold SMILES, one per molecule, in input order.
+    :raises TypeError: If ``scaffold`` is not a string, ``num_threads`` is not
+        an integer, or ``mols`` is not a list of OEMolBase molecules.
+    :raises ValueError: If ``scaffold`` is not ``"framework"`` or ``"generic"``,
+        ``mols`` is empty, or ``num_threads`` is negative.
+    :raises RuntimeError: If a ring-containing molecule yields no framework.
+        The message names the first such molecule's index.
+    """
+    options = _murcko_options(mols, scaffold, num_threads, "murcko_scaffolds")
+    return list(_murcko_scaffolds(mols, options))
+
+
+def murcko(mols, *, scaffold="framework", num_threads=0):
+    """
+    Cluster molecules by Bemis-Murcko scaffold identity.
+
+    Two molecules share a cluster exactly when their scaffolds canonicalize to
+    the same SMILES. Unlike :func:`butina` and the other distance-driven
+    algorithms, this one takes molecules rather than a distance matrix -- there
+    is no distance in it -- following the same rule as :func:`bitbirch`, whose
+    first argument is a fingerprint batch.
+
+    Labels come from sorting the distinct scaffold strings, so two runs over
+    permuted inputs give the same label to the same scaffold. Acyclic molecules
+    are noise: they carry ``-1``, appear in ``scaffolds`` as ``''``, and belong
+    to no cluster.
+
+    Every normalization and caveat on :func:`murcko_scaffolds` applies here
+    unchanged, including the salt-stripping one.
+
+    :param mols: List of OEMolBase molecules.
+    :param scaffold: ``"framework"`` (default) or ``"generic"``;
+        case-insensitive. See :func:`murcko_scaffolds`.
+    :param num_threads: Worker threads; 0 auto-detects hardware concurrency.
+    :returns: MurckoResult with labels, clusters, per-item ``scaffolds`` and the
+        sorted ``cluster_scaffolds``.
+    :raises TypeError: If ``scaffold`` is not a string, ``num_threads`` is not
+        an integer, or ``mols`` is not a list of OEMolBase molecules.
+    :raises ValueError: If ``scaffold`` is not ``"framework"`` or ``"generic"``,
+        ``mols`` is empty, or ``num_threads`` is negative.
+    :raises RuntimeError: If a ring-containing molecule yields no framework.
+    """
+    options = _murcko_options(mols, scaffold, num_threads, "murcko")
+    result = _murcko_cluster(mols, options)
+    return MurckoResult(
+        result.Labels(),
+        result.Members(),
+        scaffolds=result.Scaffolds(),
+        cluster_scaffolds=result.ClusterScaffolds(),
     )
 
 
