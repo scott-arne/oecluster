@@ -60,7 +60,10 @@ std::optional<std::string> scaffold_of(const OEChem::OEMolBase& mol,
  * :param count: Number of items.
  * :param num_threads: Worker threads; 0 auto-detects. Already clamped.
  * :param chunk: Items per work unit; 0 and over-large values are corrected.
- * :param extract: Callable taking an index and returning the slot's value.
+ * :param extract: Callable taking an index and returning the slot's value. It
+ *     is copied once and then invoked concurrently by every worker, so it must
+ *     be safe to call from several threads at once -- a functor carrying
+ *     mutable state would race.
  * :returns: One entry per item, in input order.
  */
 template <typename Extract>
@@ -72,9 +75,10 @@ std::vector<std::optional<std::string>> extract_all(size_t count,
     if (count == 0u) {
         return raw;
     }
-    // ParallelFor divides the range by the chunk size, so zero would be
-    // undefined and an over-large value overflows its chunk-count arithmetic
-    // into zero chunks -- meaning no work runs and every slot stays empty.
+    // ParallelFor early-returns on a zero chunk size, and an over-large value
+    // overflows its chunk-count arithmetic into zero chunks. Either way no work
+    // runs and every slot stays empty, so the failure scan then blames index 0
+    // -- a confidently wrong answer rather than a crash.
     const size_t safe_chunk = std::min(chunk == 0u ? count : chunk, count);
     ThreadPool pool(num_threads);
     pool.ParallelFor(0u, count, safe_chunk, [&](size_t begin, size_t end) {
@@ -126,7 +130,32 @@ inline size_t effective_thread_count(size_t requested, size_t n) {
     // Extraction is CPU-bound, so oversubscribing far past the core count buys
     // nothing. The multiple rather than hw exactly leaves room for a caller who
     // knows their machine.
-    return std::min(requested, std::min(n, 4u * hw));
+    //
+    // The max guards the n == 0 case, where the mins would otherwise return 0
+    // and collide with the auto-detect sentinel above. For any n >= 1 the mins
+    // already yield at least 1, so nothing reachable changes.
+    return std::max<size_t>(1u, std::min(requested, std::min(n, 4u * hw)));
+}
+
+/**
+ * @brief Resolve the worker count for one extraction run.
+ *
+ * Joins the two independent decisions -- whether the toolkit's memory pool is
+ * safe to drive from threads, and how many workers this request justifies --
+ * so that the join is a pure function a test can exercise at any mode.
+ * Mutating the process-global mode is not an option: OESetMemPoolMode is fatal
+ * on a second call, so a test that changed it could never restore it.
+ *
+ * :param mode: The value OEGetMemPoolMode() reported.
+ * :param requested: The caller's MurckoOptions::num_threads.
+ * :param n: Number of molecules.
+ * :returns: 1 when the pool is not thread-safe, otherwise the clamped count.
+ */
+inline size_t dispatch_thread_count(unsigned int mode, size_t requested, size_t n) {
+    if (!pool_is_thread_safe(mode)) {
+        return 1u;
+    }
+    return effective_thread_count(requested, n);
 }
 
 }  // namespace OECluster::detail

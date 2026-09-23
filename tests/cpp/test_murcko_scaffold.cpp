@@ -25,6 +25,7 @@
 namespace {
 
 using OECluster::ScaffoldType;
+using OECluster::detail::dispatch_thread_count;
 using OECluster::detail::effective_thread_count;
 using OECluster::detail::extract_all;
 using OECluster::detail::first_failure;
@@ -292,12 +293,15 @@ TEST(MurckoExtractAllTest, FillsEverySlotAcrossChunks) {
 
 TEST(MurckoExtractAllTest, PreservesFailureOrderAtEveryThreadCount) {
     // The regression guard for reporting a race winner instead of the first
-    // failing index: 7 is reached by an earlier chunk than 3 is at some thread
-    // counts, and the answer must still be 3.
+    // failing index. The two indices must straddle a chunk boundary: at chunk
+    // size 64, index 60 is in chunk 0 and index 64 in chunk 1, so different
+    // workers can reach them in either time order. A pair inside one chunk --
+    // 3 and 7, say -- is always visited in ascending order by a single worker,
+    // so it cannot fail against the race this test exists for.
     for (size_t threads : {size_t(1), size_t(8)}) {
         const std::vector<std::optional<std::string>> raw = extract_all(
             200u, threads, 64u, [](size_t i) -> std::optional<std::string> {
-                if (i == 7u || i == 3u) {
+                if (i == 64u || i == 60u) {
                     return std::nullopt;
                 }
                 return std::string("c1ccccc1");
@@ -305,7 +309,7 @@ TEST(MurckoExtractAllTest, PreservesFailureOrderAtEveryThreadCount) {
         ASSERT_EQ(raw.size(), 200u) << "threads=" << threads;
         const std::optional<size_t> bad = first_failure(raw);
         ASSERT_TRUE(bad.has_value()) << "threads=" << threads;
-        EXPECT_EQ(*bad, 3u) << "threads=" << threads;
+        EXPECT_EQ(*bad, 60u) << "threads=" << threads;
     }
 }
 
@@ -329,12 +333,15 @@ TEST(MurckoThreadClampTest, ClampsByItemCountAndConcurrencyCeiling) {
     // item count alone cannot reach, and the one that closes the ParallelFor
     // reserve-then-fill terminate path.
     EXPECT_EQ(effective_thread_count(1000000u, 1000000u), ceiling);
+    // An empty item count must not produce the auto-detect sentinel.
+    EXPECT_EQ(effective_thread_count(4u, 0u), 1u);
 }
 
 TEST(MurckoMemPoolGateTest, RecognizesOnlyTheThreadSafeModes) {
-    // Every single bit OEMemPoolMode defines, so a vendor addition that this
-    // predicate has not been taught about shows up as a compile error here
-    // rather than as silent parallelism.
+    // Every single bit OEMemPoolMode defines as of 2026.1.0. The members are
+    // namespace-scoped const unsigned int rather than enumerators, so a vendor
+    // addition compiles silently and simply goes unlisted -- this table is a
+    // record of what was checked, not a compile-time guard.
     EXPECT_TRUE(pool_is_thread_safe(OESystem::OEMemPoolMode::Mutexed));
     EXPECT_TRUE(pool_is_thread_safe(OESystem::OEMemPoolMode::ThreadLocal));
     EXPECT_TRUE(pool_is_thread_safe(OESystem::OEMemPoolMode::Default));
@@ -343,9 +350,10 @@ TEST(MurckoMemPoolGateTest, RecognizesOnlyTheThreadSafeModes) {
     // flag: asserting it is unsafe is asserting the predicate's default.
     EXPECT_FALSE(pool_is_thread_safe(OESystem::OEMemPoolMode::SingleThreaded));
     // The cache and allocator-strategy bits say nothing about thread safety on
-    // their own. Spinlocked is treated as unsafe deliberately: OpenEye
-    // documents no concurrency guarantee for it, and the cost of being wrong
-    // in this direction is lost parallelism rather than corruption.
+    // their own. Spinlocked is treated as unsafe deliberately: the SDK header
+    // describes it as "Spinlock - for Java threading", which names an intended
+    // consumer rather than a guarantee for this caller, and the cost of being
+    // wrong in this direction is lost parallelism rather than corruption.
     EXPECT_FALSE(pool_is_thread_safe(OESystem::OEMemPoolMode::BoundedCache));
     EXPECT_FALSE(pool_is_thread_safe(OESystem::OEMemPoolMode::UnboundedCache));
     EXPECT_FALSE(pool_is_thread_safe(OESystem::OEMemPoolMode::System));
@@ -357,6 +365,27 @@ TEST(MurckoMemPoolGateTest, RecognizesOnlyTheThreadSafeModes) {
                                     OESystem::OEMemPoolMode::BoundedCache));
     EXPECT_FALSE(pool_is_thread_safe(OESystem::OEMemPoolMode::System |
                                      OESystem::OEMemPoolMode::UnboundedCache));
+}
+
+TEST(MurckoMemPoolGateTest, ForcesSerialExtractionWhenThePoolIsUnsafe) {
+    // The line murcko_scaffolds actually executes, as a pure function. An
+    // unsafe mode collapses every thread request to 1, whatever the caller
+    // asked for and however many molecules there are. This is the branch whose
+    // end-to-end form cannot be written in this binary.
+    const unsigned int unsafe = OESystem::OEMemPoolMode::SingleThreaded |
+                                OESystem::OEMemPoolMode::UnboundedCache;
+    EXPECT_EQ(dispatch_thread_count(unsafe, 0u, 1000u), 1u);
+    EXPECT_EQ(dispatch_thread_count(unsafe, 8u, 1000u), 1u);
+    EXPECT_EQ(dispatch_thread_count(unsafe, 1000000u, 1000u), 1u);
+}
+
+TEST(MurckoMemPoolGateTest, DefersToTheClampWhenThePoolIsSafe) {
+    const unsigned int safe = OESystem::OEMemPoolMode::Default;
+    // The auto-detect sentinel must survive the gate rather than become 1.
+    EXPECT_EQ(dispatch_thread_count(safe, 0u, 1000u), 0u);
+    EXPECT_EQ(dispatch_thread_count(safe, 2u, 1000u), 2u);
+    EXPECT_EQ(dispatch_thread_count(safe, 1000000u, 1000u),
+              effective_thread_count(1000000u, 1000u));
 }
 
 TEST(MurckoScaffoldsTest, RefusesAnUnknownScaffoldType) {
@@ -457,6 +486,8 @@ TEST(MurckoScaffoldsTest, ClampsAnAbsurdThreadRequest) {
 // OESetMemPoolMode is fatal when called a second time in a process ("Fatal:
 // OESetMemPoolMode called twice!"), so a test cannot restore the mode it
 // changed, and leaving it changed would silently reconfigure every later test.
-// MurckoMemPoolGateTest covers the gate decision itself instead.
+// MurckoMemPoolGateTest covers the decision instead, including the wiring line
+// itself via dispatch_thread_count. What remains untested is only the call to
+// OEGetMemPoolMode that feeds it.
 
 }  // namespace

@@ -159,10 +159,8 @@ std::vector<std::string> murcko_scaffolds(const std::vector<OEChem::OEMolBase*>&
     // data -- each worker builds its own molecule copies -- but the toolkit's
     // shared molecule memory pool. A caller who selected SingleThreaded gets
     // serial extraction rather than a data race.
-    const size_t num_threads =
-        detail::pool_is_thread_safe(OESystem::OEGetMemPoolMode())
-            ? detail::effective_thread_count(options.num_threads, inputs.size())
-            : 1u;
+    const size_t num_threads = detail::dispatch_thread_count(
+        OESystem::OEGetMemPoolMode(), options.num_threads, inputs.size());
     const size_t chunk = std::min(MURCKO_CHUNK, inputs.size());
     const ScaffoldType type = options.scaffold;
 
