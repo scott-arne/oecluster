@@ -3,15 +3,21 @@
  * @brief Tests for Bemis-Murcko scaffold extraction and clustering.
  */
 
+#include <algorithm>
 #include <cstddef>
+#include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <gtest/gtest.h>
 
 #include <oechem.h>
+#include <oesystem.h>
 
+#include "oecluster/Error.h"
 #include "oecluster/clustering/MurckoScaffold.h"
 
 #include "../../src/clustering/MurckoKernels.h"
@@ -19,6 +25,10 @@
 namespace {
 
 using OECluster::ScaffoldType;
+using OECluster::detail::effective_thread_count;
+using OECluster::detail::extract_all;
+using OECluster::detail::first_failure;
+using OECluster::detail::pool_is_thread_safe;
 using OECluster::detail::scaffold_of;
 
 /// Extract a scaffold from a SMILES string, reporting a failure as a string
@@ -207,5 +217,246 @@ TEST(MurckoExtractionTest, LeavesTheInputMoleculeUnmodified) {
     }
     EXPECT_EQ(after_ring_flags, before_ring_flags);
 }
+
+/// Owns a set of molecules parsed from SMILES and hands out the pointer vector
+/// the public entry points take. Pointers are collected only after every
+/// molecule is allocated, so no reallocation can invalidate them.
+class MolSet {
+public:
+    explicit MolSet(const std::vector<std::string>& smiles) {
+        for (const std::string& value : smiles) {
+            auto mol = std::make_unique<OEChem::OEGraphMol>();
+            OEChem::OESmilesToMol(*mol, value.c_str());
+            owned_.push_back(std::move(mol));
+        }
+        // OEGraphMol is not derived from OEMolBase -- it owns one and converts
+        // to it -- so the cast is the repository's established idiom rather
+        // than a pointer upcast.
+        for (const auto& mol : owned_) {
+            pointers_.push_back(&static_cast<OEChem::OEMolBase&>(*mol));
+        }
+    }
+
+    const std::vector<OEChem::OEMolBase*>& Pointers() const { return pointers_; }
+
+private:
+    std::vector<std::unique_ptr<OEChem::OEGraphMol>> owned_;
+    std::vector<OEChem::OEMolBase*> pointers_;
+};
+
+/// 200 molecules over 10 distinct frameworks: each core carries an alkyl chain
+/// of length 0 to 19. Large enough to span several chunks at the internal chunk
+/// size of 64, which a fixture of a dozen molecules would not.
+std::vector<std::string> threading_fixture_smiles() {
+    static const char* const CORES[] = {
+        "c1ccccc1", "c1ccncc1", "c1ccc2ccccc2c1", "C1CCCCC1", "c1ccsc1",
+        "c1cc[nH]c1", "C1CCNCC1", "c1ccc(cc1)-c1ccccc1", "C1CCOCC1", "c1cnccn1",
+    };
+    std::vector<std::string> smiles;
+    for (const char* core : CORES) {
+        for (size_t length = 0; length < 20; ++length) {
+            smiles.push_back(std::string(length, 'C') + core);
+        }
+    }
+    return smiles;
+}
+
+TEST(MurckoFailureScanTest, ReturnsTheFirstFailureInInputOrder) {
+    std::vector<std::optional<std::string>> raw(10, std::string("c1ccccc1"));
+    raw[7] = std::nullopt;
+    raw[3] = std::nullopt;
+    const std::optional<size_t> bad = first_failure(raw);
+    ASSERT_TRUE(bad.has_value());
+    EXPECT_EQ(*bad, 3u);
+}
+
+TEST(MurckoFailureScanTest, ReturnsNulloptWhenEveryExtractionSucceeded) {
+    const std::vector<std::optional<std::string>> raw(10, std::string("c1ccccc1"));
+    EXPECT_FALSE(first_failure(raw).has_value());
+}
+
+TEST(MurckoFailureScanTest, ReturnsNulloptForAnEmptyBuffer) {
+    EXPECT_FALSE(first_failure({}).has_value());
+}
+
+TEST(MurckoExtractAllTest, FillsEverySlotAcrossChunks) {
+    const std::vector<std::optional<std::string>> raw = extract_all(
+        200u, 4u, 64u,
+        [](size_t i) -> std::optional<std::string> { return std::to_string(i); });
+    ASSERT_EQ(raw.size(), 200u);
+    for (size_t i = 0; i < raw.size(); ++i) {
+        ASSERT_TRUE(raw[i].has_value()) << "index " << i;
+        EXPECT_EQ(*raw[i], std::to_string(i));
+    }
+}
+
+TEST(MurckoExtractAllTest, PreservesFailureOrderAtEveryThreadCount) {
+    // The regression guard for reporting a race winner instead of the first
+    // failing index: 7 is reached by an earlier chunk than 3 is at some thread
+    // counts, and the answer must still be 3.
+    for (size_t threads : {size_t(1), size_t(8)}) {
+        const std::vector<std::optional<std::string>> raw = extract_all(
+            200u, threads, 64u, [](size_t i) -> std::optional<std::string> {
+                if (i == 7u || i == 3u) {
+                    return std::nullopt;
+                }
+                return std::string("c1ccccc1");
+            });
+        ASSERT_EQ(raw.size(), 200u) << "threads=" << threads;
+        const std::optional<size_t> bad = first_failure(raw);
+        ASSERT_TRUE(bad.has_value()) << "threads=" << threads;
+        EXPECT_EQ(*bad, 3u) << "threads=" << threads;
+    }
+}
+
+TEST(MurckoThreadClampTest, ZeroMeansAutoDetectAndSurvivesTheClamp) {
+    EXPECT_EQ(effective_thread_count(0u, 0u), 0u);
+    EXPECT_EQ(effective_thread_count(0u, 1u), 0u);
+    EXPECT_EQ(effective_thread_count(0u, 1000000u), 0u);
+}
+
+TEST(MurckoThreadClampTest, ClampsByItemCountAndConcurrencyCeiling) {
+    const size_t hw = std::max<size_t>(1u, std::thread::hardware_concurrency());
+    const size_t ceiling = 4u * hw;
+
+    EXPECT_EQ(effective_thread_count(1u, 1u), 1u);
+    EXPECT_EQ(effective_thread_count(1u, 1000u), 1u);
+    // Below both bounds: returned unchanged.
+    EXPECT_EQ(effective_thread_count(2u, 1000u), 2u);
+    // Above the item count: clamped to the item count.
+    EXPECT_EQ(effective_thread_count(1000u, 3u), 3u);
+    // Above the concurrency ceiling on a large n. This is the case a clamp by
+    // item count alone cannot reach, and the one that closes the ParallelFor
+    // reserve-then-fill terminate path.
+    EXPECT_EQ(effective_thread_count(1000000u, 1000000u), ceiling);
+}
+
+TEST(MurckoMemPoolGateTest, RecognizesOnlyTheThreadSafeModes) {
+    // Every single bit OEMemPoolMode defines, so a vendor addition that this
+    // predicate has not been taught about shows up as a compile error here
+    // rather than as silent parallelism.
+    EXPECT_TRUE(pool_is_thread_safe(OESystem::OEMemPoolMode::Mutexed));
+    EXPECT_TRUE(pool_is_thread_safe(OESystem::OEMemPoolMode::ThreadLocal));
+    EXPECT_TRUE(pool_is_thread_safe(OESystem::OEMemPoolMode::Default));
+
+    // SingleThreaded is 0, so it is the absence of a safe bit rather than a
+    // flag: asserting it is unsafe is asserting the predicate's default.
+    EXPECT_FALSE(pool_is_thread_safe(OESystem::OEMemPoolMode::SingleThreaded));
+    // The cache and allocator-strategy bits say nothing about thread safety on
+    // their own. Spinlocked is treated as unsafe deliberately: OpenEye
+    // documents no concurrency guarantee for it, and the cost of being wrong
+    // in this direction is lost parallelism rather than corruption.
+    EXPECT_FALSE(pool_is_thread_safe(OESystem::OEMemPoolMode::BoundedCache));
+    EXPECT_FALSE(pool_is_thread_safe(OESystem::OEMemPoolMode::UnboundedCache));
+    EXPECT_FALSE(pool_is_thread_safe(OESystem::OEMemPoolMode::System));
+    EXPECT_FALSE(pool_is_thread_safe(OESystem::OEMemPoolMode::Spinlocked));
+
+    // A safe bit stays safe when a cache bit joins it, which is the only
+    // combination Default itself relies on.
+    EXPECT_TRUE(pool_is_thread_safe(OESystem::OEMemPoolMode::Mutexed |
+                                    OESystem::OEMemPoolMode::BoundedCache));
+    EXPECT_FALSE(pool_is_thread_safe(OESystem::OEMemPoolMode::System |
+                                     OESystem::OEMemPoolMode::UnboundedCache));
+}
+
+TEST(MurckoScaffoldsTest, RefusesAnUnknownScaffoldType) {
+    const MolSet mols({"c1ccccc1"});
+    OECluster::MurckoOptions options;
+    options.scaffold = static_cast<ScaffoldType>(42);
+    EXPECT_THROW(OECluster::murcko_scaffolds(mols.Pointers(), options),
+                 std::invalid_argument);
+}
+
+TEST(MurckoScaffoldsTest, RefusesAnEmptyInput) {
+    const std::vector<OEChem::OEMolBase*> mols;
+    EXPECT_THROW(OECluster::murcko_scaffolds(mols), OECluster::ComparisonError);
+}
+
+TEST(MurckoScaffoldsTest, RefusesANullMolecule) {
+    const MolSet mols({"c1ccccc1"});
+    std::vector<OEChem::OEMolBase*> with_null = mols.Pointers();
+    with_null.push_back(nullptr);
+    EXPECT_THROW(OECluster::murcko_scaffolds(with_null),
+                 OECluster::ComparisonError);
+}
+
+TEST(MurckoScaffoldsTest, JudgesTheOptionsBeforeTheInput) {
+    // A call wrong in two ways reports the enumerator -- the cheaper fix, and
+    // the one that does not depend on data.
+    const std::vector<OEChem::OEMolBase*> mols;
+    OECluster::MurckoOptions options;
+    options.scaffold = static_cast<ScaffoldType>(42);
+    EXPECT_THROW(OECluster::murcko_scaffolds(mols, options),
+                 std::invalid_argument);
+}
+
+TEST(MurckoScaffoldsTest, MatchesTheKernelForEveryFixture) {
+    // The end-to-end form of the one-extraction guarantee: the public entry
+    // point returns exactly what the kernel returns, so the extraction table in
+    // MurckoExtractionTest covers both.
+    const std::vector<std::string> smiles = {
+        "c1ccccc1", "Cc1ccccc1", "CC(=O)Oc1ccccc1C(=O)O", "c1ccncc1",
+        "c1ccc(cc1)-c1ccccc1", "c1ccc(cc1)Cc1ccccc1", "Cn1cnc2c1c(=O)n(C)c(=O)n2C",
+        "O=C1CCCCN1", "C1CCCCC1", "FC1=CCCCC1", "FC1CCCCC1",
+        "c1ccccc1C(=O)O.c1ccncc1", "CCCCCC", "C", "",
+        // The stereo fixtures travel the driver too: the kernel strips
+        // stereochemistry, and nothing on the threaded path may reintroduce it.
+        "C1CC[C@H]2CCCC[C@@H]2C1", "C1CC[C@H]2CCCC[C@H]2C1",
+        "C[C@H](N)c1ccccc1", "C[C@@H](N)c1ccccc1",
+    };
+    const MolSet mols(smiles);
+    for (ScaffoldType type : {ScaffoldType::Framework, ScaffoldType::Generic}) {
+        OECluster::MurckoOptions options;
+        options.scaffold = type;
+        const std::vector<std::string> actual =
+            OECluster::murcko_scaffolds(mols.Pointers(), options);
+        ASSERT_EQ(actual.size(), smiles.size());
+        for (size_t i = 0; i < smiles.size(); ++i) {
+            const std::optional<std::string> expected =
+                scaffold_of(*mols.Pointers()[i], type);
+            ASSERT_TRUE(expected.has_value()) << "index " << i;
+            EXPECT_EQ(actual[i], *expected) << "index " << i;
+        }
+    }
+}
+
+TEST(MurckoScaffoldsTest, RaisesNothingForOrdinaryMolecules) {
+    const MolSet mols(threading_fixture_smiles());
+    EXPECT_NO_THROW(OECluster::murcko_scaffolds(mols.Pointers()));
+}
+
+TEST(MurckoScaffoldsTest, IsDeterministicAcrossThreadCounts) {
+    // A regression smoke test, not a proof of thread safety: the safety
+    // argument is the checked mem-pool precondition.
+    const MolSet mols(threading_fixture_smiles());
+    OECluster::MurckoOptions serial;
+    serial.num_threads = 1;
+    const std::vector<std::string> expected =
+        OECluster::murcko_scaffolds(mols.Pointers(), serial);
+    ASSERT_EQ(expected.size(), 200u);
+
+    for (size_t threads : {size_t(2), size_t(8)}) {
+        OECluster::MurckoOptions options;
+        options.num_threads = threads;
+        EXPECT_EQ(OECluster::murcko_scaffolds(mols.Pointers(), options), expected)
+            << "threads=" << threads;
+    }
+}
+
+TEST(MurckoScaffoldsTest, ClampsAnAbsurdThreadRequest) {
+    const MolSet mols({"c1ccccc1", "Cc1ccccc1", "CCCCCC"});
+    OECluster::MurckoOptions serial;
+    serial.num_threads = 1;
+    OECluster::MurckoOptions absurd;
+    absurd.num_threads = 1000000;
+    EXPECT_EQ(OECluster::murcko_scaffolds(mols.Pointers(), absurd),
+              OECluster::murcko_scaffolds(mols.Pointers(), serial));
+}
+
+// The end-to-end serial-fallback case cannot be written in this binary:
+// OESetMemPoolMode is fatal when called a second time in a process ("Fatal:
+// OESetMemPoolMode called twice!"), so a test cannot restore the mode it
+// changed, and leaving it changed would silently reconfigure every later test.
+// MurckoMemPoolGateTest covers the gate decision itself instead.
 
 }  // namespace

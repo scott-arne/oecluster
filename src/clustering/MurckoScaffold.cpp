@@ -5,13 +5,21 @@
 
 #include "oecluster/clustering/MurckoScaffold.h"
 
+#include <algorithm>
+#include <cstddef>
 #include <optional>
+#include <stdexcept>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include <oechem.h>
 #include <oemedchem.h>
+#include <oesystem.h>
 
+#include "../DescriptorBuild.h"
 #include "MurckoKernels.h"
+#include "oecluster/Error.h"
 
 namespace OECluster::detail {
 
@@ -121,3 +129,63 @@ std::optional<std::string> scaffold_of(const OEChem::OEMolBase& mol,
 }
 
 }  // namespace OECluster::detail
+
+namespace OECluster {
+
+namespace {
+
+// Per-molecule extraction cost varies little, so there is nothing for a caller
+// to tune; the constant is internal and capped at the item count at the use
+// site.
+constexpr size_t MURCKO_CHUNK = 64;
+
+}  // namespace
+
+std::vector<std::string> murcko_scaffolds(const std::vector<OEChem::OEMolBase*>& mols,
+                                          const MurckoOptions& options) {
+    // Options before inputs, so a caller wrong in two ways learns about the
+    // enumerator rather than about their data.
+    if (options.scaffold != ScaffoldType::Framework &&
+        options.scaffold != ScaffoldType::Generic) {
+        throw std::invalid_argument("Unknown Murcko scaffold type");
+    }
+    if (mols.empty()) {
+        throw ComparisonError("murcko_scaffolds requires at least one molecule");
+    }
+    const std::vector<const OEChem::OEMolBase*> inputs =
+        checked_inputs(mols, "murcko_scaffolds");
+
+    // The hazard in calling the toolkit concurrently is not this function's
+    // data -- each worker builds its own molecule copies -- but the toolkit's
+    // shared molecule memory pool. A caller who selected SingleThreaded gets
+    // serial extraction rather than a data race.
+    const size_t num_threads =
+        detail::pool_is_thread_safe(OESystem::OEGetMemPoolMode())
+            ? detail::effective_thread_count(options.num_threads, inputs.size())
+            : 1u;
+    const size_t chunk = std::min(MURCKO_CHUNK, inputs.size());
+    const ScaffoldType type = options.scaffold;
+
+    std::vector<std::optional<std::string>> raw = detail::extract_all(
+        inputs.size(), num_threads, chunk,
+        [&](size_t i) { return detail::scaffold_of(*inputs[i], type); });
+
+    // The verdict is a post-join scan in input order, not an exception thrown
+    // through ParallelFor: that one is captured under call_once, so the
+    // survivor is a race winner and cancellation may leave later molecules
+    // unexamined.
+    if (const std::optional<size_t> bad = detail::first_failure(raw)) {
+        throw ComparisonError(
+            "murcko_scaffolds could not extract a scaffold for molecule at index " +
+            std::to_string(*bad));
+    }
+
+    std::vector<std::string> scaffolds;
+    scaffolds.reserve(raw.size());
+    for (std::optional<std::string>& value : raw) {
+        scaffolds.push_back(std::move(*value));
+    }
+    return scaffolds;
+}
+
+}  // namespace OECluster
