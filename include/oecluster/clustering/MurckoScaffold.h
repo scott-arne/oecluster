@@ -55,9 +55,10 @@ struct MurckoOptions {
  *
  * Clusters are scaffold identity classes. Label ``i`` is the class whose
  * scaffold is ``ClusterScaffolds()[i]``; labels are assigned by sorting the
- * distinct scaffold strings lexicographically, so the labeling is canonical
- * and independent of input order. Molecules with no ring system have an empty
- * scaffold string and carry ``NOISE_LABEL``.
+ * distinct non-empty scaffold strings lexicographically, so the labeling is
+ * canonical and independent of input order. Molecules with no ring system have
+ * an empty scaffold string, which is excluded from that set: they form no
+ * cluster and carry ``NOISE_LABEL``.
  */
 class MurckoResult : public ClusteringResult {
 public:
@@ -113,7 +114,9 @@ std::vector<std::string> murcko_scaffolds(
  * @brief Cluster molecules by Bemis-Murcko scaffold identity.
  *
  * Two molecules share a cluster exactly when their scaffolds canonicalize to
- * the same SMILES. Acyclic molecules are noise.
+ * the same non-empty SMILES. An acyclic molecule canonicalizes to ``""``,
+ * which names no cluster: acyclic molecules are noise rather than a shared
+ * "no scaffold" cluster, however many of them the input holds.
  *
  * :param mols: Molecules to cluster; must not contain null pointers.
  * :param options: Extraction level and threading.
