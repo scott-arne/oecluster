@@ -44,6 +44,19 @@ class TestScaffoldKeyword:
             oecluster.murcko_scaffolds(mols(BENZENE), scaffold=1)
 
 
+class TestScaffoldKeywordReachesTheClusterer:
+    def test_generic_merges_what_framework_separates(self):
+        # The contrast is the point: under a defect that drops the caller's
+        # level on the way to the native call, both runs come back Framework
+        # and every other test stays green.
+        molecules = mols(BENZENE, PYRIDINE)
+        framework = oecluster.murcko(molecules)
+        assert framework.cluster_scaffolds == ("c1ccccc1", "c1ccncc1")
+        generic = oecluster.murcko(molecules, scaffold="generic")
+        assert generic.cluster_scaffolds == ("C1CCCCC1",)
+        assert list(generic.labels) == [0, 0]
+
+
 class TestValidationMirror:
     def test_an_empty_list_is_a_value_error(self):
         with pytest.raises(ValueError, match="at least one molecule"):
@@ -81,6 +94,13 @@ class TestValidationMirror:
     def test_the_scaffold_verdict_precedes_the_empty_input_verdict(self):
         with pytest.raises(ValueError, match="framework.*generic"):
             oecluster.murcko_scaffolds([], scaffold="bogus")
+
+    def test_the_clusterer_names_itself_in_the_message(self):
+        # murcko_scaffolds() does not contain the substring "murcko()", so this
+        # regex fails if the wrong caller name is threaded through.
+        with pytest.raises(ValueError,
+                           match=r"murcko\(\) requires at least one molecule"):
+            oecluster.murcko([])
 
 
 class TestMurckoResult:
@@ -140,5 +160,6 @@ class TestComposition:
         result = oecluster.murcko(molecules)
         assert list(result.labels) == [-1, -1, -1]
         assert result.num_clusters == 0
+        assert result.cluster_scaffolds == ()
         # Producer and consumer agree that "" is missing data, not a category.
         oecluster.scaffold_agreement(result.labels, scaffolds, noise="singletons")

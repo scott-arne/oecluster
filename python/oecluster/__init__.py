@@ -2989,8 +2989,10 @@ def _murcko_options(mols, scaffold, num_threads, caller):
 
     The SWIG layer collapses every native exception to ``RuntimeError``, so the
     native checks are mirrored here -- before the call -- to give callers the
-    exception type that actually describes what happened. Options are judged
-    before inputs, matching the native ordering.
+    exception type that actually describes what happened. The scaffold level is
+    judged before the input, matching the native ordering; ``num_threads`` has
+    no native check to mirror -- the native layer clamps rather than refuses --
+    and is only bounded here to what a ``size_t`` can hold.
 
     :param mols: The caller's molecule sequence, judged only for emptiness.
     :param scaffold: Scaffold level name; case-insensitive.
@@ -3037,15 +3039,17 @@ def murcko_scaffolds(mols, *, scaffold="framework", num_threads=0):
     rings but from which no framework can be extracted is an error rather than
     an empty string.
 
-    Three normalizations are applied, all of them so that scaffold identity is
+    Two normalizations are applied, both of them so that scaffold identity is
     string identity. Stereochemistry is dropped, because deleting sidechains can
     orphan a stereocenter and leave a configuration that means nothing;
     enantiomers and diastereomers therefore share a scaffold. Explicit hydrogens
     are suppressed, so an SD-file molecule and the same molecule read from
     SMILES agree. Nothing else is standardized: there is no salt stripping and
-    no largest-component selection, so a two-component record yields one
-    ``.``-joined scaffold that will not match the same drug recorded as a free
-    base. Strip salts first if you want the parent scaffold.
+    no largest-component selection. An acyclic counter-ion contributes no
+    framework, so most salt forms already match the free base; a counter-ion
+    that *also* carries a ring -- a tosylate or besylate -- yields one
+    ``.``-joined scaffold that will not. Strip salts first if you want the
+    parent scaffold of those.
 
     Input molecules are never modified.
 
@@ -3062,7 +3066,8 @@ def murcko_scaffolds(mols, *, scaffold="framework", num_threads=0):
     :raises TypeError: If ``scaffold`` is not a string, ``num_threads`` is not
         an integer, or ``mols`` is not a list of OEMolBase molecules.
     :raises ValueError: If ``scaffold`` is not ``"framework"`` or ``"generic"``,
-        ``mols`` is empty, or ``num_threads`` is negative.
+        ``mols`` is empty, or ``num_threads`` is negative or exceeds a
+        ``size_t``.
     :raises RuntimeError: If a ring-containing molecule yields no framework.
         The message names the first such molecule's index.
     """
@@ -3097,7 +3102,8 @@ def murcko(mols, *, scaffold="framework", num_threads=0):
     :raises TypeError: If ``scaffold`` is not a string, ``num_threads`` is not
         an integer, or ``mols`` is not a list of OEMolBase molecules.
     :raises ValueError: If ``scaffold`` is not ``"framework"`` or ``"generic"``,
-        ``mols`` is empty, or ``num_threads`` is negative.
+        ``mols`` is empty, or ``num_threads`` is negative or exceeds a
+        ``size_t``.
     :raises RuntimeError: If a ring-containing molecule yields no framework.
     """
     options = _murcko_options(mols, scaffold, num_threads, "murcko")

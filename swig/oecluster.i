@@ -764,9 +764,9 @@ OECLUSTER_GIL_EXCEPTION(OECluster::bitbirch_refine, bitbirch_refine)
 // entirely on native data with no Python object in reach.
 OECLUSTER_GIL_EXCEPTION(OECluster::k_medoids_cluster, k_medoids_cluster)
 
-// Extraction spawns ThreadPool workers that touch only OEChem data, and the
-// canonical SMILES it builds never reaches a Python object, so the GIL is
-// released for both entry points.
+// Extraction spawns ThreadPool workers that touch only OEChem data, and
+// nothing it builds touches a Python object before the GIL is reacquired, so
+// the GIL is released for both entry points.
 OECLUSTER_GIL_EXCEPTION(OECluster::murcko_scaffolds, murcko_scaffolds)
 OECLUSTER_GIL_EXCEPTION(OECluster::murcko_cluster, murcko_cluster)
 
