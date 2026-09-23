@@ -159,9 +159,24 @@ class TestValidationMirror:
         assert "murcko_cluster" not in str(caught.value)
         assert "overloaded" not in str(caught.value)
 
-    def test_a_non_molecule_element_is_a_type_error(self):
-        with pytest.raises(TypeError):
-            oecluster.murcko_scaffolds([1, 2, 3])
+    @pytest.mark.parametrize("entry_point", [
+        oecluster.murcko_scaffolds, oecluster.murcko])
+    @pytest.mark.parametrize("position", ["first", "last", "only"])
+    def test_a_non_molecule_element_names_the_element(
+            self, entry_point, position):
+        # The element's position used to decide the message. SWIG expands a
+        # defaulted argument into two overloads, and the resulting dispatcher
+        # consults the typecheck typemap, which looks only at element 0: a bad
+        # first element was rejected by the dispatcher with "Wrong number or
+        # type of arguments for overloaded function 'murcko_cluster'", while a
+        # bad later element reached the real typemap and got a message that
+        # says what is wrong. Asserting only on TypeError could not tell the
+        # two apart.
+        good = mols(BENZENE)[0]
+        bad = {"first": [1, good], "last": [good, 1], "only": [1]}[position]
+        with pytest.raises(TypeError,
+                           match=r"List item is not an OEMolBase object"):
+            entry_point(bad)
 
     def test_the_scaffold_verdict_precedes_the_empty_input_verdict(self):
         with pytest.raises(ValueError, match="framework.*generic"):

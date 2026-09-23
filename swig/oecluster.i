@@ -1057,6 +1057,18 @@ public:
 %include "oecluster/clustering/Agglomerative.h"
 %include "oecluster/clustering/BitBirch.h"
 %include "oecluster/clustering/KMedoids.h"
+// Both Murcko entry points default their options argument, and SWIG's usual
+// expansion of a default argument into two overloads puts an overload
+// dispatcher in front of them. That dispatcher consults only the first list
+// element through the typecheck typemap, and when it rejects a call it reports
+// its own message -- "Wrong number or type of arguments for overloaded function
+// 'murcko_cluster'" -- in place of the typemap's. The result named a C++ symbol
+// that murcko() does not expose, and said nothing about which element was
+// wrong. Compacting the defaults into one wrapper each removes the dispatcher,
+// so the molecule-list typemap's own message reaches the caller for every bad
+// element, as it already does for the unoverloaded descriptor_statistics.
+%feature("compactdefaultargs") OECluster::murcko_scaffolds;
+%feature("compactdefaultargs") OECluster::murcko_cluster;
 %include "oecluster/clustering/MurckoScaffold.h"
 
 // ============================================================================
