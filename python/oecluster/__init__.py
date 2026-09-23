@@ -2999,8 +2999,8 @@ def _murcko_options(mols, scaffold, num_threads, caller):
     :param num_threads: Worker thread request.
     :param caller: Public function name, for the messages.
     :returns: A populated native ``MurckoOptions``.
-    :raises TypeError: If ``scaffold`` is not a string or ``num_threads`` is not
-        index-coercible.
+    :raises TypeError: If ``scaffold`` is not a string, ``mols`` has no length,
+        or ``num_threads`` is not index-coercible.
     :raises ValueError: If ``scaffold`` is not a known level, ``mols`` is empty,
         or ``num_threads`` is negative or larger than a ``size_t``.
     """
@@ -3011,7 +3011,12 @@ def _murcko_options(mols, scaffold, num_threads, caller):
         raise ValueError(
             f"Unknown Murcko scaffold type: {scaffold!r}; "
             "expected 'framework' or 'generic'")
-    if len(mols) == 0:
+    try:
+        is_empty = len(mols) == 0
+    except TypeError as error:
+        raise TypeError(
+            f"{caller}() requires a list of molecules") from error
+    if is_empty:
         raise ValueError(f"{caller}() requires at least one molecule")
 
     num_threads_int = operator.index(num_threads)

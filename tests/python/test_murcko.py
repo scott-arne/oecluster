@@ -59,7 +59,12 @@ class TestScaffoldKeywordReachesTheClusterer:
 
 class TestValidationMirror:
     def test_an_empty_list_is_a_value_error(self):
-        with pytest.raises(ValueError, match="at least one molecule"):
+        # Pins the caller name as well as the condition. murcko() raises the
+        # same sentence, so matching only the condition leaves the two callers
+        # interchangeable -- which is exactly the mutation that survived.
+        with pytest.raises(
+                ValueError,
+                match=r"murcko_scaffolds\(\) requires at least one molecule"):
             oecluster.murcko_scaffolds([])
 
     def test_an_empty_tuple_is_a_value_error_not_a_type_error(self):
@@ -86,6 +91,16 @@ class TestValidationMirror:
     def test_a_non_list_is_a_type_error(self):
         with pytest.raises(TypeError):
             oecluster.murcko_scaffolds("not molecules")
+
+    def test_an_unsized_input_names_the_function(self):
+        # Without the guard this escapes as "object of type 'generator' has no
+        # len()" -- the right exception type, carrying neither the function name
+        # nor what it wanted. A string reaches the typemap and gets a good
+        # message; a generator did not.
+        with pytest.raises(
+                TypeError,
+                match=r"murcko_scaffolds\(\) requires a list of molecules"):
+            oecluster.murcko_scaffolds(mol for mol in mols(BENZENE))
 
     def test_a_non_molecule_element_is_a_type_error(self):
         with pytest.raises(TypeError):
