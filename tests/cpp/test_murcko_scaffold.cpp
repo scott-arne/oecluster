@@ -115,6 +115,46 @@ TEST(MurckoExtractionTest, PreservesElementIdentityAtFramework) {
     EXPECT_EQ(framework("c1ccncc1"), "c1ccncc1");
 }
 
+TEST(MurckoExtractionTest, NormalizesTheValenceOfAHeteroatomLinker) {
+    // Cutting a sidechain takes its bond order with it, and OESubsetMol's
+    // hydrogen-count adjustment banks that order as implicit hydrogens on the
+    // atom left behind. On carbon that is invisible -- benzophenone and
+    // diphenylmethane have always agreed -- and on anything else it is wrong:
+    // the sulfone framework came out [SH4] and matched neither the sulfoxide
+    // ([SH2]) nor the sulfide it should be identical to.
+    EXPECT_EQ(framework("O=S(=O)(c1ccccc1)c1ccccc1"), "c1ccc(cc1)Sc2ccccc2");
+    EXPECT_EQ(framework("O=S(c1ccccc1)c1ccccc1"), "c1ccc(cc1)Sc2ccccc2");
+    EXPECT_EQ(framework("S(c1ccccc1)c1ccccc1"), "c1ccc(cc1)Sc2ccccc2");
+    EXPECT_EQ(framework("O=P(c1ccccc1)(c1ccccc1)c1ccccc1"),
+              "c1ccc(cc1)P(c2ccccc2)c3ccccc3");
+    EXPECT_EQ(framework("P(c1ccccc1)(c1ccccc1)c1ccccc1"),
+              "c1ccc(cc1)P(c2ccccc2)c3ccccc3");
+    // Nitrogen: the N-methyl is a sidechain, so what is left is pyridine and
+    // not a pyridinium that banked the lost bond as a hydrogen.
+    EXPECT_EQ(framework("C[n+]1ccccc1"), framework("c1ccncc1"));
+    // The carbon control. This pair passed before the fix and must keep
+    // passing: it is what says the rule is uniform across elements rather than
+    // special-cased for sulfur.
+    EXPECT_EQ(framework("O=C(c1ccccc1)c1ccccc1"),
+              framework("C(c1ccccc1)c1ccccc1"));
+}
+
+TEST(MurckoExtractionTest, KeepsAChargeTheCutNeverTouched) {
+    // The scope limit on the normalization above, and the reason it is not
+    // applied to the whole framework: a charged ring atom whose every bond
+    // survives the cut is part of the scaffold. Neutralizing the spiro
+    // ammonium here produces a nitrogen with five bonds and no charge, which
+    // OEChem will not read back.
+    const std::string scaffold = framework("C1CC[N+]2(CCCCC2)CC1");
+    EXPECT_EQ(scaffold, "C1CC[N+]2(CC1)CCCCC2");
+    EXPECT_TRUE(round_trips(scaffold)) << scaffold;
+    // Berberine: the same case inside a fused aromatic system.
+    const std::string alkaloid =
+        framework("COc1ccc2cc3[n+](cc2c1OC)CCc1cc2c(cc1-3)OCO2");
+    EXPECT_EQ(alkaloid, "c1ccc2c[n+]3c(cc2c1)-c4cc5c(cc4CC3)OCO5");
+    EXPECT_TRUE(round_trips(alkaloid)) << alkaloid;
+}
+
 TEST(MurckoExtractionTest, GenericReductionConverges) {
     // The binding contract of the Generic level: benzene and pyridine must
     // become one string. A hand-rolled atom-type rewrite does not achieve this.
@@ -174,6 +214,10 @@ TEST(MurckoExtractionTest, ScaffoldsRoundTripThroughOEChem) {
         "FC1=CCCCC1",
         "O=C1CCCCN1",
         "c1ccccc1C(=O)O.c1ccncc1",
+        "O=S(=O)(c1ccccc1)c1ccccc1",
+        "O=P(c1ccccc1)(c1ccccc1)c1ccccc1",
+        "C[n+]1ccccc1",
+        "C1CC[N+]2(CCCCC2)CC1",
     };
     for (const char* smiles : inputs) {
         EXPECT_TRUE(round_trips(framework(smiles))) << "framework of " << smiles;
@@ -490,6 +534,11 @@ TEST(MurckoScaffoldsTest, MatchesTheKernelForEveryFixture) {
         // stereochemistry, and nothing on the threaded path may reintroduce it.
         "C1CC[C@H]2CCCC[C@@H]2C1", "C1CC[C@H]2CCCC[C@H]2C1",
         "C[C@H](N)c1ccccc1", "C[C@@H](N)c1ccccc1",
+        // The heteroatom-linker fixtures travel the driver too: the valence
+        // normalization happens in the kernel, and nothing on the threaded
+        // path may undo it.
+        "O=S(=O)(c1ccccc1)c1ccccc1", "O=S(c1ccccc1)c1ccccc1",
+        "S(c1ccccc1)c1ccccc1", "C[n+]1ccccc1", "C1CC[N+]2(CCCCC2)CC1",
     };
     const MolSet mols(smiles);
     for (ScaffoldType type : {ScaffoldType::Framework, ScaffoldType::Generic}) {
@@ -651,11 +700,19 @@ TEST(MurckoClusterTest, HonorsTheGenericScaffoldLevel) {
 TEST(MurckoClusterTest, PropagatesTheLabelerValidation) {
     const std::vector<OEChem::OEMolBase*> empty;
     EXPECT_THROW(OECluster::murcko_cluster(empty), OECluster::ComparisonError);
+    // The clusterer names itself: a caller who never called murcko_scaffolds
+    // should not be told that murcko_scaffolds refused their input.
     EXPECT_EQ(thrown_message<OECluster::ComparisonError>(
                   [&] { OECluster::murcko_cluster(empty); }),
-              "murcko_scaffolds requires at least one molecule");
+              "murcko_cluster requires at least one molecule");
 
     const MolSet mols({"c1ccccc1"});
+    std::vector<OEChem::OEMolBase*> with_null = mols.Pointers();
+    with_null.push_back(nullptr);
+    EXPECT_EQ(thrown_message<OECluster::ComparisonError>(
+                  [&] { OECluster::murcko_cluster(with_null); }),
+              "murcko_cluster received null molecule pointer at index 1");
+
     OECluster::MurckoOptions options;
     options.scaffold = static_cast<ScaffoldType>(42);
     EXPECT_THROW(OECluster::murcko_cluster(mols.Pointers(), options),

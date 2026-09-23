@@ -24,6 +24,16 @@
 
 namespace OECluster::detail {
 
+namespace {
+
+// Atom map index marking a framework atom whose bonds the sidechain cut
+// removed. Map indices are the only per-atom marking that survives
+// OESubsetMol, and OECreateCanSmiString emits them, so scaffold_of clears
+// every one of them before canonicalizing.
+constexpr unsigned int CUT_ATOM_MARK = 1u;
+
+}  // namespace
+
 std::optional<std::string> scaffold_of(const OEChem::OEMolBase& mol,
                                        ScaffoldType type) noexcept {
     try {
@@ -66,6 +76,30 @@ std::optional<std::string> scaffold_of(const OEChem::OEMolBase& mol,
             return std::nullopt;
         }
 
+        // OESubsetMol's hydrogen-count adjustment turns the bond order lost to
+        // the cut into implicit hydrogens on the atom left behind. Which atoms
+        // those are is knowable only here, while the parent still holds the
+        // bonds that leave the union, so they are marked now and normalized
+        // after the subset. The clearing pass is not redundant: an input read
+        // from mapped SMILES arrives with map indices already set.
+        for (OESystem::OEIter<OEChem::OEAtomBase> atom = work.GetAtoms(); atom;
+             ++atom) {
+            atom->SetMapIdx(0u);
+        }
+        for (OESystem::OEIter<OEChem::OEAtomBase> atom = work.GetAtoms(); atom;
+             ++atom) {
+            if (!region_union.HasAtom(&*atom)) {
+                continue;
+            }
+            for (OESystem::OEIter<OEChem::OEBondBase> bond = atom->GetBonds();
+                 bond; ++bond) {
+                if (!region_union.HasBond(&*bond)) {
+                    atom->SetMapIdx(CUT_ATOM_MARK);
+                    break;
+                }
+            }
+        }
+
         // OEIsMemberPtr consumes the iterator it is handed, so each predicate
         // takes its own call to GetAtoms/GetBonds.
         OEChem::OEIsMemberPtr<OEChem::OEAtomBase> atom_pred(region_union.GetAtoms());
@@ -88,6 +122,47 @@ std::optional<std::string> scaffold_of(const OEChem::OEMolBase& mol,
         // without re-perception here the Framework level emits a string OEChem
         // cannot kekulize. This runs for both levels, before anything
         // canonicalizes the result.
+        OEChem::OEFindRingAtomsAndBonds(framework);
+        OEChem::OEAssignAromaticFlags(framework);
+
+        // The normalization the marks exist for. RemoveAtomProperties is the
+        // library's own recomputation of formal charge and implicit hydrogen
+        // count -- the same bit the Generic level already relies on inside
+        // BemisMurcko -- and the two OEChem default-valence helpers are not
+        // usable here: both turn a neutral sp3 secondary amine into [NH2],
+        // which would corrupt the caffeine and piperazine frameworks.
+        //
+        // It runs on a copy and is transferred only onto the marked atoms. A
+        // charged ring atom whose every bond survived the cut is part of the
+        // scaffold, and stripping it produces a structure OEChem cannot read
+        // back: an azoniaspiro ammonium loses its charge and keeps five bonds.
+        OEChem::OEGraphMol normalized(framework);
+        if (!OEChem::OEUncolorMol(
+                normalized, OEChem::OEUncolorStrategy::RemoveAtomProperties)) {
+            return std::nullopt;
+        }
+        for (OESystem::OEIter<OEChem::OEAtomBase> atom = framework.GetAtoms();
+             atom; ++atom) {
+            if (atom->GetMapIdx() != CUT_ATOM_MARK) {
+                continue;
+            }
+            const OEChem::OEAtomBase* source =
+                normalized.GetAtom(OEChem::OEHasAtomIdx(atom->GetIdx()));
+            if (source == nullptr) {
+                return std::nullopt;
+            }
+            atom->SetFormalCharge(source->GetFormalCharge());
+            atom->SetImplicitHCount(source->GetImplicitHCount());
+        }
+        // OECreateCanSmiString emits atom map indices, so clearing them is a
+        // correctness step and not tidiness: leaving them turns c1ccccc1 into
+        // [cH:1]1ccccc1.
+        for (OESystem::OEIter<OEChem::OEAtomBase> atom = framework.GetAtoms();
+             atom; ++atom) {
+            atom->SetMapIdx(0u);
+        }
+        // Charge and hydrogen counts changed, so the flags assigned just above
+        // are re-derived before either level consumes them.
         OEChem::OEFindRingAtomsAndBonds(framework);
         OEChem::OEAssignAromaticFlags(framework);
 
@@ -140,10 +215,9 @@ namespace {
 // site.
 constexpr size_t MURCKO_CHUNK = 64;
 
-}  // namespace
-
-std::vector<std::string> murcko_scaffolds(const std::vector<OEChem::OEMolBase*>& mols,
-                                          const MurckoOptions& options) {
+std::vector<std::string> scaffolds_for(const std::vector<OEChem::OEMolBase*>& mols,
+                                       const MurckoOptions& options,
+                                       const char* caller) {
     // Options before inputs, so a caller wrong in two ways learns about the
     // enumerator rather than about their data.
     if (options.scaffold != ScaffoldType::Framework &&
@@ -151,10 +225,10 @@ std::vector<std::string> murcko_scaffolds(const std::vector<OEChem::OEMolBase*>&
         throw std::invalid_argument("Unknown Murcko scaffold type");
     }
     if (mols.empty()) {
-        throw ComparisonError("murcko_scaffolds requires at least one molecule");
+        throw ComparisonError(std::string(caller) +
+                              " requires at least one molecule");
     }
-    const std::vector<const OEChem::OEMolBase*> inputs =
-        checked_inputs(mols, "murcko_scaffolds");
+    const std::vector<const OEChem::OEMolBase*> inputs = checked_inputs(mols, caller);
 
     // The hazard in calling the toolkit concurrently is not this function's
     // data -- each worker builds its own molecule copies -- but the toolkit's
@@ -173,14 +247,23 @@ std::vector<std::string> murcko_scaffolds(const std::vector<OEChem::OEMolBase*>&
     // through ParallelFor: that one is captured under call_once, so the
     // survivor is a race winner and cancellation may leave later molecules
     // unexamined.
-    return detail::finish_extraction(std::move(raw), "murcko_scaffolds");
+    return detail::finish_extraction(std::move(raw), caller);
+}
+
+}  // namespace
+
+std::vector<std::string> murcko_scaffolds(const std::vector<OEChem::OEMolBase*>& mols,
+                                          const MurckoOptions& options) {
+    return scaffolds_for(mols, options, "murcko_scaffolds");
 }
 
 MurckoResult murcko_cluster(const std::vector<OEChem::OEMolBase*>& mols,
                             const MurckoOptions& options) {
-    // Calls the labeler rather than re-extracting, so the two public entry
-    // points cannot drift apart about what a scaffold is.
-    std::vector<std::string> scaffolds = murcko_scaffolds(mols, options);
+    // Shares the labeler's implementation rather than re-extracting, so the
+    // two public entry points cannot drift apart about what a scaffold is.
+    // The caller name is the only thing that differs: a murcko_cluster user
+    // should not be told that murcko_scaffolds refused their input.
+    std::vector<std::string> scaffolds = scaffolds_for(mols, options, "murcko_cluster");
 
     std::vector<std::string> cluster_scaffolds;
     for (const std::string& scaffold : scaffolds) {

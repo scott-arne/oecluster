@@ -20,6 +20,10 @@ BENZENE = "c1ccccc1"
 TOLUENE = "Cc1ccccc1"
 PYRIDINE = "c1ccncc1"
 HEXANE = "CCCCCC"
+DIPHENYL_SULFONE = "O=S(=O)(c1ccccc1)c1ccccc1"
+DIPHENYL_SULFOXIDE = "O=S(c1ccccc1)c1ccccc1"
+DIPHENYL_SULFIDE = "S(c1ccccc1)c1ccccc1"
+AZONIASPIRO = "C1CC[N+]2(CCCCC2)CC1"
 
 
 class TestScaffoldKeyword:
@@ -55,6 +59,33 @@ class TestScaffoldKeywordReachesTheClusterer:
         generic = oecluster.murcko(molecules, scaffold="generic")
         assert generic.cluster_scaffolds == ("C1CCCCC1",)
         assert list(generic.labels) == [0, 0]
+
+
+class TestHeteroatomLinkerNormalization:
+    # The Python mirror of the C++ fixtures: the normalization lives in the
+    # kernel, so what these pin is that the binding surfaces it unchanged.
+
+    def test_the_sulfur_oxidation_states_share_one_scaffold(self):
+        molecules = mols(DIPHENYL_SULFONE, DIPHENYL_SULFOXIDE, DIPHENYL_SULFIDE)
+        assert (oecluster.murcko_scaffolds(molecules)
+                == ["c1ccc(cc1)Sc2ccccc2"] * 3)
+
+    def test_the_oxidation_states_land_in_one_cluster(self):
+        result = oecluster.murcko(
+            mols(DIPHENYL_SULFONE, DIPHENYL_SULFOXIDE, DIPHENYL_SULFIDE,
+                 BENZENE))
+        assert result.cluster_scaffolds == ("c1ccc(cc1)Sc2ccccc2", "c1ccccc1")
+        assert list(result.labels) == [0, 0, 0, 1]
+
+    def test_an_n_methylated_ring_reduces_to_the_parent(self):
+        assert (oecluster.murcko_scaffolds(mols("C[n+]1ccccc1"))
+                == oecluster.murcko_scaffolds(mols(PYRIDINE)))
+
+    def test_a_ring_charge_the_cut_never_touched_survives(self):
+        # The scope limit: normalizing this one would produce a five-bonded
+        # neutral nitrogen.
+        assert (oecluster.murcko_scaffolds(mols(AZONIASPIRO))
+                == ["C1CC[N+]2(CC1)CCCCC2"])
 
 
 class TestValidationMirror:
