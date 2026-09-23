@@ -690,12 +690,12 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, _oecluster_is_oereceptor, "
 // handler above)
 //
 // Every override releases the GIL around $action and restores it on each exit
-// path. Fifteen of the sixteen then share one catch ladder, differing only in
-// the name in the fallback message; spelling that out fifteen times invited
-// the ladders to drift apart, and one of them already had. `NAME` is SWIG
-// preprocessor stringification, which is what keeps each message naming its
-// own function. cluster_report needs an extra pair of catch clauses and so is
-// written out below rather than expanded.
+// path. Twenty-one of the twenty-two then share one catch ladder, differing
+// only in the name in the fallback message; spelling that out twenty-one times
+// invited the ladders to drift apart, and one of them already had. `NAME` is
+// SWIG preprocessor stringification, which is what keeps each message naming
+// its own function. cluster_report needs an extra pair of catch clauses and so
+// is written out below rather than expanded.
 // ============================================================================
 %define OECLUSTER_GIL_EXCEPTION(QUALIFIED, NAME)
 %exception QUALIFIED {

@@ -93,6 +93,12 @@ private:
  * *has* rings but from which no framework can be extracted is an error, not an
  * empty string.
  *
+ * Removing a sidechain takes its bond order with it, so hydrogen counts and
+ * formal charges are recomputed on the atoms the cut touched. Diphenyl
+ * sulfone, diphenyl sulfoxide and diphenyl sulfide therefore share one
+ * framework scaffold, as their carbon analogues already did. A charged ring
+ * atom whose bonds all survive the cut keeps its charge.
+ *
  * Input molecules are never modified: each is copied before extraction.
  *
  * Extraction is parallelized across molecules only when the process

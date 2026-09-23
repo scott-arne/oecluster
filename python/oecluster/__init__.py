@@ -1942,10 +1942,12 @@ class MurckoResult(ClusteringResult):
     """Murcko scaffold clustering result with the scaffold strings.
 
     Clusters are scaffold identity classes: two molecules share a cluster
-    exactly when their scaffolds canonicalize to the same SMILES. Labels come
-    from sorting the distinct scaffold strings, so ``cluster_scaffolds`` is
-    ascending and ``cluster_scaffolds[i]`` names ``clusters[i]``. A molecule
-    with no ring system has an empty scaffold string and carries ``-1``.
+    exactly when their scaffolds canonicalize to the same non-empty SMILES.
+    Labels come from sorting the distinct non-empty scaffold strings, so
+    ``cluster_scaffolds`` is ascending and ``cluster_scaffolds[i]`` names
+    ``clusters[i]``. A molecule with no ring system has an empty scaffold
+    string, which names no cluster: it carries ``-1`` however many other
+    acyclic molecules the input holds.
     """
 
     def __init__(self, labels, clusters, *, scaffolds=(), cluster_scaffolds=(),
@@ -3044,17 +3046,21 @@ def murcko_scaffolds(mols, *, scaffold="framework", num_threads=0):
     rings but from which no framework can be extracted is an error rather than
     an empty string.
 
-    Two normalizations are applied, both of them so that scaffold identity is
+    Three normalizations are applied, all of them so that scaffold identity is
     string identity. Stereochemistry is dropped, because deleting sidechains can
     orphan a stereocenter and leave a configuration that means nothing;
     enantiomers and diastereomers therefore share a scaffold. Explicit hydrogens
     are suppressed, so an SD-file molecule and the same molecule read from
-    SMILES agree. Nothing else is standardized: there is no salt stripping and
-    no largest-component selection. An acyclic counter-ion contributes no
-    framework, so most salt forms already match the free base; a counter-ion
-    that *also* carries a ring -- a tosylate or besylate -- yields one
-    ``.``-joined scaffold that will not. Strip salts first if you want the
-    parent scaffold of those.
+    SMILES agree. Hydrogen counts and formal charges are recomputed on the atoms
+    the cut touched, because removing a sidechain takes its bond order with it;
+    diphenyl sulfone, diphenyl sulfoxide and diphenyl sulfide therefore share
+    one framework scaffold, as their carbon analogues already did, while a
+    charged ring atom whose bonds all survive keeps its charge. Nothing else is
+    standardized: there is no salt stripping and no largest-component
+    selection. An acyclic counter-ion contributes no framework, so most salt
+    forms already match the free base; a counter-ion that *also* carries a ring
+    -- a tosylate or besylate -- yields one ``.``-joined scaffold that will
+    not. Strip salts first if you want the parent scaffold of those.
 
     Input molecules are never modified.
 
@@ -3085,15 +3091,15 @@ def murcko(mols, *, scaffold="framework", num_threads=0):
     Cluster molecules by Bemis-Murcko scaffold identity.
 
     Two molecules share a cluster exactly when their scaffolds canonicalize to
-    the same SMILES. Unlike :func:`butina` and the other distance-driven
-    algorithms, this one takes molecules rather than a distance matrix -- there
-    is no distance in it -- following the same rule as :func:`bitbirch`, whose
-    first argument is a fingerprint batch.
+    the same non-empty SMILES. Unlike :func:`butina` and the other
+    distance-driven algorithms, this one takes molecules rather than a distance
+    matrix -- there is no distance in it -- following the same rule as
+    :func:`bitbirch`, whose first argument is a fingerprint batch.
 
-    Labels come from sorting the distinct scaffold strings, so two runs over
-    permuted inputs give the same label to the same scaffold. Acyclic molecules
-    are noise: they carry ``-1``, appear in ``scaffolds`` as ``''``, and belong
-    to no cluster.
+    Labels come from sorting the distinct non-empty scaffold strings, so two
+    runs over permuted inputs give the same label to the same scaffold. Acyclic
+    molecules are noise: they carry ``-1``, appear in ``scaffolds`` as ``''``,
+    and belong to no cluster.
 
     Every normalization and caveat on :func:`murcko_scaffolds` applies here
     unchanged, including the salt-stripping one.

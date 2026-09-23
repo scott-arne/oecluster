@@ -208,7 +208,9 @@ sodium salt and a mesylate all give the same scaffold as the free base. Only a
 counter-ion that carries its own ring, such as a tosylate, adds a `.`-joined
 component that will not match the free base. Stereochemistry is dropped and
 explicit hydrogens are suppressed, so scaffold identity does not depend on how a
-molecule was read.
+molecule was read, and hydrogen counts and formal charges are recomputed on the
+atoms a sidechain cut touched, so diphenyl sulfone, diphenyl sulfoxide and
+diphenyl sulfide share one framework scaffold.
 
 ### BitBirch Variants
 
