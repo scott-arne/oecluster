@@ -172,18 +172,7 @@ std::vector<std::string> murcko_scaffolds(const std::vector<OEChem::OEMolBase*>&
     // through ParallelFor: that one is captured under call_once, so the
     // survivor is a race winner and cancellation may leave later molecules
     // unexamined.
-    if (const std::optional<size_t> bad = detail::first_failure(raw)) {
-        throw ComparisonError(
-            "murcko_scaffolds could not extract a scaffold for molecule at index " +
-            std::to_string(*bad));
-    }
-
-    std::vector<std::string> scaffolds;
-    scaffolds.reserve(raw.size());
-    for (std::optional<std::string>& value : raw) {
-        scaffolds.push_back(std::move(*value));
-    }
-    return scaffolds;
+    return detail::finish_extraction(std::move(raw), "murcko_scaffolds");
 }
 
 }  // namespace OECluster

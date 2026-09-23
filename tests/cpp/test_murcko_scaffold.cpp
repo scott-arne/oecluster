@@ -28,6 +28,7 @@ using OECluster::ScaffoldType;
 using OECluster::detail::dispatch_thread_count;
 using OECluster::detail::effective_thread_count;
 using OECluster::detail::extract_all;
+using OECluster::detail::finish_extraction;
 using OECluster::detail::first_failure;
 using OECluster::detail::pool_is_thread_safe;
 using OECluster::detail::scaffold_of;
@@ -245,6 +246,21 @@ private:
     std::vector<OEChem::OEMolBase*> pointers_;
 };
 
+/// Runs `call` and returns the message of the `Error` it threw, or a sentinel
+/// no expectation below can match. gtest has no message matcher without gmock,
+/// and EXPECT_THROW discards the exception it catches.
+template <typename Error, typename Call>
+std::string thrown_message(Call call) {
+    try {
+        call();
+    } catch (const Error& error) {
+        return error.what();
+    } catch (...) {
+        return "<threw some other exception type>";
+    }
+    return "<threw nothing>";
+}
+
 /// 200 molecules over 10 distinct frameworks: each core carries an alkyl chain
 /// of length 0 to 19. Large enough to span several chunks at the internal chunk
 /// size of 64, which a fixture of a dozen molecules would not.
@@ -310,6 +326,33 @@ TEST(MurckoExtractAllTest, PreservesFailureOrderAtEveryThreadCount) {
         const std::optional<size_t> bad = first_failure(raw);
         ASSERT_TRUE(bad.has_value()) << "threads=" << threads;
         EXPECT_EQ(*bad, 60u) << "threads=" << threads;
+    }
+}
+
+TEST(MurckoFinishExtractionTest, ReturnsEveryScaffoldInInputOrder) {
+    // The empty slot is the acyclic outcome, which is a value and not a
+    // failure -- the conversion must pass it through untouched.
+    std::vector<std::optional<std::string>> raw{
+        std::string("c1ccccc1"), std::string(""), std::string("C1CCCCC1")};
+    const std::vector<std::string> scaffolds =
+        finish_extraction(std::move(raw), "murcko_scaffolds");
+    EXPECT_EQ(scaffolds,
+              (std::vector<std::string>{"c1ccccc1", "", "C1CCCCC1"}));
+}
+
+TEST(MurckoFinishExtractionTest, NamesTheFirstFailingIndexInTheMessage) {
+    // Two failures, seeded out of order, so the message can only be right by
+    // scanning in input order rather than by finding some failure.
+    std::vector<std::optional<std::string>> raw(12u, std::string("c1ccccc1"));
+    raw[9] = std::nullopt;
+    raw[5] = std::nullopt;
+    try {
+        finish_extraction(std::move(raw), "murcko_scaffolds");
+        FAIL() << "expected a ComparisonError";
+    } catch (const OECluster::ComparisonError& error) {
+        EXPECT_STREQ(error.what(),
+                     "murcko_scaffolds could not extract a scaffold for "
+                     "molecule at index 5");
     }
 }
 
@@ -394,11 +437,17 @@ TEST(MurckoScaffoldsTest, RefusesAnUnknownScaffoldType) {
     options.scaffold = static_cast<ScaffoldType>(42);
     EXPECT_THROW(OECluster::murcko_scaffolds(mols.Pointers(), options),
                  std::invalid_argument);
+    EXPECT_EQ(thrown_message<std::invalid_argument>(
+                  [&] { OECluster::murcko_scaffolds(mols.Pointers(), options); }),
+              "Unknown Murcko scaffold type");
 }
 
 TEST(MurckoScaffoldsTest, RefusesAnEmptyInput) {
     const std::vector<OEChem::OEMolBase*> mols;
     EXPECT_THROW(OECluster::murcko_scaffolds(mols), OECluster::ComparisonError);
+    EXPECT_EQ(thrown_message<OECluster::ComparisonError>(
+                  [&] { OECluster::murcko_scaffolds(mols); }),
+              "murcko_scaffolds requires at least one molecule");
 }
 
 TEST(MurckoScaffoldsTest, RefusesANullMolecule) {
@@ -407,6 +456,10 @@ TEST(MurckoScaffoldsTest, RefusesANullMolecule) {
     with_null.push_back(nullptr);
     EXPECT_THROW(OECluster::murcko_scaffolds(with_null),
                  OECluster::ComparisonError);
+    // The index is the null's position, not the count.
+    EXPECT_EQ(thrown_message<OECluster::ComparisonError>(
+                  [&] { OECluster::murcko_scaffolds(with_null); }),
+              "murcko_scaffolds received null molecule pointer at index 1");
 }
 
 TEST(MurckoScaffoldsTest, JudgesTheOptionsBeforeTheInput) {
@@ -417,6 +470,11 @@ TEST(MurckoScaffoldsTest, JudgesTheOptionsBeforeTheInput) {
     options.scaffold = static_cast<ScaffoldType>(42);
     EXPECT_THROW(OECluster::murcko_scaffolds(mols, options),
                  std::invalid_argument);
+    // This is what turns the test from "an invalid_argument escaped" into "the
+    // options one escaped" -- the empty input would raise its own error.
+    EXPECT_EQ(thrown_message<std::invalid_argument>(
+                  [&] { OECluster::murcko_scaffolds(mols, options); }),
+              "Unknown Murcko scaffold type");
 }
 
 TEST(MurckoScaffoldsTest, MatchesTheKernelForEveryFixture) {
@@ -486,8 +544,13 @@ TEST(MurckoScaffoldsTest, ClampsAnAbsurdThreadRequest) {
 // OESetMemPoolMode is fatal when called a second time in a process ("Fatal:
 // OESetMemPoolMode called twice!"), so a test cannot restore the mode it
 // changed, and leaving it changed would silently reconfigure every later test.
-// MurckoMemPoolGateTest covers the decision instead, including the wiring line
-// itself via dispatch_thread_count. What remains untested is only the call to
-// OEGetMemPoolMode that feeds it.
+// MurckoMemPoolGateTest covers the decision as a pure function instead.
+//
+// Two things stay unobserved by design. One is the OEGetMemPoolMode() call that
+// feeds the gate. The other is the resolved count reaching extract_all: a
+// mutation passing 1u there changes throughput and nothing else, and
+// IsDeterministicAcrossThreadCounts exists precisely to pin that the results
+// must not depend on the thread count. Catching that mutation would mean
+// asserting on wall time.
 
 }  // namespace

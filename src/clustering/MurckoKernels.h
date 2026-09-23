@@ -16,10 +16,12 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <oesystem.h>
 
+#include "oecluster/Error.h"
 #include "oecluster/ThreadPool.h"
 #include "oecluster/clustering/MurckoScaffold.h"
 
@@ -98,6 +100,36 @@ inline std::optional<size_t> first_failure(
         }
     }
     return std::nullopt;
+}
+
+/**
+ * @brief Convert raw extraction slots into scaffolds, or report the first failure.
+ *
+ * Separated from murcko_scaffolds so that the failure conversion -- the
+ * exception type, the index it names, and the message text -- is directly
+ * testable. No real molecule is known to make the kernel fail, so without this
+ * seam the branch would ship with no coverage at all.
+ *
+ * :param raw: Extraction slots in input order. Consumed: engaged slots are
+ *     moved from.
+ * :param caller: Name of the public entry point, used in the diagnostic.
+ * :returns: One scaffold per slot, in input order.
+ * :raises ComparisonError: If any slot is disengaged, naming the first such
+ *     index in input order rather than whichever worker failed first.
+ */
+inline std::vector<std::string> finish_extraction(
+        std::vector<std::optional<std::string>>&& raw, const char* caller) {
+    if (const std::optional<size_t> bad = first_failure(raw)) {
+        throw ComparisonError(std::string(caller) +
+                              " could not extract a scaffold for molecule at index " +
+                              std::to_string(*bad));
+    }
+    std::vector<std::string> scaffolds;
+    scaffolds.reserve(raw.size());
+    for (std::optional<std::string>& value : raw) {
+        scaffolds.push_back(std::move(*value));
+    }
+    return scaffolds;
 }
 
 /**
