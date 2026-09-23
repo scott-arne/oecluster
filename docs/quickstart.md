@@ -99,10 +99,10 @@ print(cross_dm.matrix[0, :])  # distances from first query to all targets
 
 ## Clustering And Representatives
 
-All clustering functions take a `DistanceMatrix` (except BitBirch, which takes
-an OEFP fingerprint batch) and return a result that subclasses
-`ClusteringResult`. Results expose a scikit-learn-style `labels` array and a
-tuple of `clusters`.
+Most clustering functions take a `DistanceMatrix`. Two do not: BitBirch takes an
+OEFP fingerprint batch, and Murcko takes molecules directly. All of them return
+a result that subclasses `ClusteringResult`, which exposes a scikit-learn-style
+`labels` array and a tuple of `clusters`.
 
 ```python
 result = oecluster.butina(dm, threshold=0.35, reordering=False)

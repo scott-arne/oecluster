@@ -13,11 +13,12 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   ring system yields the empty string, which is the "missing scaffold"
   convention `scaffold_agreement` already consumes -- the library can now
   produce the `scaffold_labels` it has consumed since 5.3.0 in three places.
-- `murcko`, clustering molecules by scaffold identity. It is the first partition
-  in the library computed from chemical structure rather than from a distance
-  matrix, so it takes molecules directly. Labels are the rank of each scaffold
-  in the sorted distinct set, making the labeling independent of input order;
-  acyclic molecules are noise. `MurckoResult` adds `scaffolds` and
+- `murcko`, clustering molecules by scaffold identity; the C++ entry point is
+  `murcko_cluster`, configured through `MurckoOptions`. It is the first
+  partition in the library computed from chemical structure rather than from a
+  distance matrix, so it takes molecules directly. Labels are the rank of each
+  scaffold in the sorted distinct set, making the labeling independent of input
+  order; acyclic molecules are noise. `MurckoResult` adds `scaffolds` and
   `cluster_scaffolds`.
 
 ### Notes

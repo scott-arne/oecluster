@@ -70,11 +70,11 @@ Two algorithms were considered and excluded:
 *Re-derived.* Partitions on chemical structure rather than on distance: Murcko
 scaffold assignment and MCS-based clustering.
 
-Every algorithm in the library today is distance-driven. `scaffold_labels` is
-consumed as an input in three places - scaffold-ARI in A2, the weighted-medoid
-representative, and scaffold purity in the report - but the library has never
-produced them. C closes that asymmetry and gives E a chemically meaningful axis
-to diversify along.
+Before C, every algorithm in the library was distance-driven. `scaffold_labels`
+is consumed as an input in three places - scaffold-ARI in A2, the
+weighted-medoid representative, and scaffold purity in the report - but nothing
+in the library produced them. C closes that asymmetry and gives E a chemically
+meaningful axis to diversify along.
 
 C1 shipped in 5.6.0 as `murcko_scaffolds` and `murcko`, closing the producer
 side of that asymmetry. C2, MCS-based clustering, is the remaining half.
@@ -120,9 +120,9 @@ algorithm roster, and that roster is not final until D2 lands.
 
 ## D4 - Out-of-core and streaming clustering
 
-*Re-derived.* Every algorithm except BitBirch requires a materialized distance
-matrix. D4 lifts that constraint at the algorithm level, building on B's
-fingerprint-native path and the completed roster.
+*Re-derived.* Every algorithm except BitBirch and Murcko requires a materialized
+distance matrix. D4 lifts that constraint at the algorithm level, building on
+B's fingerprint-native path and the completed roster.
 
 ## Deferred defect backlog
 
