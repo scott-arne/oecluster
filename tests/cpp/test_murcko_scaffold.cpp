@@ -37,13 +37,22 @@ std::string generic(const char* smiles) {
     return scaffold_from_smiles(smiles, ScaffoldType::Generic);
 }
 
-/// Heavy-atom count of a SMILES string. Re-parsing an aromatic framework can
-/// emit a kekulization warning on stderr; the atom count is still correct and
-/// the warning is not a failure.
+/// Heavy-atom count of a SMILES string, asserting that the string parses. A
+/// scaffold OEChem cannot read back still yields a plausible count from the
+/// partial parse, so an unchecked status hides exactly the bug this helper
+/// would otherwise be measuring.
 size_t atom_count(const std::string& smiles) {
     OEChem::OEGraphMol mol;
-    OEChem::OESmilesToMol(mol, smiles.c_str());
+    EXPECT_TRUE(OEChem::OESmilesToMol(mol, smiles.c_str())) << smiles;
     return mol.NumAtoms();
+}
+
+/// Whether a scaffold string reparses. A scaffold the SDK that produced it
+/// cannot read back is not a usable canonical SMILES, however plausible it
+/// looks.
+bool round_trips(const std::string& smiles) {
+    OEChem::OEGraphMol mol;
+    return OEChem::OESmilesToMol(mol, smiles.c_str());
 }
 
 TEST(MurckoExtractionTest, RemovesSidechains) {
@@ -85,7 +94,7 @@ TEST(MurckoExtractionTest, TheDiphenylmethaneLinkerIsExactlyOneAtom) {
 
 TEST(MurckoExtractionTest, DropsNMethylsFromCaffeine) {
     const char* caffeine = "Cn1cnc2c1c(=O)n(C)c(=O)n2C";
-    EXPECT_EQ(framework(caffeine), "c1c2c([nH]c[nH]1)nc[nH]2");
+    EXPECT_EQ(framework(caffeine), "c1[nH]c2c(n1)NCNC2");
     EXPECT_LT(atom_count(framework(caffeine)), atom_count(caffeine));
 }
 
@@ -137,6 +146,27 @@ TEST(MurckoExtractionTest, IgnoresExplicitHydrogens) {
 TEST(MurckoExtractionTest, JoinsDisconnectedComponentsIntoOneString) {
     EXPECT_EQ(framework("c1ccccc1C(=O)O.c1ccncc1"), "c1ccccc1.c1ccncc1");
     EXPECT_EQ(generic("c1ccccc1C(=O)O.c1ccncc1"), "C1CCCCC1.C1CCCCC1");
+}
+
+TEST(MurckoExtractionTest, ScaffoldsRoundTripThroughOEChem) {
+    // Aromatic flags inherited from the parent once produced a caffeine
+    // framework that OEChem itself could not kekulize, and the suite passed
+    // regardless because nothing checked a parse status.
+    const char* inputs[] = {
+        "c1ccccc1",
+        "c1ccncc1",
+        "c1ccc(cc1)Cc1ccccc1",
+        "c1ccc(cc1)-c1ccccc1",
+        "Cn1cnc2c1c(=O)n(C)c(=O)n2C",
+        "C1CC[C@H]2CCCC[C@@H]2C1",
+        "FC1=CCCCC1",
+        "O=C1CCCCN1",
+        "c1ccccc1C(=O)O.c1ccncc1",
+    };
+    for (const char* smiles : inputs) {
+        EXPECT_TRUE(round_trips(framework(smiles))) << "framework of " << smiles;
+        EXPECT_TRUE(round_trips(generic(smiles))) << "generic of " << smiles;
+    }
 }
 
 TEST(MurckoExtractionTest, AcyclicMoleculesYieldTheEmptyString) {

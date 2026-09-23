@@ -25,7 +25,7 @@ namespace OECluster::detail {
 /**
  * @brief Extract one molecule's Bemis-Murcko scaffold.
  *
- * Never throws for an extraction failure: the three outcomes are distinct in
+ * Never throws: the three outcomes are distinct in
  * the return type, which is what lets the threaded caller report the *first*
  * failing index in input order rather than whichever worker lost the race.
  *
@@ -36,7 +36,7 @@ namespace OECluster::detail {
  *     any SDK transformation step reported failure.
  */
 std::optional<std::string> scaffold_of(const OEChem::OEMolBase& mol,
-                                       ScaffoldType type);
+                                       ScaffoldType type) noexcept;
 
 }  // namespace OECluster::detail
 
