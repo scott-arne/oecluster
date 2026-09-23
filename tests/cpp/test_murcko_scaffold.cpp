@@ -621,6 +621,33 @@ TEST(MurckoClusterTest, ReportsTheSameScaffoldsAsTheLabeler) {
     EXPECT_EQ(result.NumClusters(), 10u);
 }
 
+TEST(MurckoClusterTest, HonorsTheGenericScaffoldLevel) {
+    // The only success-path test that passes a non-default MurckoOptions.
+    // Without it, dropping the caller's scaffold level on the way to the
+    // labeler would leave every other test green while silently returning a
+    // Framework partition for a Generic request.
+    const MolSet mols({"c1ccccc1", "c1ccncc1"});
+    OECluster::MurckoOptions options;
+    options.scaffold = ScaffoldType::Generic;
+
+    const OECluster::MurckoResult generic =
+        OECluster::murcko_cluster(mols.Pointers(), options);
+    EXPECT_EQ(generic.NumClusters(), 1u);
+    EXPECT_EQ(generic.ClusterScaffolds(),
+              std::vector<std::string>({"C1CCCCC1"}));
+    EXPECT_EQ(generic.Labels()[0], generic.Labels()[1]);
+    EXPECT_EQ(generic.Scaffolds(),
+              OECluster::murcko_scaffolds(mols.Pointers(), options));
+
+    // The contrast is what proves the option was read rather than that the
+    // call merely succeeded: the same two molecules are two clusters at the
+    // default Framework level.
+    const OECluster::MurckoResult framework =
+        OECluster::murcko_cluster(mols.Pointers());
+    EXPECT_EQ(framework.NumClusters(), 2u);
+    EXPECT_NE(framework.Labels()[0], framework.Labels()[1]);
+}
+
 TEST(MurckoClusterTest, PropagatesTheLabelerValidation) {
     const std::vector<OEChem::OEMolBase*> empty;
     EXPECT_THROW(OECluster::murcko_cluster(empty), OECluster::ComparisonError);
