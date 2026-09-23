@@ -144,6 +144,7 @@ set(OECLUSTER_SOURCES
     src/clustering/BitBirch.cpp
     src/clustering/PartitionAgreement.cpp
     src/clustering/SARCoherence.cpp
+    src/clustering/MurckoScaffold.cpp
     src/DescriptorBuild.cpp
     src/DescriptorStatistics.cpp
 )
@@ -158,9 +159,19 @@ target_include_directories(oecluster
         $<INSTALL_INTERFACE:include>
 )
 
+# FindOpenEye defines OpenEye::OEMedChem conditionally, only when OEMEDCHEM_LIBRARY
+# resolves. A toolkit installation without it would configure clean and then fail
+# at link with an unhelpful message, so refuse loudly at configure time instead.
+if(NOT TARGET OpenEye::OEMedChem)
+    message(FATAL_ERROR
+        "OpenEye::OEMedChem not found; Murcko scaffold support requires the "
+        "OEMedChem library in the OpenEye toolkit installation.")
+endif()
+
 target_link_libraries(oecluster
     PUBLIC
         OpenEye::OEChem
+        OpenEye::OEMedChem
         OpenEye::OEShape
         OpenEye::OEBio
         OpenEye::OESpruce
