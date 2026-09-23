@@ -2996,12 +2996,12 @@ def _murcko_options(mols, scaffold, num_threads, caller):
     no native check to mirror -- the native layer clamps rather than refuses --
     and is only bounded here to what a ``size_t`` can hold.
 
-    :param mols: The caller's molecule sequence, judged only for emptiness.
+    :param mols: The caller's molecule list, judged only for type and emptiness.
     :param scaffold: Scaffold level name; case-insensitive.
     :param num_threads: Worker thread request.
     :param caller: Public function name, for the messages.
     :returns: A populated native ``MurckoOptions``.
-    :raises TypeError: If ``scaffold`` is not a string, ``mols`` has no length,
+    :raises TypeError: If ``scaffold`` is not a string, ``mols`` is not a list,
         or ``num_threads`` is not index-coercible.
     :raises ValueError: If ``scaffold`` is not a known level, ``mols`` is empty,
         or ``num_threads`` is negative or larger than a ``size_t``.
@@ -3013,12 +3013,16 @@ def _murcko_options(mols, scaffold, num_threads, caller):
         raise ValueError(
             f"Unknown Murcko scaffold type: {scaffold!r}; "
             "expected 'framework' or 'generic'")
-    try:
-        is_empty = len(mols) == 0
-    except TypeError as error:
-        raise TypeError(
-            f"{caller}() requires a list of molecules") from error
-    if is_empty:
+    # The typemap is a strict PyList_Check, so anything else is rejected there
+    # anyway -- but both entry points are overloaded, and SWIG's overload
+    # dispatcher discards the typemap's message in favour of "Wrong number or
+    # type of arguments for overloaded function 'murcko_cluster'", naming a
+    # symbol murcko() never told the caller about. Mirroring the check exactly
+    # keeps a tuple, which has a length and so used to slip through, from
+    # reaching that dispatcher.
+    if not isinstance(mols, list):
+        raise TypeError(f"{caller}() requires a list of molecules")
+    if not mols:
         raise ValueError(f"{caller}() requires at least one molecule")
 
     num_threads_int = operator.index(num_threads)

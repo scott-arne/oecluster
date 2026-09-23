@@ -98,11 +98,14 @@ class TestValidationMirror:
                 match=r"murcko_scaffolds\(\) requires at least one molecule"):
             oecluster.murcko_scaffolds([])
 
-    def test_an_empty_tuple_is_a_value_error_not_a_type_error(self):
-        # The mirror's length check fires before the typemap would have had an
-        # element to object to; "empty container of the wrong type" is
-        # otherwise genuinely ambiguous between the two.
-        with pytest.raises(ValueError):
+    def test_an_empty_tuple_is_a_type_error_not_a_value_error(self):
+        # "Empty container of the wrong type" is ambiguous between the two
+        # verdicts, and the mirror resolves it the way the scaffold verdict is
+        # already resolved against the empty one: type first. Telling this
+        # caller to add molecules would only send them back for a TypeError
+        # once they had.
+        with pytest.raises(TypeError,
+                           match=r"requires a list of molecules"):
             oecluster.murcko_scaffolds(())
 
     def test_a_non_integer_thread_count_is_a_type_error(self):
@@ -123,15 +126,38 @@ class TestValidationMirror:
         with pytest.raises(TypeError):
             oecluster.murcko_scaffolds("not molecules")
 
-    def test_an_unsized_input_names_the_function(self):
-        # Without the guard this escapes as "object of type 'generator' has no
-        # len()" -- the right exception type, carrying neither the function name
-        # nor what it wanted. A string reaches the typemap and gets a good
-        # message; a generator did not.
+    @pytest.mark.parametrize("entry_point, name", [
+        (oecluster.murcko_scaffolds, "murcko_scaffolds"),
+        (oecluster.murcko, "murcko"),
+    ])
+    @pytest.mark.parametrize("label", ["generator", "tuple"])
+    def test_a_non_list_input_names_the_public_function(
+            self, entry_point, name, label):
+        # Three ways this message went wrong before the mirror covered the
+        # whole type. A generator escaped as "object of type 'generator' has
+        # no len()" -- the right exception type, naming neither the function
+        # nor what it wanted. A tuple has a length, so it passed the mirror and
+        # reached the native call, where SWIG's overload dispatcher reports
+        # "Wrong number or type of arguments for overloaded function
+        # 'murcko_cluster'" -- and murcko() never told the caller that symbol
+        # exists. The match is anchored on the full sentence so a message that
+        # merely contains the right words does not satisfy it.
+        molecules = mols(BENZENE)
+        bad_input = (
+            (mol for mol in molecules) if label == "generator"
+            else tuple(molecules))
         with pytest.raises(
                 TypeError,
-                match=r"murcko_scaffolds\(\) requires a list of molecules"):
-            oecluster.murcko_scaffolds(mol for mol in mols(BENZENE))
+                match=rf"^{name}\(\) requires a list of molecules$"):
+            entry_point(bad_input)
+
+    def test_a_non_list_error_never_names_the_native_symbol(self):
+        # The generic SWIG dispatcher message is what this guards against, so
+        # assert on its distinguishing text rather than only on the good text.
+        with pytest.raises(TypeError) as caught:
+            oecluster.murcko(tuple(mols(BENZENE)))
+        assert "murcko_cluster" not in str(caught.value)
+        assert "overloaded" not in str(caught.value)
 
     def test_a_non_molecule_element_is_a_type_error(self):
         with pytest.raises(TypeError):
