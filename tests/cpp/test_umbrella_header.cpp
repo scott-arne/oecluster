@@ -89,6 +89,8 @@ TEST(UmbrellaHeaderTest, ReachesTheClusteringHeaders) {
     EXPECT_NE(definition_size<OECluster::AgglomerativeOptions>(), 0u);
     EXPECT_NE(definition_size<OECluster::BitBirchOptions>(), 0u);
     EXPECT_NE(definition_size<OECluster::KMedoidsOptions>(), 0u);
+    EXPECT_NE(definition_size<OECluster::MurckoOptions>(), 0u);
+    EXPECT_NE(definition_size<OECluster::MurckoResult>(), 0u);
 
     // ClusterTypes.h is reached through the free function rather than through
     // ClusteringResult, which every header above would drag in anyway.
