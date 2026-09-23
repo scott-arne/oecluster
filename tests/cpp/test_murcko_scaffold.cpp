@@ -49,6 +49,16 @@ std::string generic(const char* smiles) {
     return scaffold_from_smiles(smiles, ScaffoldType::Generic);
 }
 
+/// The scaffold of a molecule whose hydrogens were made explicit before
+/// extraction, which is how an SD file or a PDB record arrives.
+std::string framework_with_explicit_h(const char* smiles) {
+    OEChem::OEGraphMol mol;
+    OEChem::OESmilesToMol(mol, smiles);
+    OEChem::OEAddExplicitHydrogens(mol);
+    return scaffold_of(mol, ScaffoldType::Framework)
+        .value_or(std::string("<extraction failed>"));
+}
+
 /// Heavy-atom count of a SMILES string, asserting that the string parses. A
 /// scaffold OEChem cannot read back still yields a plausible count from the
 /// partial parse, so an unchecked status hides exactly the bug this helper
@@ -65,6 +75,18 @@ size_t atom_count(const std::string& smiles) {
 bool round_trips(const std::string& smiles) {
     OEChem::OEGraphMol mol;
     return OEChem::OESmilesToMol(mol, smiles.c_str());
+}
+
+/// Whether every atom of a reparsed scaffold carries a valence OEChem accepts
+/// for its element and charge. A quaternary nitrogen stripped of its charge
+/// reparses without complaint, so the round trip alone cannot tell a scaffold
+/// from the hypervalent molecule it should never have become.
+bool has_valid_valences(const std::string& smiles) {
+    OEChem::OEGraphMol mol;
+    if (!OEChem::OESmilesToMol(mol, smiles.c_str())) {
+        return false;
+    }
+    return OEChem::OECheckAtomValences(mol);
 }
 
 TEST(MurckoExtractionTest, RemovesSidechains) {
@@ -206,6 +228,30 @@ TEST(MurckoExtractionTest, IgnoresExplicitHydrogens) {
               scaffold_of(explicit_h, ScaffoldType::Framework));
     EXPECT_EQ(scaffold_of(implicit_h, ScaffoldType::Generic),
               scaffold_of(explicit_h, ScaffoldType::Generic));
+}
+
+TEST(MurckoExtractionTest, IgnoresExplicitHydrogensOnChargedRings) {
+    // Toluene above cannot see the failure this pins, because neutralizing an
+    // already-neutral atom changes nothing. A Bemis-Murcko region holds no
+    // hydrogen, so the bond from a ring atom to an explicit hydrogen is absent
+    // from the region union and reads exactly like a severed sidechain; taking
+    // it for one hands the atom to the cut-atom normalization, which recomputes
+    // the charge away. An explicit-hydrogen pyridinium came back as pyridine
+    // while its implicit-hydrogen twin stayed a pyridinium -- scaffold identity
+    // turning on how the molecule was read, which is what hydrogen suppression
+    // exists to rule out.
+    for (const char* smiles : {"c1cc[nH+]cc1", "C[n+]1ccccc1",
+                               "C1CC[N+]2(CCCCC2)CC1", "c1ccc2[nH]ccc2c1",
+                               "[O-]C(=O)c1cc[nH+]cc1"}) {
+        const std::string scaffold = framework(smiles);
+        EXPECT_EQ(framework_with_explicit_h(smiles), scaffold) << smiles;
+        EXPECT_TRUE(has_valid_valences(scaffold))
+            << smiles << " -> " << scaffold;
+    }
+    // The charged pair the position-dependent rule turns on, stated as literals
+    // so a change that quietly neutralized both would still fail here.
+    EXPECT_EQ(framework_with_explicit_h("c1cc[nH+]cc1"), "c1cc[nH+]cc1");
+    EXPECT_EQ(framework_with_explicit_h("C[n+]1ccccc1"), "c1ccncc1");
 }
 
 TEST(MurckoExtractionTest, JoinsDisconnectedComponentsIntoOneString) {

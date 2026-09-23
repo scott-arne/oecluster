@@ -93,10 +93,24 @@ std::optional<std::string> scaffold_of(const OEChem::OEMolBase& mol,
             }
             for (OESystem::OEIter<OEChem::OEBondBase> bond = atom->GetBonds();
                  bond; ++bond) {
-                if (!region_union.HasBond(&*bond)) {
-                    atom->SetMapIdx(CUT_ATOM_MARK);
-                    break;
+                if (region_union.HasBond(&*bond)) {
+                    continue;
                 }
+                // A framework region holds no hydrogen, so an explicit
+                // hydrogen looks exactly like a severed sidechain from here.
+                // Marking one would neutralize the atom it hangs off -- an
+                // explicit-hydrogen pyridinium came out as pyridine -- and
+                // make scaffold identity depend on how the molecule was read,
+                // which is the opposite of what the hydrogen suppression
+                // further down exists to guarantee. Losing an explicit
+                // hydrogen costs exactly one bond order, which OESubsetMol
+                // banks back as one implicit hydrogen: correct without help.
+                if (bond->GetNbr(&*atom)->GetAtomicNum() ==
+                    OEChem::OEElemNo::H) {
+                    continue;
+                }
+                atom->SetMapIdx(CUT_ATOM_MARK);
+                break;
             }
         }
 
