@@ -418,7 +418,8 @@ print(oecluster.compare_reports(butina_report, dbscan_report))
 ```
 
 Every clustering result and its report expose a read-only `.method` name
-(`"butina"`, `"dbscan"`, `"hdbscan"`, `"agglomerative"`, or `"bitbirch"`).
+(`"butina"`, `"dbscan"`, `"hdbscan"`, `"agglomerative"`, `"k_medoids"`,
+`"bitbirch"`, or `"murcko"`).
 `compare_reports` accepts two or more reports and labels each column by method:
 
 ```python
@@ -831,7 +832,7 @@ Runnable examples live in `examples/`:
 |---------|---------------|
 | `quickstart_smiles.py` | End-to-end clustering from inline SMILES. |
 | `rank_representatives.py` | Weighted ranking plus score/diversity k-representative selection. |
-| `getting-started.ipynb` | Notebook walkthrough over a real dataset: distances, all five algorithms, and a side-by-side quality comparison. |
+| `getting-started.ipynb` | Notebook walkthrough over a real dataset: distances, four of the clustering algorithms, and a side-by-side quality comparison. |
 
 Run the scripts with the local package on your `PYTHONPATH`:
 
