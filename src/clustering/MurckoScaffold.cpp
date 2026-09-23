@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <iterator>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -173,6 +174,44 @@ std::vector<std::string> murcko_scaffolds(const std::vector<OEChem::OEMolBase*>&
     // survivor is a race winner and cancellation may leave later molecules
     // unexamined.
     return detail::finish_extraction(std::move(raw), "murcko_scaffolds");
+}
+
+MurckoResult murcko_cluster(const std::vector<OEChem::OEMolBase*>& mols,
+                            const MurckoOptions& options) {
+    // Calls the labeler rather than re-extracting, so the two public entry
+    // points cannot drift apart about what a scaffold is.
+    std::vector<std::string> scaffolds = murcko_scaffolds(mols, options);
+
+    std::vector<std::string> cluster_scaffolds;
+    for (const std::string& scaffold : scaffolds) {
+        if (!scaffold.empty()) {
+            cluster_scaffolds.push_back(scaffold);
+        }
+    }
+    // Sorting before assigning ranks is what makes the labeling canonical:
+    // permuted inputs give the same label to the same scaffold.
+    std::sort(cluster_scaffolds.begin(), cluster_scaffolds.end());
+    cluster_scaffolds.erase(
+        std::unique(cluster_scaffolds.begin(), cluster_scaffolds.end()),
+        cluster_scaffolds.end());
+
+    std::vector<ClusterLabel> labels(scaffolds.size(), NOISE_LABEL);
+    for (size_t i = 0; i < scaffolds.size(); ++i) {
+        if (scaffolds[i].empty()) {
+            continue;  // Acyclic: noise, and absent from every cluster.
+        }
+        const auto position = std::lower_bound(cluster_scaffolds.begin(),
+                                               cluster_scaffolds.end(),
+                                               scaffolds[i]);
+        labels[i] = static_cast<ClusterLabel>(
+            std::distance(cluster_scaffolds.begin(), position));
+    }
+
+    // Ranks are dense from zero, so labels_to_clusters indexes Members() by
+    // label directly and ClusterScaffolds()[i] names Members()[i].
+    Clusters members = labels_to_clusters(labels);
+    return MurckoResult(std::move(labels), std::move(members),
+                        std::move(scaffolds), std::move(cluster_scaffolds));
 }
 
 }  // namespace OECluster

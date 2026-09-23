@@ -540,6 +540,104 @@ TEST(MurckoScaffoldsTest, ClampsAnAbsurdThreadRequest) {
               OECluster::murcko_scaffolds(mols.Pointers(), serial));
 }
 
+TEST(MurckoClusterTest, GroupsMoleculesBySharedScaffold) {
+    const MolSet mols({"c1ccccc1", "Cc1ccccc1", "c1ccncc1"});
+    const OECluster::MurckoResult result = OECluster::murcko_cluster(mols.Pointers());
+
+    EXPECT_EQ(result.Method(), "murcko");
+    ASSERT_EQ(result.Labels().size(), 3u);
+    EXPECT_EQ(result.Labels()[0], result.Labels()[1]);
+    EXPECT_NE(result.Labels()[0], result.Labels()[2]);
+    EXPECT_EQ(result.NumClusters(), 2u);
+}
+
+TEST(MurckoClusterTest, LabelsIndexTheClusterScaffolds) {
+    const MolSet mols({"c1ccncc1", "c1ccccc1", "Cc1ccccc1", "c1ccc2ccccc2c1"});
+    const OECluster::MurckoResult result = OECluster::murcko_cluster(mols.Pointers());
+
+    // Sorted distinct scaffolds, so the labeling is canonical rather than
+    // first-seen.
+    EXPECT_TRUE(std::is_sorted(result.ClusterScaffolds().begin(),
+                               result.ClusterScaffolds().end()));
+    ASSERT_EQ(result.ClusterScaffolds().size(), result.Members().size());
+    for (size_t label = 0; label < result.Members().size(); ++label) {
+        for (size_t member : result.Members()[label]) {
+            EXPECT_EQ(result.Scaffolds()[member], result.ClusterScaffolds()[label])
+                << "label " << label << " member " << member;
+        }
+    }
+}
+
+TEST(MurckoClusterTest, AcyclicMoleculesAreNoise) {
+    const MolSet mols({"c1ccccc1", "CCCCCC", "Cc1ccccc1"});
+    const OECluster::MurckoResult result = OECluster::murcko_cluster(mols.Pointers());
+
+    EXPECT_EQ(result.Labels()[1], OECluster::NOISE_LABEL);
+    EXPECT_EQ(result.Scaffolds()[1], "");
+    EXPECT_EQ(result.NumClusters(), 1u);
+    for (const OECluster::Cluster& cluster : result.Members()) {
+        EXPECT_EQ(std::count(cluster.begin(), cluster.end(), size_t(1)), 0);
+    }
+}
+
+TEST(MurckoClusterTest, AllAcyclicInputProducesNoClusters) {
+    const MolSet mols({"CCCCCC", "CCO", "C"});
+    const OECluster::MurckoResult result = OECluster::murcko_cluster(mols.Pointers());
+
+    EXPECT_EQ(result.NumClusters(), 0u);
+    ASSERT_EQ(result.Labels().size(), 3u);
+    for (OECluster::ClusterLabel label : result.Labels()) {
+        EXPECT_EQ(label, OECluster::NOISE_LABEL);
+    }
+    EXPECT_TRUE(result.ClusterScaffolds().empty());
+}
+
+TEST(MurckoClusterTest, IsInvariantUnderInputPermutation) {
+    const std::vector<std::string> smiles = {
+        "c1ccccc1", "c1ccncc1", "Cc1ccccc1", "c1ccc2ccccc2c1", "CCCCCC",
+    };
+    const std::vector<std::string> shuffled = {
+        "c1ccc2ccccc2c1", "CCCCCC", "Cc1ccccc1", "c1ccccc1", "c1ccncc1",
+    };
+    const MolSet original(smiles);
+    const MolSet permuted(shuffled);
+    const OECluster::MurckoResult a = OECluster::murcko_cluster(original.Pointers());
+    const OECluster::MurckoResult b = OECluster::murcko_cluster(permuted.Pointers());
+
+    // Sorting the distinct scaffolds before labeling is what makes the two
+    // runs comparable without a permutation in between.
+    EXPECT_EQ(a.ClusterScaffolds(), b.ClusterScaffolds());
+    EXPECT_EQ(a.Labels()[0], b.Labels()[3]);
+    EXPECT_EQ(a.Labels()[1], b.Labels()[4]);
+    EXPECT_EQ(a.Labels()[2], b.Labels()[2]);
+    EXPECT_EQ(a.Labels()[3], b.Labels()[0]);
+    EXPECT_EQ(a.Labels()[4], b.Labels()[1]);
+}
+
+TEST(MurckoClusterTest, ReportsTheSameScaffoldsAsTheLabeler) {
+    const MolSet mols(threading_fixture_smiles());
+    const OECluster::MurckoResult result = OECluster::murcko_cluster(mols.Pointers());
+    EXPECT_EQ(result.Scaffolds(), OECluster::murcko_scaffolds(mols.Pointers()));
+    EXPECT_EQ(result.NumClusters(), 10u);
+}
+
+TEST(MurckoClusterTest, PropagatesTheLabelerValidation) {
+    const std::vector<OEChem::OEMolBase*> empty;
+    EXPECT_THROW(OECluster::murcko_cluster(empty), OECluster::ComparisonError);
+    EXPECT_EQ(thrown_message<OECluster::ComparisonError>(
+                  [&] { OECluster::murcko_cluster(empty); }),
+              "murcko_scaffolds requires at least one molecule");
+
+    const MolSet mols({"c1ccccc1"});
+    OECluster::MurckoOptions options;
+    options.scaffold = static_cast<ScaffoldType>(42);
+    EXPECT_THROW(OECluster::murcko_cluster(mols.Pointers(), options),
+                 std::invalid_argument);
+    EXPECT_EQ(thrown_message<std::invalid_argument>(
+                  [&] { OECluster::murcko_cluster(mols.Pointers(), options); }),
+              "Unknown Murcko scaffold type");
+}
+
 // The end-to-end serial-fallback case cannot be written in this binary:
 // OESetMemPoolMode is fatal when called a second time in a process ("Fatal:
 // OESetMemPoolMode called twice!"), so a test cannot restore the mode it
