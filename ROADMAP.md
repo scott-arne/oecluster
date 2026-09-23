@@ -23,7 +23,8 @@ they are not recoveries of the original intent.
 | A2 | Partition agreement: ARI/AMI/NMI/V-measure/Fowlkes-Mallows, scaffold-ARI | shipped 5.3.0 |
 | A3 | SAR coherence: eta-squared, omega-squared, SALI, cliff density, MODI/RMODI | shipped 5.4.0 |
 | D1 | k-medoids/PAM: exactly `k` clusters with real-member centers | shipped 5.5.0 |
-| C | Chemistry-native clustering: Murcko scaffold and MCS partitioning | next |
+| C1 | Murcko scaffold assignment and scaffold-identity clustering | shipped 5.6.0 |
+| C2 | MCS-based clustering | next |
 | E | Diversity metrics and library-scale selection | planned |
 | D2 | Graph and leader algorithms: Leiden, Jarvis-Patrick, leader/DISE | planned |
 | B | Fingerprint-native O(N) counterparts of the A metrics | planned |
@@ -74,6 +75,9 @@ consumed as an input in three places - scaffold-ARI in A2, the weighted-medoid
 representative, and scaffold purity in the report - but the library has never
 produced them. C closes that asymmetry and gives E a chemically meaningful axis
 to diversify along.
+
+C1 shipped in 5.6.0 as `murcko_scaffolds` and `murcko`, closing the producer
+side of that asymmetry. C2, MCS-based clustering, is the remaining half.
 
 ## E - Diversity metrics and library-scale selection
 

@@ -2,6 +2,36 @@
 
 This file starts at 5.0.0; earlier releases are not recorded here.
 
+## [5.6.0] - 2026-09-23
+
+### Added
+
+- `murcko_scaffolds`, in C++ and Python, assigning each molecule its
+  Bemis-Murcko scaffold as a canonical SMILES. `scaffold="framework"` keeps ring
+  systems plus their linkers; `scaffold="generic"` reduces that framework to its
+  topology, every heavy atom carbon and every bond single. A molecule with no
+  ring system yields the empty string, which is the "missing scaffold"
+  convention `scaffold_agreement` already consumes -- the library can now
+  produce the `scaffold_labels` it has consumed since 5.3.0 in three places.
+- `murcko`, clustering molecules by scaffold identity. It is the first partition
+  in the library computed from chemical structure rather than from a distance
+  matrix, so it takes molecules directly. Labels are the rank of each scaffold
+  in the sorted distinct set, making the labeling independent of input order;
+  acyclic molecules are noise. `MurckoResult` adds `scaffolds` and
+  `cluster_scaffolds`.
+
+### Notes
+
+- Molecules are taken as given: no salt stripping and no largest-component
+  selection, so a multi-component record produces one `.`-joined scaffold.
+  Stereochemistry is dropped and explicit hydrogens are suppressed, so scaffold
+  identity does not depend on how a molecule was read.
+- Extraction parallelizes across molecules only when the OpenEye memory-pool
+  mode reports a thread-safe setting; otherwise it runs serially and returns the
+  same answer. `num_threads` is clamped to the molecule count and to a multiple
+  of the hardware concurrency.
+- `oecluster` now links `OpenEye::OEMedChem`.
+
 ## [5.5.0] - 2026-09-20
 
 ### Added

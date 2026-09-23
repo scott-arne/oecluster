@@ -137,6 +137,13 @@ result = oecluster.bitbirch(fingerprints, threshold=0.65, branching_factor=50)
 print(result.centroids, result.cluster_sizes)
 ```
 
+Murcko clusters molecules by scaffold identity, with no distance matrix at all:
+
+```python
+scaffolded = oecluster.murcko(mols)
+print(scaffolded.cluster_scaffolds[0], scaffolded.labels[:5])
+```
+
 See [Choosing representatives](python-api.md#representatives) for the weighted
 medoid and k-representative selection options shown in
 `examples/rank_representatives.py`.

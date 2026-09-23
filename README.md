@@ -285,12 +285,16 @@ with open("clusters.csv", "w", newline="") as handle:
 | `agglomerative` | `oecluster.DistanceMatrix` | Starts with each molecule as its own cluster and repeatedly merges the closest clusters according to the selected linkage rule. Clustering stops when either `n_clusters` is reached or the `distance_threshold` is exceeded.                       | Small-to-medium datasets where all molecules should be assigned to compact clusters and the desired granularity is controlled by cluster count or distance threshold. | `n_clusters`, `distance_threshold`, `linkage`                 |
 | `k_medoids`     | `oecluster.DistanceMatrix` | Places exactly `n_clusters` medoids -- real members of the input, never synthetic averages -- and minimizes the sum of every item's distance to its assigned medoid, using PAM BUILD seeding and the FastPAM1 swap. Does not assume a metric.       | Datasets where the cluster count is a requirement and every center must be an orderable compound.                                                                     | `n_clusters`, `init`, `initial_medoids`                       |
 | `bitbirch`      | `oefp.OEFPBatch`           | Incrementally inserts binary fingerprints into a Birch-style tree that summarizes nearby fingerprints in feature space. Leaf subclusters can then be merged according to the selected merge criterion to produce final clusters.                    | Large binary fingerprint datasets with many locally similar molecules where scalable feature-space clustering is preferred over a full pairwise distance matrix.      | `threshold`, `branching_factor`, `merge_criterion`            |
+| `murcko`        | `list[OEMolBase]`          | Assigns each molecule its Bemis-Murcko scaffold -- ring systems plus the linkers that connect them -- and clusters by scaffold identity. Molecules with no ring system are labeled as noise. Takes molecules rather than a distance matrix, because the partition is on structure rather than on distance.                        | Chemical-series partitioning, scaffold-diversity accounting, and producing the `scaffold_labels` that `scaffold_agreement` and the weighted-medoid representative consume.                                                             | `scaffold`                                                    |
 
 Start with **Butina** or **agglomerative** for familiar fingerprint threshold clustering. Use
 **k-medoids** when the cluster count is fixed in advance and each center has to be a real molecule. Use
 **DBSCAN/HDBSCAN** when noise and density matter. Use **BitBirch** when the workflow already has
 OEFP dense binary fingerprints and you want feature-space clustering without
 materializing an initial pairwise distance matrix (good for VERY large datasets).
+Use **Murcko** when the grouping you want is chemical series rather than
+fingerprint neighborhood -- it is the only algorithm here that partitions on
+structure, and its clusters come with the scaffold string that names each one.
 
 All clustering functions return a result that subclasses `ClusteringResult`,
 which exposes read-only `labels` (a length-n, scikit-learn-style assignment

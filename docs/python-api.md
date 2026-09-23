@@ -77,9 +77,10 @@ dm = oecluster.load_distance_matrix("distances.npz")
 
 ## Clustering
 
-All clustering functions take a `DistanceMatrix` (except BitBirch, which takes
-an OEFP fingerprint batch) and return a result that subclasses
-`ClusteringResult`.
+Most clustering functions take a `DistanceMatrix`. Two do not: BitBirch takes an
+OEFP fingerprint batch, and Murcko takes molecules directly, because it
+partitions on chemical structure rather than on distance. All of them return a
+result that subclasses `ClusteringResult`.
 
 ```python
 result = oecluster.butina(dm, threshold=0.35, reordering=False)
@@ -106,6 +107,7 @@ The available algorithms and their key parameters:
 | `agglomerative(dm, ...)` | `DistanceMatrix` | `n_clusters`, `distance_threshold`, `linkage` |
 | `k_medoids(dm, ...)` | `DistanceMatrix` | `n_clusters`, `init`, `initial_medoids` |
 | `bitbirch(fingerprints, ...)` | `oefp.OEFPBatch` | `threshold`, `branching_factor`, `merge_criterion` |
+| `murcko(mols, ...)` | `list[OEMolBase]` | `scaffold` |
 
 Algorithm-specific outputs live on the specific result subclass — for example
 `DBSCANResult.core_sample_indices` or `BitBirchResult.centroids` — so a result
@@ -159,6 +161,51 @@ minimizes the distance sum within its own cluster, so
 cluster tie on within-cluster distance sum, both are minimizers and the two
 functions may name different ones; the medoid the result reports is still a
 minimizer.
+
+### Murcko scaffolds
+
+`murcko()` is the one clustering entry point that partitions on chemical
+structure rather than on distance, so it takes molecules directly. Two molecules
+share a cluster exactly when their Bemis-Murcko scaffolds canonicalize to the
+same SMILES.
+
+```python
+result = oecluster.murcko(mols)
+
+result.scaffolds          # ('c1ccccc1', 'c1ccccc1', '', ...) one per molecule
+result.cluster_scaffolds  # ('c1ccccc1', 'c1ccncc1') sorted, indexed by label
+result.labels             # -1 for a molecule with no ring system
+```
+
+`scaffold="generic"` reduces each framework to its topology -- every heavy atom
+carbon, every bond single -- so scaffolds differing only in element or bond
+order collapse together.
+
+`murcko_scaffolds()` returns the same per-molecule strings without clustering,
+which is what closes the loop with the functions that consume a scaffold
+annotation:
+
+```python
+scaffolds = oecluster.murcko_scaffolds(mols)
+dm = oecluster.pdist(mols, "fingerprint", metric="tanimoto")
+clustering = oecluster.butina(dm, threshold=0.35)
+agreement = oecluster.scaffold_agreement(clustering.labels, scaffolds)
+```
+
+`scaffolds` is per-item and in input order, so it is also what the
+representative functions take as `scaffold_labels`:
+
+```python
+index = oecluster.representative(clustering.clusters[0], dm,
+                                 method="weighted_medoid",
+                                 scaffold_labels=scaffolds)
+```
+
+Molecules are taken as given: there is no salt stripping and no largest-component
+selection, so a two-component record yields one `.`-joined scaffold that will not
+match the same compound recorded as a free base. Strip salts first if you want
+the parent scaffold. Stereochemistry is dropped and explicit hydrogens are
+suppressed, so scaffold identity does not depend on how a molecule was read.
 
 ### BitBirch Variants
 

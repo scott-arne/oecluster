@@ -11,7 +11,8 @@ The public API lives directly on the top-level :mod:`oecluster` package:
 distance computation (:func:`oecluster.pdist`, :func:`oecluster.cdist`),
 clustering (:func:`oecluster.butina`, :func:`oecluster.dbscan`,
 :func:`oecluster.hdbscan`, :func:`oecluster.agglomerative`,
-:func:`oecluster.k_medoids`, :func:`oecluster.bitbirch`), representative
+:func:`oecluster.k_medoids`, :func:`oecluster.bitbirch`,
+:func:`oecluster.murcko`), representative
 selection, quality reporting, and the supporting option, result, and
 comparison classes.
 
