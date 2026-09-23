@@ -534,6 +534,18 @@ TEST(MurckoMemPoolGateTest, DefersToTheClampWhenThePoolIsSafe) {
               effective_thread_count(1000000u, 1000u));
 }
 
+TEST(MurckoMemPoolGateTest, TheSuiteItselfRunsUnderAThreadSafePool) {
+    // Every claim this file makes about the parallel path is conditional on the
+    // process pool being safe: under an unsafe one the gate collapses each
+    // request to a single thread, and the thread-count tests would keep passing
+    // while exercising nothing. OESetMemPoolMode is fatal on a second call, so
+    // a single-process binary cannot drive the real mode to the unsafe branch;
+    // what it can do is refuse to let the mode drift out from under the tests
+    // that assume it.
+    const unsigned int mode = OESystem::OEGetMemPoolMode();
+    EXPECT_TRUE(pool_is_thread_safe(mode)) << "OEGetMemPoolMode() = " << mode;
+}
+
 TEST(MurckoScaffoldsTest, RefusesAnUnknownScaffoldType) {
     const MolSet mols({"c1ccccc1"});
     OECluster::MurckoOptions options;
