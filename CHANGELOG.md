@@ -31,7 +31,8 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   identity does not depend on how a molecule was read. Hydrogen counts and
   formal charges are recomputed on the atoms a sidechain cut touched, so
   diphenyl sulfone, diphenyl sulfoxide and diphenyl sulfide share one framework
-  scaffold.
+  scaffold; a charged ring atom whose bonds all survive the cut keeps its
+  charge.
 - Extraction parallelizes across molecules only when the OpenEye memory-pool
   mode reports a thread-safe setting; otherwise it runs serially and returns the
   same answer. `num_threads` is clamped to the molecule count and to a multiple

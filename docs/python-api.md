@@ -210,7 +210,9 @@ component that will not match the free base. Stereochemistry is dropped and
 explicit hydrogens are suppressed, so scaffold identity does not depend on how a
 molecule was read, and hydrogen counts and formal charges are recomputed on the
 atoms a sidechain cut touched, so diphenyl sulfone, diphenyl sulfoxide and
-diphenyl sulfide share one framework scaffold.
+diphenyl sulfide share one framework scaffold. Only the cut atoms: a charged
+ring atom whose bonds all survive keeps its charge, so an N-methylpyridinium
+reduces to pyridine while a pyridinium stays a pyridinium.
 
 ### BitBirch Variants
 

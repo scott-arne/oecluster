@@ -134,11 +134,20 @@ std::optional<std::string> scaffold_of(const OEChem::OEMolBase& mol,
         //
         // It runs on a copy and is transferred only onto the marked atoms. A
         // charged ring atom whose every bond survived the cut is part of the
-        // scaffold, and stripping it produces a structure OEChem cannot read
-        // back: an azoniaspiro ammonium loses its charge and keeps five bonds.
+        // scaffold, and stripping it yields a neutral hypervalent atom: an
+        // azoniaspiro ammonium comes back with five bonds and no charge, which
+        // OEChem will parse but which is not the molecule.
         OEChem::OEGraphMol normalized(framework);
         if (!OEChem::OEUncolorMol(
                 normalized, OEChem::OEUncolorStrategy::RemoveAtomProperties)) {
+            return std::nullopt;
+        }
+        // The transfer below matches atoms by index, which holds only because
+        // a framework region never contains a hydrogen: RemoveAtomProperties
+        // deletes explicit hydrogens and renumbers what is left, and a shifted
+        // index would silently move another atom's charge. Refusing on a count
+        // mismatch keeps that latent assumption from failing quietly.
+        if (normalized.NumAtoms() != framework.NumAtoms()) {
             return std::nullopt;
         }
         for (OESystem::OEIter<OEChem::OEAtomBase> atom = framework.GetAtoms();

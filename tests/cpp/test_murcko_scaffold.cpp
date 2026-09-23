@@ -143,8 +143,9 @@ TEST(MurckoExtractionTest, KeepsAChargeTheCutNeverTouched) {
     // The scope limit on the normalization above, and the reason it is not
     // applied to the whole framework: a charged ring atom whose every bond
     // survives the cut is part of the scaffold. Neutralizing the spiro
-    // ammonium here produces a nitrogen with five bonds and no charge, which
-    // OEChem will not read back.
+    // ammonium here yields a nitrogen with five bonds and no charge --
+    // something OEChem parses without complaint, so the literal comparison
+    // rather than the round trip is what rejects the over-broad alternative.
     const std::string scaffold = framework("C1CC[N+]2(CCCCC2)CC1");
     EXPECT_EQ(scaffold, "C1CC[N+]2(CC1)CCCCC2");
     EXPECT_TRUE(round_trips(scaffold)) << scaffold;
@@ -153,6 +154,18 @@ TEST(MurckoExtractionTest, KeepsAChargeTheCutNeverTouched) {
         framework("COc1ccc2cc3[n+](cc2c1OC)CCc1cc2c(cc1-3)OCO2");
     EXPECT_EQ(alkaloid, "c1ccc2c[n+]3c(cc2c1)-c4cc5c(cc4CC3)OCO5");
     EXPECT_TRUE(round_trips(alkaloid)) << alkaloid;
+}
+
+TEST(MurckoExtractionTest, IgnoresAtomMapIndicesOnTheInput) {
+    // Map indices are how the cut atoms are marked, so an input that arrives
+    // already mapped -- from reaction SMILES, or from an atlas that numbers
+    // its atoms -- has to be neutral ground. Two ways it would not be: a
+    // pre-set index of 1 reads as a cut mark and the atom is wrongly
+    // neutralized, and any surviving index is emitted by OECreateCanSmiString
+    // into a string the unmapped form of the same molecule cannot match.
+    EXPECT_EQ(framework("[nH+:1]1ccccc1"), framework("c1cc[nH+]cc1"));
+    EXPECT_EQ(framework("[cH:1]1ccccc1"), "c1ccccc1");
+    EXPECT_EQ(framework("[CH3:3][n+:5]1ccccc1"), framework("C[n+]1ccccc1"));
 }
 
 TEST(MurckoExtractionTest, GenericReductionConverges) {
