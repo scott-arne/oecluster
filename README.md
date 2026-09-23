@@ -34,7 +34,8 @@ cluster summaries as well as lower-level control over distance computation.
 ## What You Can Do
 
 - **Cluster molecular collections** with Butina, DBSCAN, HDBSCAN,
-  agglomerative clustering, or BitBirch.
+  agglomerative clustering, k-medoids, BitBirch, or Murcko scaffold
+  clustering.
 - **Choose representatives** with true medoids, minimax/radius centers,
   highest-neighborhood Butina-style representatives, weighted medoids, ranked
   representative lists, and k-representative selection.

@@ -109,9 +109,13 @@ their option/result types:
   `HDBSCANResult`).
 - `Agglomerative.h` — bottom-up linkage clustering (`AgglomerativeOptions`,
   `AgglomerativeResult`).
+- `KMedoids.h` — k-medoids (PAM) clustering over precomputed distances
+  (`KMedoidsOptions`, `KMedoidsResult`).
 - `BitBirch.h` — Birch-style clustering of binary fingerprint batches
   (`BitBirchOptions`, `BitBirchReclusteringOptions`,
   `BitBirchRefinementOptions`, `BitBirchResult`).
+- `MurckoScaffold.h` — Bemis-Murcko scaffold assignment and scaffold-identity
+  clustering of molecules (`ScaffoldType`, `MurckoOptions`, `MurckoResult`).
 
 `ClusterTypes.h` defines the shared cluster representation, `ClusterReport.h`
 defines the method-agnostic quality scorecard exposed in Python as
