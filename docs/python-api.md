@@ -1181,9 +1181,9 @@ molecules' heavy-atom bond counts. The distance is one minus that.
 Coordinates are never read, so molecules parsed from SMILES need no embedding
 step and a multi-conformer `OEMol` is scored once rather than once per pose.
 The input must nonetheless be `OEMol` rather than `OEGraphMol`, as it is for
-`rocs` and `superpose`, because the comparison keeps its own molecule
-snapshots; a list of `OEGraphMol` raises `TypeError` at construction, so wrap
-with `oechem.OEMol(graph_mol)` first. Hydrogens are always suppressed, isotopic
+`rocs`, because the comparison keeps its own molecule snapshots; a list of
+`OEGraphMol` raises `TypeError` at construction, so wrap with
+`oechem.OEMol(graph_mol)` first. Hydrogens are always suppressed, isotopic
 ones included, so a deuterated analogue scores as identical to its parent.
 Molecules with no bonds after suppression -- methane, water, argon -- are
 refused at construction, because bond Tanimoto has a zero denominator for them

@@ -78,10 +78,9 @@ struct MCSOptions {
  * from its parent -- a difference a topological score has no way to mean.
  *
  * Approximate search is asymmetric: the match found with A as the pattern need
- * not equal the one found with B as the pattern, and it differed on 21 of 190
- * drug-like pairs. Since ``pdist`` fills only one triangle, ``Compare`` runs
- * both directions and takes the larger count, which is symmetric by
- * construction and never worse than either direction alone.
+ * not equal the one found with B as the pattern. Since ``pdist`` fills only one
+ * triangle, ``Compare`` runs both directions and takes the larger count, which
+ * is symmetric by construction and never worse than either direction alone.
  *
  * Molecules with no bonds after hydrogen suppression -- methane, water, argon
  * -- are refused at construction, because bond Tanimoto is undefined rather
