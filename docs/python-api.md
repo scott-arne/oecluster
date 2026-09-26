@@ -1175,7 +1175,7 @@ an empty title; the caller's molecules are never modified.
 
 Scores the maximum common substructure as Tanimoto over matched bonds:
 `c / (|A| + |B| - c)` with `c` the matched-bond count and `|A|`, `|B|` the two
-molecules' heavy-atom bond counts. The distance is one minus that.
+hydrogen-suppressed snapshots' bond counts. The distance is one minus that.
 `similarity=True` is supported, unlike `rmsd`.
 
 Coordinates are never read, so molecules parsed from SMILES need no embedding
@@ -1183,11 +1183,19 @@ step and a multi-conformer `OEMol` is scored once rather than once per pose.
 The input must nonetheless be `OEMol` rather than `OEGraphMol`, as it is for
 `rocs`, because the comparison keeps its own molecule snapshots; a list of
 `OEGraphMol` raises `TypeError` at construction, so wrap with
-`oechem.OEMol(graph_mol)` first. Hydrogens are always suppressed, isotopic
-ones included, so a deuterated analogue scores as identical to its parent.
+`oechem.OEMol(graph_mol)` first. Hydrogens are suppressed, isotopic ones
+included, so a deuterated analogue scores as identical to its parent.
 Molecules with no bonds after suppression -- methane, water, argon -- are
 refused at construction, because bond Tanimoto has a zero denominator for them
 rather than an extreme value.
+
+Suppression works by making a hydrogen implicit on the heavy atom it hangs
+off, so a hydrogen bonded to two atoms has no single owner and survives.
+Diborane keeps both bridging hydrogens and is scored on its four B-H bonds,
+having no heavy-atom bonds at all; it is accepted rather than refused, because
+the zero-bond check counts the snapshot's bonds and it has four. Drug-like
+input has no bridging hydrogens, so the denominator is a heavy-atom bond count
+in practice but not by construction.
 
 `match_level` chooses how strictly atoms and bonds must correspond: `"loose"` is
 atomic number only with bonds unconstrained, so benzene matches cyclohexane

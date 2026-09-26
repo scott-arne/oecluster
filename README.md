@@ -737,7 +737,7 @@ the `expand_conformers` caveat.
 | `max_matches` | Matches one directed search may enumerate | `1024` |
 
 Maximum common substructure scored as Tanimoto over matched bonds. Topological,
-so coordinates are never read and hydrogens are always suppressed; molecules
+so coordinates are never read and terminal hydrogens are suppressed; molecules
 with no bonds after suppression are refused. `exhaustive` is one to three orders
 of magnitude slower than `approximate` and is not reliably better. There is no
 metric guarantee, so the matrix reports `triangle` as `unknown`. See

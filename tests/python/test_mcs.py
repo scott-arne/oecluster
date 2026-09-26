@@ -14,6 +14,8 @@ SUCROSE = ("OC[C@H]1O[C@@](CO)(O[C@H]2O[C@H](CO)[C@@H](O)[C@H](O)[C@H]2O)"
            "[C@@H](O)[C@@H]1O")
 MACROLIDE = ("CC[C@H]1OC(=O)[C@H](C)[C@@H](O)[C@H](C)[C@@H](O)[C@](C)(O)C"
              "[C@@H](C)C(=O)[C@H](C)[C@@H](O)[C@]1(C)O")
+DIBORANE = "[BH2]1[H][BH2][H]1"
+SINGLE_BRIDGE = "[BH2][H][BH2]"
 
 
 def _mol(smiles, title="mol"):
@@ -188,3 +190,13 @@ def test_similarity_string_is_refused_by_pdist():
         oecluster.pdist(
             _pair(BENZENE, TOLUENE), "mcs",
             similarity="false")  # pyright: ignore[reportArgumentType]
+
+
+def test_bridging_hydrogens_survive_suppression():
+    # OESuppressHydrogens makes a hydrogen implicit on the heavy atom it hangs
+    # off, so a hydrogen bonded to two atoms has nowhere to go. Diborane keeps
+    # both bridging hydrogens: it has zero heavy-atom bonds, yet it clears the
+    # zero-bond guard and scores on B-H bonds alone. A nonzero score is the
+    # observable proof that the denominator is the snapshot's bond count.
+    dm = oecluster.pdist(_pair(DIBORANE, SINGLE_BRIDGE), "mcs", similarity=True)
+    assert dm.condensed[0] == pytest.approx(0.5)

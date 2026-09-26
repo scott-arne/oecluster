@@ -9,7 +9,7 @@ This file starts at 5.0.0; earlier releases are not recorded here.
 - `mcs`, a maximum-common-substructure comparison for `pdist` and `cdist`, with
   the C++ class `MCSComparison` configured through `MCSOptions`. The score is
   Tanimoto over matched bonds, `c / (|A| + |B| - c)`, searched with complete
-  cycles. It is topological: coordinates are never read, hydrogens are always
+  cycles. It is topological: coordinates are never read, terminal hydrogens are
   suppressed including isotopic ones, and a multi-conformer molecule is scored
   once rather than once per pose. Molecules with no bonds after suppression are
   refused at construction, because bond Tanimoto has a zero denominator there.
