@@ -168,3 +168,22 @@ def test_every_entry_point_accepts_an_mcs_matrix(call):
     # complete, so no entry point needs allow_nonmetric=True.
     dm = oecluster.pdist(_gate_mols(), "mcs")
     assert call(dm) is not None
+
+
+def test_similarity_string_is_refused_by_the_wrapper():
+    # bool("false") is True, so coercing here would silently return the
+    # complement of the orientation the caller named. Assigning raw lets the
+    # SWIG bool typemap refuse it, which is what every sibling comparison does.
+    with pytest.raises(TypeError, match="similarity"):
+        oecluster.MCSComparison(
+            _pair(BENZENE, TOLUENE),
+            similarity="false")  # pyright: ignore[reportArgumentType]
+
+
+def test_similarity_string_is_refused_by_pdist():
+    # The wrapper and _build_mcs are separate assignment sites, so the refusal
+    # has to be pinned on both paths.
+    with pytest.raises(TypeError, match="similarity"):
+        oecluster.pdist(
+            _pair(BENZENE, TOLUENE), "mcs",
+            similarity="false")  # pyright: ignore[reportArgumentType]

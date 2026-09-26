@@ -997,8 +997,9 @@ def _build_mcs(items, similarity, kwargs, symmetric):
     opts = mcs_options(kwargs)
     # mcs_options never sets this, because similarity is not an _MCS_KEYS
     # member. The top-level MCSComparison wrapper carries its own copy of this
-    # line for the same reason.
-    opts.similarity = bool(similarity)
+    # line for the same reason. Assigned raw, as every sibling builder does, so
+    # the SWIG bool typemap refuses a string the caller meant as false.
+    opts.similarity = similarity
     for key in _MCS_KEYS:
         kwargs.pop(key, None)
 

@@ -5288,6 +5288,8 @@ class MCSComparison:
         # struct default of False. This path does not go through _build_mcs, so
         # it carries its own copy of the assignment; without it,
         # MCSComparison(mols, similarity=True) would return distances and report
-        # is_distance = Yes with no error anywhere.
-        opts.similarity = bool(similarity)
+        # is_distance = Yes with no error anywhere. Assigned raw, matching
+        # ROCSComparison and SuperposeComparison, so the SWIG bool typemap
+        # refuses a string the caller meant as false.
+        opts.similarity = similarity
         return _MCSComparison(mols, opts)
