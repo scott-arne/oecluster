@@ -69,6 +69,30 @@ std::vector<double> run_pdist(MCSComparison& comparison, size_t num_threads) {
     return values;
 }
 
+/// One directed approximate MCS search, written out here rather than reused
+/// from the implementation. The symmetry test's first assertion has to be
+/// independent evidence that the two directions genuinely disagree; taking that
+/// evidence from the code under test would make it circular.
+unsigned int directed_bonds(const char* pattern_smiles, const char* target_smiles) {
+    OEChem::OEMol pattern;
+    OEChem::OESmilesToMol(pattern, pattern_smiles);
+    OEChem::OESuppressHydrogens(pattern, false, false, false);
+    OEChem::OEMol target;
+    OEChem::OESmilesToMol(target, target_smiles);
+    OEChem::OESuppressHydrogens(target, false, false, false);
+
+    OEChem::OEMCSSearch search(pattern, OEChem::OEExprOpts::DefaultAtoms,
+                               OEChem::OEExprOpts::DefaultBonds, OEChem::OEMCSType::Approximate);
+    search.SetMCSFunc(OEChem::OEMCSMaxBondsCompleteCycles(1.0));
+    search.SetMaxMatches(1024);
+    unsigned int best = 0;
+    for (OESystem::OEIter<const OEChem::OEMatchBase> match = search.Match(target, /*umatch=*/true);
+         match; ++match) {
+        best = std::max<unsigned int>(best, match->NumBonds());
+    }
+    return best;
+}
+
 }  // namespace
 
 class MCSComparisonTest : public ::testing::Test {
@@ -203,4 +227,147 @@ TEST_F(MCSComparisonTest, CloneOutlivesItsParent) {
     }
     EXPECT_NEAR(clone->Compare(0, 1), expected, 1e-9);
     EXPECT_NEAR(clone->Compare(0, 1), 0.142857, 1e-6);
+}
+
+// --- Symmetry ---------------------------------------------------------------
+
+TEST_F(MCSComparisonTest, SymmetryTakesTheLargerDirection) {
+    // The three pairs form a cycle in the winning direction: testosterone beats
+    // morphine, morphine beats penicillin G, penicillin G beats testosterone.
+    // The winner relation is therefore not transitive and no ordering of these
+    // three molecules exists at all, so any implementation that picks its one
+    // pattern by ranking the pair -- on canonical SMILES, bond count,
+    // heavy-atom count, weight, address or anything else -- imposes a total
+    // order and must get at least one row wrong in at least one list order.
+    // Only running both searches passes. This is the only cycle among the 14
+    // asymmetric pairs in the 190-pair scan the design ran, so the fixtures are
+    // not substitutable.
+    struct Case {
+        const char* name;
+        const char* first;
+        const char* second;
+        unsigned int first_as_pattern;
+        unsigned int second_as_pattern;
+        double expected;  ///< The max-derived distance.
+        double wrong;     ///< What the losing direction alone would give.
+    };
+    const Case cases[] = {
+        // 24 and 25 bonds: 8/(24+25-8) = 8/41 against 7/42.
+        {"testosterone/morphine", TESTOSTERONE, MORPHINE, 8, 7, 0.804878, 0.833333},
+        // 25 and 25 bonds: 11/(50-11) = 11/39 against 10/40.
+        {"morphine/penicillinG", MORPHINE, PENICILLIN_G, 11, 10, 0.717949, 0.750000},
+        // 25 and 24 bonds: 5/(49-5) = 5/44 against 4/45.
+        {"penicillinG/testosterone", PENICILLIN_G, TESTOSTERONE, 5, 4, 0.886364, 0.911111},
+    };
+
+    for (const Case& test_case : cases) {
+        SCOPED_TRACE(test_case.name);
+
+        // 1. The two directions really do disagree. If a future toolkit makes
+        //    any of these symmetric, the cycle is gone and the test says so
+        //    loudly rather than quietly passing on nothing.
+        EXPECT_EQ(directed_bonds(test_case.first, test_case.second), test_case.first_as_pattern);
+        EXPECT_EQ(directed_bonds(test_case.second, test_case.first), test_case.second_as_pattern);
+        EXPECT_NE(test_case.first_as_pattern, test_case.second_as_pattern);
+
+        // 2. Compare returns the max-derived value, not the other direction's.
+        MCSComparison forward(pair_of(test_case.first, test_case.second));
+        EXPECT_NEAR(forward.Compare(0, 1), test_case.expected, 1e-6);
+        EXPECT_GT(std::abs(test_case.expected - test_case.wrong), 1e-4);
+
+        // 3. And it does so from the reversed list too, which rules out any
+        //    canonicalization on the index pair.
+        MCSComparison reversed(pair_of(test_case.second, test_case.first));
+        EXPECT_NEAR(reversed.Compare(0, 1), test_case.expected, 1e-6);
+    }
+}
+
+// --- Options observability --------------------------------------------------
+//
+// Every advertised control has a case that fails if the control is ignored.
+
+TEST_F(MCSComparisonTest, LooseMatchesAcrossAromaticity) {
+    // Benzene (6 bonds) against cyclohexane (6). Loose leaves bonds
+    // unconstrained, so the whole ring matches: c = 6, similarity 6/6.
+    MCSOptions loose;
+    loose.match_level = MCSMatchLevel::Loose;
+    MCSComparison loose_comparison(pair_of(BENZENE, CYCLOHEXANE), loose);
+    EXPECT_NEAR(loose_comparison.Compare(0, 1), 0.000000, 1e-6);
+
+    MCSComparison default_comparison(pair_of(BENZENE, CYCLOHEXANE));
+    EXPECT_NEAR(default_comparison.Compare(0, 1), 1.000000, 1e-6);
+}
+
+TEST_F(MCSComparisonTest, ExactRequiresSubstitutionPattern) {
+    // Benzene (6) against toluene (7). Exact adds hydrogen count and degree, so
+    // toluene's substituted ring carbon no longer matches a benzene CH and the
+    // match drops from the full ring to c = 4: 4/(6+7-4) = 4/9.
+    MCSOptions exact;
+    exact.match_level = MCSMatchLevel::Exact;
+    MCSComparison exact_comparison(pair_of(BENZENE, TOLUENE), exact);
+    EXPECT_NEAR(exact_comparison.Compare(0, 1), 0.555556, 1e-6);
+
+    MCSComparison default_comparison(pair_of(BENZENE, TOLUENE));
+    EXPECT_NEAR(default_comparison.Compare(0, 1), 0.142857, 1e-6);
+}
+
+TEST_F(MCSComparisonTest, ExhaustiveFindsALargerMatchThanApproximate) {
+    // Sucrose (24 bonds) against a macrolide fragment (29). Exhaustive finds 17
+    // matched bonds against approximate's 15: 17/36 against 15/38. This pair
+    // was the cheapest of the eleven measured pairs that discriminate the two
+    // modes, at 6.4 ms exhaustive; the same scan found pairs costing seconds.
+    MCSComparison approximate(pair_of(SUCROSE, MACROLIDE));
+    EXPECT_NEAR(approximate.Compare(0, 1), 0.605263, 1e-6);
+
+    MCSOptions exhaustive;
+    exhaustive.search_mode = MCSSearchMode::Exhaustive;
+    MCSComparison exhaustive_comparison(pair_of(SUCROSE, MACROLIDE), exhaustive);
+    EXPECT_NEAR(exhaustive_comparison.Compare(0, 1), 0.527778, 1e-6);
+}
+
+TEST_F(MCSComparisonTest, MaxMatchesBoundsTheSearch) {
+    // Morphine against penicillin G, both 25 bonds. A budget of one match cuts
+    // the count from 11 to 2: 2/48 against 11/39. Without this case only
+    // max_matches == 0 is exercised, and a build that ignored every positive
+    // value would pass the whole suite.
+    MCSOptions budget;
+    budget.max_matches = 1;
+    MCSComparison bounded(pair_of(MORPHINE, PENICILLIN_G), budget);
+    EXPECT_NEAR(bounded.Compare(0, 1), 0.958333, 1e-6);
+
+    MCSComparison unbounded(pair_of(MORPHINE, PENICILLIN_G));
+    EXPECT_NEAR(unbounded.Compare(0, 1), 0.717949, 1e-6);
+}
+
+TEST_F(MCSComparisonTest, HydrogenRepresentationDoesNotChangeTheScore) {
+    // Explicit hydrogens are suppressed, so they cannot reach the denominator.
+    auto explicit_benzene = from_smiles(BENZENE, "explicit");
+    OEChem::OEAddExplicitHydrogens(*explicit_benzene);
+    ASSERT_GT(explicit_benzene->NumBonds(), 6u);
+    std::vector<std::shared_ptr<OEChem::OEMol>> with_hydrogens = {
+        from_smiles(BENZENE, "plain"), explicit_benzene};
+    MCSComparison hydrogen_comparison(with_hydrogens);
+    EXPECT_NEAR(hydrogen_comparison.Compare(0, 1), 0.000000, 1e-6);
+
+    // Isotopic hydrogens too. This one fails if retainIsotope is left at the
+    // toolkit default of true: benzene-d1 would keep 7 bonds against benzene's
+    // 6 and score 6/7 similarity, a distance of 0.142857.
+    MCSComparison deuterium_comparison(pair_of(BENZENE_D1, BENZENE));
+    EXPECT_NEAR(deuterium_comparison.Compare(0, 1), 0.000000, 1e-6);
+}
+
+// --- Reproducibility --------------------------------------------------------
+
+TEST_F(MCSComparisonTest, ThreadCountDoesNotChangeTheResult) {
+    // Reproducibility only. Equal results across thread counts cannot detect a
+    // data race, and nothing here should be read as evidence of one's absence;
+    // the isolation argument rests on Clone() giving each worker private
+    // molecules, not on this test.
+    MCSComparison comparison(mols_);
+    EXPECT_EQ(run_pdist(comparison, 1), run_pdist(comparison, 8));
+}
+
+TEST_F(MCSComparisonTest, RepeatedPDistIsIdentical) {
+    MCSComparison comparison(mols_);
+    EXPECT_EQ(run_pdist(comparison, 4), run_pdist(comparison, 4));
 }
