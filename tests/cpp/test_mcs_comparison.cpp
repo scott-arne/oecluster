@@ -156,6 +156,27 @@ TEST_F(MCSComparisonTest, NullMoleculeIsRejected) {
     EXPECT_THROW(MCSComparison comparison(mols), ComparisonError);
 }
 
+// The value of this test is that it compiles. Adding the OEMolBase* overload
+// made all three braced forms below ambiguous -- either vector type can be
+// brace-initialized from them, so no candidate wins -- and a source break is
+// invisible to a suite that never spells the call that way. The runtime
+// assertions are incidental; if the ambiguity returns, this file stops
+// building.
+TEST_F(MCSComparisonTest, BracedInitializersStayUnambiguous) {
+    MCSComparison empty({});
+    EXPECT_EQ(empty.Size(), 0u);
+
+    EXPECT_THROW(MCSComparison comparison({nullptr}), ComparisonError);
+
+    // A braced list of real molecules binds the initializer-list overload
+    // rather than the vector one it used to reach, so the score is pinned to
+    // confirm the delegation lands on the strict constructor: the same 6/7
+    // KnownPairScoresTheExpectedTanimoto measures through the vector.
+    MCSComparison braced({from_smiles(BENZENE, "first"), from_smiles(TOLUENE, "second")});
+    EXPECT_EQ(braced.Size(), 2u);
+    EXPECT_NEAR(braced.Compare(0, 1), 0.142857, 1e-6);
+}
+
 TEST_F(MCSComparisonTest, CompareRefusesAnIndexPastTheEnd) {
     MCSComparison comparison(mols_);
     EXPECT_THROW((void)comparison.Compare(0, mols_.size()), ComparisonError);

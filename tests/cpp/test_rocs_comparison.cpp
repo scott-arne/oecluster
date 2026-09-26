@@ -101,6 +101,38 @@ TEST_F(ROCSComparisonTest, ConstructAndSize) {
     EXPECT_EQ(comparison.ComparisonName(), "rocs");
 }
 
+// The value of this test is that it compiles. Adding the OEMolBase* overload
+// made all three braced forms below ambiguous -- either vector type can be
+// brace-initialized from them, so no candidate wins -- and a source break is
+// invisible to a suite that never spells the call that way. If the ambiguity
+// returns, this file stops building.
+TEST_F(ROCSComparisonTest, BracedInitializersStayUnambiguous) {
+    ROCSComparison empty({});
+    EXPECT_EQ(empty.Size(), 0u);
+
+    EXPECT_THROW(ROCSComparison comparison({nullptr}), ComparisonError);
+
+    // A braced list of real molecules binds the initializer-list overload
+    // rather than the vector one it used to reach, so the score is pinned
+    // against the vector's. A multiconformer molecule is used deliberately:
+    // it is what makes the two distinguishable, since the wrong delegation
+    // would reach the OEMolBase view and leave BestOverlay one pose instead of
+    // an ensemble. The last assertion measures that the input really does
+    // separate the two paths, so the equality above cannot hold vacuously.
+    const std::shared_ptr<OEChem::OEMol> flexible = MakeConformer("c1ccccc1CCCCc1ccccc1", 3);
+    ASSERT_GT(flexible->NumConfs(), 1u);
+    const std::vector<std::shared_ptr<OEChem::OEMol>> pair{mols_[0], flexible};
+
+    ROCSComparison via_vector(pair);
+    ROCSComparison braced({mols_[0], flexible});
+    EXPECT_DOUBLE_EQ(braced.Compare(0, 1), via_vector.Compare(0, 1));
+
+    std::vector<OEChem::OEMolBase*> as_base{&static_cast<OEChem::OEMolBase&>(*mols_[0]),
+                                            &static_cast<OEChem::OEMolBase&>(*flexible)};
+    ROCSComparison collapsed(as_base);
+    EXPECT_NE(collapsed.Compare(0, 1), via_vector.Compare(0, 1));
+}
+
 TEST_F(ROCSComparisonTest, CompareRefusesAnIndexPastTheEnd) {
     // SetupRef dereferences ``*shared_->mols[i]`` before the overlay runs, so
     // an out-of-range index is an out-of-bounds read on the molecule vector.

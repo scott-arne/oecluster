@@ -7,6 +7,7 @@
 #define OECLUSTER_COMPARISONS_MCSCOMPARISON_H
 
 #include <cstddef>
+#include <initializer_list>
 #include <memory>
 #include <string>
 #include <vector>
@@ -178,6 +179,37 @@ public:
      */
     explicit MCSComparison(const std::vector<OEChem::OEMolBase*>& mols,
                            const Options& opts = Options());
+
+#ifndef SWIG
+    /**
+     * @brief Disambiguate a braced initializer between the two overloads above.
+     *
+     * ``MCSComparison({})`` and ``MCSComparison({nullptr})`` compiled before
+     * the ``OEMolBase*`` overload existed and are ambiguous with it: both
+     * vector types can be brace-initialized from either, so neither candidate
+     * wins. An initializer-list constructor is considered ahead of both and
+     * restores those spellings.
+     *
+     * It also takes ``{sp, sp}``, which used to reach the strict vector
+     * constructor, because a braced list matches an initializer list exactly
+     * where a vector needs a user-defined conversion. That is why this
+     * delegates to the strict constructor rather than carrying logic of its
+     * own: the destination is unchanged, so conformers and every validation
+     * are preserved. ``{raw, raw}`` is unaffected, an ``OEMolBase*`` having no
+     * conversion to ``shared_ptr<OEMol>``.
+     *
+     * Hidden from SWIG deliberately. ``swig/oecluster.i`` ``%include``s this
+     * header, so an unguarded third constructor would add a third candidate to
+     * the overload dispatch whose ranking the precedence note in that file
+     * exists to pin. This is a C++ source-compatibility measure with no
+     * bindings surface.
+     *
+     * :param mols: Shared pointers to molecules, as for the strict overload.
+     * :param opts: Scoring options.
+     */
+    explicit MCSComparison(std::initializer_list<std::shared_ptr<OEChem::OEMol>> mols,
+                           const Options& opts = Options());
+#endif
 
     ~MCSComparison() override;
 

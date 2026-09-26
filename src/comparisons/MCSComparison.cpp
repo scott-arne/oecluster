@@ -237,6 +237,13 @@ MCSComparison::MCSComparison(const std::vector<OEChem::OEMolBase*>& mols,
                              const Options& opts)
     : MCSComparison(to_oemol_snapshots(mols), opts) {}
 
+// Delegates to the strict constructor, which is the whole point of it: a
+// braced list of shared_ptr used to land there directly and must still end up
+// there. See the header for why this overload exists at all.
+MCSComparison::MCSComparison(std::initializer_list<std::shared_ptr<OEChem::OEMol>> mols,
+                             const Options& opts)
+    : MCSComparison(std::vector<std::shared_ptr<OEChem::OEMol>>(mols), opts) {}
+
 MCSComparison::MCSComparison(std::shared_ptr<const SharedData> shared, const Options& opts)
     : shared_(std::move(shared)), opts_(opts) {}
 

@@ -567,8 +567,13 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, _oecluster_is_oereceptor, "
 // Moving this to 1 breaks the tie explicitly: the strict typecheck stays at 0
 // and therefore ranks ahead in every argument-count group. Fingerprint and
 // Descriptor are unaffected, having no competing overload for precedence to
-// order; Superpose's two overloads are mutually exclusive, so its order is now
-// deterministic rather than lucky, but cannot change which one accepts a list.
+// order; Superpose's two overloads are disjoint for non-empty lists, so its
+// order is now deterministic rather than lucky without changing which one
+// accepts a list. An *empty* list is the exception -- both typechecks fall
+// through to the same ``PyList_Check`` branch and so both accept it, and the
+// precedence change does reorder that case. Nothing observable moves, because
+// both constructors refuse an empty list with the same
+// "SuperposeComparison: empty structure list".
 %typemap(typecheck, precedence=1) const std::vector<OEChem::OEMolBase*>& {
     if (PyList_Check($input) && PyList_Size($input) > 0) {
         $1 = _oecluster_is_oemolbase(PyList_GetItem($input, 0)) ? 1 : 0;

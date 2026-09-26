@@ -54,8 +54,17 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   documentation builds `OEGraphMol`, and these were the two comparisons in
   scope for that change. `rmsd` still requires `OEMol` and continues to reject
   an `OEGraphMol` list at construction. A multi-conformer `OEMol` still binds
-  to the `OEMol` overload and keeps its whole ensemble; nothing about existing
-  calls changes.
+  to the `OEMol` overload and keeps its whole ensemble, so no Python call that
+  worked before returns anything different now.
+- C++ callers keep source compatibility, but it was not free. A second vector
+  overload made `MCSComparison({})` and `MCSComparison({nullptr})` ambiguous --
+  either vector type can be brace-initialized from those, so neither candidate
+  wins -- and the same held for `ROCSComparison`. Both classes therefore carry
+  a `std::initializer_list<std::shared_ptr<OEMol>>` constructor that restores
+  those spellings. It delegates to the `OEMol` overload and is hidden from the
+  bindings, so a braced list of molecules -- which binds it now rather than the
+  vector overload -- keeps every conformer and scores exactly what it scored
+  before.
 - Passing `rocs` a list whose **first** element is an `OEGraphMol` now selects
   the permissive overload for the entire list, so an `OEMol` later in that list
   is reduced to its active conformer with no error raised. The reverse ordering

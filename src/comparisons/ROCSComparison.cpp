@@ -306,6 +306,14 @@ ROCSComparison::ROCSComparison(const std::vector<OEChem::OEMolBase*>& mols,
                                const Options& opts)
     : ROCSComparison(to_oemol_snapshots(mols), opts) {}
 
+// Delegates to the strict constructor, which is the whole point of it: a
+// braced list of shared_ptr used to land there directly, and routing it through
+// the OEMolBase view instead would collapse every multiconformer molecule to
+// its active pose. See the header for why this overload exists at all.
+ROCSComparison::ROCSComparison(std::initializer_list<std::shared_ptr<OEChem::OEMol>> mols,
+                               const Options& opts)
+    : ROCSComparison(std::vector<std::shared_ptr<OEChem::OEMol>>(mols), opts) {}
+
 ROCSComparison::ROCSComparison(std::shared_ptr<const SharedData> shared,
                        const Options& opts)
     : shared_(std::move(shared)),
