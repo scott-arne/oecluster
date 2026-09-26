@@ -5248,8 +5248,11 @@ class MCSComparison:
         Construct an MCSComparison.
 
         Coordinates are never read, so molecules parsed from SMILES need no
-        embedding step. Hydrogens are always suppressed, isotopic ones included,
-        so a deuterated analogue scores against its parent as identical.
+        embedding step. Suppression folds a hydrogen into the implicit
+        hydrogen count of the heavy atom it hangs off, so isotopic hydrogens
+        go too and a deuterated analogue scores against its parent as
+        identical; a hydrogen that cannot be folded survives, which means a
+        bridging hydrogen or one carrying a formal charge.
 
         Approximate search is asymmetric, so each pair is searched in both
         directions and the larger match wins. There is no metric guarantee: no

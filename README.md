@@ -737,12 +737,12 @@ the `expand_conformers` caveat.
 | `max_matches` | Matches one directed search may enumerate | `1024` |
 
 Maximum common substructure scored as Tanimoto over matched bonds. Topological,
-so coordinates are never read and terminal hydrogens are suppressed; molecules
-with no bonds after suppression are refused. `exhaustive` is one to three orders
-of magnitude slower than `approximate` and is not reliably better. There is no
-metric guarantee, so the matrix reports `triangle` as `unknown`. See
-[docs/python-api.md](docs/python-api.md#mcs) for the cost estimate and the
-measurements behind both caveats.
+so coordinates are never read and hydrogens are suppressed wherever they can be
+folded into a heavy atom; molecules with no bonds after suppression are refused.
+`exhaustive` is one to three orders of magnitude slower than `approximate` and
+is not reliably better. There is no metric guarantee, so the matrix reports
+`triangle` as `unknown`. See [docs/python-api.md](docs/python-api.md#mcs) for
+the cost estimate and the measurements behind both caveats.
 
 ---
 

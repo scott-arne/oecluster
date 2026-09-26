@@ -19,6 +19,8 @@ SINGLE_BRIDGE = "[BH2][H][BH2]"
 HEXANE = "CCCCCC"
 ETHANE = "CC"
 ETHENE = "C=C"
+NEUTRAL_HYDRIDE = "[H][Li]"
+CHARGED_HYDRIDE = "[H-][Li+]"
 
 
 def _mol(smiles, title="mol"):
@@ -259,3 +261,38 @@ def test_multiconformer_molecule_stays_one_item():
     # the topology that was compared.
     assert dm.condensed[0] == pytest.approx(0.142857, abs=1e-6)
     assert oecluster.cdist([first], [second], "mcs").shape == (1, 1)
+
+
+def test_charged_hydrogen_survives_suppression():
+    # Suppression folds a hydrogen into a heavy atom's implicit hydrogen
+    # count, and a formal charge on the hydrogen has nowhere to go in such a
+    # count, so the charged atom survives where the neutral one does not.
+    # Both halves are pinned because the asymmetry is the whole claim: the
+    # neutral hydride suppresses to nothing and is refused, while the charged
+    # one keeps its single bond and is accepted.
+    with pytest.raises(RuntimeError, match="no bonds after hydrogen"):
+        oecluster.pdist(_pair(NEUTRAL_HYDRIDE, NEUTRAL_HYDRIDE), "mcs")
+    dm = oecluster.pdist(_pair(CHARGED_HYDRIDE, CHARGED_HYDRIDE), "mcs")
+    assert dm.num_samples == 2
+    assert dm.condensed[0] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_direct_constructor_honours_search_mode():
+    # The wrapper builds its own kwargs dict rather than routing through
+    # _build_mcs, so each option needs coverage here too: deleting
+    # search_mode from that dict leaves every pdist test in this file green.
+    default = oecluster.MCSComparison(_pair(SUCROSE, MACROLIDE))
+    assert default.Compare(0, 1) == pytest.approx(0.605263, abs=1e-6)
+    exhaustive = oecluster.MCSComparison(_pair(SUCROSE, MACROLIDE),
+                                         search_mode="exhaustive")
+    assert exhaustive.Compare(0, 1) == pytest.approx(0.527778, abs=1e-6)
+
+
+def test_direct_constructor_honours_max_matches():
+    # As above: deleting max_matches from the wrapper's kwargs dict is silent
+    # against every other test in this file.
+    default = oecluster.MCSComparison(_pair(MORPHINE, PENICILLIN_G))
+    assert default.Compare(0, 1) == pytest.approx(0.717949, abs=1e-6)
+    bounded = oecluster.MCSComparison(_pair(MORPHINE, PENICILLIN_G),
+                                      max_matches=1)
+    assert bounded.Compare(0, 1) == pytest.approx(0.958333, abs=1e-6)
