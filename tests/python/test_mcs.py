@@ -36,6 +36,18 @@ def _pair(first, second):
     return [_mol(first, "first"), _mol(second, "second")]
 
 
+def _graph_mol(smiles, title="mol"):
+    """Parse a SMILES into an ``OEGraphMol``, the type every doc example builds."""
+    mol = oechem.OEGraphMol()
+    oechem.OESmilesToMol(mol, smiles)
+    mol.SetTitle(title)
+    return mol
+
+
+def _graph_pair(first, second):
+    return [_graph_mol(first, "first"), _graph_mol(second, "second")]
+
+
 def _multiconformer(smiles, title="mol"):
     """Build a three-conformer molecule without an embedding step.
 
@@ -262,6 +274,31 @@ def test_multiconformer_molecule_stays_one_item():
     # the topology that was compared.
     assert dm.condensed[0] == pytest.approx(0.142857, abs=1e-6)
     assert oecluster.cdist([first], [second], "mcs").shape == (1, 1)
+
+
+def test_pdist_accepts_graph_molecules():
+    # Every example in README.md and docs/python-api.md builds an OEGraphMol,
+    # and this comparison rejected that list outright until the OEMolBase
+    # overload was added. Pinned against the OEMol score as well as against the
+    # literal: an overload that resolved differently for the two input types
+    # would still produce a number, so only comparing them catches it.
+    graph = oecluster.pdist(_graph_pair(BENZENE, TOLUENE), "mcs")
+    oemol = oecluster.pdist(_pair(BENZENE, TOLUENE), "mcs")
+    assert graph.num_samples == 2
+    assert graph.condensed[0] == pytest.approx(0.142857, abs=1e-6)
+    assert graph.condensed[0] == pytest.approx(oemol.condensed[0], abs=1e-12)
+
+
+def test_direct_constructor_accepts_graph_molecules():
+    # The top-level wrapper hands its item list straight to the SWIG class, so
+    # the new overload has to resolve on this route too and not only through
+    # the registry that pdist goes by.
+    comparison = oecluster.MCSComparison(_graph_pair(BENZENE, TOLUENE))
+    assert comparison.Size() == 2
+    assert comparison.Compare(0, 1) == pytest.approx(0.142857, abs=1e-6)
+    native_comparison = native.MCSComparison(_graph_pair(BENZENE, TOLUENE),
+                                             native.MCSOptions())
+    assert native_comparison.Compare(0, 1) == pytest.approx(0.142857, abs=1e-6)
 
 
 def test_charged_hydrogen_survives_suppression():

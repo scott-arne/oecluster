@@ -43,6 +43,23 @@ constexpr double SELF_SCORE_TOLERANCE = 1e-6;
 /// limit can still be unreliable. That split is a property of OEOverlay reuse
 /// rather than of the input, and is tracked separately from this guard.
 constexpr double MAX_COORDINATE_EXTENT = 1e4;  // angstroms
+
+/// Snapshot raw molecule pointers so the shared_ptr<OEMol> constructor can own
+/// the validation. Null checking happens here because the conversion below
+/// dereferences before that constructor ever sees the input.
+std::vector<std::shared_ptr<OEChem::OEMol>> to_oemol_snapshots(
+    const std::vector<OEChem::OEMolBase*>& mols) {
+    std::vector<std::shared_ptr<OEChem::OEMol>> out;
+    out.reserve(mols.size());
+    for (size_t i = 0; i < mols.size(); ++i) {
+        if (!mols[i]) {
+            throw ComparisonError("ROCSComparison received null molecule pointer at index " +
+                                  std::to_string(i));
+        }
+        out.push_back(std::make_shared<OEChem::OEMol>(*mols[i]));
+    }
+    return out;
+}
 }  // namespace
 
 struct ROCSComparison::SharedData {
@@ -274,6 +291,15 @@ ROCSComparison::ROCSComparison(const std::vector<std::shared_ptr<OEChem::OEMol>>
     // construction is single-threaded and no clone can exist.
     MeasureDiagonal(*shared);
 }
+
+// Delegates rather than duplicating the null scan, the snapshot, the dimension
+// and coordinate guards and the diagonal measurement above, so the two
+// construction paths cannot drift. The resulting double copy -- raw pointer to
+// OEMol here, then the delegate's own snapshot -- is O(n) against the O(n^2)
+// overlay matrix this class exists to fill.
+ROCSComparison::ROCSComparison(const std::vector<OEChem::OEMolBase*>& mols,
+                               const Options& opts)
+    : ROCSComparison(to_oemol_snapshots(mols), opts) {}
 
 ROCSComparison::ROCSComparison(std::shared_ptr<const SharedData> shared,
                        const Options& opts)

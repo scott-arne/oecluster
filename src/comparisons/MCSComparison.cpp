@@ -132,6 +132,23 @@ unsigned int directed_bond_count(const OEChem::OEMol& pattern, const OEChem::OEM
     }
 }
 
+/// Snapshot raw molecule pointers so the shared_ptr<OEMol> constructor can own
+/// the validation. Null checking happens here because the conversion below
+/// dereferences before that constructor ever sees the input.
+std::vector<std::shared_ptr<OEChem::OEMol>> to_oemol_snapshots(
+    const std::vector<OEChem::OEMolBase*>& mols) {
+    std::vector<std::shared_ptr<OEChem::OEMol>> out;
+    out.reserve(mols.size());
+    for (size_t i = 0; i < mols.size(); ++i) {
+        if (!mols[i]) {
+            throw ComparisonError("MCSComparison received null molecule pointer at index " +
+                                  std::to_string(i));
+        }
+        out.push_back(std::make_shared<OEChem::OEMol>(*mols[i]));
+    }
+    return out;
+}
+
 }  // namespace
 
 struct MCSComparison::SharedData {
@@ -204,6 +221,14 @@ MCSComparison::MCSComparison(const std::vector<std::shared_ptr<OEChem::OEMol>>& 
 
     shared_ = std::move(shared);
 }
+
+// Delegates rather than duplicating the four validations and the
+// snapshot-and-suppress loop above, so the two construction paths cannot drift.
+// The resulting double copy -- raw pointer to OEMol here, then the delegate's
+// own snapshot -- is O(n) against the O(n^2) matrix this class exists to fill.
+MCSComparison::MCSComparison(const std::vector<OEChem::OEMolBase*>& mols,
+                             const Options& opts)
+    : MCSComparison(to_oemol_snapshots(mols), opts) {}
 
 MCSComparison::MCSComparison(std::shared_ptr<const SharedData> shared, const Options& opts)
     : shared_(std::move(shared)), opts_(opts) {}

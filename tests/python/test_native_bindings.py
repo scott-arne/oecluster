@@ -227,6 +227,157 @@ def test_typemap_preserves_conformers(native):
         f"distinguish a dropped conformer from a kept one: gaps={gaps}")
 
 
+def _graph_conformer_series():
+    """``_conformer_series`` viewed as OEGraphMol, so each carries one pose."""
+    from openeye import oechem
+
+    return [oechem.OEGraphMol(mol) for mol in _conformer_series()]
+
+
+def test_rocs_comparison_accepts_graph_molecules(native):
+    """The OEMolBase overload, added because the docs all build OEGraphMol.
+
+    Before it existed this list raised a bare SWIG "Wrong number or type of
+    arguments" TypeError, naming no argument and suggesting no remedy.
+    """
+    comparison = native.ROCSComparison(_graph_conformer_series(), native.ROCSOptions())
+    assert comparison.ComparisonName() == "rocs"
+    assert comparison.Size() == 3
+    # As in test_rocs_comparison_accepts_molecules: this is an overload test,
+    # not a scoring test, so it asks only that the molecules survived the
+    # crossing into C++.
+    value = comparison.Compare(0, 1)
+    assert math.isfinite(value)
+    assert 0.0 <= value <= 2.0
+
+
+def _flexible_multiconformer():
+    """A molecule whose conformers differ enough to be told apart by shape."""
+    pytest.importorskip("openeye.oeomega")
+    from openeye import oechem, oeomega
+
+    omega = oeomega.OEOmega()
+    omega.SetMaxConfs(3)
+    omega.SetStrictStereo(False)
+    multi = oechem.OEMol()
+    oechem.OESmilesToMol(multi, "c1ccccc1CCCCc1ccccc1")
+    assert omega(multi)
+    assert multi.NumConfs() > 1
+    return multi
+
+
+def _non_active_reference(multi):
+    """An ``OEMol`` of a conformer that is *not* the active one.
+
+    The active conformer is the only pose an ``OEMolBase`` view of ``multi``
+    keeps, so a reference drawn from any other one is reachable through the
+    ensemble and unreachable through the collapsed copy. That asymmetry is what
+    makes the conformer tests below able to tell the two apart.
+    """
+    from openeye import oechem
+
+    active_idx = multi.GetActive().GetIdx()
+    others = [conf.GetIdx() for conf in multi.GetConfs() if conf.GetIdx() != active_idx]
+    assert others, "fixture produced no conformer other than the active one"
+    return oechem.OEMol(multi.GetConf(oechem.OEHasConfIdx(others[-1])))
+
+
+def test_oemol_input_still_binds_the_conformer_preserving_overload(native):
+    """The hazard the OEMolBase overload introduces, pinned as a property.
+
+    ``ROCSComparison`` has two constructors an ``OEMol`` list satisfies both
+    of: ``vector<shared_ptr<OEMol>>`` and ``vector<OEMolBase*>``, the latter
+    matching because an ``OEMol`` is an ``OEMolBase``. Only the first preserves
+    conformers; the second copies through an ``OEMolBase&`` view, which for a
+    multiconformer ``OEMol`` is its active conformer alone. Which one binds is
+    decided by typemap precedence in ``swig/oecluster.i`` -- explicitly, since
+    an equal precedence leaves it to a tie-break that was measured to rank them
+    one way for one-argument calls and the opposite way for two-argument ones.
+
+    Two arguments here on purpose. That is the form ``_comparisons.py`` builds,
+    so it is the form ``pdist(..., "rocs")`` reaches, and it is the form that
+    was broken while the one-argument form stayed correct.
+
+    The assertion is a property, not a literal: the ensemble and the same
+    molecule collapsed to its active conformer must score *differently*. A
+    literal would pin the number while the property was what broke -- when the
+    ensemble collapsed, these two scores became equal to the last digit.
+    """
+    from openeye import oechem
+
+    multi = _flexible_multiconformer()
+    options = native.ROCSOptions()
+    options.score_type = native.ROCSScoreType_Shape
+    reference = _non_active_reference(multi)
+
+    # OEGraphMol is the active-conformer view, so round-tripping through it
+    # produces exactly the loss the wrong overload would cause. Rebuilt as an
+    # OEMol so that this list binds the same constructor the kept case does,
+    # leaving the ensemble as the only difference between the two calls.
+    collapsed_mol = oechem.OEMol(oechem.OEGraphMol(multi))
+    assert collapsed_mol.NumConfs() == 1
+    assert multi.NumConfs() > collapsed_mol.NumConfs()
+
+    kept = native.ROCSComparison([reference, multi], options).Compare(0, 1)
+    collapsed = native.ROCSComparison([reference, collapsed_mol], options).Compare(0, 1)
+
+    # The property. Dropping the ensemble makes the first call compute the
+    # second, and this margin is what goes to zero when it does.
+    assert collapsed - kept > 0.1, (
+        "the multiconformer OEMol scored as its active conformer alone, so the "
+        f"ensemble was dropped crossing into C++: kept={kept}, "
+        f"collapsed={collapsed}")
+
+    # Corroboration, not the point: a reachable conformer overlays its own
+    # reference exactly, which says the ensemble arrived intact rather than
+    # merely arriving different.
+    assert kept == pytest.approx(0.0, abs=1e-3)
+
+
+def test_mixed_molecule_lists_resolve_by_the_stricter_overload(native):
+    """Both orderings of a list mixing OEGraphMol with OEMol.
+
+    Both typechecks sample element 0 only, so the first element alone decides
+    which overload the whole list binds -- and the two orderings are therefore
+    not symmetric.
+
+    ``[OEGraphMol, OEMol]`` fails the strict check at element 0 and binds the
+    OEMolBase overload, which accepts every element. This is the one ordering
+    where a caller can still lose an ensemble: an OEMol later in the list is
+    converted through an OEMolBase view. It is accepted rather than refused
+    because refusing it would mean rejecting the OEGraphMol lists this overload
+    exists to admit.
+
+    ``[OEMol, OEGraphMol]`` passes the strict check at element 0, and that
+    typemap validates *every* element rather than sampling one, so the
+    OEGraphMol at index 1 is refused by name. Pinned on both the one- and
+    two-argument forms: precedence used to order those two groups oppositely,
+    and this refusal survived on one form while vanishing on the other.
+    """
+    from openeye import oechem
+
+    multi = _flexible_multiconformer()
+    options = native.ROCSOptions()
+    options.score_type = native.ROCSScoreType_Shape
+    reference = _non_active_reference(multi)
+    graph_reference = oechem.OEGraphMol(reference)
+
+    # Accepted, and the ensemble is lost -- element 0 put the whole list on the
+    # OEMolBase overload. Asserted against the collapsed score rather than a
+    # literal, which is what makes the conformer loss the claim.
+    collapsed_mol = oechem.OEMol(oechem.OEGraphMol(multi))
+    mixed = native.ROCSComparison([graph_reference, multi], options).Compare(0, 1)
+    collapsed = native.ROCSComparison([reference, collapsed_mol], options).Compare(0, 1)
+    assert mixed == pytest.approx(collapsed, abs=1e-6)
+
+    # The reverse ordering is refused, on both argument-count forms.
+    reverse = [reference, oechem.OEGraphMol(multi)]
+    with pytest.raises(TypeError, match="List item is not an OEMol object"):
+        native.ROCSComparison(reverse, options)
+    with pytest.raises(TypeError, match="List item is not an OEMol object"):
+        native.ROCSComparison(reverse)
+
+
 def test_sar_coherence_is_bound(native):
     """The labels overload takes a plain list and returns the per-cluster table."""
     coherence = native.sar_coherence([0, 0, 1, 1], [1.0, 1.0, 5.0, 5.0])

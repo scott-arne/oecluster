@@ -47,6 +47,14 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   every similarity-capable comparison, `fingerprint` included, not only the
   `mcs` comparison new in this release.
 
+### Changed
+
+- `MCSComparison` and `ROCSComparison` now accept `OEGraphMol` as well as
+  `OEMol`, snapshotting either into their own storage. Every example in the
+  documentation builds `OEGraphMol`, and those two were the only comparisons
+  that rejected it. A multi-conformer `OEMol` still binds to the `OEMol`
+  overload and keeps its whole ensemble; nothing about existing calls changes.
+
 ## [5.6.0] - 2026-09-23
 
 ### Added

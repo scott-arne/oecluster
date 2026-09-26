@@ -562,6 +562,42 @@ def test_pdist_rocs_end_to_end():
     assert np.allclose(square, square.T)
 
 
+def test_pdist_rocs_accepts_graph_molecules():
+    """The documented input type, which ``rocs`` rejected until 5.7.0.
+
+    Bare SMILES will not do here: ``ROCSComparison`` refuses a molecule whose
+    recomputed dimension is below three, so the graph molecules are taken from
+    embedded ones. Scored against the equivalent ``OEMol`` input, because an
+    overload that resolved differently for the two types would still return
+    perfectly plausible numbers.
+    """
+    pytest.importorskip("openeye.oeomega")
+    import oecluster
+    from openeye import oechem, oeomega
+
+    omega = oeomega.OEOmega()
+    omega.SetMaxConfs(1)
+    omega.SetStrictStereo(False)
+    oemols = []
+    for idx, smi in enumerate(["c1ccccc1", "c1ccc(O)cc1", "CCCCCCCC"]):
+        mol = oechem.OEMol()
+        oechem.OESmilesToMol(mol, smi)
+        assert omega(mol)
+        mol.SetTitle(f"m{idx}")
+        oemols.append(mol)
+    graphs = [oechem.OEGraphMol(mol) for mol in oemols]
+
+    dist = oecluster.pdist(graphs, "rocs", score_type="shape")
+    assert dist.comparison_name == "rocs"
+    assert dist.num_samples == 3
+    assert dist.labels == ["m0", "m1", "m2"]
+
+    # One conformer apiece on both routes, so BestOverlay has the same single
+    # pose to choose from and the two must agree exactly.
+    reference = oecluster.pdist(oemols, "rocs", score_type="shape")
+    assert np.allclose(np.asarray(dist), np.asarray(reference), atol=1e-6)
+
+
 def test_pdist_rocs_refuses_molecules_without_coordinates():
     """The refusal has to reach the caller through the public surface.
 

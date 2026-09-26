@@ -12,6 +12,7 @@
 #include "oecluster/PairwiseComparison.h"
 
 namespace OEChem { class OEMol; }
+namespace OEChem { class OEMolBase; }
 
 namespace OECluster {
 
@@ -91,6 +92,30 @@ public:
      */
     explicit ROCSComparison(const std::vector<std::shared_ptr<OEChem::OEMol>>& mols,
                         const Options& opts = Options());
+
+    /**
+     * @brief Construct from molecules that need not be multiconformer.
+     *
+     * Molecules are snapshotted into ``OEMol`` internally, so an
+     * ``OEGraphMol`` is accepted directly. Such an input carries one
+     * conformer, so ``BestOverlay`` has a single pose to choose from rather
+     * than an ensemble; pass an ``OEMol`` when conformer search matters.
+     *
+     * An ``OEMol`` satisfies this overload's bindings typecheck as well as the
+     * strict one above, so something has to rank them. That something is
+     * typemap precedence, not declaration order: SWIG ranks by argument count
+     * first and precedence second, and equal precedence leaves the order to an
+     * unspecified tie-break that was measured to differ between argument-count
+     * groups. See the precedence note on the ``OEMolBase*`` typecheck in
+     * ``swig/oecluster.i``, which is what keeps a multiconformer ``OEMol`` off
+     * this overload's active-conformer view -- a view that would silently
+     * change every score it touched.
+     *
+     * :param mols: Pointers to molecules with 3D coordinates.
+     * :param opts: ROCS options.
+     */
+    explicit ROCSComparison(const std::vector<OEChem::OEMolBase*>& mols,
+                            const Options& opts = Options());
 
     ~ROCSComparison() override;
 

@@ -13,6 +13,7 @@
 #include "oecluster/PairwiseComparison.h"
 
 namespace OEChem { class OEMol; }
+namespace OEChem { class OEMolBase; }
 
 namespace OECluster {
 
@@ -148,6 +149,28 @@ public:
      *     ``search_mode`` or ``match_level`` carries a value outside its enum.
      */
     explicit MCSComparison(const std::vector<std::shared_ptr<OEChem::OEMol>>& mols,
+                           const Options& opts = Options());
+
+    /**
+     * @brief Construct from molecules that need not be multiconformer.
+     *
+     * Molecules are snapshotted into ``OEMol`` internally, so an
+     * ``OEGraphMol`` is accepted directly. The comparison never reads
+     * coordinates, so nothing is lost by the narrower input type.
+     *
+     * An ``OEMol`` satisfies this overload's bindings typecheck as well as the
+     * strict one above, so something has to rank them. That something is
+     * typemap precedence, not declaration order: SWIG ranks by argument count
+     * first and precedence second, and equal precedence leaves the order to an
+     * unspecified tie-break that was measured to differ between argument-count
+     * groups. See the precedence note on the ``OEMolBase*`` typecheck in
+     * ``swig/oecluster.i``, which is what keeps a multiconformer ``OEMol`` off
+     * this overload's active-conformer view.
+     *
+     * :param mols: Pointers to molecules.
+     * :param opts: MCS options.
+     */
+    explicit MCSComparison(const std::vector<OEChem::OEMolBase*>& mols,
                            const Options& opts = Options());
 
     ~MCSComparison() override;

@@ -535,7 +535,39 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, _oecluster_is_oereceptor, "
     $1 = &temp;
 }
 
-%typemap(typecheck, precedence=SWIG_TYPECHECK_POINTER) const std::vector<OEChem::OEMolBase*>& {
+// ``precedence=1``, deliberately not the ``SWIG_TYPECHECK_POINTER`` every
+// typecheck above uses, and the one place in this file where that constant is
+// wrong.
+//
+// MCSComparison and ROCSComparison each carry two constructors, one taking
+// this vector and one taking the strict ``shared_ptr<OEMol>`` vector below.
+// The two are not disjoint: an OEMol *is* an OEMolBase, so a list of OEMol
+// satisfies both typechecks, and whichever is examined first wins. Only the
+// strict one preserves conformers -- it converts through
+// ``OEMol(const OEMCMolBase&)``, where this one converts through
+// ``OEMol(const OEMolBase&)``, which is the active conformer alone.
+//
+// SWIG ranks overloads by argument count first and typemap precedence second,
+// and lower precedence is examined first. ``SWIG_TYPECHECK_POINTER`` is 0, so
+// leaving this at that value made it an exact tie with the strict typecheck
+// and handed the order to SWIG's unspecified tie-break. Declaration order does
+// not decide it: measured, the tie-break put the strict overload first in the
+// one-argument group and *second* in the two-argument group, so the same
+// declaration order produced opposite results in the two groups and no
+// ordering could fix both.
+//
+// That is worth stating plainly because of how it failed. The broken group was
+// the two-argument one, which is the only form _comparisons.py builds, so
+// every pdist(..., "rocs") call silently scored a multiconformer OEMol on its
+// active conformer -- while the one-argument form a casual probe would reach
+// for stayed correct and showed nothing wrong.
+//
+// Moving this to 1 breaks the tie explicitly: the strict typecheck stays at 0
+// and therefore ranks ahead in every argument-count group. Fingerprint and
+// Descriptor are unaffected, having no competing overload for precedence to
+// order; Superpose's two overloads are mutually exclusive, so its order is now
+// deterministic rather than lucky, but cannot change which one accepts a list.
+%typemap(typecheck, precedence=1) const std::vector<OEChem::OEMolBase*>& {
     if (PyList_Check($input) && PyList_Size($input) > 0) {
         $1 = _oecluster_is_oemolbase(PyList_GetItem($input, 0)) ? 1 : 0;
     } else {
