@@ -1193,13 +1193,14 @@ two share nothing; `"exact"` adds hydrogen count, charge, degree and bond order.
 `search_mode` deliberately inverts the toolkit's own default. Exhaustive search
 genuinely finds larger matches on rigid polycyclic and sugar-like input -- on
 eleven of 120 measured pairs it did, by one to three bonds -- but it costs one
-to three orders of magnitude, and it is not uniformly better: on a 53-bond
-against 54-bond macrolide pair it took 16.2 s and matched 50 bonds where
-approximate took 8.5 ms and matched 51. Exhaustive mode also prints
-`Warning: MCS search truncated` to OpenEye's process-global error stream, once
-per truncated pair, which at 500,000 pairs is unusable output; the library does
-not redirect that stream, because doing so would silence warnings from the
-caller's own unrelated OpenEye code.
+to three orders of magnitude, and it is not uniformly better: on erythromycin
+against azithromycin, a 53-bond against 54-bond macrolide pair, it took 16.2 s
+and matched 50 bonds where approximate took 8.5 ms and matched 51. Exhaustive
+mode also prints `Warning: MCS search truncated` to OpenEye's process-global
+error stream, once per truncated directed search and so up to twice per pair,
+which at 500,000 pairs is unusable output; the library does not redirect that
+stream, because doing so would silence warnings from the caller's own
+unrelated OpenEye code.
 
 There is **no metric guarantee**. No triangle-inequality violation appeared in
 74,400 ordered triples across three molecule sets, one of them built to stress
@@ -1209,8 +1210,9 @@ violated 66 times over 59,280 triples, so the Jaccard metric proof is
 unavailable rather than merely unattempted. The matrix therefore reports
 `triangle` as `"unknown"`, which every clustering entry point accepts without
 `allow_nonmetric=True`. To check the property empirically on your own data, use
-`from_array(..., probe_triples=N)`, which samples triples and refuses on a
-violation.
+`SymmetricDistanceMatrix.from_condensed(..., probe_triples=N)`, which samples
+triples and stamps `metric_probe`; a matrix stamped `violations_found` is then
+refused by the clustering entry points unless you pass `allow_nonmetric=True`.
 
 **Cost.** An order-of-magnitude planning estimate, not a measurement. No
 `pdist` run at this size has been executed.
@@ -1262,13 +1264,12 @@ Most users do not need this section. The generated SWIG wrapper is available as
 users who need direct access to the C++ options and classes. The comparison
 wrappers -- `DescriptorComparison`, `FingerprintComparison`, `MCSComparison`,
 `RMSDComparison`, `ROCSComparison` and `SuperposeComparison` -- are on the
-top-level package, and
-so are many of the option structs, among them `PDistOptions`, `ButinaOptions`
-and `FingerprintOptions`. Others are not, `ClusterReportOptions` and
-`RMSDOptions` among them. Reach those through `oecluster.oecluster`, or let the
-wrapper build them from keywords. Which structs fall on which side moves as new
-metrics are added, so read the split off the installed package rather than off
-a list here:
+top-level package, and so are many of the option structs, among them
+`PDistOptions`, `ButinaOptions` and `FingerprintOptions`. Others are not,
+`ClusterReportOptions` and `RMSDOptions` among them. Reach those through
+`oecluster.oecluster`, or let the wrapper build them from keywords. Which
+structs fall on which side moves as new metrics are added, so read the split
+off the installed package rather than off a list here:
 
 ```python
 import oecluster

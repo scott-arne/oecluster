@@ -2,7 +2,7 @@
 
 This file starts at 5.0.0; earlier releases are not recorded here.
 
-## [5.7.0] - 2026-09-25
+## [5.7.0] - 2026-09-26
 
 ### Added
 
@@ -27,7 +27,9 @@ This file starts at 5.0.0; earlier releases are not recorded here.
 - The matrix reports `triangle` as `unknown`: no violation appeared in 74,400
   ordered triples, but the inclusion-exclusion bound a genuine set intersection
   satisfies was violated 66 times over 59,280 triples, so the metric proof is
-  unavailable. All seven clustering entry points accept an MCS matrix without
+  unavailable. All seven matrix entry points that gate on metric facts --
+  `butina`, `dbscan`, `hdbscan`, `agglomerative`, `k_medoids`,
+  `activity_landscape` and `modelability` -- accept an MCS matrix without
   `allow_nonmetric=True`.
 
 ## [5.6.0] - 2026-09-23

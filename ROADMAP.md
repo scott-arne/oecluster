@@ -80,7 +80,7 @@ C1 shipped in 5.6.0 as `murcko_scaffolds` and `murcko`, closing the producer
 side of that asymmetry. C2 shipped in 5.7.0 as the `mcs` comparison. It is
 scoped to a comparison method rather than a clustering entry point: a dedicated
 MCS clustering algorithm and common-core reporting were both offered and
-declined in favour of feeding the seven existing algorithms, either of which
+declined in favour of feeding the existing algorithms, either of which
 remains available as an additive follow-on.
 
 ## E - Diversity metrics and library-scale selection
