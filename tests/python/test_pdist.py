@@ -147,6 +147,11 @@ def test_pdist_similarity_with_cutoff_raises():
     precisely the pairs that scored highest. Pairs below the cutoff come back
     untouched, which is what makes the corruption easy to miss in a larger
     matrix.
+
+    Two comparisons, because the guard is a property of ``pdist`` rather than
+    of one comparison. A refusal that happened to depend on the name
+    ``fingerprint`` would leave every other similarity-capable comparison
+    corrupting, and the 5.7.0 CHANGELOG entry claims exactly the opposite.
     """
     import oecluster
     from openeye import oechem
@@ -157,20 +162,54 @@ def test_pdist_similarity_with_cutoff_raises():
         oechem.OESmilesToMol(mol, smi)
         mols.append(mol)
 
-    with pytest.raises(ValueError,
-                       match="cutoff > 0 is not supported with "
-                             "similarity=True"):
+    for name in ["fingerprint", "mcs"]:
+        with pytest.raises(ValueError,
+                           match="cutoff > 0 is not supported with "
+                                 "similarity=True"):
+            oecluster.pdist(mols, name, similarity=True, cutoff=0.2)
+
+
+def test_pdist_and_cdist_share_the_cutoff_refusal_text():
+    """The two refusals are one message, not two that happen to agree.
+
+    Giving ``pdist`` the refusal ``cdist`` already had is the whole point of
+    the change. A wording improvement applied to one copy and not the other
+    would leave the two functions describing the same mistake differently,
+    which is the inconsistency this task exists to remove.
+    """
+    import oecluster
+    from openeye import oechem
+
+    mols = []
+    for smi in ["c1ccccc1", "Cc1ccccc1"]:
+        mol = oechem.OEGraphMol()
+        oechem.OESmilesToMol(mol, smi)
+        mols.append(mol)
+
+    with pytest.raises(ValueError) as from_pdist:
         oecluster.pdist(mols, "fingerprint", similarity=True, cutoff=0.2)
+    with pytest.raises(ValueError) as from_cdist:
+        oecluster.cdist(mols, mols, "fingerprint", similarity=True,
+                        cutoff=0.2)
+
+    assert str(from_pdist.value) == str(from_cdist.value)
 
 
 def test_pdist_cutoff_positivity_is_decided_once():
-    """A cutoff whose comparison is unstable cannot slip past the guard.
+    """A cutoff whose truth value is unstable cannot slip past the guard.
 
     The guard and the storage selection used to test ``cutoff > 0.0``
     independently, so a value answering False to the first and True to the
     second cleared the guard and then selected sparse storage anyway,
     reinstating the corruption the guard exists to prevent. Measured before
     the fix, this pair came back as 0.0 instead of 0.2727.
+
+    Three shapes, because two of them survive a partial repair. Deciding the
+    comparison once but leaving its result unconverted still lets the truth
+    value shift between the two readers, since ``and`` yields the operand
+    rather than a bool. And a repair that re-tests the cutoff behind the
+    cached flag is invisible to the False-then-True direction, which
+    short-circuits before ever reaching the second test.
     """
     import oecluster
     from openeye import oechem
@@ -185,15 +224,59 @@ def test_pdist_cutoff_positivity_is_decided_once():
             self._comparisons += 1
             return self._comparisons > 1
 
+    class MirrorCutoff(float):
+        """Compares as positive once, then as zero."""
+
+        def __init__(self, _value):
+            self._comparisons = 0
+
+        def __gt__(self, other):
+            self._comparisons += 1
+            return self._comparisons == 1
+
+    class ShiftingTruth:
+        """Falsy once, then truthy. A comparison may return one of these."""
+
+        def __init__(self):
+            self.conversions = 0
+
+        def __bool__(self):
+            self.conversions += 1
+            return self.conversions > 1
+
+    class ProxyCutoff(float):
+        """Compares to a value whose truth is decided on conversion."""
+
+        def __init__(self, _value):
+            self.truth = ShiftingTruth()
+
+        def __gt__(self, other):
+            return self.truth
+
     mols = []
     for smi in ["c1ccccc1", "Cc1ccccc1"]:
         mol = oechem.OEGraphMol()
         oechem.OESmilesToMol(mol, smi)
         mols.append(mol)
 
+    shifting = ShiftingCutoff(0.2)
     result = oecluster.pdist(mols, "fingerprint", similarity=True,
-                             cutoff=ShiftingCutoff(0.2))
+                             cutoff=shifting)
     assert result.condensed[0] == pytest.approx(0.2727, abs=1e-4)
+    assert shifting._comparisons == 1
+
+    proxy = ProxyCutoff(0.2)
+    result = oecluster.pdist(mols, "fingerprint", similarity=True,
+                             cutoff=proxy)
+    assert result.condensed[0] == pytest.approx(0.2727, abs=1e-4)
+    assert proxy.truth.conversions == 1
+
+    mirror = MirrorCutoff(0.2)
+    with pytest.raises(ValueError,
+                       match="cutoff > 0 is not supported with "
+                             "similarity=True"):
+        oecluster.pdist(mols, "fingerprint", similarity=True, cutoff=mirror)
+    assert mirror._comparisons == 1
 
 
 def test_pdist_reports_a_typod_kwarg_before_the_cutoff():
@@ -220,6 +303,36 @@ def test_pdist_reports_a_typod_kwarg_before_the_cutoff():
     with pytest.raises(TypeError, match="Unknown kwargs for mcs"):
         oecluster.cdist(mols, mols, "mcs", bogus=1, similarity=True,
                         cutoff=0.5)
+
+
+def test_pdist_reports_an_unsupported_similarity_before_the_cutoff():
+    """A comparison with no similarity form says so, cutoff or not.
+
+    ``rmsd`` and ``descriptor`` refuse ``similarity=True`` outright, and that
+    refusal names the argument the caller has to change. The cutoff refusal
+    names dropping the cutoff, which would not help here -- the call would
+    still be asking for similarities the comparison cannot produce.
+
+    This is the half of the ordering the ``mcs`` test above cannot see.
+    ``_validate_mcs`` documents that it ignores ``similarity``, so handing
+    ``validate_request`` a hardcoded ``False`` would leave that test green
+    while silently putting the cutoff refusal ahead of both refusals here.
+    """
+    import oecluster
+    from openeye import oechem
+
+    mols = []
+    for smi in ["c1ccccc1", "Cc1ccccc1"]:
+        mol = oechem.OEGraphMol()
+        oechem.OESmilesToMol(mol, smi)
+        mols.append(mol)
+
+    with pytest.raises(ValueError,
+                       match="rmsd comparison has no similarity form"):
+        oecluster.pdist(mols, "rmsd", similarity=True, cutoff=0.5)
+    with pytest.raises(ValueError,
+                       match="descriptor comparison has no similarity form"):
+        oecluster.pdist(mols, "descriptor", similarity=True, cutoff=0.5)
 
 
 def test_pdist_progress():

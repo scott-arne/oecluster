@@ -2012,7 +2012,11 @@ def pdist(items,
         # Decided once and reused at the storage branch below: testing
         # ``cutoff > 0.0`` in both places would let a value whose comparison
         # is not stable answer differently there, selecting sparse storage
-        # for a call this guard had already cleared.
+        # for a call this guard had already cleared. ``bool`` is what makes
+        # the decision final. ``and`` yields its operand, so without it the
+        # binding holds whatever ``__gt__`` returned, and the guard and the
+        # storage branch each convert that to a truth value again -- the same
+        # divergence, one level down.
         #
         # Below validate_request because the cutoff message names dropping
         # the cutoff as the remedy, which cannot fix a misspelled argument.
@@ -2027,7 +2031,7 @@ def pdist(items,
         # similarity-oriented comparison plus a cutoff does still corrupt,
         # but the ``similarity`` argument is not what reveals it; that hole
         # is a known residual.
-        sparse = output is None and cutoff > 0.0
+        sparse = output is None and bool(cutoff > 0.0)
         if sparse and similarity:
             raise ValueError(
                 "cutoff > 0 is not supported with similarity=True: the cutoff "
@@ -2052,7 +2056,9 @@ def pdist(items,
         comparison_name = comparison_obj.ComparisonName()
         labels = []
         params = {}
-        sparse = output is None and cutoff > 0.0
+        # Deliberately a second copy rather than a hoist; see the string
+        # branch above for why the two cannot be merged.
+        sparse = output is None and bool(cutoff > 0.0)
 
     n = comparison_obj.Size()
 
