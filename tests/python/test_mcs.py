@@ -162,6 +162,7 @@ def _gate_mols():
     lambda dm: oecluster.k_medoids(dm, n_clusters=2),
     lambda dm: oecluster.activity_landscape(dm, [0.0, 1.0, 2.0, 3.0]),
     lambda dm: oecluster.modelability(dm, ["A", "A", "B", "B"]),
+    lambda dm: oecluster.cluster_report(oecluster.butina(dm, 0.9), dm),
 ])
 def test_every_entry_point_accepts_an_mcs_matrix(call):
     # triangle = "unknown" is permissive at the gate and data_integrity is

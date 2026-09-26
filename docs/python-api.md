@@ -1180,10 +1180,14 @@ molecules' heavy-atom bond counts. The distance is one minus that.
 
 Coordinates are never read, so molecules parsed from SMILES need no embedding
 step and a multi-conformer `OEMol` is scored once rather than once per pose.
-Hydrogens are always suppressed, isotopic ones included, so a deuterated
-analogue scores as identical to its parent. Molecules with no bonds after
-suppression -- methane, water, argon -- are refused at construction, because
-bond Tanimoto has a zero denominator for them rather than an extreme value.
+The input must nonetheless be `OEMol` rather than `OEGraphMol`, as it is for
+`rocs` and `superpose`, because the comparison keeps its own molecule
+snapshots; a list of `OEGraphMol` raises `TypeError` at construction, so wrap
+with `oechem.OEMol(graph_mol)` first. Hydrogens are always suppressed, isotopic
+ones included, so a deuterated analogue scores as identical to its parent.
+Molecules with no bonds after suppression -- methane, water, argon -- are
+refused at construction, because bond Tanimoto has a zero denominator for them
+rather than an extreme value.
 
 `match_level` chooses how strictly atoms and bonds must correspond: `"loose"` is
 atomic number only with bonds unconstrained, so benzene matches cyclohexane
@@ -1191,16 +1195,17 @@ completely; `"default"` is OEChem's own pair of expressions, under which those
 two share nothing; `"exact"` adds hydrogen count, charge, degree and bond order.
 
 `search_mode` deliberately inverts the toolkit's own default. Exhaustive search
-genuinely finds larger matches on rigid polycyclic and sugar-like input -- on
-eleven of 120 measured pairs it did, by one to three bonds -- but it costs one
-to three orders of magnitude, and it is not uniformly better: on erythromycin
-against azithromycin, a 53-bond against 54-bond macrolide pair, it took 16.2 s
-and matched 50 bonds where approximate took 8.5 ms and matched 51. Exhaustive
-mode also prints `Warning: MCS search truncated` to OpenEye's process-global
-error stream, once per truncated directed search and so up to twice per pair,
-which at 500,000 pairs is unusable output; the library does not redirect that
-stream, because doing so would silence warnings from the caller's own
-unrelated OpenEye code.
+genuinely finds larger matches on rigid polycyclic and sugar-like input: in a
+120-pair scan it won on eleven of the 118 pairs that completed, by one to three
+bonds, while the other two exhaustive searches passed four seconds and were
+abandoned. But it costs one to three orders of magnitude, and it is not
+uniformly better: on erythromycin against azithromycin, a 53-bond against
+54-bond macrolide pair, it took 16.2 s and matched 50 bonds where approximate
+took 8.5 ms and matched 51. Exhaustive mode also prints `Warning: MCS search
+truncated` to OpenEye's process-global error stream, once per truncated
+directed search and so up to twice per pair, which at 500,000 pairs is unusable
+output; the library does not redirect that stream, because doing so would
+silence warnings from the caller's own unrelated OpenEye code.
 
 There is **no metric guarantee**. No triangle-inequality violation appeared in
 74,400 ordered triples across three molecule sets, one of them built to stress
@@ -1208,11 +1213,14 @@ transitivity, and the thinnest observed margin was 1.0000 against 1.1444. But
 the inclusion-exclusion bound that a genuine set intersection satisfies was
 violated 66 times over 59,280 triples, so the Jaccard metric proof is
 unavailable rather than merely unattempted. The matrix therefore reports
-`triangle` as `"unknown"`, which every clustering entry point accepts without
+`triangle` as `"unknown"`, which every entry point accepts without
 `allow_nonmetric=True`. To check the property empirically on your own data, use
 `SymmetricDistanceMatrix.from_condensed(..., probe_triples=N)`, which samples
-triples and stamps `metric_probe`; a matrix stamped `violations_found` is then
-refused by the clustering entry points unless you pass `allow_nonmetric=True`.
+triples and stamps `metric_probe`. Five entry points gate on that stamp --
+`butina`, `dbscan`, `hdbscan`, `agglomerative` and `cluster_report` -- and
+refuse a matrix stamped `violations_found` unless you pass
+`allow_nonmetric=True`; `k_medoids`, `activity_landscape` and `modelability`
+do not gate on metric facts and accept it either way.
 
 **Cost.** An order-of-magnitude planning estimate, not a measurement. No
 `pdist` run at this size has been executed.

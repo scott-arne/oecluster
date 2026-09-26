@@ -21,16 +21,16 @@ This file starts at 5.0.0; earlier releases are not recorded here.
 - `match_level` selects `default`, `exact` or `loose` matching strictness, and
   `max_matches` bounds how many matches one directed search enumerates.
 - Each pair is searched in both directions and the larger match is taken.
-  Approximate search is asymmetric -- it differed on 21 of 190 drug-like pairs
-  -- and `pdist` fills only one triangle, so a one-direction score would depend
-  on input order.
+  Approximate search is asymmetric -- the two directions can return different
+  match sizes -- and `pdist` fills only one triangle, so a one-direction score
+  would depend on input order.
 - The matrix reports `triangle` as `unknown`: no violation appeared in 74,400
   ordered triples, but the inclusion-exclusion bound a genuine set intersection
   satisfies was violated 66 times over 59,280 triples, so the metric proof is
-  unavailable. All seven matrix entry points that gate on metric facts --
-  `butina`, `dbscan`, `hdbscan`, `agglomerative`, `k_medoids`,
-  `activity_landscape` and `modelability` -- accept an MCS matrix without
-  `allow_nonmetric=True`.
+  unavailable. The five entry points that gate on metric facts -- `butina`,
+  `dbscan`, `hdbscan`, `agglomerative` and `cluster_report` -- accept an MCS
+  matrix without `allow_nonmetric=True`, as do `k_medoids`,
+  `activity_landscape` and `modelability`, which do not gate at all.
 
 ## [5.6.0] - 2026-09-23
 
