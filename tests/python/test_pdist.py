@@ -138,6 +138,25 @@ def test_pdist_with_cutoff():
     dist = oecluster.pdist(mols, "fingerprint", cutoff=0.5)
     assert dist.num_samples == 3
 
+def test_pdist_similarity_with_cutoff_raises():
+    """cutoff > 0 with similarity=True is rejected, as it is in cdist.
+
+    Without the guard this call returns a matrix of zeros: sparse storage
+    drops values above the cutoff, which for a similarity matrix is every
+    pair the caller cares about.
+    """
+    import oecluster
+    from openeye import oechem
+
+    mols = []
+    for smi in ["c1ccccc1", "Cc1ccccc1"]:
+        mol = oechem.OEGraphMol()
+        oechem.OESmilesToMol(mol, smi)
+        mols.append(mol)
+
+    with pytest.raises(ValueError, match="cutoff"):
+        oecluster.pdist(mols, "fingerprint", similarity=True, cutoff=0.5)
+
 def test_pdist_progress():
     """Test progress callback is invoked."""
     import oecluster

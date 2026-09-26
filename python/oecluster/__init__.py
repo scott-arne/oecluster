@@ -2000,7 +2000,18 @@ def pdist(items,
     :param kwargs: Comparison-specific options.
     :returns: SymmetricDistanceMatrix with computed distances/similarities.
     :raises TypeError: If unknown kwargs are passed.
+    :raises ValueError: If cutoff > 0 with similarity=True, or if normalizing
+                        the inputs leaves no items.
     """
+    # Hoisted above the string/prebuilt split so both branches answer the same
+    # way, which is the parity ``cdist``'s own guard comment already claims.
+    # Sparse storage zeroes values above the cutoff -- the far pairs for a
+    # distance matrix, the near ones for a similarity matrix.
+    if cutoff > 0.0 and similarity:
+        raise ValueError(
+            "cutoff > 0 is not supported with similarity=True: the cutoff zeroes "
+            "values above the threshold, which would discard high similarities")
+
     if isinstance(comparison, str):
         # Before normalization: filtering can empty the list, and the refusal
         # below would then answer for an argument no input could rescue.

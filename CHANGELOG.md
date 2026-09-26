@@ -34,6 +34,16 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   matrix without `allow_nonmetric=True`, as do `k_medoids`,
   `activity_landscape` and `modelability`, which do not gate at all.
 
+### Fixed
+
+- `pdist` now raises on `cutoff > 0` together with `similarity=True` instead of
+  silently returning zeros. Sparse storage drops values above the cutoff, which
+  discards the far pairs of a distance matrix but the *near* pairs of a
+  similarity matrix. **Calls that combined the two previously returned a matrix
+  of zeros and now raise `ValueError`**, matching the guard `cdist` has always
+  had. This affected every similarity-capable comparison, `fingerprint`
+  included, not only the `mcs` comparison new in this release.
+
 ## [5.6.0] - 2026-09-23
 
 ### Added
