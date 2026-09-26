@@ -42,9 +42,10 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   of a similarity matrix. The result was not an obviously broken matrix of
   zeros -- everything below the cutoff came back untouched, so the call looked
   plausible with exactly the most-similar pairs replaced by `0.0`. **Calls that
-  combined the two now raise `ValueError`**, matching the guard `cdist` has
-  always had. This affected every similarity-capable comparison, `fingerprint`
-  included, not only the `mcs` comparison new in this release.
+  would have used sparse storage -- a named comparison with no `output=` -- now
+  raise `ValueError`**, matching the guard `cdist` has always had. This affected
+  every similarity-capable comparison, `fingerprint` included, not only the
+  `mcs` comparison new in this release.
 
 ## [5.6.0] - 2026-09-23
 

@@ -2000,8 +2000,9 @@ def pdist(items,
     :param kwargs: Comparison-specific options.
     :returns: SymmetricDistanceMatrix with computed distances/similarities.
     :raises TypeError: If unknown kwargs are passed.
-    :raises ValueError: If cutoff > 0 with similarity=True, or if normalizing
-        the inputs leaves no items.
+    :raises ValueError: If cutoff > 0 with similarity=True on a named
+        comparison with no ``output``, or if normalizing the inputs leaves no
+        items.
     """
     if isinstance(comparison, str):
         # Before normalization: filtering can empty the list, and the refusal
@@ -2012,9 +2013,11 @@ def pdist(items,
         # typo'd kwarg: the cutoff message names dropping the cutoff as the
         # remedy, which cannot fix a misspelled argument. The condition
         # matches the sparse-storage branch below exactly -- an mmap output
-        # never consults the cutoff, and the prebuilt branch ignores
-        # ``similarity`` entirely, so refusing either would explain a
-        # corruption that cannot occur there.
+        # never consults the cutoff, and the prebuilt branch ignores the
+        # ``similarity`` argument, so on neither path would this message
+        # describe what actually happened. A prebuilt similarity-oriented
+        # comparison plus a cutoff does still corrupt, but the ``similarity``
+        # argument is not what reveals it; that hole is a known residual.
         if cutoff > 0.0 and similarity and output is None:
             raise ValueError(
                 "cutoff > 0 is not supported with similarity=True: the cutoff "

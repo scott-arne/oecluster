@@ -144,8 +144,9 @@ def test_pdist_similarity_with_cutoff_raises():
 
     Without the guard this pair's 0.2727 comes back as 0.0: sparse storage
     zeroes values above the cutoff, so on a similarity matrix it discards
-    precisely the pairs that scored highest. Lower-scoring pairs survive,
-    which is what makes the corruption easy to miss.
+    precisely the pairs that scored highest. Pairs below the cutoff come back
+    untouched, which is what makes the corruption easy to miss in a larger
+    matrix.
     """
     import oecluster
     from openeye import oechem
