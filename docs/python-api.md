@@ -1189,19 +1189,21 @@ Molecules with no bonds after suppression -- methane, water, argon -- are
 refused at construction, because bond Tanimoto has a zero denominator for them
 rather than an extreme value.
 
-Suppression folds a hydrogen into the implicit hydrogen count of the heavy atom
-it hangs off, so a hydrogen survives exactly when it cannot be folded: when it
-has no single owner, being bonded to two atoms, or when it carries a formal
-charge, which an implicit count has nowhere to store. Diborane keeps both
-bridging hydrogens and is scored on its four B-H bonds, having no heavy-atom
-bonds at all; it is accepted rather than refused, because the zero-bond check
-counts the snapshot's bonds and it has four. `[H-][Li+]` is the charged case:
-it keeps its hydride and is accepted, where neutral `[H][Li]` suppresses to
-nothing and is refused. Isotope is not a survival cause once `retainIsotope` is
-false -- perdeuterated benzene suppresses to the same six-bond ring as benzene,
-which is why it scores 1.0 against its parent. Drug-like input has neither a
-bridging nor a charged hydrogen, so the denominator is a heavy-atom bond count
-in practice but not by construction.
+Suppression folds a hydrogen into the implicit hydrogen count of the atom it
+hangs off, so a hydrogen stays explicit when that fold has nowhere to go: when
+it has no single owner, being bonded to two atoms, or when it carries a formal
+charge, which an implicit count cannot hold. Diborane keeps both bridging
+hydrogens and is scored on its four B-H bonds, having no heavy-atom bonds at
+all; it is accepted rather than refused, because the zero-bond check counts the
+snapshot's bonds and it has four. `[H-][Li+]` is the charged case: it keeps its
+hydride and is accepted, where neutral `[H][Li]` suppresses to nothing and is
+refused. Molecular hydrogen is the degenerate case -- with no heavy atom in the
+component, one hydrogen absorbs the other and survives as its owner, leaving
+`[H][H]` with no bonds and so refused. Isotope is not a survival cause once
+`retainIsotope` is false -- perdeuterated benzene suppresses to the same
+six-bond ring as benzene, which is why it scores 1.0 against its parent.
+Drug-like input has none of these, so the denominator is a heavy-atom bond
+count in practice but not by construction.
 
 `match_level` chooses how strictly atoms and bonds must correspond: `"loose"` is
 atomic number only with bonds unconstrained, so benzene matches cyclohexane

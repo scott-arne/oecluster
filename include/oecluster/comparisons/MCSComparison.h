@@ -91,17 +91,18 @@ struct MCSOptions {
  * an explicit atom and put a labelled analogue on a different bond denominator
  * from its parent -- a difference a topological score has no way to mean.
  *
- * Suppression folds a hydrogen into the implicit hydrogen count of the heavy
- * atom it hangs off, so a hydrogen survives exactly when it cannot be folded:
+ * Suppression folds a hydrogen into the implicit hydrogen count of the atom it
+ * hangs off, so a hydrogen stays explicit when that fold has nowhere to go:
  * when it has no single owner, being bonded to two atoms, or when it carries a
- * formal charge, which an implicit count has nowhere to store. Diborane keeps
- * both bridging hydrogens and is scored on its four B-H bonds, having no
- * heavy-atom bonds at all; ``[H-][Li+]`` keeps its hydride and is accepted
- * where neutral ``[H][Li]`` loses its only bond and is refused. Isotope is not
- * a survival cause once ``retainIsotope`` is false: perdeuterated benzene
- * suppresses to the same six-bond ring as benzene. Drug-like input has neither
- * a bridging nor a charged hydrogen, so the denominator is a heavy-atom bond
- * count in practice but not by construction.
+ * formal charge, which an implicit count cannot hold. Diborane keeps both
+ * bridging hydrogens and is scored on its four B-H bonds, having no heavy-atom
+ * bonds at all; ``[H-][Li+]`` keeps its hydride and is accepted where neutral
+ * ``[H][Li]`` loses its only bond and is refused. Molecular hydrogen is the
+ * degenerate case: one atom absorbs the other and survives as its owner, and
+ * with no bonds left ``[H][H]`` is refused. Isotope is not a survival cause
+ * once ``retainIsotope`` is false: perdeuterated benzene suppresses to the same
+ * six-bond ring as benzene. Drug-like input has none of these, so the
+ * denominator is a heavy-atom bond count in practice but not by construction.
  *
  * Approximate search is asymmetric: the match found with A as the pattern need
  * not equal the one found with B as the pattern. Since ``pdist`` fills only one

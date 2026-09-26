@@ -21,6 +21,7 @@ ETHANE = "CC"
 ETHENE = "C=C"
 NEUTRAL_HYDRIDE = "[H][Li]"
 CHARGED_HYDRIDE = "[H-][Li+]"
+DIHYDROGEN = "[H][H]"
 
 
 def _mol(smiles, title="mol"):
@@ -275,6 +276,23 @@ def test_charged_hydrogen_survives_suppression():
     dm = oecluster.pdist(_pair(CHARGED_HYDRIDE, CHARGED_HYDRIDE), "mcs")
     assert dm.num_samples == 2
     assert dm.condensed[0] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_molecular_hydrogen_is_the_degenerate_fold():
+    # With no heavy atom in the component the fold has to stop somewhere, so
+    # one hydrogen absorbs the other and survives as its owner -- neutral and
+    # unbridged, which is why the rule is phrased around where the fold can
+    # go rather than around the surviving atom's own properties. Nothing is
+    # left to score, so the zero-bond guard refuses it.
+    with pytest.raises(RuntimeError, match="no bonds after hydrogen"):
+        oecluster.pdist(_pair(DIHYDROGEN, DIHYDROGEN), "mcs")
+
+    # The same stray hydrogen alongside a real fragment is bondless, so it
+    # cannot reach the bond Tanimoto: benzene scores against toluene exactly
+    # as it does without it.
+    stray = oecluster.pdist([_mol(f"{DIHYDROGEN}.{BENZENE}", "first"),
+                             _mol(TOLUENE, "second")], "mcs")
+    assert stray.condensed[0] == pytest.approx(0.142857, abs=1e-6)
 
 
 def test_direct_constructor_honours_search_mode():
