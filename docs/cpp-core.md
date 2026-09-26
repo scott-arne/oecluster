@@ -69,6 +69,10 @@ The concrete comparisons are:
   `inverse_covariance`, `missing`, `p`).
 - `RMSDComparison` — coordinate RMSD between poses of one molecule, configured
   by `RMSDOptions` (`overlay`, `automorph`, `heavy_only`).
+- `MCSComparison` — maximum common substructure, scored as Tanimoto over
+  matched bonds with each pair searched in both directions and the larger match
+  taken; configured by `MCSOptions` (`search_mode`, `match_level`,
+  `max_matches`, `similarity`).
 
 ## Storage Backends
 

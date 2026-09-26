@@ -2,6 +2,34 @@
 
 This file starts at 5.0.0; earlier releases are not recorded here.
 
+## [5.7.0] - 2026-09-25
+
+### Added
+
+- `mcs`, a maximum-common-substructure comparison for `pdist` and `cdist`, with
+  the C++ class `MCSComparison` configured through `MCSOptions`. The score is
+  Tanimoto over matched bonds, `c / (|A| + |B| - c)`, searched with complete
+  cycles. It is topological: coordinates are never read, hydrogens are always
+  suppressed including isotopic ones, and a multi-conformer molecule is scored
+  once rather than once per pose. Molecules with no bonds after suppression are
+  refused at construction, because bond Tanimoto has a zero denominator there.
+- `search_mode` selects `approximate` (the default) or `exhaustive`. This
+  inverts the toolkit's own default deliberately: exhaustive search costs one to
+  three orders of magnitude and is not reliably better, having returned a
+  smaller match than approximate on a large macrolide pair while taking 16.2 s
+  against 8.5 ms.
+- `match_level` selects `default`, `exact` or `loose` matching strictness, and
+  `max_matches` bounds how many matches one directed search enumerates.
+- Each pair is searched in both directions and the larger match is taken.
+  Approximate search is asymmetric -- it differed on 21 of 190 drug-like pairs
+  -- and `pdist` fills only one triangle, so a one-direction score would depend
+  on input order.
+- The matrix reports `triangle` as `unknown`: no violation appeared in 74,400
+  ordered triples, but the inclusion-exclusion bound a genuine set intersection
+  satisfies was violated 66 times over 59,280 triples, so the metric proof is
+  unavailable. All seven clustering entry points accept an MCS matrix without
+  `allow_nonmetric=True`.
+
 ## [5.6.0] - 2026-09-23
 
 ### Added

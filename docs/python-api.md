@@ -37,8 +37,8 @@ dm.to_file("distances.npz")
 ```
 
 `pdist()` returns a `SymmetricDistanceMatrix`. The supported comparison names
-are `"descriptor"`, `"fingerprint"`, `"rmsd"`, `"rocs"`, `"sitehopper"`, and
-`"superpose"` (`"sitehopper"` is a superpose mode). See
+are `"descriptor"`, `"fingerprint"`, `"mcs"`, `"rmsd"`, `"rocs"`,
+`"sitehopper"`, and `"superpose"` (`"sitehopper"` is a superpose mode). See
 [Comparison Methods](#comparison-methods) for the keyword arguments each one
 accepts, and [Metric Requirements](#metric-requirements) for which of them
 produce a matrix the clustering algorithms will accept.
@@ -1165,6 +1165,76 @@ an empty title; the caller's molecules are never modified.
 `expand_conformers` is a `pdist()`/`cdist()` keyword only -- the
 `RMSDComparison` factory takes the molecules exactly as passed.
 
+### MCS
+
+| Parameter | Values | Default |
+|-----------|--------|---------|
+| `search_mode` | `"approximate"`, `"exhaustive"` | `"approximate"` |
+| `match_level` | `"default"`, `"exact"`, `"loose"` | `"default"` |
+| `max_matches` | Matches one directed search may enumerate | `1024` |
+
+Scores the maximum common substructure as Tanimoto over matched bonds:
+`c / (|A| + |B| - c)` with `c` the matched-bond count and `|A|`, `|B|` the two
+molecules' heavy-atom bond counts. The distance is one minus that.
+`similarity=True` is supported, unlike `rmsd`.
+
+Coordinates are never read, so molecules parsed from SMILES need no embedding
+step and a multi-conformer `OEMol` is scored once rather than once per pose.
+Hydrogens are always suppressed, isotopic ones included, so a deuterated
+analogue scores as identical to its parent. Molecules with no bonds after
+suppression -- methane, water, argon -- are refused at construction, because
+bond Tanimoto has a zero denominator for them rather than an extreme value.
+
+`match_level` chooses how strictly atoms and bonds must correspond: `"loose"` is
+atomic number only with bonds unconstrained, so benzene matches cyclohexane
+completely; `"default"` is OEChem's own pair of expressions, under which those
+two share nothing; `"exact"` adds hydrogen count, charge, degree and bond order.
+
+`search_mode` deliberately inverts the toolkit's own default. Exhaustive search
+genuinely finds larger matches on rigid polycyclic and sugar-like input -- on
+eleven of 120 measured pairs it did, by one to three bonds -- but it costs one
+to three orders of magnitude, and it is not uniformly better: on a 53-bond
+against 54-bond macrolide pair it took 16.2 s and matched 50 bonds where
+approximate took 8.5 ms and matched 51. Exhaustive mode also prints
+`Warning: MCS search truncated` to OpenEye's process-global error stream, once
+per truncated pair, which at 500,000 pairs is unusable output; the library does
+not redirect that stream, because doing so would silence warnings from the
+caller's own unrelated OpenEye code.
+
+There is **no metric guarantee**. No triangle-inequality violation appeared in
+74,400 ordered triples across three molecule sets, one of them built to stress
+transitivity, and the thinnest observed margin was 1.0000 against 1.1444. But
+the inclusion-exclusion bound that a genuine set intersection satisfies was
+violated 66 times over 59,280 triples, so the Jaccard metric proof is
+unavailable rather than merely unattempted. The matrix therefore reports
+`triangle` as `"unknown"`, which every clustering entry point accepts without
+`allow_nonmetric=True`. To check the property empirically on your own data, use
+`from_array(..., probe_triples=N)`, which samples triples and refuses on a
+violation.
+
+**Cost.** An order-of-magnitude planning estimate, not a measurement. No
+`pdist` run at this size has been executed.
+
+| quantity | 1,000 molecules, approximate, drug-like |
+|----------|------------------------------------------|
+| pairs / searches | 499,500 / 999,000 |
+| search time | ~400 s |
+| search construction, 0.287 ms each | ~287 s |
+| total, single-threaded | ~11.5 min |
+| total, 8 threads | ~90 s |
+| peak memory added by per-clone molecule copies | ~79 MB |
+
+Two caveats travel with those numbers. The per-search figures come from small
+drug-like inputs and scale steeply with molecule size -- the erythromycin
+against azithromycin pair above is 8.5 ms in approximate mode, about twelve
+times the 0.691 ms mean the microbenchmark measured. And the 8-thread row
+assumes linear scaling, which was never measured. Use `fingerprint` for large
+sets and `mcs` for focused series.
+
+Memory grows as `num_threads x n x 10.4 KB`, because each worker holds private
+copies of the molecules rather than sharing one set. That is the one cost here
+that grows with thread count instead of shrinking.
+
 ## Storage Backends
 
 `pdist()` selects the backend from its keywords: dense by default, sparse when
@@ -1190,8 +1260,9 @@ memory. Both surface as `RuntimeError`.
 Most users do not need this section. The generated SWIG wrapper is available as
 `oecluster.oecluster` and the compiled extension as `oecluster._oecluster` for
 users who need direct access to the C++ options and classes. The comparison
-wrappers -- `DescriptorComparison`, `FingerprintComparison`, `RMSDComparison`,
-`ROCSComparison` and `SuperposeComparison` -- are on the top-level package, and
+wrappers -- `DescriptorComparison`, `FingerprintComparison`, `MCSComparison`,
+`RMSDComparison`, `ROCSComparison` and `SuperposeComparison` -- are on the
+top-level package, and
 so are many of the option structs, among them `PDistOptions`, `ButinaOptions`
 and `FingerprintOptions`. Others are not, `ClusterReportOptions` and
 `RMSDOptions` among them. Reach those through `oecluster.oecluster`, or let the

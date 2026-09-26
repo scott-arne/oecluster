@@ -24,7 +24,7 @@ they are not recoveries of the original intent.
 | A3 | SAR coherence: eta-squared, omega-squared, SALI, cliff density, MODI/RMODI | shipped 5.4.0 |
 | D1 | k-medoids/PAM: exactly `k` clusters with real-member centers | shipped 5.5.0 |
 | C1 | Murcko scaffold assignment and scaffold-identity clustering | shipped 5.6.0 |
-| C2 | MCS-based clustering | next |
+| C2 | MCS-based comparison: Tanimoto over matched bonds | shipped 5.7.0 |
 | E | Diversity metrics and library-scale selection | planned |
 | D2 | Graph and leader algorithms: Leiden, Jarvis-Patrick, leader/DISE | planned |
 | B | Fingerprint-native O(N) counterparts of the A metrics | planned |
@@ -68,7 +68,7 @@ Two algorithms were considered and excluded:
 ## C - Chemistry-native clustering
 
 *Re-derived.* Partitions on chemical structure rather than on distance: Murcko
-scaffold assignment and MCS-based clustering.
+scaffold assignment and MCS-based comparison.
 
 Before C, every algorithm in the library was distance-driven. `scaffold_labels`
 is consumed as an input in three places - scaffold-ARI in A2, the
@@ -77,7 +77,11 @@ in the library produced them. C closes that asymmetry and gives E a chemically
 meaningful axis to diversify along.
 
 C1 shipped in 5.6.0 as `murcko_scaffolds` and `murcko`, closing the producer
-side of that asymmetry. C2, MCS-based clustering, is the remaining half.
+side of that asymmetry. C2 shipped in 5.7.0 as the `mcs` comparison. It is
+scoped to a comparison method rather than a clustering entry point: a dedicated
+MCS clustering algorithm and common-core reporting were both offered and
+declined in favour of feeding the seven existing algorithms, either of which
+remains available as an additive follow-on.
 
 ## E - Diversity metrics and library-scale selection
 

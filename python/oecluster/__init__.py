@@ -27,8 +27,8 @@ from typing import Any, ClassVar, NamedTuple
 
 import numpy as np
 
-__version__ = "5.6.0"
-__version_info__ = (5, 6, 0)
+__version__ = "5.7.0"
+__version_info__ = (5, 7, 0)
 
 
 _OPENEYE_COMPAT_PRELOAD_PATHS: list[str] = []
@@ -1989,8 +1989,8 @@ def pdist(items,
 
     :param items: List of molecules, design units, or other items.
     :param comparison: Comparison method: "fingerprint", "rocs", "superpose",
-                       "sitehopper", "descriptor", "rmsd", or a C++ comparison
-                       object.
+                       "sitehopper", "descriptor", "rmsd", "mcs", or a C++
+                       comparison object.
     :param similarity: Return similarities instead of distances.
     :param num_threads: Number of threads (0 = auto).
     :param chunk_size: Pairs per work unit.
@@ -2068,8 +2068,8 @@ def cdist(items_a, items_b, comparison, *,
     :param items_a: Reference items (rows of the result).
     :param items_b: Fit items (columns of the result).
     :param comparison: Comparison method name: "fingerprint", "rocs", "superpose",
-                       "sitehopper", "descriptor", or "rmsd". Prebuilt comparison
-                       objects are not supported.
+                       "sitehopper", "descriptor", "rmsd", or "mcs". Prebuilt
+                       comparison objects are not supported.
     :param similarity: Return similarities instead of distances.
     :param num_threads: Number of threads (0 = auto).
     :param chunk_size: Pairs per work unit.

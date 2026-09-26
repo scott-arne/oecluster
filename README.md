@@ -728,6 +728,22 @@ coordinates. Use `rocs` to compare different molecules by shape. See
 [docs/python-api.md](docs/python-api.md#rmsd) for the conformer labeling and
 the `expand_conformers` caveat.
 
+### MCS
+
+| Parameter | Values | Default |
+|-----------|--------|---------|
+| `search_mode` | `approximate`, `exhaustive` | `approximate` |
+| `match_level` | `default`, `exact`, `loose` | `default` |
+| `max_matches` | Matches one directed search may enumerate | `1024` |
+
+Maximum common substructure scored as Tanimoto over matched bonds. Topological,
+so coordinates are never read and hydrogens are always suppressed; molecules
+with no bonds after suppression are refused. `exhaustive` is one to three orders
+of magnitude slower than `approximate` and is not reliably better. There is no
+metric guarantee, so the matrix reports `triangle` as `unknown`. See
+[docs/python-api.md](docs/python-api.md#mcs) for the cost estimate and the
+measurements behind both caveats.
+
 ---
 
 ## Storage Backends
@@ -815,7 +831,7 @@ for (size_t i = 0; i < mols.size(); ++i) {
 |---------|--------------|-----|
 | `ImportError` for `_oecluster` | Python extension was not built or cannot find runtime libraries | Rebuild with `scripts/build_python.py` or ensure the wheel matches your Python and platform. |
 | OpenEye import or license failure | OpenEye Toolkits or license is missing at runtime | Install OpenEye Toolkits and configure your OpenEye license before importing or running examples. |
-| `Unknown comparison` | The comparison string is misspelled | Use one of `descriptor`, `fingerprint`, `rmsd`, `rocs`, `sitehopper`, or `superpose`; the message itself lists the valid names. |
+| `Unknown comparison` | The comparison string is misspelled | Use one of `descriptor`, `fingerprint`, `mcs`, `rmsd`, `rocs`, `sitehopper`, or `superpose`; the message itself lists the valid names. |
 | `Unknown representative method` | Representative method name is misspelled | Use `medoid`, `minimax`, `highest_neighborhood`, or `weighted_medoid`. |
 | `highest_neighborhood representative requires a threshold` | The method needs a neighbor cutoff | Pass `threshold=<distance>`. |
 | Sparse storage cutoff error | `cutoff` is lower than the clustering threshold | Recompute distances with a cutoff at least as large as the clustering threshold, or use dense/mmap storage. |
