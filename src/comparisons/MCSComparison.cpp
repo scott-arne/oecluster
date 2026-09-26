@@ -223,7 +223,14 @@ MCSComparison::MCSComparison(const std::vector<std::shared_ptr<OEChem::OEMol>>& 
 }
 
 // Delegates rather than duplicating the four validations and the
-// snapshot-and-suppress loop above, so the two construction paths cannot drift.
+// snapshot-and-suppress loop above, so neither can be changed for one path and
+// forgotten for the other. The two are not quite interchangeable: this path
+// null-checks while snapshotting, before the delegate validates the options, so
+// given both a null pointer and a bad option it reports the null pointer where
+// the direct path reports the option. Unreachable from Python, where the
+// bindings reject a null list element before any constructor runs, and harmless
+// in C++, where both inputs are errors and either message names a real one.
+//
 // The resulting double copy -- raw pointer to OEMol here, then the delegate's
 // own snapshot -- is O(n) against the O(n^2) matrix this class exists to fill.
 MCSComparison::MCSComparison(const std::vector<OEChem::OEMolBase*>& mols,

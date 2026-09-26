@@ -1062,6 +1062,32 @@ atom-pair window must ask for it with
 
 Distance ranges: combo_norm [0, 1], combo [0, 2], shape [0, 1], color [0, 1].
 
+Either `OEMol` or `OEGraphMol` is accepted, since the comparison snapshots its
+own copies, but the choice changes what is computed rather than only what is
+accepted. An `OEGraphMol` carries a single conformer, so `BestOverlay` has one
+pose to choose from instead of an ensemble. Pass an `OEMol` whenever conformer
+search matters. Every molecule still needs real 3D coordinates either way.
+
+**Do not mix the two types in one list.** The first element alone decides how
+the whole list is read. If it is an `OEGraphMol`, every later element is taken
+as a single conformer too, so an `OEMol` further down the list is silently
+reduced to its active conformer and scored on that alone -- no error, no
+warning, just a different number:
+
+```python
+# Wrong: mol keeps only its active conformer, because graph_mol came first.
+oecluster.pdist([graph_mol, mol], "rocs")
+
+# Raises TypeError: List item is not an OEMol object.
+oecluster.pdist([mol, graph_mol], "rocs")
+```
+
+The two orderings are not symmetric: the second is refused because the stricter
+path validates every element, while the first is accepted because refusing it
+would also refuse the all-`OEGraphMol` lists this comparison now exists to take.
+Convert up front -- `oechem.OEMol(graph_mol)` -- when a list would otherwise be
+mixed.
+
 ### Superpose
 
 | Parameter | Values | Default |

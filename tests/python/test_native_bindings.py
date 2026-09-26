@@ -251,8 +251,16 @@ def test_rocs_comparison_accepts_graph_molecules(native):
     assert 0.0 <= value <= 2.0
 
 
-def _flexible_multiconformer():
-    """A molecule whose conformers differ enough to be told apart by shape."""
+def _flexible_multiconformer(native):
+    """A molecule whose conformers differ enough to be told apart by shape.
+
+    The ensemble is what the tests below use to tell a preserved
+    multiconformer copy from a collapsed one, so "differ enough" is asserted
+    rather than assumed: if Omega ever generates a tighter ensemble for this
+    input, those tests would agree on a number for the wrong reason instead of
+    failing. The same self-check, against the same threshold, guards the
+    inlined fixture in ``test_typemap_preserves_conformers``.
+    """
     pytest.importorskip("openeye.oeomega")
     from openeye import oechem, oeomega
 
@@ -263,6 +271,17 @@ def _flexible_multiconformer():
     oechem.OESmilesToMol(multi, "c1ccccc1CCCCc1ccccc1")
     assert omega(multi)
     assert multi.NumConfs() > 1
+
+    options = native.ROCSOptions()
+    options.score_type = native.ROCSScoreType_Shape
+    references = [oechem.OEMol(multi.GetConf(oechem.OEHasConfIdx(conf.GetIdx())))
+                  for conf in multi.GetConfs()]
+    gaps = [native.ROCSComparison([reference, references[0]], options).Compare(0, 1)
+            for reference in references[1:]]
+    assert max(gaps) > 0.1, (
+        "the conformers generated here are too similar for the tests using "
+        f"this fixture to distinguish a dropped ensemble from a kept one: "
+        f"gaps={gaps}")
     return multi
 
 
@@ -305,7 +324,7 @@ def test_oemol_input_still_binds_the_conformer_preserving_overload(native):
     """
     from openeye import oechem
 
-    multi = _flexible_multiconformer()
+    multi = _flexible_multiconformer(native)
     options = native.ROCSOptions()
     options.score_type = native.ROCSScoreType_Shape
     reference = _non_active_reference(multi)
@@ -334,7 +353,7 @@ def test_oemol_input_still_binds_the_conformer_preserving_overload(native):
     assert kept == pytest.approx(0.0, abs=1e-3)
 
 
-def test_mixed_molecule_lists_resolve_by_the_stricter_overload(native):
+def test_mixed_molecule_lists_resolve_asymmetrically_by_their_first_element(native):
     """Both orderings of a list mixing OEGraphMol with OEMol.
 
     Both typechecks sample element 0 only, so the first element alone decides
@@ -356,7 +375,7 @@ def test_mixed_molecule_lists_resolve_by_the_stricter_overload(native):
     """
     from openeye import oechem
 
-    multi = _flexible_multiconformer()
+    multi = _flexible_multiconformer(native)
     options = native.ROCSOptions()
     options.score_type = native.ROCSScoreType_Shape
     reference = _non_active_reference(multi)
@@ -376,6 +395,55 @@ def test_mixed_molecule_lists_resolve_by_the_stricter_overload(native):
         native.ROCSComparison(reverse, options)
     with pytest.raises(TypeError, match="List item is not an OEMol object"):
         native.ROCSComparison(reverse)
+
+
+def test_the_molbase_typecheck_is_ranked_behind_the_strict_one():
+    """The precedence the three tests above rest on, asserted from the source.
+
+    Those three all sit behind ``importorskip("openeye.oeomega")``, so on a
+    machine without that license the entire guard against a precedence
+    regression disappears. This one has no license gate.
+
+    ``SWIG_TYPECHECK_POINTER`` is 0, and the strict
+    ``vector<shared_ptr<OEMol>>`` typecheck carries it. Giving the permissive
+    ``vector<OEMolBase*>`` typecheck the same value makes the two an exact tie,
+    which SWIG then resolves by a rule it does not specify -- measured to rank
+    them one way for one-argument calls and the opposite way for two-argument
+    ones, which is how every ``pdist(..., "rocs")`` call came to drop
+    conformers while the one-argument form stayed correct. Any value above
+    zero breaks the tie in the strict typemap's favour, since lower precedence
+    is examined first. Comments are stripped before the search so that the long
+    note explaining this, which quotes both spellings, cannot satisfy it.
+
+    Same limit as ``test_the_new_entry_points_release_the_gil``: this describes
+    the interface, not the built artifact, so a stale ``_oecluster.so`` passes
+    it. What it covers is the window before a rebuild -- where a tidy-up
+    substituting the symbolic constant back would land. Where an Omega license
+    exists, the behavioural tests above remain the real guard.
+    """
+    interface = pathlib.Path(__file__).resolve().parents[2] / "swig" / "oecluster.i"
+    text = _SWIG_COMMENT.sub("", interface.read_text(encoding="utf-8"))
+
+    def precedence_of(cpp_type):
+        found = re.findall(
+            r"%typemap\(typecheck,\s*precedence=([^)]+)\)\s*" + re.escape(cpp_type),
+            text)
+        assert len(found) == 1, (
+            f"expected exactly one typecheck typemap for {cpp_type}, found {found}")
+        return found[0].strip()
+
+    strict = precedence_of("const std::vector<std::shared_ptr<OEChem::OEMol>>&")
+    permissive = precedence_of("const std::vector<OEChem::OEMolBase*>&")
+
+    assert strict == "SWIG_TYPECHECK_POINTER", (
+        "this test compares the permissive typecheck against the strict one's "
+        f"precedence; the strict one now reads {strict!r}")
+    assert permissive != strict, (
+        "equal precedence restores the tie whose unspecified resolution dropped "
+        "conformers from every pdist(..., 'rocs') call")
+    assert permissive.isdigit() and int(permissive) > 0, (
+        "the permissive typecheck needs a numeric precedence above zero so the "
+        f"strict one is examined first; found {permissive!r}")
 
 
 def test_sar_coherence_is_bound(native):

@@ -535,9 +535,11 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, _oecluster_is_oereceptor, "
     $1 = &temp;
 }
 
-// ``precedence=1``, deliberately not the ``SWIG_TYPECHECK_POINTER`` every
-// typecheck above uses, and the one place in this file where that constant is
-// wrong.
+// ``precedence=1``, a literal rather than ``SWIG_TYPECHECK_POINTER``, and load
+// bearing. A bare numeric is ordinary here -- four typechecks in this file use
+// ``precedence=10`` -- so the value is not an oddity to be tidied into a
+// symbolic constant. Substituting ``SWIG_TYPECHECK_POINTER`` back would be a
+// silent scoring regression, for the reason below.
 //
 // MCSComparison and ROCSComparison each carry two constructors, one taking
 // this vector and one taking the strict ``shared_ptr<OEMol>`` vector below.

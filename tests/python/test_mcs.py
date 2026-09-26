@@ -300,6 +300,14 @@ def test_direct_constructor_accepts_graph_molecules():
                                              native.MCSOptions())
     assert native_comparison.Compare(0, 1) == pytest.approx(0.142857, abs=1e-6)
 
+    # Both calls above pass options, and a defaulted argument expands into its
+    # own SWIG dispatch case with its own overload ranking -- the ranking that
+    # was measured to come out one way for one-argument calls and the opposite
+    # way for two-argument ones. So the no-options form is pinned separately
+    # rather than assumed to follow.
+    defaulted = native.MCSComparison(_graph_pair(BENZENE, TOLUENE))
+    assert defaulted.Compare(0, 1) == pytest.approx(0.142857, abs=1e-6)
+
 
 def test_charged_hydrogen_survives_suppression():
     # Suppression folds a hydrogen into a heavy atom's implicit hydrogen

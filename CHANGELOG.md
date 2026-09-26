@@ -51,9 +51,15 @@ This file starts at 5.0.0; earlier releases are not recorded here.
 
 - `MCSComparison` and `ROCSComparison` now accept `OEGraphMol` as well as
   `OEMol`, snapshotting either into their own storage. Every example in the
-  documentation builds `OEGraphMol`, and those two were the only comparisons
-  that rejected it. A multi-conformer `OEMol` still binds to the `OEMol`
-  overload and keeps its whole ensemble; nothing about existing calls changes.
+  documentation builds `OEGraphMol`, and these were the two comparisons in
+  scope for that change. `rmsd` still requires `OEMol` and continues to reject
+  an `OEGraphMol` list at construction. A multi-conformer `OEMol` still binds
+  to the `OEMol` overload and keeps its whole ensemble; nothing about existing
+  calls changes.
+- Passing `rocs` a list whose **first** element is an `OEGraphMol` now selects
+  the permissive overload for the entire list, so an `OEMol` later in that list
+  is reduced to its active conformer with no error raised. The reverse ordering
+  still raises. See the `rocs` section of `docs/python-api.md`.
 
 ## [5.6.0] - 2026-09-23
 

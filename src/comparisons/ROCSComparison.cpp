@@ -293,10 +293,15 @@ ROCSComparison::ROCSComparison(const std::vector<std::shared_ptr<OEChem::OEMol>>
 }
 
 // Delegates rather than duplicating the null scan, the snapshot, the dimension
-// and coordinate guards and the diagonal measurement above, so the two
-// construction paths cannot drift. The resulting double copy -- raw pointer to
-// OEMol here, then the delegate's own snapshot -- is O(n) against the O(n^2)
-// overlay matrix this class exists to fill.
+// and coordinate guards and the diagonal measurement above, so none of them can
+// be changed for one path and forgotten for the other. The order of checks is
+// the same either way here: this constructor has no option validation to run
+// ahead of the null scan, so a caller sees the same error for the same input on
+// both paths.
+//
+// The resulting double copy -- raw pointer to OEMol here, then the delegate's
+// own snapshot -- is O(n) against the O(n^2) overlay matrix this class exists
+// to fill.
 ROCSComparison::ROCSComparison(const std::vector<OEChem::OEMolBase*>& mols,
                                const Options& opts)
     : ROCSComparison(to_oemol_snapshots(mols), opts) {}

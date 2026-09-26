@@ -5130,7 +5130,7 @@ class ROCSComparison:
         """
         Construct a ROCSComparison.
 
-        :param mols: List of OEMol molecules with 3D coordinates.
+        :param mols: List of OEMolBase molecules with 3D coordinates.
         :param similarity: Return similarity instead of distance.
         :returns: C++ ROCSComparison object.
         """
@@ -5295,7 +5295,7 @@ class MCSComparison:
         triangle-inequality violation has been observed, but none is proven
         either, so the matrix reports ``triangle`` as ``"unknown"``.
 
-        :param mols: List of OEMol molecules.
+        :param mols: List of OEMolBase molecules.
         :param search_mode: ``"approximate"`` (default) or ``"exhaustive"``.
             Exhaustive is one to three orders of magnitude slower and is not
             reliably better: on a 53-bond against 54-bond macrolide pair it took

@@ -164,8 +164,14 @@ public:
      * first and precedence second, and equal precedence leaves the order to an
      * unspecified tie-break that was measured to differ between argument-count
      * groups. See the precedence note on the ``OEMolBase*`` typecheck in
-     * ``swig/oecluster.i``, which is what keeps a multiconformer ``OEMol`` off
-     * this overload's active-conformer view.
+     * ``swig/oecluster.i``.
+     *
+     * The ranking has to be right even though this class cannot suffer a wrong
+     * one. Binding here rather than above costs a multiconformer ``OEMol`` its
+     * non-active conformers, which is unobservable to a comparison that never
+     * reads coordinates -- hence "nothing is lost" above. The same typemap
+     * serves ``ROCSComparison``, where that loss changes every score, so the
+     * ordering is load-bearing there and merely correct here.
      *
      * :param mols: Pointers to molecules.
      * :param opts: MCS options.
