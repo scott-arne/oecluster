@@ -2009,16 +2009,26 @@ def pdist(items,
         # below would then answer for an argument no input could rescue.
         _comparisons.validate_request(comparison, similarity, kwargs)
 
-        # Below validate_request so a typo'd kwarg is still reported as a
-        # typo'd kwarg: the cutoff message names dropping the cutoff as the
-        # remedy, which cannot fix a misspelled argument. The condition
-        # matches the sparse-storage branch below exactly -- an mmap output
-        # never consults the cutoff, and the prebuilt branch ignores the
-        # ``similarity`` argument, so on neither path would this message
-        # describe what actually happened. A prebuilt similarity-oriented
-        # comparison plus a cutoff does still corrupt, but the ``similarity``
-        # argument is not what reveals it; that hole is a known residual.
-        if cutoff > 0.0 and similarity and output is None:
+        # Decided once and reused at the storage branch below: testing
+        # ``cutoff > 0.0`` in both places would let a value whose comparison
+        # is not stable answer differently there, selecting sparse storage
+        # for a call this guard had already cleared.
+        #
+        # Below validate_request because the cutoff message names dropping
+        # the cutoff as the remedy, which cannot fix a misspelled argument.
+        # That only reorders the two for a comparison that validates its
+        # keywords in validate_request; most register no validator, and for
+        # those this refusal comes first regardless. cdist orders them the
+        # same way in both cases.
+        #
+        # An mmap output never consults the cutoff, and the prebuilt branch
+        # ignores the ``similarity`` argument, so on neither path would this
+        # message describe what actually happened. A prebuilt
+        # similarity-oriented comparison plus a cutoff does still corrupt,
+        # but the ``similarity`` argument is not what reveals it; that hole
+        # is a known residual.
+        sparse = output is None and cutoff > 0.0
+        if sparse and similarity:
             raise ValueError(
                 "cutoff > 0 is not supported with similarity=True: the cutoff "
                 "zeroes values above the threshold, which would discard high "
@@ -2042,13 +2052,14 @@ def pdist(items,
         comparison_name = comparison_obj.ComparisonName()
         labels = []
         params = {}
+        sparse = output is None and cutoff > 0.0
 
     n = comparison_obj.Size()
 
     storage: Any
     if output is not None:
         storage = MMapStorage(output, n)
-    elif cutoff > 0.0:
+    elif sparse:
         storage = SparseStorage(n, cutoff)
     else:
         storage = DenseStorage(n)

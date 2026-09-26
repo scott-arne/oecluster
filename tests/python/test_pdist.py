@@ -157,8 +157,69 @@ def test_pdist_similarity_with_cutoff_raises():
         oechem.OESmilesToMol(mol, smi)
         mols.append(mol)
 
-    with pytest.raises(ValueError, match="cutoff"):
+    with pytest.raises(ValueError,
+                       match="cutoff > 0 is not supported with "
+                             "similarity=True"):
         oecluster.pdist(mols, "fingerprint", similarity=True, cutoff=0.2)
+
+
+def test_pdist_cutoff_positivity_is_decided_once():
+    """A cutoff whose comparison is unstable cannot slip past the guard.
+
+    The guard and the storage selection used to test ``cutoff > 0.0``
+    independently, so a value answering False to the first and True to the
+    second cleared the guard and then selected sparse storage anyway,
+    reinstating the corruption the guard exists to prevent. Measured before
+    the fix, this pair came back as 0.0 instead of 0.2727.
+    """
+    import oecluster
+    from openeye import oechem
+
+    class ShiftingCutoff(float):
+        """Compares as zero once, then as positive."""
+
+        def __init__(self, _value):
+            self._comparisons = 0
+
+        def __gt__(self, other):
+            self._comparisons += 1
+            return self._comparisons > 1
+
+    mols = []
+    for smi in ["c1ccccc1", "Cc1ccccc1"]:
+        mol = oechem.OEGraphMol()
+        oechem.OESmilesToMol(mol, smi)
+        mols.append(mol)
+
+    result = oecluster.pdist(mols, "fingerprint", similarity=True,
+                             cutoff=ShiftingCutoff(0.2))
+    assert result.condensed[0] == pytest.approx(0.2727, abs=1e-4)
+
+
+def test_pdist_reports_a_typod_kwarg_before_the_cutoff():
+    """A typo'd keyword outranks the cutoff refusal, as it does in cdist.
+
+    ca761af placed the guard above validate_request, which turned this call's
+    unknown-kwarg TypeError into a ValueError naming a cutoff -- so the
+    remedy the message offered was to drop a cutoff that was never the
+    problem. The comparison has to be one that validates its keywords in
+    validate_request; ``mcs`` does, and ``fingerprint`` does not, so this
+    would not bite with ``fingerprint``.
+    """
+    import oecluster
+    from openeye import oechem
+
+    mols = []
+    for smi in ["c1ccccc1", "Cc1ccccc1"]:
+        mol = oechem.OEGraphMol()
+        oechem.OESmilesToMol(mol, smi)
+        mols.append(mol)
+
+    with pytest.raises(TypeError, match="Unknown kwargs for mcs"):
+        oecluster.pdist(mols, "mcs", bogus=1, similarity=True, cutoff=0.5)
+    with pytest.raises(TypeError, match="Unknown kwargs for mcs"):
+        oecluster.cdist(mols, mols, "mcs", bogus=1, similarity=True,
+                        cutoff=0.5)
 
 
 def test_pdist_progress():
