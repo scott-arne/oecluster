@@ -2,6 +2,7 @@
 
 import oecluster
 import pytest
+from oecluster import oecluster as native
 from openeye import oechem
 
 BENZENE = "c1ccccc1"
@@ -124,3 +125,46 @@ def test_max_matches_is_observable():
     assert bounded.condensed[0] == pytest.approx(0.958333, abs=1e-6)
     unbounded = oecluster.pdist(_pair(MORPHINE, PENICILLIN_G), "mcs")
     assert unbounded.condensed[0] == pytest.approx(0.717949, abs=1e-6)
+
+
+def test_mcs_comparison_is_exported():
+    assert "MCSComparison" in oecluster.__all__
+
+
+def test_top_level_wrapper_constructs_with_a_match_level():
+    comparison = oecluster.MCSComparison(_pair(BENZENE, TOLUENE), match_level="exact")
+    assert comparison.ComparisonName() == "mcs"
+    assert comparison.Compare(0, 1) == pytest.approx(0.555556, abs=1e-6)
+
+
+def test_top_level_wrapper_honours_similarity():
+    # The wrapper does not route through _build_mcs, so it carries its own
+    # opts.similarity assignment. Forgetting it is silent: the comparison would
+    # return distances and claim to be one. The pdist tests above exercise
+    # _build_mcs and would pass regardless.
+    comparison = oecluster.MCSComparison(_pair(BENZENE, TOLUENE), similarity=True)
+    facts = comparison.Facts()
+    assert facts.is_distance == native.Capability_No
+    assert facts.zero_self == native.Capability_No
+    assert comparison.Compare(0, 1) == pytest.approx(6.0 / 7.0, abs=1e-6)
+
+
+def _gate_mols():
+    return [_mol(BENZENE, "b"), _mol(TOLUENE, "t"),
+            _mol(CYCLOHEXANE, "c"), _mol(MORPHINE, "m")]
+
+
+@pytest.mark.parametrize("call", [
+    lambda dm: oecluster.butina(dm, 0.9),
+    lambda dm: oecluster.dbscan(dm, 0.9),
+    lambda dm: oecluster.hdbscan(dm, min_cluster_size=2),
+    lambda dm: oecluster.agglomerative(dm, n_clusters=2),
+    lambda dm: oecluster.k_medoids(dm, n_clusters=2),
+    lambda dm: oecluster.activity_landscape(dm, [0.0, 1.0, 2.0, 3.0]),
+    lambda dm: oecluster.modelability(dm, ["A", "A", "B", "B"]),
+])
+def test_every_entry_point_accepts_an_mcs_matrix(call):
+    # triangle = "unknown" is permissive at the gate and data_integrity is
+    # complete, so no entry point needs allow_nonmetric=True.
+    dm = oecluster.pdist(_gate_mols(), "mcs")
+    assert call(dm) is not None

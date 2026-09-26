@@ -104,6 +104,7 @@ __all__ = [  # noqa: RUF022
     "ROCSComparison",
     "SuperposeComparison",
     "DescriptorComparison",
+    "MCSComparison",
     "RMSDComparison",
     "descriptor_statistics",
 ]
@@ -700,6 +701,7 @@ from .oecluster import DescriptorComparison as _DescriptorComparison  # noqa: I0
 # to keep resolving here; the redundant alias says so rather than leaving the
 # import looking dead.
 from .oecluster import FingerprintOptions as FingerprintOptions
+from .oecluster import MCSComparison as _MCSComparison
 from .oecluster import RMSDComparison as _RMSDComparison
 from .oecluster import ROCSComparison as _ROCSComparison
 from .oecluster import ROCSOptions
@@ -5235,3 +5237,57 @@ class RMSDComparison:
             'heavy_only': heavy_only,
         }
         return _RMSDComparison(mols, _comparisons.rmsd_options(kwargs))
+
+
+class MCSComparison:
+    """Maximum common substructure, scored as Tanimoto over matched bonds."""
+
+    def __new__(cls, mols, *, search_mode=None, match_level=None,
+                max_matches=None, similarity=False):
+        """
+        Construct an MCSComparison.
+
+        Coordinates are never read, so molecules parsed from SMILES need no
+        embedding step. Hydrogens are always suppressed, isotopic ones included,
+        so a deuterated analogue scores against its parent as identical.
+
+        Approximate search is asymmetric, so each pair is searched in both
+        directions and the larger match wins. There is no metric guarantee: no
+        triangle-inequality violation has been observed, but none is proven
+        either, so the matrix reports ``triangle`` as ``"unknown"``.
+
+        :param mols: List of OEMol molecules.
+        :param search_mode: ``"approximate"`` (default) or ``"exhaustive"``.
+            Exhaustive is one to three orders of magnitude slower and is not
+            reliably better: on a 53-bond against 54-bond macrolide pair it took
+            16.2 s and matched 50 bonds where approximate took 8.5 ms and
+            matched 51.
+        :param match_level: ``"default"``, ``"exact"`` or ``"loose"``, setting
+            how strictly atoms and bonds must correspond.
+        :param max_matches: How many matches one directed search may enumerate.
+            Defaults to 1024. Quality saturates by 256; small values are
+            destructive rather than merely faster.
+        :param similarity: Return the bond Tanimoto rather than one minus it.
+        :returns: C++ MCSComparison object.
+        :raises RuntimeError: If the C++ layer refuses the request. Among the
+            reasons: a null molecule; a molecule with no bonds after hydrogen
+            suppression, such as methane, water or argon, for which bond
+            Tanimoto has a zero denominator; ``max_matches=0``, which the
+            toolkit would read as a budget of zero matches; and a
+            ``search_mode`` or ``match_level`` outside its enum.
+        :raises ValueError: If ``search_mode`` or ``match_level`` names a mode
+            the comparison does not have.
+        """
+        kwargs = {
+            'search_mode': search_mode,
+            'match_level': match_level,
+            'max_matches': max_matches,
+        }
+        opts = _comparisons.mcs_options(kwargs)
+        # similarity is not an _MCS_KEYS member, so mcs_options leaves the
+        # struct default of False. This path does not go through _build_mcs, so
+        # it carries its own copy of the assignment; without it,
+        # MCSComparison(mols, similarity=True) would return distances and report
+        # is_distance = Yes with no error anywhere.
+        opts.similarity = bool(similarity)
+        return _MCSComparison(mols, opts)
