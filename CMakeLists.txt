@@ -127,6 +127,7 @@ set(OECLUSTER_SOURCES
     src/comparisons/RMSDComparison.cpp
     src/comparisons/SuperposeComparison.cpp
     src/comparisons/DescriptorComparison.cpp
+    src/comparisons/MCSComparison.cpp
     src/clustering/ClusterTypes.cpp
     src/clustering/ThresholdGraph.cpp
     src/clustering/Butina.cpp

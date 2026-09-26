@@ -26,6 +26,7 @@ set(_OECLUSTER_SWIG_DEPENDS
     ${CMAKE_SOURCE_DIR}/include/oecluster/comparisons/SuperposeComparison.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/comparisons/DescriptorComparison.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/comparisons/RMSDComparison.h
+    ${CMAKE_SOURCE_DIR}/include/oecluster/comparisons/MCSComparison.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/clustering/ClusterTypes.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/clustering/Butina.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/clustering/Representative.h

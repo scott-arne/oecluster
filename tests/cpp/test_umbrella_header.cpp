@@ -60,6 +60,18 @@ TEST(UmbrellaHeaderTest, ReachesRMSDComparison) {
     EXPECT_EQ(ptr, nullptr);
 }
 
+TEST(UmbrellaHeaderTest, ReachesMCSComparison) {
+    const OECluster::MCSOptions options;
+    EXPECT_EQ(options.search_mode, OECluster::MCSSearchMode::Approximate);
+    EXPECT_EQ(options.match_level, OECluster::MCSMatchLevel::Default);
+    EXPECT_EQ(options.max_matches, 1024u);
+    EXPECT_FALSE(options.similarity);
+
+    // The type name is the assertion; cannot construct without molecules.
+    const OECluster::MCSComparison* ptr = nullptr;
+    EXPECT_EQ(ptr, nullptr);
+}
+
 TEST(UmbrellaHeaderTest, ReachesTheCoreHeaders) {
     EXPECT_NE(definition_size<OECluster::ComparisonError>(), 0u);
     EXPECT_NE(definition_size<OECluster::GateFacts>(), 0u);
