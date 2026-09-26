@@ -16,6 +16,9 @@ MACROLIDE = ("CC[C@H]1OC(=O)[C@H](C)[C@@H](O)[C@H](C)[C@@H](O)[C@](C)(O)C"
              "[C@@H](C)C(=O)[C@H](C)[C@@H](O)[C@]1(C)O")
 DIBORANE = "[BH2]1[H][BH2][H]1"
 SINGLE_BRIDGE = "[BH2][H][BH2]"
+HEXANE = "CCCCCC"
+ETHANE = "CC"
+ETHENE = "C=C"
 
 
 def _mol(smiles, title="mol"):
@@ -28,6 +31,20 @@ def _mol(smiles, title="mol"):
 
 def _pair(first, second):
     return [_mol(first, "first"), _mol(second, "second")]
+
+
+def _multiconformer(smiles, title="mol"):
+    """Build a three-conformer molecule without an embedding step.
+
+    MCS never reads coordinates, so what the conformers contain does not
+    matter -- only that the molecule carries more than one.
+    """
+    mol = _mol(smiles, title)
+    oechem.OEAddExplicitHydrogens(mol)
+    coords = oechem.OEFloatArray(3 * mol.GetMaxAtomIdx())
+    mol.NewConf(coords)
+    mol.NewConf(coords)
+    return mol
 
 
 def test_pdist_resolves_the_mcs_name():
@@ -200,3 +217,45 @@ def test_bridging_hydrogens_survive_suppression():
     # observable proof that the denominator is the snapshot's bond count.
     dm = oecluster.pdist(_pair(DIBORANE, SINGLE_BRIDGE), "mcs", similarity=True)
     assert dm.condensed[0] == pytest.approx(0.5)
+
+
+def test_exact_match_level_enforces_ring_membership():
+    # Ring membership is the exact preset's largest practical effect and was
+    # missing from its documentation until it was measured: a ring never
+    # matches a chain under "exact", however identical the bonds themselves.
+    default = oecluster.pdist(_pair(CYCLOHEXANE, HEXANE), "mcs",
+                              similarity=True, match_level="default")
+    exact = oecluster.pdist(_pair(CYCLOHEXANE, HEXANE), "mcs",
+                            similarity=True, match_level="exact")
+    assert default.condensed[0] == pytest.approx(0.833333, abs=1e-6)
+    assert exact.condensed[0] == pytest.approx(0.0)
+
+
+def test_default_match_level_already_constrains_bond_order():
+    # "exact" was documented as adding bond order, but DefaultBonds already
+    # carries it and only "loose" ignores it. Pinning both ends keeps the
+    # corrected wording honest.
+    loose = oecluster.pdist(_pair(ETHANE, ETHENE), "mcs", similarity=True,
+                            match_level="loose")
+    default = oecluster.pdist(_pair(ETHANE, ETHENE), "mcs", similarity=True,
+                              match_level="default")
+    assert loose.condensed[0] == pytest.approx(1.0)
+    assert default.condensed[0] == pytest.approx(0.0)
+
+
+def test_multiconformer_molecule_stays_one_item():
+    # The docs promise a multi-conformer OEMol is scored once rather than once
+    # per pose. Every other fixture here has a single conformer, so a
+    # regression routing mcs through the conformer-expanding normalizer would
+    # leave them all green while changing the matrix's cardinality.
+    first = _multiconformer(BENZENE, "first")
+    second = _multiconformer(TOLUENE, "second")
+    assert first.NumConfs() == 3
+    assert second.NumConfs() == 3
+    dm = oecluster.pdist([first, second], "mcs")
+    assert dm.num_samples == 2
+    assert len(dm.condensed) == 1
+    # The single-conformer score, so the extra poses changed nothing about
+    # the topology that was compared.
+    assert dm.condensed[0] == pytest.approx(0.142857, abs=1e-6)
+    assert oecluster.cdist([first], [second], "mcs").shape == (1, 1)

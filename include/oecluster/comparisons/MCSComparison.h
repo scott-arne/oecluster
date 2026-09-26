@@ -35,10 +35,24 @@ enum class MCSSearchMode {
  *
  * Three presets rather than raw ``OEExprOpts`` bitmasks, so the public surface
  * names chemistry rather than toolkit flags.
+ *
+ * ``Default`` already constrains bond order, so ``Exact`` does not add it:
+ * ethane against ethene scores 1.0 under ``Loose`` and 0.0 under ``Default``.
+ * What ``Exact`` adds is ring membership on both atoms and bonds, hydrogen
+ * count, degree, and strict rather than lenient formal charge. Ring membership
+ * is the one that surprises: cyclohexane against hexane scores 0.83 under
+ * ``Default`` and 0.0 under ``Exact``.
+ *
+ * ``ExactAtoms`` also sets the isotope and chirality bits, but neither was
+ * observed to change a score. Isotope matching is directional -- an unlabelled
+ * pattern matches a labelled target -- and ``Compare`` takes the larger of the
+ * two directions, so the unlabelled direction wins: 13C-butane against butane
+ * scores 1.0 at every level. Do not rely on either to separate stereoisomers
+ * or labelled analogues.
  */
 enum class MCSMatchLevel {
     Default,  ///< OEChem's default atom and bond expressions.
-    Exact,    ///< Adds hydrogen count, charge, degree and bond order.
+    Exact,    ///< Adds ring membership, hydrogen count, degree, strict charge.
     Loose     ///< Atomic number only, with bonds unconstrained.
 };
 

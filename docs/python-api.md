@@ -1200,7 +1200,18 @@ in practice but not by construction.
 `match_level` chooses how strictly atoms and bonds must correspond: `"loose"` is
 atomic number only with bonds unconstrained, so benzene matches cyclohexane
 completely; `"default"` is OEChem's own pair of expressions, under which those
-two share nothing; `"exact"` adds hydrogen count, charge, degree and bond order.
+two share nothing; `"exact"` adds ring membership, hydrogen count, degree, and
+strict rather than lenient formal charge.
+
+`"default"` already constrains bond order, so `"exact"` does not add it: ethane
+against ethene scores 1.0 under `"loose"` and 0.0 under `"default"`. Ring
+membership is the addition that surprises -- cyclohexane against hexane scores
+0.83 under `"default"` and 0.0 under `"exact"`. The exact preset also sets
+OEChem's isotope and chirality bits, but neither was observed to change a score:
+isotope matching is directional, an unlabelled pattern matching a labelled
+target, and the comparison takes the larger of the two directions, so 13C-butane
+against butane scores 1.0 at every level. Do not rely on `"exact"` to separate
+stereoisomers or labelled analogues.
 
 `search_mode` deliberately inverts the toolkit's own default. Exhaustive search
 genuinely finds larger matches on rigid polycyclic and sugar-like input: in a
