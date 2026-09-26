@@ -20,11 +20,13 @@ from .oecluster import DescriptorComparison as _DescriptorComparison
 from .oecluster import (
     DescriptorOptions,
     FingerprintOptions,
+    MCSOptions,
     RMSDOptions,
     ROCSOptions,
     SuperposeOptions,
 )
 from .oecluster import FingerprintComparison as _FingerprintComparison
+from .oecluster import MCSComparison as _MCSComparison
 from .oecluster import RMSDComparison as _RMSDComparison
 from .oecluster import ROCSComparison as _ROCSComparison
 from .oecluster import SuperposeComparison as _SuperposeComparison
@@ -906,6 +908,103 @@ def _build_rmsd(items, similarity, kwargs, symmetric):
     return _RMSDComparison(items, opts), "rmsd"
 
 
+# similarity is deliberately absent: it is not a keyword option but its own
+# positional argument on the builder, and MCSOptions leaves it False.
+_MCS_KEYS = ('search_mode', 'match_level', 'max_matches')
+
+# The scoped C++ enums flatten to module-level names in the generated wrapper,
+# the way SuperposeMethod does above.
+_MCS_SEARCH_MODES = {
+    'approximate': _oecluster.MCSSearchMode_Approximate,
+    'exhaustive': _oecluster.MCSSearchMode_Exhaustive,
+}
+
+_MCS_MATCH_LEVELS = {
+    'default': _oecluster.MCSMatchLevel_Default,
+    'exact': _oecluster.MCSMatchLevel_Exact,
+    'loose': _oecluster.MCSMatchLevel_Loose,
+}
+
+
+def mcs_options(kwargs):
+    """
+    Build an :class:`MCSOptions` from keyword options.
+
+    Reads ``kwargs`` without consuming it, so the validator and the builder can
+    both call it. ``similarity`` is never set here, because it is not an
+    ``_MCS_KEYS`` member: each of the two construction sites assigns it from its
+    own argument.
+
+    :param kwargs: Comparison keyword options.
+    :returns: A populated ``MCSOptions``.
+    :raises TypeError: If ``search_mode`` or ``match_level`` is neither a string
+        nor ``None``, or if ``max_matches`` is of a type ``MCSOptions`` will not
+        take.
+    :raises ValueError: If ``search_mode`` or ``match_level`` names a mode the
+        comparison does not have. Names are resolved by lookup, never by
+        truthiness.
+    """
+    opts = MCSOptions()
+    search_mode = kwargs.get('search_mode')
+    if search_mode is not None:
+        key = _default_selector(search_mode, 'approximate', 'search_mode')
+        if key not in _MCS_SEARCH_MODES:
+            raise ValueError(f"Unknown MCS search mode: {search_mode}")
+        opts.search_mode = _MCS_SEARCH_MODES[key]
+    match_level = kwargs.get('match_level')
+    if match_level is not None:
+        key = _default_selector(match_level, 'default', 'match_level')
+        if key not in _MCS_MATCH_LEVELS:
+            raise ValueError(f"Unknown MCS match level: {match_level}")
+        opts.match_level = _MCS_MATCH_LEVELS[key]
+    _set_if_given(opts, 'max_matches', kwargs.get('max_matches'))
+    return opts
+
+
+def _validate_mcs(similarity, kwargs):
+    """Reject MCS arguments before any molecule is read.
+
+    Registered as the comparison's validator so that, in :func:`oecluster.cdist`,
+    an unknown keyword or an unusable ``search_mode`` is reported ahead of the
+    cutoff and arrived-empty guards, which would otherwise name a remedy that
+    cannot fix it.
+
+    :param similarity: Whether the caller asked for similarities. MCS supports
+        both orientations -- bond Tanimoto is natively a similarity and the
+        distance is the derived form -- so nothing is refused on it. The
+        parameter is here because the validator contract passes it.
+    :param kwargs: Comparison keyword options, read but never consumed.
+    :raises TypeError: If any keyword option is not an MCS option, or if an
+        option value is of a type ``MCSOptions`` will not take.
+    :raises ValueError: If ``search_mode`` or ``match_level`` names a mode the
+        comparison does not have.
+    """
+    unknown = [key for key in kwargs if key not in _MCS_KEYS]
+    if unknown:
+        raise TypeError(f"Unknown kwargs for mcs comparison: {unknown}")
+    # Building the options here is what puts the enum-name and option-value
+    # refusals ahead of cdist's guards too.
+    mcs_options(kwargs)
+
+
+def _build_mcs(items, similarity, kwargs, symmetric):
+    """Build an :class:`MCSComparison` from keyword options."""
+    # ``build_comparison`` is a module-level entry point, reachable without the
+    # ``validate_request`` call ``pdist`` and ``cdist`` make first, so the
+    # builder stays the enforcing copy.
+    _validate_mcs(similarity, kwargs)
+
+    opts = mcs_options(kwargs)
+    # mcs_options never sets this, because similarity is not an _MCS_KEYS
+    # member. The top-level MCSComparison wrapper carries its own copy of this
+    # line for the same reason.
+    opts.similarity = bool(similarity)
+    for key in _MCS_KEYS:
+        kwargs.pop(key, None)
+
+    return _MCSComparison(items, opts), "mcs"
+
+
 register_comparison("fingerprint", _build_fingerprint)
 register_comparison("rocs", _build_rocs)
 register_comparison(
@@ -919,3 +1018,6 @@ register_comparison(
 register_comparison("descriptor", _build_descriptor, _normalize_descriptor,
                     _validate_descriptor)
 register_comparison("rmsd", _build_rmsd, _normalize_rmsd, _validate_rmsd)
+# No normalizer: MCS is topological, so multi-conformer input passes through
+# untouched and 3D coordinates are irrelevant.
+register_comparison("mcs", _build_mcs, None, _validate_mcs)

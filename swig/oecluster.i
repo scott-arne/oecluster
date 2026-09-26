@@ -22,6 +22,7 @@
 #include "oecluster/comparisons/SuperposeComparison.h"
 #include "oecluster/comparisons/DescriptorComparison.h"
 #include "oecluster/comparisons/RMSDComparison.h"
+#include "oecluster/comparisons/MCSComparison.h"
 #include "oecluster/clustering/DBSCAN.h"
 #include "oecluster/clustering/HDBSCAN.h"
 #include "oecluster/clustering/Agglomerative.h"
@@ -826,6 +827,7 @@ OECLUSTER_GIL_EXCEPTION(OECluster::modelability, modelability)
 %ignore OECluster::DescriptorComparison::TryCDist;
 
 %ignore OECluster::RMSDComparison::RMSDComparison(std::shared_ptr<const SharedData>, const Options&);
+%ignore OECluster::MCSComparison::MCSComparison(std::shared_ptr<const SharedData>, const Options&);
 
 // Ignore SparseStorage internals that use unordered_map/shared_mutex/thread
 %ignore OECluster::SparseStorage::Entries;
@@ -1028,6 +1030,7 @@ public:
 %include "oecluster/comparisons/SuperposeComparison.h"
 %include "oecluster/comparisons/DescriptorComparison.h"
 %include "oecluster/comparisons/RMSDComparison.h"
+%include "oecluster/comparisons/MCSComparison.h"
 
 // ============================================================================
 // Descriptor statistics
