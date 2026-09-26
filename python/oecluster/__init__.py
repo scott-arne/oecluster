@@ -2001,21 +2001,26 @@ def pdist(items,
     :returns: SymmetricDistanceMatrix with computed distances/similarities.
     :raises TypeError: If unknown kwargs are passed.
     :raises ValueError: If cutoff > 0 with similarity=True, or if normalizing
-                        the inputs leaves no items.
+        the inputs leaves no items.
     """
-    # Hoisted above the string/prebuilt split so both branches answer the same
-    # way, which is the parity ``cdist``'s own guard comment already claims.
-    # Sparse storage zeroes values above the cutoff -- the far pairs for a
-    # distance matrix, the near ones for a similarity matrix.
-    if cutoff > 0.0 and similarity:
-        raise ValueError(
-            "cutoff > 0 is not supported with similarity=True: the cutoff zeroes "
-            "values above the threshold, which would discard high similarities")
-
     if isinstance(comparison, str):
         # Before normalization: filtering can empty the list, and the refusal
         # below would then answer for an argument no input could rescue.
         _comparisons.validate_request(comparison, similarity, kwargs)
+
+        # Below validate_request so a typo'd kwarg is still reported as a
+        # typo'd kwarg: the cutoff message names dropping the cutoff as the
+        # remedy, which cannot fix a misspelled argument. The condition
+        # matches the sparse-storage branch below exactly -- an mmap output
+        # never consults the cutoff, and the prebuilt branch ignores
+        # ``similarity`` entirely, so refusing either would explain a
+        # corruption that cannot occur there.
+        if cutoff > 0.0 and similarity and output is None:
+            raise ValueError(
+                "cutoff > 0 is not supported with similarity=True: the cutoff "
+                "zeroes values above the threshold, which would discard high "
+                "similarities")
+
         items, excluded = _comparisons.normalize_items(
             comparison, items, kwargs)
         # Refuse only when normalization is what emptied the list; an input

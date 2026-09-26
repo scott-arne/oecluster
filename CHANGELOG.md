@@ -37,11 +37,13 @@ This file starts at 5.0.0; earlier releases are not recorded here.
 ### Fixed
 
 - `pdist` now raises on `cutoff > 0` together with `similarity=True` instead of
-  silently returning zeros. Sparse storage drops values above the cutoff, which
-  discards the far pairs of a distance matrix but the *near* pairs of a
-  similarity matrix. **Calls that combined the two previously returned a matrix
-  of zeros and now raise `ValueError`**, matching the guard `cdist` has always
-  had. This affected every similarity-capable comparison, `fingerprint`
+  silently discarding the highest scores. Sparse storage zeroes values *above*
+  the cutoff, which drops the far pairs of a distance matrix but the near pairs
+  of a similarity matrix. The result was not an obviously broken matrix of
+  zeros -- everything below the cutoff came back untouched, so the call looked
+  plausible with exactly the most-similar pairs replaced by `0.0`. **Calls that
+  combined the two now raise `ValueError`**, matching the guard `cdist` has
+  always had. This affected every similarity-capable comparison, `fingerprint`
   included, not only the `mcs` comparison new in this release.
 
 ## [5.6.0] - 2026-09-23

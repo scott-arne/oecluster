@@ -138,12 +138,14 @@ def test_pdist_with_cutoff():
     dist = oecluster.pdist(mols, "fingerprint", cutoff=0.5)
     assert dist.num_samples == 3
 
+
 def test_pdist_similarity_with_cutoff_raises():
     """cutoff > 0 with similarity=True is rejected, as it is in cdist.
 
-    Without the guard this call returns a matrix of zeros: sparse storage
-    drops values above the cutoff, which for a similarity matrix is every
-    pair the caller cares about.
+    Without the guard this pair's 0.2727 comes back as 0.0: sparse storage
+    zeroes values above the cutoff, so on a similarity matrix it discards
+    precisely the pairs that scored highest. Lower-scoring pairs survive,
+    which is what makes the corruption easy to miss.
     """
     import oecluster
     from openeye import oechem
@@ -155,7 +157,8 @@ def test_pdist_similarity_with_cutoff_raises():
         mols.append(mol)
 
     with pytest.raises(ValueError, match="cutoff"):
-        oecluster.pdist(mols, "fingerprint", similarity=True, cutoff=0.5)
+        oecluster.pdist(mols, "fingerprint", similarity=True, cutoff=0.2)
+
 
 def test_pdist_progress():
     """Test progress callback is invoked."""
