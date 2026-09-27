@@ -984,8 +984,9 @@ def _validate_mcs(similarity, kwargs):
         distance is the derived form -- so nothing is refused on it. The
         parameter is here because the validator contract passes it.
     :param kwargs: Comparison keyword options, read but never consumed.
-    :raises TypeError: If any keyword option is not an MCS option, or if an
-        option value is of a type ``MCSOptions`` will not take.
+    :raises TypeError: If any keyword option is not an MCS option, if
+        ``max_matches`` is a bool, or if an option value is of a type
+        ``MCSOptions`` will not take.
     :raises ValueError: If ``search_mode`` or ``match_level`` names a mode the
         comparison does not have.
     """

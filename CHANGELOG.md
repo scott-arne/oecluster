@@ -21,7 +21,10 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   smaller match than approximate on a large macrolide pair while taking 16.2 s
   against 8.5 ms.
 - `match_level` selects `default`, `exact` or `loose` matching strictness, and
-  `max_matches` bounds how many matches one directed search enumerates.
+  `max_matches` bounds how many matches one directed search enumerates. A bool
+  is refused: `bool` is an `int` subclass, so `True` would otherwise be read as
+  a budget of 1, the most destructive value the option has, and would change
+  scores silently rather than raise.
 - Each pair is searched in both directions and the larger match is taken.
   Approximate search is asymmetric -- the two directions can return different
   match sizes -- and `pdist` fills only one triangle, so a one-direction score
@@ -69,12 +72,6 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   raise `ValueError`**, matching the guard `cdist` has always had. This affected
   every similarity-capable comparison, `fingerprint` included, not only the
   `mcs` comparison new in this release.
-- `max_matches` now refuses a bool. Python's `bool` is an `int` subclass, so
-  the unsigned-int typemap that type-checks the option read `True` as a match
-  budget of 1 -- the most destructive value the option has, and one that
-  changed scores silently rather than raising. `False` was refused already,
-  but by way of the zero-budget message, which named a zero the caller never
-  wrote.
 
 ### Changed
 
