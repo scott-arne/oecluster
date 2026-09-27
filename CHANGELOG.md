@@ -48,12 +48,12 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   thread-safety guarantee had rested on reading the code.
 - A `tsan` CMake preset builds the C++ tests under ThreadSanitizer into their
   own `build-tsan/` tree, with the procedure documented in
-  `docs/developer.md`. It covers the concurrency this project owns -- the
-  thread pool, the storage backends, the progress callback and the
-  clone-distribution loops -- and reported no races. The OpenEye libraries are
-  prebuilt and uninstrumented, so it can say nothing about the toolkit's own
-  internals, and it does not verify the `Clone()` deep copy above; the test
-  does that.
+  `docs/developer.md`. It exercises the concurrency this project owns -- the
+  thread pool, the storage backends and the progress callback -- and reported
+  no races across the 102 tests the two documented filters select. The OpenEye
+  libraries are prebuilt and uninstrumented, so it can say nothing about the
+  toolkit's own internals, and it does not verify the `Clone()` deep copy
+  above; the test does that.
 
 ### Fixed
 

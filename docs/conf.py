@@ -128,5 +128,6 @@ GENERATE_LATEX         = NO
 GENERATE_XML           = YES
 QUIET                  = YES
 WARN_IF_UNDOCUMENTED   = NO
+EXCLUDE_SYMBOLS        = MCSComparisonSnapshotAccess
 """,
 }
