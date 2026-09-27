@@ -291,7 +291,7 @@ nor the twenty targets were.
 
 **Measured.** Copy-constructing 1,000 drug-like molecules moved peak RSS by
 10,128 KiB. Copying those 1,000 molecules took 5.51 ms, so building 8 clones
-costs about 44 ms -- against the roughly 90 s of search time the cost table
+costs about 44 ms -- against the roughly 90 s 8-thread total the cost table
 projects for that same input.
 
 A note on the units, because the division does not work otherwise: 10,128 KiB
