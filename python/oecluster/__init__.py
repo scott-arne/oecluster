@@ -5314,8 +5314,10 @@ class MCSComparison:
         :param match_level: ``"default"``, ``"exact"`` or ``"loose"``, setting
             how strictly atoms and bonds must correspond.
         :param max_matches: How many matches one directed search may enumerate.
-            Defaults to 1024. Quality saturates by 256; small values are
-            destructive rather than merely faster.
+            Defaults to 1024. Quality saturated by 256 on all 45 pairs
+            measured; small values are destructive rather than merely faster.
+            A bool is refused, because ``True`` would otherwise be read as a
+            budget of 1.
         :param similarity: Return the bond Tanimoto rather than one minus it.
         :returns: C++ MCSComparison object.
         :raises RuntimeError: If the C++ layer refuses the request. Among the
@@ -5324,6 +5326,8 @@ class MCSComparison:
             Tanimoto has a zero denominator; ``max_matches=0``, which the
             toolkit would read as a budget of zero matches; and a
             ``search_mode`` or ``match_level`` outside its enum.
+        :raises TypeError: If ``max_matches`` is a bool, or if an option value
+            is of a type the options struct will not take.
         :raises ValueError: If ``search_mode`` or ``match_level`` names a mode
             the comparison does not have.
         """

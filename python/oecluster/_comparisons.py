@@ -938,8 +938,8 @@ def mcs_options(kwargs):
     :param kwargs: Comparison keyword options.
     :returns: A populated ``MCSOptions``.
     :raises TypeError: If ``search_mode`` or ``match_level`` is neither a string
-        nor ``None``, or if ``max_matches`` is of a type ``MCSOptions`` will not
-        take.
+        nor ``None``, if ``max_matches`` is a bool, or if ``max_matches`` is of
+        a type ``MCSOptions`` will not take.
     :raises ValueError: If ``search_mode`` or ``match_level`` names a mode the
         comparison does not have. Names are resolved by lookup, never by
         truthiness.
@@ -957,7 +957,17 @@ def mcs_options(kwargs):
         if key not in _MCS_MATCH_LEVELS:
             raise ValueError(f"Unknown MCS match level: {match_level}")
         opts.match_level = _MCS_MATCH_LEVELS[key]
-    _set_if_given(opts, 'max_matches', kwargs.get('max_matches'))
+    # bool is an int subclass, so the SWIG ``unsigned int`` typemap -- the
+    # type check every other option here leans on -- reads True as a budget
+    # of 1. That is the most destructive value the option has: it moves
+    # morphine against penicillin G from 0.717949 to 0.958333. Refuse it
+    # explicitly rather than let the typemap wave it through.
+    max_matches = kwargs.get('max_matches')
+    if isinstance(max_matches, bool):
+        raise TypeError(
+            "max_matches must be an integer, not a bool: True would be read "
+            "as a match budget of 1, which silently corrupts scores")
+    _set_if_given(opts, 'max_matches', max_matches)
     return opts
 
 

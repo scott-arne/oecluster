@@ -359,3 +359,33 @@ def test_direct_constructor_honours_max_matches():
     bounded = oecluster.MCSComparison(_pair(MORPHINE, PENICILLIN_G),
                                       max_matches=1)
     assert bounded.Compare(0, 1) == pytest.approx(0.958333, abs=1e-6)
+
+
+def test_max_matches_refuses_a_bool():
+    # bool is an int subclass, so the unsigned-int typemap that type-checks
+    # every other numeric option reads True as a budget of 1 -- the one value
+    # the header calls destructive. The pair is chosen because it actually
+    # discriminates: benzene against toluene scores the same at 1 as at the
+    # default, so it would let the corruption through unnoticed.
+    assert oecluster.pdist(_pair(MORPHINE, PENICILLIN_G),
+                           "mcs").condensed[0] == pytest.approx(0.717949,
+                                                                abs=1e-6)
+    assert oecluster.pdist(_pair(MORPHINE, PENICILLIN_G), "mcs",
+                           max_matches=1).condensed[0] == pytest.approx(
+                               0.958333, abs=1e-6)
+
+    # All three entry points funnel through mcs_options, so one guard covers
+    # them; pin all three rather than trust that it stays true.
+    with pytest.raises(TypeError, match="must be an integer, not a bool"):
+        oecluster.pdist(_pair(MORPHINE, PENICILLIN_G), "mcs",
+                        max_matches=True)
+    with pytest.raises(TypeError, match="must be an integer, not a bool"):
+        oecluster.cdist(_pair(BENZENE, TOLUENE), _pair(BENZENE, TOLUENE),
+                        "mcs", max_matches=True)
+    with pytest.raises(TypeError, match="must be an integer, not a bool"):
+        oecluster.MCSComparison(_pair(BENZENE, TOLUENE), max_matches=True)
+
+    # False is refused too, and no longer by way of the zero-budget message,
+    # which named a zero the caller never wrote.
+    with pytest.raises(TypeError, match="must be an integer, not a bool"):
+        oecluster.pdist(_pair(BENZENE, TOLUENE), "mcs", max_matches=False)

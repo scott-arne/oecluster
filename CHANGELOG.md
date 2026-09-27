@@ -69,6 +69,12 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   raise `ValueError`**, matching the guard `cdist` has always had. This affected
   every similarity-capable comparison, `fingerprint` included, not only the
   `mcs` comparison new in this release.
+- `max_matches` now refuses a bool. Python's `bool` is an `int` subclass, so
+  the unsigned-int typemap that type-checks the option read `True` as a match
+  budget of 1 -- the most destructive value the option has, and one that
+  changed scores silently rather than raising. `False` was refused already,
+  but by way of the zero-budget message, which named a zero the caller never
+  wrote.
 
 ### Changed
 
