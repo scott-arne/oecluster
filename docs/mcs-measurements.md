@@ -260,8 +260,12 @@ iterator early does not avoid a slow search: 15,935 ms against 16,679 ms on the
 erythromycin pair.
 
 The shipped 0.691 ms mean is the 13.82 ms fresh-per-target row divided by the
-twenty targets, and the cost table's `~400 s` search-time projection for
-1,000 molecules comes from 0.691 ms times 600,000 pairs.
+twenty targets. That mean includes the 0.287 ms construction, so the
+search-only share is about 0.404 ms. The cost table for 1,000 molecules runs
+999,000 directed searches, two per pair: its `~400 s` search-time row is
+0.404 ms times 999,000 searches, its `~287 s` construction row is 0.287 ms
+times 999,000 searches, and the two sum to the `~11.5 min` single-threaded
+total.
 
 **Provenance: Lost.** Neither the pattern nor the twenty targets were recorded.
 
@@ -302,8 +306,8 @@ membership is the surprising one.
 **Measured.** Over 153 pairs of small molecules, 132 distinguish at least two
 levels: loose differs from default on 85, default differs from exact on 81.
 
-**Provenance: Described** for the sweep. **Pinned** for five worked examples,
-two given as distances and three as similarities:
+**Provenance: Described** for the sweep. **Pinned** for four worked examples,
+two given as distances and two as similarities:
 
 Distances: benzene against cyclohexane gives 0.000 under loose and 1.000 under
 default; benzene against toluene gives 0.143 under default and 0.556 under
@@ -319,8 +323,7 @@ membership is the addition that surprises." Both pairs are pinned fixtures.
 **Lost** for the one isotope claim: 13C-butane against butane scoring 1.0 at
 every level, cited in `docs/python-api.md` and `MCSComparison.h`. Neither
 molecule appears in any test and neither SMILES is written down anywhere, so
-this is the weakest-evidenced of the three match-level claims the shipped docs
-make.
+this is the weakest-evidenced of the match-level claims the shipped docs make.
 
 ## Hydrogen suppression and isotopes
 
