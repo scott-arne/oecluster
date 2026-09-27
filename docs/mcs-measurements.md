@@ -270,7 +270,7 @@ Construction is 41.5% of the fresh-per-target cost on that fast workload and
 about 3% of the 8.5 ms erythromycin pair. Reuse produced identical bond counts,
 and results were independent of target order. Breaking out of the match
 iterator early does not avoid a slow search: 15,935 ms against 16,679 ms on the
-erythromycin pair.
+erythromycin pair. The search mode of this timing was not recorded.
 
 The shipped 0.691 ms mean is the 13.82 ms fresh-per-target row divided by the
 twenty targets. That mean includes the 0.287 ms construction, so the

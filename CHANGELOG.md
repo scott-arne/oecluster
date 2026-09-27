@@ -55,10 +55,10 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   own `build-tsan/` tree, with the procedure documented in
   `docs/developer.md`. It exercises the concurrency this project owns -- the
   thread pool, the storage backends and the progress callback -- and reported
-  no races across the 102 tests the two documented filters select. The OpenEye
-  libraries are prebuilt and uninstrumented, so it can say nothing about the
-  toolkit's own internals, and it does not verify the `Clone()` deep copy
-  above; the test does that.
+  no races across the 101 distinct tests the two documented filters select.
+  The OpenEye libraries are prebuilt and uninstrumented, so it can say nothing
+  about the toolkit's own internals, and it does not verify the `Clone()` deep
+  copy above; the test does that.
 
 ### Fixed
 
@@ -100,7 +100,11 @@ This file starts at 5.0.0; earlier releases are not recorded here.
 - Passing `rocs` a list whose **first** element is an `OEGraphMol` now selects
   the permissive overload for the entire list, so an `OEMol` later in that list
   is reduced to its active conformer with no error raised. The reverse ordering
-  still raises. See the `rocs` section of `docs/python-api.md`.
+  still raises. `cdist` builds one comparison over `items_a + items_b`, so the
+  first element of `items_a` decides for both sets. `mcs` follows the same
+  rule for which lists are accepted, but never reads coordinates, so its
+  scores are unchanged. See the `rocs` and `mcs` sections of
+  `docs/python-api.md`.
 
 ## [5.6.0] - 2026-09-23
 

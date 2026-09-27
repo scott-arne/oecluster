@@ -1254,13 +1254,13 @@ six-bond ring as benzene, which is why it scores 1.0 against its parent.
 Drug-like input has none of these, so the denominator is a heavy-atom bond
 count in practice but not by construction.
 
-**Mixing the two types is accepted in one direction only.** The rule is the one
-`rocs` documents above: the first element decides how the whole list is read,
-and `cdist` concatenates `items_a + items_b` before deciding, so set A's first
-element decides for set B as well. Nothing is lost to the score here -- MCS
-never reads coordinates, so the collapsed view of a multi-conformer `OEMol`
-scores exactly as its ensemble would -- but which calls are *accepted* is still
-asymmetric, and the refusal reaches across the set boundary:
+**Mixing `OEMol` and `OEGraphMol` is accepted in one direction only.** The
+rule is the one `rocs` documents above: the first element decides how the whole
+list is read, and `cdist` concatenates `items_a + items_b` before deciding, so
+set A's first element decides for set B as well. Nothing is lost to the score
+here -- MCS never reads coordinates, so the collapsed view of a multi-conformer
+`OEMol` scores exactly as its ensemble would -- but which calls are *accepted*
+is still asymmetric, and the refusal reaches across the set boundary:
 
 ```python
 # 0.143 = 1 - 6/7, benzene against toluene. Accepted: the OEGraphMol at index 0
@@ -1351,7 +1351,9 @@ not.
 `pdist()` selects the backend from its keywords: dense by default, sparse when
 `cutoff` is set, and memory-mapped when `output` is a path. The backends are
 also available directly as `DenseStorage`, `MMapStorage`, and `SparseStorage`
-for advanced use through the lower-level API.
+for advanced use through the lower-level API. For a named comparison with no
+`output`, `pdist()` raises `ValueError` when `cutoff > 0` is combined with
+`similarity=True`, because the cutoff would discard the high similarities.
 
 | Backend | Use case | Memory |
 |---------|----------|--------|
