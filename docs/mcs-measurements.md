@@ -20,9 +20,8 @@ is cited, what was actually measured, and a **provenance** verdict:
   preserved or no test asserts the figure. A re-run would measure something
   close to the figure, or would need someone to write the missing assertion
   first.
-- **Lost** — the inputs were named only by common name, or not named at all.
-  The figure stands as a historical observation and cannot be checked against
-  anything.
+- **Lost** — the inputs were named only by common name. The figure stands as
+  a historical observation and cannot be checked against anything.
 
 Elsewhere on this page, a *pinned fixture* means only that a molecule's SMILES
 is in a tracked test file. An entry earns **Pinned** only when a test also
@@ -276,7 +275,8 @@ search-only share is about 0.404 ms. The cost table for 1,000 molecules runs
 times 999,000 searches, and the two sum to the `~11.5 min` single-threaded
 total.
 
-**Provenance: Lost.** Neither the pattern nor the twenty targets were recorded.
+**Provenance: Described.** The procedure is recorded, but neither the pattern
+nor the twenty targets were.
 
 ## Per-clone molecule copies
 
@@ -357,10 +357,12 @@ benzene-d1 becomes indistinguishable from toluene by bond count alone.
 **Provenance: Pinned** for the consequence: `tests/cpp/test_mcs_comparison.cpp`
 asserts benzene-d1 against benzene at a distance of exactly 0. **Described**
 for the table's atom and bond counts and the 0.857 score. Three rows --
-`c1ccccc1`, `[2H]c1ccccc1` and `Cc1ccccc1` -- are pinned fixtures, but no test
-asserts their counts, and no test asserts the 0.857. The trideuterated row is a
-fixture nowhere, but its SMILES is written out above, so it is the one entry on
-this page that is re-derivable from the page itself rather than from the suite.
+`c1ccccc1`, `[2H]c1ccccc1` and `Cc1ccccc1` -- are pinned fixtures, but the only
+count any test asserts is benzene's 6 bonds after suppression, checked
+incidentally by `CloneDeepCopiesItsMoleculeSnapshots`, and no test asserts the
+0.857. The trideuterated row is a fixture nowhere, but its SMILES is written
+out above, so it is the one entry on this page that is re-derivable from the
+page itself rather than from the suite.
 
 ## Zero-bond molecules
 
@@ -385,8 +387,9 @@ measurements of the library, and no test asserts what any of them observed, so
 
 - `OEMCSSearch` copies its pattern. After constructing from a 7-atom molecule
   and calling `Clear()` on the source, `GetPattern().NumAtoms()` still reads 7
-  and `Match` still returns 7 bonds. **Provenance: Lost** -- the molecule is
-  not named anywhere, not even by common name.
+  and `Match` still returns 7 bonds. **Provenance: Described** -- the procedure
+  is recorded but the molecule was not, and any 7-atom molecule tests the same
+  property.
 
 - `umatch` does not change the score. Over all 120 pairs of the sixteen
   molecules in the search-mode scan, symmetrized bond counts with
