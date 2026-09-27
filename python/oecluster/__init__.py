@@ -1987,6 +1987,14 @@ def pdist(items,
     """
     Compute pairwise distances for a collection of items using a comparison.
 
+    Warning: the first element of ``items`` decides how the whole list is
+    read. For ``rocs`` an ``OEGraphMol`` there silently reduces every later
+    ``OEMol`` to its active conformer and the scores move with it; the reverse
+    ordering raises ``TypeError`` instead. Convert up front with
+    ``oechem.OEMol(...)`` when a list would otherwise be mixed. ``mcs`` follows
+    the same rule for which lists are accepted, but its scores are unchanged.
+    See the ROCS and MCS sections of ``docs/python-api.md``.
+
     :param items: List of molecules, design units, or other items.
     :param comparison: Comparison method: "fingerprint", "rocs", "superpose",
                        "sitehopper", "descriptor", "rmsd", "mcs", or a C++
@@ -5140,7 +5148,12 @@ class ROCSComparison:
         """
         Construct a ROCSComparison.
 
-        :param mols: List of OEMolBase molecules with 3D coordinates.
+        :param mols: List of OEMolBase molecules with 3D coordinates. The
+            first element decides how the whole list is read: if it is an
+            ``OEGraphMol``, every later ``OEMol`` is silently reduced to its
+            active conformer, and the reverse ordering raises ``TypeError``.
+            Convert with ``oechem.OEMol(...)`` first when the list would
+            otherwise be mixed.
         :param similarity: Return similarity instead of distance.
         :returns: C++ ROCSComparison object.
         """
@@ -5305,7 +5318,9 @@ class MCSComparison:
         triangle-inequality violation has been observed, but none is proven
         either, so the matrix reports ``triangle`` as ``"unknown"``.
 
-        :param mols: List of OEMolBase molecules.
+        :param mols: List of OEMolBase molecules. The first element decides
+            which mixed lists are accepted, as for ``ROCSComparison``, but the
+            scores are unchanged because coordinates are never read.
         :param search_mode: ``"approximate"`` (default) or ``"exhaustive"``.
             Exhaustive is one to three orders of magnitude slower and is not
             reliably better: on a 53-bond against 54-bond macrolide pair it took
@@ -5321,13 +5336,14 @@ class MCSComparison:
         :param similarity: Return the bond Tanimoto rather than one minus it.
         :returns: C++ MCSComparison object.
         :raises RuntimeError: If the C++ layer refuses the request. Among the
-            reasons: a null molecule; a molecule with no bonds after hydrogen
-            suppression, such as methane, water or argon, for which bond
-            Tanimoto has a zero denominator; ``max_matches=0``, which the
-            toolkit would read as a budget of zero matches; and a
-            ``search_mode`` or ``match_level`` outside its enum.
+            reasons: a molecule with no bonds after hydrogen suppression, such
+            as methane, water or argon, for which bond Tanimoto has a zero
+            denominator; and ``max_matches=0``, which the toolkit would read
+            as a budget of zero matches.
         :raises TypeError: If ``max_matches`` is a bool, or if an option value
             is of a type the options struct will not take.
+        :raises OverflowError: If ``max_matches`` is outside the range of
+            an ``unsigned int``, such as ``-1`` or ``2**40``.
         :raises ValueError: If ``search_mode`` or ``match_level`` names a mode
             the comparison does not have.
         """

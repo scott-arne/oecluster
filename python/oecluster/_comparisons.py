@@ -127,11 +127,12 @@ def _default_selector(value, default, name):
     """
     if value is None:
         return default
-    # A non-string reaches here only from a direct call to one of this
-    # module's rule functions: on the pdist and cdist paths the SWIG setters
-    # have already refused anything but a string. Naming the argument still
-    # beats the bare "'int' object has no attribute 'lower'" that the fold
-    # would otherwise produce, which blames a method the caller never wrote.
+    # A non-string reaches here from pdist and cdist as well as from a direct
+    # call: ``pdist(..., "mcs", search_mode=3)`` arrives with the int intact,
+    # because this fold runs before any SWIG setter sees the value. Naming the
+    # argument beats the bare "'int' object has no attribute 'lower'" that the
+    # fold would otherwise produce, which blames a method the caller never
+    # wrote.
     if not isinstance(value, str):
         raise TypeError(
             f"{name} must be a string or None, not "
@@ -940,6 +941,8 @@ def mcs_options(kwargs):
     :raises TypeError: If ``search_mode`` or ``match_level`` is neither a string
         nor ``None``, if ``max_matches`` is a bool, or if ``max_matches`` is of
         a type ``MCSOptions`` will not take.
+    :raises OverflowError: If ``max_matches`` is outside the range of an
+        ``unsigned int``, such as ``-1`` or ``2**40``.
     :raises ValueError: If ``search_mode`` or ``match_level`` names a mode the
         comparison does not have. Names are resolved by lookup, never by
         truthiness.
@@ -987,6 +990,8 @@ def _validate_mcs(similarity, kwargs):
     :raises TypeError: If any keyword option is not an MCS option, if
         ``max_matches`` is a bool, or if an option value is of a type
         ``MCSOptions`` will not take.
+    :raises OverflowError: If ``max_matches`` is outside the range of an
+        ``unsigned int``, such as ``-1`` or ``2**40``.
     :raises ValueError: If ``search_mode`` or ``match_level`` names a mode the
         comparison does not have.
     """
@@ -994,7 +999,7 @@ def _validate_mcs(similarity, kwargs):
     if unknown:
         raise TypeError(f"Unknown kwargs for mcs comparison: {unknown}")
     # Building the options here is what puts the enum-name and option-value
-    # refusals ahead of cdist's guards too.
+    # type refusals ahead of cdist's guards too.
     mcs_options(kwargs)
 
 
