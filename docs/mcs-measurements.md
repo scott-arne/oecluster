@@ -115,14 +115,16 @@ reconstructed. Five of the sixteen do survive as pinned fixtures -- benzene,
 morphine, sucrose, testosterone and the macrolide fragment -- while raffinose,
 cholesterol and the paclitaxel, digoxin and vancomycin fragments do not.
 
-Two rows are better off than the verdict suggests. Sucrose against the
-macrolide fragment, the first row, is asserted in both suites and re-derived
-on every run: `tests/cpp/test_mcs_comparison.cpp` and
+Three rows are better off than the verdict suggests, in decreasing order.
+Sucrose against the macrolide fragment, the first row, is asserted in both
+suites and re-derived on every run: `tests/cpp/test_mcs_comparison.cpp` and
 `tests/python/test_mcs.py` each pin 0.605263 approximate against 0.527778
 exhaustive, which is 15 matched bonds against 17, and the C++ comment quotes
-the 6.4 ms. Morphine against testosterone is built from pinned molecules, and
-the C++ suite asserts its directed approximate counts of 8 and 7, whose
-maximum is the 8 in this table -- but nothing asserts the exhaustive 9.
+the 6.4 ms. Morphine against testosterone has its directed approximate counts
+of 8 and 7 asserted in the C++ suite, whose maximum is the 8 in this table,
+but nothing asserts the exhaustive 9. Testosterone against the macrolide
+fragment is built from pinned fixtures as well, so its inputs survive, but no
+test pairs those two and neither of its bond counts is asserted anywhere.
 
 One caveat travels with the scan and was recorded at the time: one of the
 sixteen SMILES, a vancomycin fragment, parsed with an `Unclosed ring` warning
