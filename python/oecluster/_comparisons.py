@@ -127,12 +127,13 @@ def _default_selector(value, default, name):
     """
     if value is None:
         return default
-    # A non-string reaches here from pdist and cdist as well as from a direct
-    # call: ``pdist(..., "mcs", search_mode=3)`` arrives with the int intact,
-    # because this fold runs before any SWIG setter sees the value. Naming the
-    # argument beats the bare "'int' object has no attribute 'lower'" that the
-    # fold would otherwise produce, which blames a method the caller never
-    # wrote.
+    # A non-string reaches here from a direct call, and for the mcs options
+    # also from pdist and cdist: ``pdist(..., "mcs", search_mode=3)`` arrives
+    # with the int intact, because the mcs fold runs before any SWIG setter
+    # sees the value. (The fingerprint path assigns first, so its setters
+    # refuse a non-string before this fold.) Naming the argument beats the
+    # bare "'int' object has no attribute 'lower'" that the fold would
+    # otherwise produce, which blames a method the caller never wrote.
     if not isinstance(value, str):
         raise TypeError(
             f"{name} must be a string or None, not "
