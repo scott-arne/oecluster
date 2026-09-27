@@ -11,6 +11,7 @@
  */
 
 #include <algorithm>
+#include <cmath>
 #include <memory>
 #include <string>
 #include <vector>
@@ -46,10 +47,12 @@ const char* const BENZENE_D1 = "[2H]c1ccccc1";
 const char* const METHANE = "C";
 
 /// Parse a SMILES into a titled molecule. MCS is topological, so no embedding
-/// step is needed and none is done.
+/// step is needed and none is done. The parse status is checked because a
+/// typo would otherwise yield an empty molecule, and the negative tests, which
+/// assert only the exception type, would still pass on it.
 std::shared_ptr<OEChem::OEMol> from_smiles(const char* smiles, const char* title = "mol") {
     auto mol = std::make_shared<OEChem::OEMol>();
-    OEChem::OESmilesToMol(*mol, smiles);
+    EXPECT_TRUE(OEChem::OESmilesToMol(*mol, smiles)) << smiles;
     mol->SetTitle(title);
     return mol;
 }
@@ -255,13 +258,14 @@ TEST_F(MCSComparisonTest, BracedInitializersStayUnambiguous) {
 // ``match_level`` is the option under test because benzene against cyclohexane
 // separates its values completely, and separates them by two independent
 // barriers rather than one. ``Default`` is ``DefaultAtoms | DefaultBonds``:
-// the atom expression carries aromaticity and the bond expression carries bond
-// order, so either one alone is enough to block the match. Measured directly
-// against the toolkit, relaxing only the bonds still matches zero bonds, and
-// so does relaxing only the atoms; only ``Loose``, which is atomic number with
-// bonds unconstrained, relaxes both at once and matches all six. The distance
-// is therefore 1.0 at ``Default`` and 0.0 at ``Loose``, with no intermediate
-// value that could be mistaken for either.
+// the atom expression carries aromaticity and the bond expression carries
+// aromaticity as well as bond order (``OEExprOpts_DefaultBonds`` is
+// ``Aromaticity | BondOrder``), so either one alone is enough to block the
+// match. Measured directly against the toolkit, relaxing only the bonds still
+// matches zero bonds, and so does relaxing only the atoms; only ``Loose``,
+// which is atomic number with bonds unconstrained, relaxes both at once and
+// matches all six. The distance is therefore 1.0 at ``Default`` and 0.0 at
+// ``Loose``, with no intermediate value that could be mistaken for either.
 TEST_F(MCSComparisonTest, TheBracedPathForwardsTheCallersOptions) {
     MCSOptions loose;
     loose.match_level = MCSMatchLevel::Loose;
@@ -274,10 +278,6 @@ TEST_F(MCSComparisonTest, TheBracedPathForwardsTheCallersOptions) {
 
     EXPECT_NEAR(defaulted.Compare(0, 1), 1.0, 1e-9);
     EXPECT_NEAR(relaxed.Compare(0, 1), 0.0, 1e-9);
-    // The option moved the number. Stated separately so that a future change to
-    // either molecule cannot leave two equal scores both passing their own
-    // tolerance.
-    EXPECT_LT(relaxed.Compare(0, 1), defaulted.Compare(0, 1));
 
     // An out-of-enum value has to be forwarded and refused here too, not only
     // through the strict vector constructor.
@@ -308,7 +308,6 @@ TEST_F(MCSComparisonTest, TheRawPointerPathForwardsTheCallersOptions) {
 
     EXPECT_NEAR(defaulted.Compare(0, 1), 1.0, 1e-9);
     EXPECT_NEAR(relaxed.Compare(0, 1), 0.0, 1e-9);
-    EXPECT_LT(relaxed.Compare(0, 1), defaulted.Compare(0, 1));
 
     MCSOptions invalid;
     invalid.match_level = static_cast<MCSMatchLevel>(9);
@@ -565,6 +564,7 @@ TEST_F(MCSComparisonTest, MaxMatchesBoundsTheSearch) {
     // the count from 11 to 2: 2/48 against 11/39. Without this case only
     // max_matches == 0 is exercised, and a build that ignored every positive
     // value would pass the whole suite.
+    // The toolkit's "maximum number of matches limit" warning is expected here.
     MCSOptions budget;
     budget.max_matches = 1;
     MCSComparison bounded(pair_of(MORPHINE, PENICILLIN_G), budget);
@@ -603,6 +603,7 @@ TEST_F(MCSComparisonTest, ThreadCountDoesNotChangeTheResult) {
 }
 
 TEST_F(MCSComparisonTest, RepeatedPDistIsIdentical) {
+    // Same thread count twice, so a difference is nondeterminism, not threads.
     MCSComparison comparison(mols_);
     EXPECT_EQ(run_pdist(comparison, 4), run_pdist(comparison, 4));
 }

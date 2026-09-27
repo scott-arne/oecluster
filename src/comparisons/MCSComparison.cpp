@@ -53,9 +53,8 @@ unsigned int mcs_type_for(MCSSearchMode mode) {
 ///
 /// These are reads, so they cannot alter perception. What they do is
 /// materialise any lazily-computed cache while a single thread still owns the
-/// molecule, which keeps the per-clone copies from having to do it later. This
-/// toolkit exposes no ``OEFindRingAtomAndBond``, so a read traversal is the
-/// available lever.
+/// molecule. This toolkit exposes no ``OEFindRingAtomAndBond``, so a read
+/// traversal is the available lever.
 void warm_perception(const OEChem::OEMol& mol) {
     for (OESystem::OEIter<OEChem::OEAtomBase> atom = mol.GetAtoms(); atom; ++atom) {
         (void)atom->IsInRing();
