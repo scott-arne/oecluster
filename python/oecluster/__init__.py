@@ -2008,9 +2008,9 @@ def pdist(items,
     :param kwargs: Comparison-specific options.
     :returns: SymmetricDistanceMatrix with computed distances/similarities.
     :raises TypeError: If unknown kwargs are passed.
-    :raises ValueError: If cutoff > 0 with similarity=True on a named
-        comparison with no ``output``, or if normalizing the inputs leaves no
-        items.
+    :raises ValueError: If cutoff > 0 with no ``output`` and either
+        similarity=True on a named comparison or a prebuilt comparison that
+        reports similarities, or if normalizing the inputs leaves no items.
     """
     if isinstance(comparison, str):
         # Before normalization: filtering can empty the list, and the refusal
@@ -2033,12 +2033,10 @@ def pdist(items,
         # those this refusal comes first regardless. cdist orders them the
         # same way in both cases.
         #
-        # An mmap output never consults the cutoff, and the prebuilt branch
-        # ignores the ``similarity`` argument, so on neither path would this
-        # message describe what actually happened. A prebuilt
-        # similarity-oriented comparison plus a cutoff does still corrupt,
-        # but the ``similarity`` argument is not what reveals it; that hole
-        # is a known residual.
+        # An mmap output never consults the cutoff, so this refusal skips it.
+        # The prebuilt branch ignores the ``similarity`` argument, so this
+        # refusal cannot guard it; that branch asks the object for its
+        # orientation instead.
         sparse = output is None and bool(cutoff > 0.0)
         if sparse and similarity:
             raise ValueError(
@@ -2064,9 +2062,22 @@ def pdist(items,
         comparison_name = comparison_obj.ComparisonName()
         labels = []
         params = {}
-        # Deliberately a second copy rather than a hoist; see the string
-        # branch above for why the two cannot be merged.
+        # Deliberately a second copy rather than a hoist above the branch:
+        # the string branch evaluates the cutoff only after validate_request,
+        # and a hoist would reverse that order.
         sparse = output is None and bool(cutoff > 0.0)
+        # Read ahead of the storage allocation and the computation, unlike
+        # the facts read below: orientation is known before any pair is
+        # scored, while data integrity is not. Only a reported ``False`` is
+        # refused; an object without facts reports "unknown" and keeps
+        # working.
+        if (sparse and _gate.facts_from_comparison(
+                comparison_obj)['is_distance'] is False):
+            raise ValueError(
+                "cutoff > 0 is not supported for a prebuilt comparison that "
+                "reports similarities: the cutoff zeroes values above the "
+                "threshold, which would discard high similarities. Drop the "
+                "cutoff or build the comparison with similarity=False")
 
     n = comparison_obj.Size()
 

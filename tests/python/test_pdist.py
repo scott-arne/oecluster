@@ -195,6 +195,68 @@ def test_pdist_and_cdist_share_the_cutoff_refusal_text():
     assert str(from_pdist.value) == str(from_cdist.value)
 
 
+def _benzene_toluene():
+    from openeye import oechem
+
+    mols = []
+    for smi in ["c1ccccc1", "Cc1ccccc1"]:
+        mol = oechem.OEGraphMol()
+        oechem.OESmilesToMol(mol, smi)
+        mols.append(mol)
+    return mols
+
+
+@pytest.mark.parametrize("factory", ["MCSComparison",
+                                     "FingerprintComparison"])
+def test_pdist_prebuilt_similarity_with_cutoff_raises(factory):
+    """A prebuilt comparison reporting similarities refuses a cutoff too.
+
+    The ``similarity`` argument says nothing about a prebuilt object, so the
+    refusal reads the orientation the object reports about itself. Without it
+    the MCS pair's 0.857 came back as 0.0. The progress callback proves the
+    refusal lands before any pair is scored.
+    """
+    import oecluster
+
+    mols = _benzene_toluene()
+    comparison = getattr(oecluster, factory)(mols, similarity=True)
+    calls = []
+    with pytest.raises(ValueError,
+                       match="cutoff > 0 is not supported for a prebuilt "
+                             "comparison that reports similarities"):
+        oecluster.pdist(mols, comparison, cutoff=0.5,
+                        progress=lambda done, total: calls.append(done))
+    assert calls == []
+
+
+def test_pdist_prebuilt_distance_with_cutoff_is_sparse():
+    """A prebuilt distance-oriented comparison keeps its sparse cutoff path."""
+    import oecluster
+
+    mols = _benzene_toluene()
+    comparison = oecluster.MCSComparison(mols, similarity=False)
+    result = oecluster.pdist(mols, comparison, cutoff=0.5)
+
+    assert isinstance(result.storage, oecluster.SparseStorage)
+    assert np.asarray(result.condensed) == pytest.approx([1.0 / 7.0])
+
+
+def test_pdist_prebuilt_similarity_without_sparse_storage_is_accepted(
+        tmp_path):
+    """No cutoff, or an mmap output that ignores it, leaves values intact."""
+    import oecluster
+
+    mols = _benzene_toluene()
+    comparison = oecluster.MCSComparison(mols, similarity=True)
+
+    dense = oecluster.pdist(mols, comparison)
+    mapped = oecluster.pdist(mols, comparison, cutoff=0.5,
+                             output=str(tmp_path / "sim.mmap"))
+
+    assert np.asarray(dense.condensed) == pytest.approx([6.0 / 7.0])
+    assert np.asarray(mapped.condensed) == pytest.approx([6.0 / 7.0])
+
+
 def test_pdist_cutoff_positivity_is_decided_once():
     """A cutoff whose truth value is unstable cannot slip past the guard.
 

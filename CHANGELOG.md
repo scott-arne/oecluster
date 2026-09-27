@@ -67,11 +67,20 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   the cutoff, which drops the far pairs of a distance matrix but the near pairs
   of a similarity matrix. The result was not an obviously broken matrix of
   zeros -- everything below the cutoff came back untouched, so the call looked
-  plausible with exactly the most-similar pairs replaced by `0.0`. **Calls that
-  would have used sparse storage -- a named comparison with no `output=` -- now
+  plausible with exactly the most-similar pairs replaced by `0.0`. **Calls with
+  a named comparison that would have used sparse storage -- no `output=` -- now
   raise `ValueError`**, matching the guard `cdist` has always had. This affected
   every similarity-capable comparison, `fingerprint` included, not only the
   `mcs` comparison new in this release.
+- `pdist` now also raises on `cutoff > 0` with no `output=` for a prebuilt
+  comparison object that reports similarity values, such as
+  `MCSComparison(mols, similarity=True)`. The `similarity` argument says
+  nothing about a prebuilt object, so the guard above never saw these calls
+  and the same corruption went through: the benzene-toluene MCS score of
+  0.857 came back as `0.0`. The orientation is read from the object's own
+  facts before any pair is scored. An object that reports no orientation is
+  still accepted, and `cdist` needs no change because it refuses prebuilt
+  objects outright.
 
 ### Changed
 

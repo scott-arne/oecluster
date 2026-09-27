@@ -1351,9 +1351,10 @@ not.
 `pdist()` selects the backend from its keywords: dense by default, sparse when
 `cutoff` is set, and memory-mapped when `output` is a path. The backends are
 also available directly as `DenseStorage`, `MMapStorage`, and `SparseStorage`
-for advanced use through the lower-level API. For a named comparison with no
-`output`, `pdist()` raises `ValueError` when `cutoff > 0` is combined with
-`similarity=True`, because the cutoff would discard the high similarities.
+for advanced use through the lower-level API. With no `output`, `pdist()`
+raises `ValueError` when `cutoff > 0` is combined with `similarity=True` on a
+named comparison, or with a prebuilt comparison object that reports
+similarities, because the cutoff would discard the high similarities.
 
 | Backend | Use case | Memory |
 |---------|----------|--------|
