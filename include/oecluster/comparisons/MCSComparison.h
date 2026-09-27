@@ -240,6 +240,15 @@ public:
     GateFacts Facts() const override;
 
 private:
+#ifndef SWIG
+    /// Grants the C++ test suite read access to the snapshot pointers. The
+    /// deep copy in ``Clone()`` is a documented thread-safety guarantee with
+    /// no observable consequence -- an aliasing clone returns identical
+    /// scores -- so this is the only route by which it can be asserted rather
+    /// than assumed.
+    friend struct MCSComparisonSnapshotAccess;
+#endif
+
     struct SharedData;
     std::shared_ptr<const SharedData> shared_;
     Options opts_;
@@ -249,6 +258,25 @@ private:
     /// the parent's own; see the class documentation.
     MCSComparison(std::shared_ptr<const SharedData> shared, const Options& opts);
 };
+
+#ifndef SWIG
+/// Test-only accessor for the molecule snapshots a comparison holds.
+///
+/// ``SharedData`` is defined in the .cpp, so friendship alone does not let a
+/// test dereference ``shared_``: the type is incomplete there. This declares
+/// the single observation the test needs, and the definition sits beside
+/// ``SharedData`` where it is complete.
+///
+/// Hidden from SWIG for the same reason as the initializer-list constructor
+/// above: ``swig/oecluster.i`` ``%include``s this header, and unguarded it was
+/// measured to generate a public ``MCSComparisonSnapshotAccess`` Python class
+/// handing out raw snapshot addresses as opaque pointers. That is a C++ test
+/// hook, not a supported binding.
+struct MCSComparisonSnapshotAccess {
+    /// Returns the address of every molecule snapshot, in storage order.
+    static std::vector<const void*> SnapshotAddresses(const MCSComparison& cmp);
+};
+#endif
 
 }  // namespace OECluster
 

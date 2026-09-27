@@ -33,7 +33,15 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   `dbscan`, `hdbscan`, `agglomerative` and `cluster_report` -- accept an MCS
   matrix without `allow_nonmetric=True`, as do `k_medoids`,
   `activity_landscape` and `modelability`, which do not gate at all.
-
+- `MCSComparison::Clone()` deep-copying its molecule snapshots is now asserted
+  rather than assumed. The clone's snapshot addresses are compared against the
+  parent's and required to be disjoint, which needed a test-only accessor
+  because the property has no consequence any score can show: an aliasing clone
+  returns identical numbers, keeps the same molecules alive and reports the
+  same `Size()`. Nothing in the suite had distinguished the two -- with
+  `Clone()` neutralised to alias the parent's snapshots, all 685 other C++
+  tests still passed -- so the documented thread-safety guarantee had rested on
+  reading the code.
 ### Fixed
 
 - `pdist` now raises on `cutoff > 0` together with `similarity=True` instead of

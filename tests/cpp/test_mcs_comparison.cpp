@@ -317,12 +317,60 @@ TEST_F(MCSComparisonTest, CloneScoresIdentically) {
     }
 }
 
+// The deep copy in Clone() is a documented thread-safety guarantee with no
+// consequence any score can show: an aliasing clone returns exactly the same
+// numbers, keeps the same molecules alive, and reports the same Size(). So the
+// only way to assert it rather than assume it is to look at the snapshot
+// addresses, which is what MCSComparisonSnapshotAccess exists for.
+//
+// What this does and does not establish: it shows each clone owns molecules the
+// parent does not, which is the premise of the isolation argument in
+// MCSComparison.h. It says nothing about whether pdist's parallel phase is
+// otherwise race-free -- that is a separate question, and one no single-threaded
+// test can answer.
+TEST_F(MCSComparisonTest, CloneDeepCopiesItsMoleculeSnapshots) {
+    std::vector<std::shared_ptr<OEChem::OEMol>> mols = {from_smiles(MORPHINE, "morphine"),
+                                                        from_smiles(PENICILLIN_G, "penicillinG"),
+                                                        from_smiles(BENZENE, "benzene")};
+    MCSComparison comparison(mols);
+    std::unique_ptr<PairwiseComparison> clone = comparison.Clone();
+
+    // Size first. A Clone() that dropped its molecules would satisfy the
+    // disjointness below vacuously.
+    ASSERT_EQ(clone->Size(), comparison.Size());
+
+    const MCSComparison* typed_clone = dynamic_cast<const MCSComparison*>(clone.get());
+    ASSERT_NE(typed_clone, nullptr);
+
+    const std::vector<const void*> parent_addresses =
+        MCSComparisonSnapshotAccess::SnapshotAddresses(comparison);
+    const std::vector<const void*> clone_addresses =
+        MCSComparisonSnapshotAccess::SnapshotAddresses(*typed_clone);
+    ASSERT_EQ(parent_addresses.size(), mols.size());
+    ASSERT_EQ(clone_addresses.size(), mols.size());
+
+    // Every clone address against every parent address, not index against
+    // index: an alias that also reordered its storage would pass a positional
+    // comparison.
+    for (size_t i = 0; i < clone_addresses.size(); ++i) {
+        for (size_t j = 0; j < parent_addresses.size(); ++j) {
+            EXPECT_NE(clone_addresses[i], parent_addresses[j])
+                << "clone snapshot " << i << " aliases parent snapshot " << j;
+        }
+    }
+
+    // And the copies are faithful rather than merely distinct: morphine against
+    // penicillin G, both 25 bonds, 11 matched, 11/39.
+    EXPECT_NEAR(comparison.Compare(0, 1), 0.717949, 1e-6);
+    EXPECT_NEAR(clone->Compare(0, 1), 0.717949, 1e-6);
+}
+
 TEST_F(MCSComparisonTest, CloneOutlivesItsParent) {
     // A lifetime test, and worth being explicit about what it does not prove:
     // it passes under the aliasing model too, because a shared_ptr alias keeps
-    // the parent's snapshots alive by itself. The copy-per-clone property is not
-    // observable through the public surface at all -- the snapshots have no
-    // accessor -- so it is enforced by review of Clone(), not by this.
+    // the parent's snapshots alive by itself. The copy-per-clone property is
+    // asserted by CloneDeepCopiesItsMoleculeSnapshots above, which needs a
+    // test-only accessor to observe the snapshots at all.
     std::unique_ptr<PairwiseComparison> clone;
     double expected = 0.0;
     {

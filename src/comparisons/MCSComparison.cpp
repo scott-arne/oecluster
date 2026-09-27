@@ -158,6 +158,16 @@ struct MCSComparison::SharedData {
     std::vector<unsigned int> bonds;
 };
 
+std::vector<const void*>
+MCSComparisonSnapshotAccess::SnapshotAddresses(const MCSComparison& cmp) {
+    std::vector<const void*> out;
+    out.reserve(cmp.shared_->mols.size());
+    for (const auto& mol : cmp.shared_->mols) {
+        out.push_back(static_cast<const void*>(mol.get()));
+    }
+    return out;
+}
+
 MCSComparison::~MCSComparison() = default;
 
 MCSComparison::MCSComparison(const std::vector<std::shared_ptr<OEChem::OEMol>>& mols,
