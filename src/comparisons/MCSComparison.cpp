@@ -11,6 +11,7 @@
 #include <utility>
 #include <oechem.h>
 #include "IndexRange.h"
+#include "MCSComparisonSnapshotAccess.h"
 #include "oecluster/Error.h"
 
 namespace OECluster {

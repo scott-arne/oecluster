@@ -21,6 +21,11 @@
 #include "oecluster/StorageBackend.h"
 #include "oecluster/comparisons/MCSComparison.h"
 
+// The snapshot accessor is a test hook and is deliberately not in the installed
+// header, so it is reached the way this suite reaches its other private
+// headers: by relative path into src/.
+#include "../../src/comparisons/MCSComparisonSnapshotAccess.h"
+
 using namespace OECluster;
 
 namespace {

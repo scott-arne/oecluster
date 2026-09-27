@@ -246,6 +246,12 @@ private:
     /// no observable consequence -- an aliasing clone returns identical
     /// scores -- so this is the only route by which it can be asserted rather
     /// than assumed.
+    ///
+    /// The type itself is declared in the like-named private header beside
+    /// ``src/comparisons/MCSComparison.cpp`` and defined in that .cpp, neither
+    /// of which is installed, so a consumer of the shipped headers has nothing
+    /// to call. A friend declaration may name a type declared nowhere else in
+    /// the translation unit, so this line needs no forward declaration here.
     friend struct MCSComparisonSnapshotAccess;
 #endif
 
@@ -258,37 +264,6 @@ private:
     /// the parent's own; see the class documentation.
     MCSComparison(std::shared_ptr<const SharedData> shared, const Options& opts);
 };
-
-#ifndef SWIG
-/// Test-only accessor for the molecule snapshots a comparison holds.
-///
-/// ``SharedData`` is defined in the .cpp, so friendship alone does not let a
-/// test dereference ``shared_``: the type is incomplete there. This declares
-/// the single observation the test needs, and the definition sits beside
-/// ``SharedData`` where it is complete.
-///
-/// Hidden from SWIG for the same reason as the initializer-list constructor
-/// above: ``swig/oecluster.i`` ``%include``s this header, and unguarded it was
-/// measured to generate a public ``MCSComparisonSnapshotAccess`` Python class
-/// handing out raw snapshot addresses as opaque pointers. That is a C++ test
-/// hook, not a supported binding.
-struct MCSComparisonSnapshotAccess {
-    /// Returns a pointer to every molecule snapshot, in storage order.
-    ///
-    /// The pointer is typed rather than ``const void*``, and that is the whole
-    /// safeguard rather than a stylistic preference. A ``void*`` return needs an
-    /// explicit cast in the definition, and that cast accepts
-    /// ``static_cast<const void*>(&mol)`` -- the address of the ``shared_ptr``
-    /// slot rather than of the molecule it owns -- as quietly as it accepts
-    /// ``mol.get()``. The accessor would then report the snapshot vector's own
-    /// element addresses, which differ between any two clones no matter what the
-    /// snapshots point at, and the disjointness test would pass over an aliasing
-    /// ``Clone()``. ``const OEMol*`` admits no conversion from the
-    /// ``shared_ptr`` slot, so the same slip is a compile error. Do not widen
-    /// this back to ``void*``.
-    static std::vector<const OEChem::OEMol*> SnapshotAddresses(const MCSComparison& cmp);
-};
-#endif
 
 }  // namespace OECluster
 
