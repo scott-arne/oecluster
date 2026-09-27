@@ -14,12 +14,19 @@ For runnable performance tools see [Benchmarks](benchmarks.md).
 Each entry gives the claim as it appears in the shipped documentation, where it
 is cited, what was actually measured, and a **provenance** verdict:
 
-- **Pinned** — the exact inputs live in a tracked test file, so anyone can
-  re-derive the figure today.
-- **Described** — the procedure is recorded but the input set was not
-  preserved. A re-run would measure something similar, not the same thing.
-- **Lost** — the inputs were named only by common name. The figure stands as a
-  historical observation and cannot be checked against anything.
+- **Pinned** — the exact inputs live in a tracked test file and a test asserts
+  the figure, so the suite re-derives it on every run.
+- **Described** — the procedure is recorded, but either the input set was not
+  preserved or no test asserts the figure. A re-run would measure something
+  close to the figure, or would need someone to write the missing assertion
+  first.
+- **Lost** — the inputs were named only by common name, or not named at all.
+  The figure stands as a historical observation and cannot be checked against
+  anything.
+
+Elsewhere on this page, a *pinned fixture* means only that a molecule's SMILES
+is in a tracked test file. An entry earns **Pinned** only when a test also
+asserts its figure.
 
 Most of the headline figures are **Described** or **Lost**. That is the honest
 state of this evidence, and stating it is the reason this page exists.
@@ -38,7 +45,9 @@ Treat every ratio as sound and every absolute millisecond figure as indicative.
 
 ## Pinned inputs
 
-These SMILES are tracked, and every **Pinned** entry below uses them.
+These are the tracked SMILES that several entries below share. A few entries
+use molecules defined only in `tests/python/test_mcs.py`, and give those SMILES
+inline.
 `tests/cpp/test_mcs_comparison.cpp` holds every molecule in this table;
 `tests/python/test_mcs.py` holds all but benzene-d1, methane and testosterone.
 Where both files define a molecule the strings are byte-identical.
@@ -345,12 +354,13 @@ taking the SDK default. Under the default, benzene-d1 carries 7 bonds against
 benzene's 6 and the pair scores `6/(6+7-6) = 0.857` instead of 1.0 -- and
 benzene-d1 becomes indistinguishable from toluene by bond count alone.
 
-**Provenance: Pinned** for three of the four rows. `c1ccccc1`,
-`[2H]c1ccccc1` and `Cc1ccccc1` are all fixtures in
-`tests/cpp/test_mcs_comparison.cpp`, which asserts benzene against benzene-d1
-at a distance of exactly 0. The trideuterated row is a fixture nowhere, but
-its SMILES is written out above, so it is the one entry on this page that is
-re-derivable from the page itself rather than from the suite.
+**Provenance: Pinned** for the consequence: `tests/cpp/test_mcs_comparison.cpp`
+asserts benzene-d1 against benzene at a distance of exactly 0. **Described**
+for the table's atom and bond counts and the 0.857 score. Three rows --
+`c1ccccc1`, `[2H]c1ccccc1` and `Cc1ccccc1` -- are pinned fixtures, but no test
+asserts their counts, and no test asserts the 0.857. The trideuterated row is a
+fixture nowhere, but its SMILES is written out above, so it is the one entry on
+this page that is re-derivable from the page itself rather than from the suite.
 
 ## Zero-bond molecules
 
@@ -370,9 +380,8 @@ all three were probed once and recorded by name only.
 
 Not performance figures, but direct probes against 2026.1.0 that the
 implementation relies on. These are probes of the SDK itself rather than
-measurements of the library, so none of them has its inputs in a tracked test
-file and **Pinned** is not available for any of them. Each bullet gives its own
-verdict.
+measurements of the library, and no test asserts what any of them observed, so
+**Pinned** is not available for any of them. Each bullet gives its own verdict.
 
 - `OEMCSSearch` copies its pattern. After constructing from a 7-atom molecule
   and calling `Clear()` on the source, `GetPattern().NumAtoms()` still reads 7
