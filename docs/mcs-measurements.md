@@ -39,8 +39,9 @@ Treat every ratio as sound and every absolute millisecond figure as indicative.
 ## Pinned inputs
 
 These SMILES are tracked, and every **Pinned** entry below uses them.
-`tests/cpp/test_mcs_comparison.cpp` is the C++ copy and
-`tests/python/test_mcs.py` the Python one; they agree.
+`tests/cpp/test_mcs_comparison.cpp` holds every molecule in this table;
+`tests/python/test_mcs.py` holds all but benzene-d1, methane and testosterone.
+Where both files define a molecule the strings are byte-identical.
 
 | name | SMILES |
 | --- | --- |
@@ -108,16 +109,29 @@ The eleven, exhaustive against approximate bond counts:
 | testosterone / paclitaxel fragment | 19 | 18 | 857.9 ms |
 | cholesterol / testosterone | 20 | 19 | 1,839.1 ms |
 
-**Provenance: Lost.** Only three of the sixteen molecules -- morphine, sucrose
-and the macrolide fragment -- survive as pinned fixtures, and no pair in the
-table is made of pinned molecules alone.
+**Provenance: Lost** for the scan as a whole: the sixteen-molecule set was not
+recorded, so neither the 120-pair nor the 118-pair denominator can be
+reconstructed. Five of the sixteen do survive as pinned fixtures -- benzene,
+morphine, sucrose, testosterone and the macrolide fragment -- while raffinose,
+cholesterol and the paclitaxel, digoxin and vancomycin fragments do not.
+
+Two rows are better off than the verdict suggests. Sucrose against the
+macrolide fragment, the first row, is asserted in both suites and re-derived
+on every run: `tests/cpp/test_mcs_comparison.cpp` and
+`tests/python/test_mcs.py` each pin 0.605263 approximate against 0.527778
+exhaustive, which is 15 matched bonds against 17, and the C++ comment quotes
+the 6.4 ms. Morphine against testosterone is built from pinned molecules, and
+the C++ suite asserts its directed approximate counts of 8 and 7, whose
+maximum is the 8 in this table -- but nothing asserts the exhaustive 9.
 
 One caveat travels with the scan and was recorded at the time: one of the
 sixteen SMILES, a vancomycin fragment, parsed with an `Unclosed ring` warning
 and so was not the structure it was meant to be. It still yielded a well-formed
-56-bond molecule and the scan treated it as another input. It appears in none
-of the eleven discriminating pairs, but the 120-pair and 118-pair counts
-include it.
+56-bond molecule and the scan treated it as another input. It appears in none of the
+eleven discriminating pairs and in no test fixture, so the table above and the
+pinned pairs are unaffected. It is counted in the 120 pairs, in the 118 that
+completed, and in the 84 that change their score at `max_matches = 1` under
+"Ranking functor and `max_matches`" below.
 
 ## Metric properties
 
@@ -145,10 +159,14 @@ was 1.0000 against 1.1444.
 
 **Provenance: Described.** The set sizes and their selection intent are
 recorded; the members are not. A re-run on fresh sets of the same sizes would
-be a new experiment, not a check of this one. Given how thin that 1.0000
-against 1.1444 margin is, a different 40 molecules could plausibly find a
-triangle violation where these did not -- which is the substantive reason
-`triangle` is reported as `unknown` rather than as satisfied.
+be a new experiment, not a check of this one. The shipped reason for reporting
+`triangle` as `unknown` is the one stated in `MCSComparison.h`,
+`CHANGELOG.md` and `docs/python-api.md`: the inclusion-exclusion bound was
+violated, so the proof is unavailable rather than merely unattempted. The thin
+1.0000 against 1.1444 margin is a further reason not to lean on the empirical
+result -- a different 40 molecules could plausibly find a triangle violation
+where these did not -- but it is a supporting observation, not the stated
+ground.
 
 ## Symmetry and reproducibility
 
@@ -187,8 +205,10 @@ scored wrong."
 **Cited in.** The `MCSOptions::max_matches` documentation in
 `MCSComparison.h`, and the `MCSComparison.__new__` docstring.
 
-**Measured.** Symmetrized bond counts over the same 45 pairs, first varying the
-ranking functor and then the match budget.
+**Measured.** Symmetrized bond counts over 45 pairs, first varying the ranking
+functor and then the match budget. The source records "45 pairs" for this
+sweep and for the symmetry sweep above without stating that they are the same
+45, so do not read the two as one set.
 
 | functor | total bonds | pairs differing from CC(1.0) |
 | --- | --- | --- |
@@ -302,7 +322,12 @@ taking the SDK default. Under the default, benzene-d1 carries 7 bonds against
 benzene's 6 and the pair scores `6/(6+7-6) = 0.857` instead of 1.0 -- and
 benzene-d1 becomes indistinguishable from toluene by bond count alone.
 
-**Provenance: Pinned.** Every SMILES in the table is in the file.
+**Provenance: Pinned** for three of the four rows. `c1ccccc1`,
+`[2H]c1ccccc1` and `Cc1ccccc1` are all fixtures in
+`tests/cpp/test_mcs_comparison.cpp`, which asserts benzene against benzene-d1
+at a distance of exactly 0. The trideuterated row is a fixture nowhere, but
+its SMILES is written out above, so it is the one entry on this page that is
+re-derivable from the page itself rather than from the suite.
 
 ## Zero-bond molecules
 
@@ -312,13 +337,19 @@ Tanimoto has a zero denominator for them.
 **Measured.** Each has 1 atom and 0 bonds after hydrogen suppression. Methane
 against water yields no MCS matches, so the denominator is `0 + 0 - 0`.
 
-**Provenance: Pinned**, and asserted in both test suites.
+**Provenance: Pinned** for the refusal, which both suites assert -- the C++
+suite through methane, and the Python suite through the hydride cases
+`[H][Li]` and `[H][H]`, each expecting a `RuntimeError` naming the missing
+bonds. Water and argon are fixtures in neither suite; they were probed once
+and recorded by name only.
 
 ## Toolkit behaviour this design depends on
 
 Not performance figures, but direct probes against 2026.1.0 that the
-implementation relies on. All are **Pinned** in the sense that they are
-one-line checks anyone can repeat against the SDK.
+implementation relies on. All but one are **Pinned** in the sense that they
+are short checks anyone can repeat against the SDK. The `umatch` bullet is the
+exception: it ran over the unrecorded sixteen-molecule set from the search-mode
+scan and is **Lost** with it.
 
 - `OEMCSSearch` copies its pattern. After constructing from a 7-atom molecule
   and calling `Clear()` on the source, `GetPattern().NumAtoms()` still reads 7
