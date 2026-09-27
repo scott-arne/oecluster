@@ -133,6 +133,22 @@ TEST_F(ROCSComparisonTest, BracedInitializersStayUnambiguous) {
     EXPECT_NE(collapsed.Compare(0, 1), via_vector.Compare(0, 1));
 }
 
+// The ``OEMolBase*`` overload's own null check, in ``to_oemol_snapshots``.
+// Nothing else in the suite reaches it: the braced ``{nullptr}`` case above
+// binds the initializer-list constructor, which outranks both vector ones, so
+// it enters the ``shared_ptr`` shim and stops at the *strict* constructor's
+// check instead; and the bindings refuse ``None`` in the typemap before C++
+// sees it. Without this case, deleting the check leaves the whole suite green
+// while a legal C++ call shape dereferences null.
+//
+// The vector is named rather than braced for exactly that reason. Brace it and
+// the call routes back to the initializer-list shim and asserts nothing new,
+// so this is not a spelling to tidy away.
+TEST_F(ROCSComparisonTest, NullRawPointerIsRejected) {
+    std::vector<OEChem::OEMolBase*> as_base{&static_cast<OEChem::OEMolBase&>(*mols_[0]), nullptr};
+    EXPECT_THROW(ROCSComparison comparison(as_base), ComparisonError);
+}
+
 TEST_F(ROCSComparisonTest, CompareRefusesAnIndexPastTheEnd) {
     // SetupRef dereferences ``*shared_->mols[i]`` before the overlay runs, so
     // an out-of-range index is an out-of-bounds read on the molecule vector.

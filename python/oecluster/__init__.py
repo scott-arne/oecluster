@@ -2101,6 +2101,13 @@ def cdist(items_a, items_b, comparison, *,
     distinct reference/fit predicates), ``cdist(A, B)`` is not guaranteed to equal
     ``cdist(B, A).T``.
 
+    Warning: one comparison is built over ``items_a + items_b``, so the first
+    element of ``items_a`` decides how *both* sets are read. For ``rocs`` and
+    ``mcs`` an ``OEGraphMol`` there silently reduces every ``OEMol`` in
+    ``items_b`` to its active conformer, while the reverse ordering raises
+    ``TypeError`` instead. See the ROCS and MCS sections of
+    ``docs/python-api.md`` for the measured effect.
+
     :param items_a: Reference items (rows of the result).
     :param items_b: Fit items (columns of the result).
     :param comparison: Comparison method name: "fingerprint", "rocs", "superpose",

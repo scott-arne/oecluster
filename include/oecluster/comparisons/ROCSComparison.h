@@ -102,6 +102,12 @@ public:
      * conformer, so ``BestOverlay`` has a single pose to choose from rather
      * than an ensemble; pass an ``OEMol`` when conformer search matters.
      *
+     * C++ callers have to spell the conversion: an ``OEGraphMol*`` does not
+     * convert to an ``OEMolBase*`` implicitly, and a pointer ``static_cast``
+     * is rejected as well. Write ``&static_cast<OEChem::OEMolBase&>(graph_mol)``.
+     * Callers arriving through the bindings never see this; the typemap
+     * converts for them.
+     *
      * An ``OEMol`` satisfies this overload's bindings typecheck as well as the
      * strict one above, so something has to rank them. That something is
      * typemap precedence, not declaration order: SWIG ranks by argument count
@@ -111,12 +117,6 @@ public:
      * ``swig/oecluster.i``, which is what keeps a multiconformer ``OEMol`` off
      * this overload's active-conformer view -- a view that would silently
      * change every score it touched.
-     *
-     * C++ callers have to spell the conversion: an ``OEGraphMol*`` does not
-     * convert to an ``OEMolBase*`` implicitly, and a pointer ``static_cast``
-     * is rejected as well. Write ``&static_cast<OEChem::OEMolBase&>(graph_mol)``.
-     * Callers arriving through the bindings never see this; the typemap
-     * converts for them.
      *
      * :param mols: Pointers to molecules with 3D coordinates.
      * :param opts: ROCS options.

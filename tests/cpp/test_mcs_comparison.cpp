@@ -156,6 +156,22 @@ TEST_F(MCSComparisonTest, NullMoleculeIsRejected) {
     EXPECT_THROW(MCSComparison comparison(mols), ComparisonError);
 }
 
+// The ``OEMolBase*`` overload's own null check, in ``to_oemol_snapshots``.
+// Nothing else in the suite reaches it: the braced ``{nullptr}`` case below
+// binds the initializer-list constructor, which outranks both vector ones, so
+// it enters the ``shared_ptr`` shim and stops at the *strict* constructor's
+// check instead; and the bindings refuse ``None`` in the typemap before C++
+// sees it. Without this case, deleting the check leaves the whole suite green
+// while a legal C++ call shape dereferences null.
+//
+// The vector is named rather than braced for exactly that reason. Brace it and
+// the call routes back to the initializer-list shim and asserts nothing new,
+// so this is not a spelling to tidy away.
+TEST_F(MCSComparisonTest, NullRawPointerIsRejected) {
+    std::vector<OEChem::OEMolBase*> as_base{&static_cast<OEChem::OEMolBase&>(*mols_[0]), nullptr};
+    EXPECT_THROW(MCSComparison comparison(as_base), ComparisonError);
+}
+
 // The value of this test is that it compiles. Adding the OEMolBase* overload
 // made all three braced forms below ambiguous -- either vector type can be
 // brace-initialized from them, so no candidate wins -- and a source break is
@@ -175,6 +191,69 @@ TEST_F(MCSComparisonTest, BracedInitializersStayUnambiguous) {
     MCSComparison braced({from_smiles(BENZENE, "first"), from_smiles(TOLUENE, "second")});
     EXPECT_EQ(braced.Size(), 2u);
     EXPECT_NEAR(braced.Compare(0, 1), 0.142857, 1e-6);
+}
+
+// Both construction paths added for OEGraphMol support carry the caller's
+// options, checked against the default rather than against a literal alone: a
+// constructor that delegated with ``Options()``, or that reimplemented the
+// strict one while dropping a field, would still return a plausible number.
+//
+// ``match_level`` is the option under test because benzene against cyclohexane
+// separates its values completely. At the default level aromatic bonds do not
+// match single ones, so nothing matches and the distance is 1.0; ``Loose`` is
+// atomic number only with bonds unconstrained, so the two rings match entirely
+// and the distance is 0.0. No intermediate value can be mistaken for either.
+TEST_F(MCSComparisonTest, TheBracedPathForwardsTheCallersOptions) {
+    MCSOptions loose;
+    loose.match_level = MCSMatchLevel::Loose;
+
+    MCSComparison defaulted({from_smiles(BENZENE, "first"),
+                             from_smiles(CYCLOHEXANE, "second")});
+    MCSComparison relaxed({from_smiles(BENZENE, "first"),
+                           from_smiles(CYCLOHEXANE, "second")},
+                          loose);
+
+    EXPECT_NEAR(defaulted.Compare(0, 1), 1.0, 1e-9);
+    EXPECT_NEAR(relaxed.Compare(0, 1), 0.0, 1e-9);
+    // The option moved the number. Stated separately so that a future change to
+    // either molecule cannot leave two equal scores both passing their own
+    // tolerance.
+    EXPECT_LT(relaxed.Compare(0, 1), defaulted.Compare(0, 1));
+
+    // An out-of-enum value has to be forwarded and refused here too, not only
+    // through the strict vector constructor.
+    MCSOptions invalid;
+    invalid.match_level = static_cast<MCSMatchLevel>(9);
+    EXPECT_THROW(MCSComparison rejected({from_smiles(BENZENE, "first"),
+                                         from_smiles(CYCLOHEXANE, "second")},
+                                        invalid),
+                 ComparisonError);
+}
+
+TEST_F(MCSComparisonTest, TheRawPointerPathForwardsTheCallersOptions) {
+    // OEGraphMol is the input type this overload exists to admit, and the
+    // conversion has to be spelled out: an OEGraphMol* does not convert to an
+    // OEMolBase* implicitly, and a pointer static_cast is rejected as well.
+    OEChem::OEGraphMol benzene;
+    OEChem::OESmilesToMol(benzene, BENZENE);
+    OEChem::OEGraphMol cyclohexane;
+    OEChem::OESmilesToMol(cyclohexane, CYCLOHEXANE);
+    std::vector<OEChem::OEMolBase*> as_base{&static_cast<OEChem::OEMolBase&>(benzene),
+                                            &static_cast<OEChem::OEMolBase&>(cyclohexane)};
+
+    MCSOptions loose;
+    loose.match_level = MCSMatchLevel::Loose;
+
+    MCSComparison defaulted(as_base);
+    MCSComparison relaxed(as_base, loose);
+
+    EXPECT_NEAR(defaulted.Compare(0, 1), 1.0, 1e-9);
+    EXPECT_NEAR(relaxed.Compare(0, 1), 0.0, 1e-9);
+    EXPECT_LT(relaxed.Compare(0, 1), defaulted.Compare(0, 1));
+
+    MCSOptions invalid;
+    invalid.match_level = static_cast<MCSMatchLevel>(9);
+    EXPECT_THROW(MCSComparison rejected(as_base, invalid), ComparisonError);
 }
 
 TEST_F(MCSComparisonTest, CompareRefusesAnIndexPastTheEnd) {

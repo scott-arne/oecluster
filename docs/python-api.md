@@ -1088,6 +1088,31 @@ would also refuse the all-`OEGraphMol` lists this comparison now exists to take.
 Convert up front -- `oechem.OEMol(graph_mol)` -- when a list would otherwise be
 mixed.
 
+**`cdist` extends that rule across its two sets.** It builds one comparison over
+`items_a + items_b`, so the first element of set A decides how *both* sets are
+read, and two individually homogeneous sets -- the arrangement the warning above
+would seem to permit -- still interact. An `OEGraphMol` in set A discards set
+B's conformers:
+
+```python
+# 0.238: multi is reduced to its active conformer, because set A holds an
+# OEGraphMol.
+oecluster.cdist([graph_ref], [multi], "rocs", score_type="shape")
+
+# 0.0: set A holds an OEMol, so multi keeps its ensemble and BestOverlay
+# recovers the pose the reference was taken from.
+oecluster.cdist([mol_ref], [multi], "rocs", score_type="shape")
+
+# Raises TypeError: List item is not an OEMol object.
+oecluster.cdist([multi], [graph_ref], "rocs", score_type="shape")
+```
+
+`multi` is a three-conformer `OEMol`, and `mol_ref` and `graph_ref` are the same
+non-active conformer of it as an `OEMol` and as an `OEGraphMol`. The two accepted
+calls differ by 0.238 on a [0, 1] scale for the same chemistry, and neither
+raises nor warns. Convert both sets up front when they would not otherwise agree
+on a type.
+
 ### Superpose
 
 | Parameter | Values | Default |
@@ -1212,6 +1237,26 @@ deuterated analogue scores as identical to its parent. Molecules with no bonds
 after suppression -- methane, water, argon -- are refused at construction,
 because bond Tanimoto has a zero denominator for them rather than an extreme
 value.
+
+**Mixing the two types is accepted in one direction only.** The rule is the one
+`rocs` documents above: the first element decides how the whole list is read,
+and `cdist` concatenates `items_a + items_b` before deciding, so set A's first
+element decides for set B as well. Nothing is lost to the score here -- MCS
+never reads coordinates, so the collapsed view of a multi-conformer `OEMol`
+scores exactly as its ensemble would -- but which calls are *accepted* is still
+asymmetric, and the refusal reaches across the set boundary:
+
+```python
+# 0.143 = 1 - 6/7, benzene against toluene. Accepted: the OEGraphMol at index 0
+# of the concatenation puts both sets on the permissive overload.
+oecluster.cdist([graph_mol], [oemol], "mcs")
+
+# Raises TypeError: List item is not an OEMol object.
+oecluster.cdist([oemol], [graph_mol], "mcs")
+```
+
+`pdist([graph_mol, oemol], "mcs")` and `pdist([oemol, graph_mol], "mcs")` split
+the same way, for the same reason.
 
 Suppression folds a hydrogen into the implicit hydrogen count of the atom it
 hangs off, so a hydrogen stays explicit when that fold has nowhere to go: when

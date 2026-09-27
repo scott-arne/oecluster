@@ -252,3 +252,124 @@ def test_cdist_rocs_end_to_end():
     # Same ordering as the pdist test, reached through the rectangular path.
     assert values[0][0] < 0.1
     assert values[0][1] > 0.4
+
+
+def _flexible_multiconformer():
+    """A molecule whose conformers differ enough to be told apart by shape.
+
+    The same construction as the fixture of the same name in
+    ``test_native_bindings.py``, and the same self-check for the same reason:
+    the test below tells a preserved ensemble from a collapsed one by the score
+    alone, so an ensemble that Omega happened to generate tightly would make it
+    agree for the wrong reason rather than fail.
+    """
+    pytest.importorskip("openeye.oeomega")
+    import oecluster
+    from openeye import oechem, oeomega
+
+    omega = oeomega.OEOmega()
+    omega.SetMaxConfs(3)
+    omega.SetStrictStereo(False)
+    multi = oechem.OEMol()
+    oechem.OESmilesToMol(multi, "c1ccccc1CCCCc1ccccc1")
+    assert omega(multi)
+    assert multi.NumConfs() > 1
+
+    references = [oechem.OEMol(multi.GetConf(oechem.OEHasConfIdx(conf.GetIdx())))
+                  for conf in multi.GetConfs()]
+    gaps = [oecluster.cdist([reference], [references[0]], "rocs",
+                            score_type="shape").matrix[0][0]
+            for reference in references[1:]]
+    assert max(gaps) > 0.1, (
+        "the conformers generated here are too similar for the test using this "
+        f"fixture to distinguish a dropped ensemble from a kept one: gaps={gaps}")
+    return multi
+
+
+def _non_active_reference(multi):
+    """An ``OEMol`` of a conformer that is *not* the active one.
+
+    The active conformer is the only pose an ``OEMolBase`` view keeps, so a
+    reference drawn from any other one is reachable through the ensemble and
+    unreachable through the collapsed copy. That asymmetry is what makes the
+    conformer loss visible as a number.
+    """
+    from openeye import oechem
+
+    active_idx = multi.GetActive().GetIdx()
+    others = [conf.GetIdx() for conf in multi.GetConfs() if conf.GetIdx() != active_idx]
+    assert others, "fixture produced no conformer other than the active one"
+    return oechem.OEMol(multi.GetConf(oechem.OEHasConfIdx(others[-1])))
+
+
+def test_cdist_rocs_lets_set_as_first_element_decide_how_set_b_is_read():
+    """Two individually homogeneous sets still interact, because cdist builds
+    one comparison over ``items_a + items_b``.
+
+    The existing warning is about mixing the two molecule types within one
+    list, and ``pdist`` has no other shape. ``cdist`` does: each set here holds
+    a single type, which is exactly the arrangement a reader would think that
+    warning permits, and set A's first element still decides how set B is read.
+    An ``OEGraphMol`` in set A puts the concatenation on the permissive overload
+    and set B's ensemble is discarded crossing into C++.
+
+    Asserted as a property rather than as two literals. Pinning the numbers
+    would let the property break while the figures were updated to match, which
+    is the whole failure mode: both calls return a plausible score.
+    """
+    pytest.importorskip("openeye.oeomega")
+    import oecluster
+    from openeye import oechem
+
+    multi = _flexible_multiconformer()
+    reference = _non_active_reference(multi)
+    graph_reference = oechem.OEGraphMol(reference)
+
+    def shape(items_a, items_b):
+        return oecluster.cdist(items_a, items_b, "rocs",
+                               score_type="shape").matrix[0][0]
+
+    through_graph = shape([graph_reference], [multi])
+    through_oemol = shape([reference], [multi])
+    assert through_graph != pytest.approx(through_oemol, abs=1e-6), (
+        "set A's type stopped reaching set B, so this hazard is no longer "
+        "reproduced and the documented warning needs rechecking")
+
+    # Which of the two changed, and why. Deliberately collapsing set B to its
+    # active conformer reproduces the OEGraphMol-first number exactly, so the
+    # difference above is the lost ensemble rather than any other effect.
+    collapsed = shape([reference], [oechem.OEMol(oechem.OEGraphMol(multi))])
+    assert through_graph == pytest.approx(collapsed, abs=1e-6)
+    assert through_oemol < collapsed - 0.1
+
+    # The reverse ordering is refused instead: set A's OEMol selects the strict
+    # typemap, which validates every element of the concatenation rather than
+    # sampling the first, so set B's OEGraphMol is named and rejected.
+    with pytest.raises(TypeError, match="List item is not an OEMol object"):
+        shape([multi], [graph_reference])
+
+
+def test_cdist_mcs_lets_set_as_first_element_decide_how_set_b_is_read():
+    """The same cross-set asymmetry on ``mcs``, which needs no license.
+
+    MCS never reads coordinates, so no score is lost when the permissive
+    overload takes both sets -- but the *acceptance* is still decided across the
+    set boundary, and that decision is what the rocs test above pays for. Kept
+    here so the ordering rule stays covered on a machine with no Omega license.
+    """
+    import oecluster
+    from openeye import oechem
+
+    benzene = oechem.OEGraphMol()
+    oechem.OESmilesToMol(benzene, "c1ccccc1")
+    toluene = oechem.OEMol()
+    oechem.OESmilesToMol(toluene, "Cc1ccccc1")
+
+    # Accepted: benzene at index 0 of the concatenation puts both sets on the
+    # permissive overload. Benzene's six bonds all match toluene's seven, so the
+    # distance is 1 - 6/7.
+    mixed = oecluster.cdist([benzene], [toluene], "mcs").matrix[0][0]
+    assert mixed == pytest.approx(1.0 / 7.0, abs=1e-6)
+
+    with pytest.raises(TypeError, match="List item is not an OEMol object"):
+        oecluster.cdist([toluene], [benzene], "mcs")
