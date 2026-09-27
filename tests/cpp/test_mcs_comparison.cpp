@@ -199,10 +199,15 @@ TEST_F(MCSComparisonTest, BracedInitializersStayUnambiguous) {
 // strict one while dropping a field, would still return a plausible number.
 //
 // ``match_level`` is the option under test because benzene against cyclohexane
-// separates its values completely. At the default level aromatic bonds do not
-// match single ones, so nothing matches and the distance is 1.0; ``Loose`` is
-// atomic number only with bonds unconstrained, so the two rings match entirely
-// and the distance is 0.0. No intermediate value can be mistaken for either.
+// separates its values completely, and separates them by two independent
+// barriers rather than one. ``Default`` is ``DefaultAtoms | DefaultBonds``:
+// the atom expression carries aromaticity and the bond expression carries bond
+// order, so either one alone is enough to block the match. Measured directly
+// against the toolkit, relaxing only the bonds still matches zero bonds, and
+// so does relaxing only the atoms; only ``Loose``, which is atomic number with
+// bonds unconstrained, relaxes both at once and matches all six. The distance
+// is therefore 1.0 at ``Default`` and 0.0 at ``Loose``, with no intermediate
+// value that could be mistaken for either.
 TEST_F(MCSComparisonTest, TheBracedPathForwardsTheCallersOptions) {
     MCSOptions loose;
     loose.match_level = MCSMatchLevel::Loose;

@@ -258,10 +258,15 @@ def _flexible_multiconformer():
     """A molecule whose conformers differ enough to be told apart by shape.
 
     The same construction as the fixture of the same name in
-    ``test_native_bindings.py``, and the same self-check for the same reason:
-    the test below tells a preserved ensemble from a collapsed one by the score
+    ``test_native_bindings.py``, and it self-checks for the same reason: the
+    test below tells a preserved ensemble from a collapsed one by the score
     alone, so an ensemble that Omega happened to generate tightly would make it
     agree for the wrong reason rather than fail.
+
+    The check is on the one conformer the test actually reaches, the one
+    ``_non_active_reference`` picks, measured against the active conformer that
+    survives the collapse. Checking the widest gap in the ensemble instead
+    would let a conformer the test never touches satisfy the guard.
     """
     pytest.importorskip("openeye.oeomega")
     import oecluster
@@ -275,14 +280,13 @@ def _flexible_multiconformer():
     assert omega(multi)
     assert multi.NumConfs() > 1
 
-    references = [oechem.OEMol(multi.GetConf(oechem.OEHasConfIdx(conf.GetIdx())))
-                  for conf in multi.GetConfs()]
-    gaps = [oecluster.cdist([reference], [references[0]], "rocs",
-                            score_type="shape").matrix[0][0]
-            for reference in references[1:]]
-    assert max(gaps) > 0.1, (
-        "the conformers generated here are too similar for the test using this "
-        f"fixture to distinguish a dropped ensemble from a kept one: gaps={gaps}")
+    active = oechem.OEMol(multi.GetConf(oechem.OEHasConfIdx(multi.GetActive().GetIdx())))
+    gap = oecluster.cdist([_non_active_reference(multi)], [active], "rocs",
+                          score_type="shape").matrix[0][0]
+    assert gap > 0.1, (
+        "the conformer the test using this fixture reaches is too similar to "
+        "the active one to distinguish a dropped ensemble from a kept one: "
+        f"gap={gap}")
     return multi
 
 
