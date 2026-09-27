@@ -62,8 +62,8 @@ Where both files define a molecule the strings are byte-identical.
 | morphine | `CN1CC[C@]23c4c5ccc(O)c4O[C@H]2[C@@H](O)C=C[C@H]3[C@H]1C5` |
 | penicillin G | `CC1(C)S[C@@H]2[C@H](NC(=O)Cc3ccccc3)C(=O)N2[C@H]1C(=O)O` |
 
-Testosterone, sucrose and the macrolide fragment are also pinned; their SMILES
-are long and are best read from the test files directly.
+Testosterone, sucrose and the macrolide fragment are also pinned fixtures;
+their SMILES are long and are best read from the test files directly.
 
 ## Search mode: approximate against exhaustive
 
