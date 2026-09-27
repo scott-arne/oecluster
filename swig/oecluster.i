@@ -1069,7 +1069,52 @@ public:
 %include "oecluster/comparisons/SuperposeComparison.h"
 %include "oecluster/comparisons/DescriptorComparison.h"
 %include "oecluster/comparisons/RMSDComparison.h"
+
+// ---- MCSOptions::max_matches: refuse a Python bool at the setter ----
+// Python's bool is an int subclass, so SWIG's default unsigned int conversion
+// accepts True and stores 1. One is the most destructive value this option
+// has: a single-match budget changes scores silently instead of raising. The
+// refusal therefore belongs at the setter boundary, which every route crosses.
+// The wrapper's own guard in _comparisons.mcs_options covers pdist, cdist and
+// oecluster.MCSComparison, but a caller who builds the struct through
+// oecluster.oecluster -- the access path documented for the option structs
+// that are not exported -- and hands the comparison straight to pdist never
+// passes through it. That guard still fires first on the wrapper paths, where
+// it refuses before any molecule is read and words the error better; this is
+// the floor beneath it, not a replacement.
+//
+// The typemap must be keyed on the bare member name and bracketed by %clear,
+// rather than written as `unsigned int OECluster::MCSOptions::max_matches`.
+// For a member setter SWIG searches `in` typemaps only under the unqualified
+// name -- `swig -debug-tmsearch` reports `Looking for: unsigned int
+// max_matches` and nothing else -- so the qualified form matches nothing and
+// is accepted in silence, with no warning and a clean build. The qualified
+// spelling is consulted only for the getter's `out` typemap.
+//
+// Hence the placement: the pair brackets exactly one %include, so the typemap
+// is live only while MCSComparison.h is parsed. That keeps it to this one
+// member deliberately. Sibling option structs stay lenient about bool, which
+// is a known inconsistency held for a separate decision, not an oversight.
+%typemap(in, fragment="SWIG_AsVal_unsigned_SS_int") unsigned int max_matches {
+    if (PyBool_Check($input)) {
+        SWIG_exception_fail(SWIG_TypeError,
+            "in method '$symname', argument $argnum of type '$type': "
+            "max_matches must be an integer, not a bool; True would be read "
+            "as a match budget of 1, which silently corrupts scores");
+    }
+    // Otherwise defer to the conversion SWIG would have generated, so floats,
+    // strings, numpy scalars and negatives keep the exact exception types and
+    // messages they raised before this typemap existed.
+    unsigned int val = 0;
+    int ecode = SWIG_AsVal_unsigned_SS_int($input, &val);
+    if (!SWIG_IsOK(ecode)) {
+        SWIG_exception_fail(SWIG_ArgError(ecode),
+            "in method '$symname', argument $argnum of type '$type'");
+    }
+    $1 = static_cast<unsigned int>(val);
+}
 %include "oecluster/comparisons/MCSComparison.h"
+%clear unsigned int max_matches;
 
 // ============================================================================
 // Descriptor statistics

@@ -389,3 +389,15 @@ def test_max_matches_refuses_a_bool():
     # which named a zero the caller never wrote.
     with pytest.raises(TypeError, match="must be an integer, not a bool"):
         oecluster.pdist(_pair(BENZENE, TOLUENE), "mcs", max_matches=False)
+
+
+def test_raw_binding_max_matches_refuses_a_bool():
+    # The guard above lives in the wrapper, so it only covers callers who let
+    # the wrapper build the options. MCSOptions is not on the top-level
+    # package, and docs/python-api.md documents oecluster.oecluster as the way
+    # to reach the option structs that are not exported; pdist then accepts the
+    # comparison object that is built from them. That route never touches the
+    # wrapper guard, so the SWIG setter carries its own -- separate layers with
+    # separate reach, and this pins the lower one.
+    with pytest.raises(TypeError, match="must be an integer, not a bool"):
+        native.MCSOptions().max_matches = True
