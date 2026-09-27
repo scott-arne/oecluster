@@ -259,6 +259,10 @@ and results were independent of target order. Breaking out of the match
 iterator early does not avoid a slow search: 15,935 ms against 16,679 ms on the
 erythromycin pair.
 
+The shipped 0.691 ms mean is the 13.82 ms fresh-per-target row divided by the
+twenty targets, and the cost table's `~400 s` search-time projection for
+1,000 molecules comes from 0.691 ms times 600,000 pairs.
+
 **Provenance: Lost.** Neither the pattern nor the twenty targets were recorded.
 
 ## Per-clone molecule copies
@@ -298,11 +302,25 @@ membership is the surprising one.
 **Measured.** Over 153 pairs of small molecules, 132 distinguish at least two
 levels: loose differs from default on 85, default differs from exact on 81.
 
-**Provenance: Described** for the sweep, **Pinned** for the two worked
-examples. Benzene against cyclohexane gives 0.000 under loose and 1.000 under
+**Provenance: Described** for the sweep. **Pinned** for five worked examples,
+two given as distances and three as similarities:
+
+Distances: benzene against cyclohexane gives 0.000 under loose and 1.000 under
 default; benzene against toluene gives 0.143 under default and 0.556 under
-exact. Both pairs are pinned fixtures and both scores are asserted in the test
-suites.
+exact. Both pairs are asserted in the test suites.
+
+Similarities: ethane against ethene (`CC` against `C=C`) gives 1.0 under loose
+and 0.0 under default, asserted in `tests/python/test_mcs.py` as the
+measurement behind "`default` already constrains bond order." Cyclohexane
+against hexane (`C1CCCCC1` against `CCCCCC`) gives 0.833333 under default and
+0.0 under exact, asserted in the same file as the measurement behind "ring
+membership is the addition that surprises." Both pairs are pinned fixtures.
+
+**Lost** for the one isotope claim: 13C-butane against butane scoring 1.0 at
+every level, cited in `docs/python-api.md` and `MCSComparison.h`. Neither
+molecule appears in any test and neither SMILES is written down anywhere, so
+this is the weakest-evidenced of the three match-level claims the shipped docs
+make.
 
 ## Hydrogen suppression and isotopes
 
@@ -342,35 +360,48 @@ against water yields no MCS matches, so the denominator is `0 + 0 - 0`.
 **Provenance: Pinned** for the refusal, which both suites assert -- the C++
 suite through methane, and the Python suite through the hydride cases
 `[H][Li]` and `[H][H]`, each expecting a `RuntimeError` naming the missing
-bonds. Water and argon are fixtures in neither suite; they were probed once
-and recorded by name only.
+bonds. **Lost** for water, argon, and the methane-against-water calculation --
+all three were probed once and recorded by name only.
 
 ## Toolkit behaviour this design depends on
 
 Not performance figures, but direct probes against 2026.1.0 that the
-implementation relies on. All but one are **Pinned** in the sense that they
-are short checks anyone can repeat against the SDK. The `umatch` bullet is the
-exception: it ran over the unrecorded sixteen-molecule set from the search-mode
-scan and is **Lost** with it.
+implementation relies on. These are probes of the SDK itself rather than
+measurements of the library, so none of them has its inputs in a tracked test
+file and **Pinned** is not available for any of them. Each bullet gives its own
+verdict.
 
 - `OEMCSSearch` copies its pattern. After constructing from a 7-atom molecule
   and calling `Clear()` on the source, `GetPattern().NumAtoms()` still reads 7
-  and `Match` still returns 7 bonds.
+  and `Match` still returns 7 bonds. **Provenance: Lost** -- the molecule is
+  not named anywhere, not even by common name.
+
 - `umatch` does not change the score. Over all 120 pairs of the sixteen
   molecules in the search-mode scan, symmetrized bond counts with
-  `umatch=false` and `umatch=true` were identical on all 120.
+  `umatch=false` and `umatch=true` were identical on all 120. **Provenance:
+  Lost** -- it ran over the unrecorded sixteen-molecule set from the
+  search-mode sweep above.
+
 - `Match` left the target's observable state unchanged across five repeated
   matches against morphine, comparing canonical SMILES and every atom's and
   bond's ring and aromatic flags. This is consistent with thread-safety but is
   not a proof of race-freedom, and the design does not treat it as one.
+  **Provenance: Described** -- morphine is a pinned fixture in both suites, so
+  the input survives, but no test performs the comparison this bullet describes.
+
 - `SetMCSFunc` and `SetMaxMatches(1024)` both return `true`.
   **`SetMaxMatches(0)` also returns `true`**, and `GetMaxMatches()` then reads
   0 -- the SDK accepts a zero budget silently, which is why the constructor
-  refuses it.
+  refuses it. **Provenance: Described** -- `tests/cpp/test_mcs_comparison.cpp`
+  calls the first two at lines 140-141 without asserting their return values,
+  and `SetMaxMatches(0)` and `GetMaxMatches()` appear in no test at all.
+
 - There is no `OEFindRingAtomAndBond` in this SDK's OEChem, in the C++ headers
   or the Python module; `OEAssignAromaticFlags` and `OEPerceiveSymmetry` exist.
   This is why the snapshot is warmed with a read traversal rather than an eager
-  perception call.
+  perception call. This is a symbol-existence fact about the installed SDK,
+  re-checkable at any time by grepping the headers and the Python module, so
+  the three-verdict vocabulary does not apply.
 
 ## What this record cannot support
 
