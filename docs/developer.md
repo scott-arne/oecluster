@@ -134,7 +134,7 @@ sanitizer silence about them carries no information and is not evidence that
 clone distribution was validated. And this pass does not verify that
 `MCSComparison::Clone()` deep-copies its molecule snapshots; the test
 `MCSComparisonTest.CloneDeepCopiesItsMoleculeSnapshots` does that, by comparing
-snapshot addresses across two clones.
+snapshot addresses across four clones and the parent.
 
 A clean sanitizer run proves nothing until the instrumentation has been shown to
 speak. Before trusting one, introduce a deliberate unsynchronised write inside a

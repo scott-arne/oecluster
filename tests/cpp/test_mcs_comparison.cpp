@@ -385,8 +385,9 @@ TEST_F(MCSComparisonTest, CloneScoresIdentically) {
 // Four clones rather than two, for the same reason two beat one: a Clone()
 // cycling a pool of two deep copies satisfies "clone 1 differs from clone 2"
 // while handing workers 0 and 2 the same molecules under a four-thread pdist.
-// Checking every unordered pair is what the test's name claims, and it retires
-// the whole pool-cycling class rather than the one instance of it.
+// Checking every unordered pair is what the test's name claims. What it
+// retires is pools smaller than the number of clones taken: a pool of four
+// distinct copies passes this and still collides under an eight-thread pdist.
 //
 // What this does not establish: that the parallel phase is otherwise
 // race-free. That is a separate question, and no single-threaded test can
