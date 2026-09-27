@@ -252,6 +252,12 @@ private:
     /// of which is installed, so a consumer of the shipped headers has nothing
     /// to call. A friend declaration may name a type declared nowhere else in
     /// the translation unit, so this line needs no forward declaration here.
+    ///
+    /// Unlike the other uses of ``#ifndef SWIG`` in this header, the guard
+    /// around this line is belt-and-braces rather than load-bearing: SWIG
+    /// discards this ``private:`` section regardless, and deleting the guard
+    /// was measured to leave both ``oeclusterPYTHON_wrap.cxx`` and the
+    /// generated ``oecluster.py`` byte-identical.
     friend struct MCSComparisonSnapshotAccess;
 #endif
 

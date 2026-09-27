@@ -29,9 +29,10 @@ namespace OECluster {
 /// into another object's private storage. Keeping it out of the installed tree
 /// also retires two name-based guards that were protecting the same hook one
 /// surface at a time: the ``#ifndef SWIG`` around the struct, since
-/// ``swig/oecluster.i`` ``%include``s only the public header, and the
-/// ``EXCLUDE_SYMBOLS`` entry in ``docs/conf.py``, since Doxygen's ``INPUT`` is
-/// ``include/oecluster``. Neither can now be defeated by renaming the struct.
+/// ``swig/oecluster.i`` ``%include``s only headers from ``include/oecluster``
+/// and never any from ``src``, and the ``EXCLUDE_SYMBOLS`` entry in
+/// ``docs/conf.py``, since Doxygen's ``INPUT`` is ``include/oecluster``.
+/// Neither can now be defeated by renaming the struct.
 ///
 /// The mangled symbol still exists in the shipped archive; only a separate
 /// test-only build configuration would remove it, and that would assert the
