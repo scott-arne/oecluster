@@ -120,13 +120,13 @@ The eleven, exhaustive against approximate bond counts:
 | cholesterol / testosterone | 20 | 19 | 1,839.1 ms |
 
 **Provenance: Described** for the scan as a whole: the procedure is recorded,
-but the input set was not preserved. The 120-pair and 118-pair
-denominators, the eleven discriminating pairs and the table rows are specific
-to those sixteen molecules, and the set cannot be rebuilt: ten of the sixteen
-are named on this page, and the other six are not named anywhere. Five of the
-ten survive as pinned fixtures -- benzene, morphine, sucrose, testosterone and
-the macrolide fragment -- while raffinose, cholesterol and the paclitaxel,
-digoxin and vancomycin fragments do not.
+but the input set was not preserved. The 120-pair and 118-pair denominators,
+the eleven discriminating pairs and the table rows are specific to those
+sixteen molecules, and the set cannot be rebuilt: ten of the sixteen are named
+on this page, and the other six are not named anywhere. Five of the ten
+survive as pinned fixtures -- benzene, morphine, sucrose, testosterone and the
+macrolide fragment -- while raffinose, cholesterol and the paclitaxel, digoxin
+and vancomycin fragments do not.
 
 Three rows are better off than the verdict suggests, in decreasing order.
 Sucrose against the macrolide fragment, the first row, is asserted in both
