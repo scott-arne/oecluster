@@ -34,18 +34,19 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   matrix without `allow_nonmetric=True`, as do `k_medoids`,
   `activity_landscape` and `modelability`, which do not gate at all.
 - `MCSComparison::Clone()` deep-copying its molecule snapshots is now asserted
-  rather than assumed. Two clones are taken, and their snapshot addresses are
-  required to be disjoint from each other and from the parent's. This needed a
-  test-only accessor, because the property has no consequence any score can
-  show: an aliasing clone returns identical numbers, keeps the same molecules
-  alive and reports the same `Size()`. Disjointness *between the clones* is the
-  operative half -- `pdist` and `cdist` give each worker its own clone and
-  never dereference the parent inside the parallel region, so a `Clone()` that
-  deep-copied once and then handed every later caller the same snapshots would
-  put one molecule set under every thread. Nothing in the suite had
-  distinguished any of this: with `Clone()` neutralised to alias the parent's
-  snapshots, all 685 other C++ tests still passed, so the documented
-  thread-safety guarantee had rested on reading the code.
+  rather than assumed. Four clones are taken; their snapshot addresses are
+  required to be pairwise disjoint and disjoint from the parent's, and each
+  pointer is dereferenced to confirm it reaches the molecule it should. This
+  needed a test-only accessor, because the property has no consequence any
+  score can show: an aliasing clone returns identical numbers, keeps the same
+  molecules alive and reports the same `Size()`. Disjointness *between the
+  clones* is the operative half -- `pdist` and `cdist` give each worker its
+  own clone and never dereference the parent inside the parallel region, so a
+  `Clone()` that deep-copied once and then handed every later caller the same
+  snapshots would put one molecule set under every thread. Nothing in the
+  suite had distinguished any of this: with `Clone()` neutralised to alias
+  the parent's snapshots, all 685 other C++ tests still passed, so the
+  documented thread-safety guarantee had rested on reading the code.
 - A `tsan` CMake preset builds the C++ tests under ThreadSanitizer into their
   own `build-tsan/` tree, with the procedure documented in
   `docs/developer.md`. It exercises the concurrency this project owns -- the

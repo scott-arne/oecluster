@@ -273,8 +273,20 @@ private:
 /// handing out raw snapshot addresses as opaque pointers. That is a C++ test
 /// hook, not a supported binding.
 struct MCSComparisonSnapshotAccess {
-    /// Returns the address of every molecule snapshot, in storage order.
-    static std::vector<const void*> SnapshotAddresses(const MCSComparison& cmp);
+    /// Returns a pointer to every molecule snapshot, in storage order.
+    ///
+    /// The pointer is typed rather than ``const void*``, and that is the whole
+    /// safeguard rather than a stylistic preference. A ``void*`` return needs an
+    /// explicit cast in the definition, and that cast accepts
+    /// ``static_cast<const void*>(&mol)`` -- the address of the ``shared_ptr``
+    /// slot rather than of the molecule it owns -- as quietly as it accepts
+    /// ``mol.get()``. The accessor would then report the snapshot vector's own
+    /// element addresses, which differ between any two clones no matter what the
+    /// snapshots point at, and the disjointness test would pass over an aliasing
+    /// ``Clone()``. ``const OEMol*`` admits no conversion from the
+    /// ``shared_ptr`` slot, so the same slip is a compile error. Do not widen
+    /// this back to ``void*``.
+    static std::vector<const OEChem::OEMol*> SnapshotAddresses(const MCSComparison& cmp);
 };
 #endif
 

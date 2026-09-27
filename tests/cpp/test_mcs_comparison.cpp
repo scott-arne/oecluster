@@ -72,7 +72,7 @@ std::vector<double> run_pdist(MCSComparison& comparison, size_t num_threads) {
 /// The snapshot addresses a comparison holds, through the test-only accessor.
 /// Clone() hands back the base type, so the downcast lives here rather than at
 /// each call site.
-std::vector<const void*> snapshot_addresses(const PairwiseComparison& comparison) {
+std::vector<const OEChem::OEMol*> snapshot_addresses(const PairwiseComparison& comparison) {
     const MCSComparison* typed = dynamic_cast<const MCSComparison*>(&comparison);
     EXPECT_NE(typed, nullptr);
     if (typed == nullptr) {
@@ -84,13 +84,37 @@ std::vector<const void*> snapshot_addresses(const PairwiseComparison& comparison
 /// Every address on the left against every address on the right. Not index
 /// against index: an alias that also reordered its storage would pass a
 /// positional comparison.
-void expect_disjoint(const std::vector<const void*>& left, const char* left_name,
-                     const std::vector<const void*>& right, const char* right_name) {
+void expect_disjoint(const std::vector<const OEChem::OEMol*>& left, const std::string& left_name,
+                     const std::vector<const OEChem::OEMol*>& right,
+                     const std::string& right_name) {
     for (size_t i = 0; i < left.size(); ++i) {
         for (size_t j = 0; j < right.size(); ++j) {
             EXPECT_NE(left[i], right[j]) << left_name << " snapshot " << i << " aliases "
                                          << right_name << " snapshot " << j;
         }
+    }
+}
+
+/// Dereference each observed pointer and check it reaches the molecule it is
+/// supposed to.
+///
+/// Disjointness on its own says only that two pointers differ, which is a
+/// property of the addresses and not of what they address -- it would hold
+/// just as well over garbage. This is the positive control that ties each one
+/// to a real snapshot, and it also catches a copy that took the right number of
+/// molecules in the wrong order, which no amount of address comparison can see.
+///
+/// It does not pin storage order completely: benzene's 6 separates it from the
+/// other two, but morphine and penicillin G are both 25 and so do not
+/// distinguish each other.
+void expect_snapshot_bonds(const std::vector<const OEChem::OEMol*>& snapshots,
+                           const std::string& name,
+                           const std::vector<unsigned int>& expected_bonds) {
+    ASSERT_EQ(snapshots.size(), expected_bonds.size()) << name;
+    for (size_t i = 0; i < snapshots.size(); ++i) {
+        ASSERT_NE(snapshots[i], nullptr) << name << " snapshot " << i << " is null";
+        EXPECT_EQ(snapshots[i]->NumBonds(), expected_bonds[i])
+            << name << " snapshot " << i << " does not hold the molecule it should";
     }
 }
 
@@ -356,7 +380,13 @@ TEST_F(MCSComparisonTest, CloneScoresIdentically) {
 // A Clone() that deep-copied once and then memoized -- handing every later
 // caller the same SharedData -- would satisfy clone-against-parent while
 // putting a single OEMol set under every worker, and it was confirmed to pass
-// a clone-against-parent-only version of this test. Hence the second clone.
+// a clone-against-parent-only version of this test.
+//
+// Four clones rather than two, for the same reason two beat one: a Clone()
+// cycling a pool of two deep copies satisfies "clone 1 differs from clone 2"
+// while handing workers 0 and 2 the same molecules under a four-thread pdist.
+// Checking every unordered pair is what the test's name claims, and it retires
+// the whole pool-cycling class rather than the one instance of it.
 //
 // What this does not establish: that the parallel phase is otherwise
 // race-free. That is a separate question, and no single-threaded test can
@@ -365,34 +395,50 @@ TEST_F(MCSComparisonTest, CloneDeepCopiesItsMoleculeSnapshots) {
     std::vector<std::shared_ptr<OEChem::OEMol>> mols = {from_smiles(MORPHINE, "morphine"),
                                                         from_smiles(PENICILLIN_G, "penicillinG"),
                                                         from_smiles(BENZENE, "benzene")};
+    // From the fixture table at the top of this file, in the order above.
+    const std::vector<unsigned int> expected_bonds = {25, 25, 6};
+
     MCSComparison comparison(mols);
-    std::unique_ptr<PairwiseComparison> first = comparison.Clone();
-    std::unique_ptr<PairwiseComparison> second = comparison.Clone();
+    constexpr size_t NUM_CLONES = 4;
+    std::vector<std::unique_ptr<PairwiseComparison>> clones;
+    for (size_t i = 0; i < NUM_CLONES; ++i) {
+        clones.push_back(comparison.Clone());
+    }
 
-    // Size first. A Clone() that dropped its molecules would satisfy the
-    // disjointness below vacuously.
-    ASSERT_EQ(first->Size(), comparison.Size());
-    ASSERT_EQ(second->Size(), comparison.Size());
+    const std::vector<const OEChem::OEMol*> parent = snapshot_addresses(comparison);
+    ASSERT_EQ(parent.size(), mols.size());
+    expect_snapshot_bonds(parent, "parent", expected_bonds);
 
-    const std::vector<const void*> parent_addresses = snapshot_addresses(comparison);
-    const std::vector<const void*> first_addresses = snapshot_addresses(*first);
-    const std::vector<const void*> second_addresses = snapshot_addresses(*second);
-    ASSERT_EQ(parent_addresses.size(), mols.size());
-    ASSERT_EQ(first_addresses.size(), mols.size());
-    ASSERT_EQ(second_addresses.size(), mols.size());
+    std::vector<std::vector<const OEChem::OEMol*>> clone_snapshots;
+    for (size_t i = 0; i < NUM_CLONES; ++i) {
+        const std::string name = "clone " + std::to_string(i);
+        // Size first. A Clone() that dropped its molecules would satisfy the
+        // disjointness below vacuously.
+        ASSERT_EQ(clones[i]->Size(), comparison.Size()) << name;
+        clone_snapshots.push_back(snapshot_addresses(*clones[i]));
+        ASSERT_EQ(clone_snapshots[i].size(), mols.size()) << name;
+        expect_snapshot_bonds(clone_snapshots[i], name, expected_bonds);
+    }
 
-    // The pair pdist actually puts on two threads at once.
-    expect_disjoint(first_addresses, "first clone", second_addresses, "second clone");
-    // And against the parent, which is what the class documentation claims.
-    expect_disjoint(first_addresses, "first clone", parent_addresses, "parent");
-    expect_disjoint(second_addresses, "second clone", parent_addresses, "parent");
+    for (size_t i = 0; i < NUM_CLONES; ++i) {
+        const std::string name = "clone " + std::to_string(i);
+        // Every unordered pair of clones: the sets pdist puts on separate
+        // threads at the same time.
+        for (size_t j = i + 1; j < NUM_CLONES; ++j) {
+            expect_disjoint(clone_snapshots[i], name, clone_snapshots[j],
+                            "clone " + std::to_string(j));
+        }
+        // And against the parent, which is what the class documentation claims.
+        expect_disjoint(clone_snapshots[i], name, parent, "parent");
+    }
 
     // The copies are faithful rather than merely distinct: morphine against
     // penicillin G, both 25 bonds, 11 matched over a denominator of 39. That is
     // a similarity of 11/39, so the distance asserted here is 28/39.
     EXPECT_NEAR(comparison.Compare(0, 1), 0.717949, 1e-6);
-    EXPECT_NEAR(first->Compare(0, 1), 0.717949, 1e-6);
-    EXPECT_NEAR(second->Compare(0, 1), 0.717949, 1e-6);
+    for (size_t i = 0; i < NUM_CLONES; ++i) {
+        EXPECT_NEAR(clones[i]->Compare(0, 1), 0.717949, 1e-6) << "clone " << i;
+    }
 }
 
 TEST_F(MCSComparisonTest, CloneOutlivesItsParent) {

@@ -158,12 +158,15 @@ struct MCSComparison::SharedData {
     std::vector<unsigned int> bonds;
 };
 
-std::vector<const void*>
+std::vector<const OEChem::OEMol*>
 MCSComparisonSnapshotAccess::SnapshotAddresses(const MCSComparison& cmp) {
-    std::vector<const void*> out;
+    std::vector<const OEChem::OEMol*> out;
     out.reserve(cmp.shared_->mols.size());
     for (const auto& mol : cmp.shared_->mols) {
-        out.push_back(static_cast<const void*>(mol.get()));
+        // No cast, deliberately. See the note on the declaration: a cast here
+        // would let ``&mol`` through, and the test that depends on this would
+        // then pass over an aliasing Clone().
+        out.push_back(mol.get());
     }
     return out;
 }
