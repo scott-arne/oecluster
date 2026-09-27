@@ -83,9 +83,11 @@ for either appears anywhere in this repository.
 
 The supporting sweep -- 15 drug-like pairs of 28 to 44 bonds, exhaustive 1 to
 5 ms against approximate 0.1 to 1.4 ms, with identical bond counts on all 15 --
-is **Lost** for the same reason. So are sucrose against raffinose (39 ms
-against 0.7 ms) and a C30 against C28 alkane (4.6 ms against 1.0 ms, 27 bonds
-both ways).
+is **Described**: the procedure is recorded, but the pairs were not. Sucrose
+against raffinose (39 ms against 0.7 ms) is **Lost**: sucrose is a pinned
+fixture, but raffinose was recorded by name only. A C30 against C28 alkane
+(4.6 ms against 1.0 ms, 27 bonds both ways) is **Described**: it was recorded
+by carbon count only, so the procedure is recorded but the structures were not.
 
 ## Search mode: how often exhaustive actually wins
 
@@ -117,10 +119,12 @@ The eleven, exhaustive against approximate bond counts:
 | testosterone / paclitaxel fragment | 19 | 18 | 857.9 ms |
 | cholesterol / testosterone | 20 | 19 | 1,839.1 ms |
 
-**Provenance: Lost** for the scan as a whole: the sixteen-molecule set was not
-recorded, so neither the 120-pair nor the 118-pair denominator can be
-reconstructed. Five of the sixteen do survive as pinned fixtures -- benzene,
-morphine, sucrose, testosterone and the macrolide fragment -- while raffinose,
+**Provenance: Lost** for the scan as a whole. The 120-pair and 118-pair
+denominators, the eleven discriminating pairs and the table rows are specific
+to those sixteen molecules, and the set cannot be rebuilt: ten of the sixteen
+are known only by the names on this page, and the other six are not named
+anywhere. Five of the ten survive as pinned fixtures -- benzene, morphine,
+sucrose, testosterone and the macrolide fragment -- while raffinose,
 cholesterol and the paclitaxel, digoxin and vancomycin fragments do not.
 
 Three rows are better off than the verdict suggests, in decreasing order.
@@ -388,14 +392,15 @@ measurements of the library, and no test asserts what any of them observed, so
 - `OEMCSSearch` copies its pattern. After constructing from a 7-atom molecule
   and calling `Clear()` on the source, `GetPattern().NumAtoms()` still reads 7
   and `Match` still returns 7 bonds. **Provenance: Described** -- the procedure
-  is recorded but the molecule was not, and any 7-atom molecule tests the same
+  is recorded but the molecule was not, and any molecule tests the same
   property.
 
 - `umatch` does not change the score. Over all 120 pairs of the sixteen
   molecules in the search-mode scan, symmetrized bond counts with
   `umatch=false` and `umatch=true` were identical on all 120. **Provenance:
-  Lost** -- it ran over the unrecorded sixteen-molecule set from the
-  search-mode sweep above.
+  Described** -- the procedure is recorded but the sixteen-molecule set from
+  the search-mode sweep above was not fully recorded, and any set of pairs
+  tests the same property.
 
 - `Match` left the target's observable state unchanged across five repeated
   matches against morphine, comparing canonical SMILES and every atom's and
