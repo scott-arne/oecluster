@@ -69,6 +69,31 @@ std::vector<double> run_pdist(MCSComparison& comparison, size_t num_threads) {
     return values;
 }
 
+/// The snapshot addresses a comparison holds, through the test-only accessor.
+/// Clone() hands back the base type, so the downcast lives here rather than at
+/// each call site.
+std::vector<const void*> snapshot_addresses(const PairwiseComparison& comparison) {
+    const MCSComparison* typed = dynamic_cast<const MCSComparison*>(&comparison);
+    EXPECT_NE(typed, nullptr);
+    if (typed == nullptr) {
+        return {};
+    }
+    return MCSComparisonSnapshotAccess::SnapshotAddresses(*typed);
+}
+
+/// Every address on the left against every address on the right. Not index
+/// against index: an alias that also reordered its storage would pass a
+/// positional comparison.
+void expect_disjoint(const std::vector<const void*>& left, const char* left_name,
+                     const std::vector<const void*>& right, const char* right_name) {
+    for (size_t i = 0; i < left.size(); ++i) {
+        for (size_t j = 0; j < right.size(); ++j) {
+            EXPECT_NE(left[i], right[j]) << left_name << " snapshot " << i << " aliases "
+                                         << right_name << " snapshot " << j;
+        }
+    }
+}
+
 /// One directed approximate MCS search, written out here rather than reused
 /// from the implementation. The symmetry test's first assertion has to be
 /// independent evidence that the two directions genuinely disagree; taking that
@@ -317,52 +342,57 @@ TEST_F(MCSComparisonTest, CloneScoresIdentically) {
     }
 }
 
-// The deep copy in Clone() is a documented thread-safety guarantee with no
-// consequence any score can show: an aliasing clone returns exactly the same
-// numbers, keeps the same molecules alive, and reports the same Size(). So the
-// only way to assert it rather than assume it is to look at the snapshot
+// Clone() deep-copying its molecule snapshots is a documented thread-safety
+// guarantee with no consequence any score can show: an aliasing clone returns
+// exactly the same numbers, keeps the same molecules alive, and reports the
+// same Size(). Asserting it rather than assuming it means reading the snapshot
 // addresses, which is what MCSComparisonSnapshotAccess exists for.
 //
-// What this does and does not establish: it shows each clone owns molecules the
-// parent does not, which is the premise of the isolation argument in
-// MCSComparison.h. It says nothing about whether pdist's parallel phase is
-// otherwise race-free -- that is a separate question, and one no single-threaded
-// test can answer.
+// The operative property is disjointness *among the clones*, not between a
+// clone and its parent. pdist builds one clone per thread serially and then
+// hands each worker clones[my_ordinal]; cdist has the same shape. Neither
+// dereferences the parent inside the parallel region, so clone-against-parent
+// is the one pair of snapshot sets the parallel phase never touches at once.
+// A Clone() that deep-copied once and then memoized -- handing every later
+// caller the same SharedData -- would satisfy clone-against-parent while
+// putting a single OEMol set under every worker, and it was confirmed to pass
+// a clone-against-parent-only version of this test. Hence the second clone.
+//
+// What this does not establish: that the parallel phase is otherwise
+// race-free. That is a separate question, and no single-threaded test can
+// answer it.
 TEST_F(MCSComparisonTest, CloneDeepCopiesItsMoleculeSnapshots) {
     std::vector<std::shared_ptr<OEChem::OEMol>> mols = {from_smiles(MORPHINE, "morphine"),
                                                         from_smiles(PENICILLIN_G, "penicillinG"),
                                                         from_smiles(BENZENE, "benzene")};
     MCSComparison comparison(mols);
-    std::unique_ptr<PairwiseComparison> clone = comparison.Clone();
+    std::unique_ptr<PairwiseComparison> first = comparison.Clone();
+    std::unique_ptr<PairwiseComparison> second = comparison.Clone();
 
     // Size first. A Clone() that dropped its molecules would satisfy the
     // disjointness below vacuously.
-    ASSERT_EQ(clone->Size(), comparison.Size());
+    ASSERT_EQ(first->Size(), comparison.Size());
+    ASSERT_EQ(second->Size(), comparison.Size());
 
-    const MCSComparison* typed_clone = dynamic_cast<const MCSComparison*>(clone.get());
-    ASSERT_NE(typed_clone, nullptr);
-
-    const std::vector<const void*> parent_addresses =
-        MCSComparisonSnapshotAccess::SnapshotAddresses(comparison);
-    const std::vector<const void*> clone_addresses =
-        MCSComparisonSnapshotAccess::SnapshotAddresses(*typed_clone);
+    const std::vector<const void*> parent_addresses = snapshot_addresses(comparison);
+    const std::vector<const void*> first_addresses = snapshot_addresses(*first);
+    const std::vector<const void*> second_addresses = snapshot_addresses(*second);
     ASSERT_EQ(parent_addresses.size(), mols.size());
-    ASSERT_EQ(clone_addresses.size(), mols.size());
+    ASSERT_EQ(first_addresses.size(), mols.size());
+    ASSERT_EQ(second_addresses.size(), mols.size());
 
-    // Every clone address against every parent address, not index against
-    // index: an alias that also reordered its storage would pass a positional
-    // comparison.
-    for (size_t i = 0; i < clone_addresses.size(); ++i) {
-        for (size_t j = 0; j < parent_addresses.size(); ++j) {
-            EXPECT_NE(clone_addresses[i], parent_addresses[j])
-                << "clone snapshot " << i << " aliases parent snapshot " << j;
-        }
-    }
+    // The pair pdist actually puts on two threads at once.
+    expect_disjoint(first_addresses, "first clone", second_addresses, "second clone");
+    // And against the parent, which is what the class documentation claims.
+    expect_disjoint(first_addresses, "first clone", parent_addresses, "parent");
+    expect_disjoint(second_addresses, "second clone", parent_addresses, "parent");
 
-    // And the copies are faithful rather than merely distinct: morphine against
-    // penicillin G, both 25 bonds, 11 matched, 11/39.
+    // The copies are faithful rather than merely distinct: morphine against
+    // penicillin G, both 25 bonds, 11 matched over a denominator of 39. That is
+    // a similarity of 11/39, so the distance asserted here is 28/39.
     EXPECT_NEAR(comparison.Compare(0, 1), 0.717949, 1e-6);
-    EXPECT_NEAR(clone->Compare(0, 1), 0.717949, 1e-6);
+    EXPECT_NEAR(first->Compare(0, 1), 0.717949, 1e-6);
+    EXPECT_NEAR(second->Compare(0, 1), 0.717949, 1e-6);
 }
 
 TEST_F(MCSComparisonTest, CloneOutlivesItsParent) {
