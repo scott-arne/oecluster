@@ -119,7 +119,8 @@ The eleven, exhaustive against approximate bond counts:
 | testosterone / paclitaxel fragment | 19 | 18 | 857.9 ms |
 | cholesterol / testosterone | 20 | 19 | 1,839.1 ms |
 
-**Provenance: Lost** for the scan as a whole. The 120-pair and 118-pair
+**Provenance: Described** for the scan as a whole: the procedure is recorded,
+but the input set was not preserved. The 120-pair and 118-pair
 denominators, the eleven discriminating pairs and the table rows are specific
 to those sixteen molecules, and the set cannot be rebuilt: ten of the sixteen
 are named on this page, and the other six are not named anywhere. Five of the
@@ -376,8 +377,8 @@ Tanimoto has a zero denominator for them.
 **Measured.** Each has 1 atom and 0 bonds after hydrogen suppression. Methane
 against water yields no MCS matches, so the denominator is `0 + 0 - 0`.
 
-**Provenance: Pinned** for the refusal, which both suites assert -- the C++
-suite through methane, and the Python suite through the hydride cases
+**Provenance: Pinned** for methane's refusal, which the C++ suite asserts. The
+Python suite asserts the same guard through other molecules, the hydride cases
 `[H][Li]` and `[H][H]`, each expecting a `RuntimeError` naming the missing
 bonds. **Lost** for water, argon, and the methane-against-water calculation --
 all three were probed once and recorded by name only.
