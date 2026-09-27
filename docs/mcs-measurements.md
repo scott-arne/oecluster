@@ -127,11 +127,11 @@ maximum is the 8 in this table -- but nothing asserts the exhaustive 9.
 One caveat travels with the scan and was recorded at the time: one of the
 sixteen SMILES, a vancomycin fragment, parsed with an `Unclosed ring` warning
 and so was not the structure it was meant to be. It still yielded a well-formed
-56-bond molecule and the scan treated it as another input. It appears in none of the
-eleven discriminating pairs and in no test fixture, so the table above and the
-pinned pairs are unaffected. It is counted in the 120 pairs, in the 118 that
-completed, and in the 84 that change their score at `max_matches = 1` under
-"Ranking functor and `max_matches`" below.
+56-bond molecule and the scan treated it as another input. It appears in none
+of the eleven discriminating pairs and in no test fixture, so the table above
+and the pinned pairs are unaffected. It is counted in the 120 pairs, in the
+118 that completed, and in the 84 that change their score at `max_matches = 1`
+under "Ranking functor and `max_matches`" below.
 
 ## Metric properties
 
