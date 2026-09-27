@@ -401,3 +401,46 @@ def test_raw_binding_max_matches_refuses_a_bool():
     # separate reach, and this pins the lower one.
     with pytest.raises(TypeError, match="must be an integer, not a bool"):
         native.MCSOptions().max_matches = True
+
+
+def test_approximate_search_mode_is_the_default():
+    # Sucrose against the macrolide separates the two modes, so naming
+    # "approximate" explicitly has to land on the default's score rather than
+    # on the exhaustive 0.527778.
+    default = oecluster.pdist(_pair(SUCROSE, MACROLIDE), "mcs")
+    named = oecluster.pdist(_pair(SUCROSE, MACROLIDE), "mcs",
+                            search_mode="approximate")
+    assert named.condensed[0] == pytest.approx(0.605263, abs=1e-6)
+    assert named.condensed[0] == pytest.approx(default.condensed[0], abs=1e-12)
+
+
+def test_option_strings_are_case_insensitive():
+    # Each pair separates the option's values, so a fold that fell back to the
+    # default instead of matching would change the score.
+    lower = oecluster.pdist(_pair(ETHANE, ETHENE), "mcs", similarity=True,
+                            match_level="loose")
+    upper = oecluster.pdist(_pair(ETHANE, ETHENE), "mcs", similarity=True,
+                            match_level="LOOSE")
+    assert upper.condensed[0] == pytest.approx(lower.condensed[0], abs=1e-12)
+    assert upper.condensed[0] == pytest.approx(1.0)
+
+    lower = oecluster.pdist(_pair(SUCROSE, MACROLIDE), "mcs",
+                            search_mode="exhaustive")
+    mixed = oecluster.pdist(_pair(SUCROSE, MACROLIDE), "mcs",
+                            search_mode="ExHaustive")
+    assert mixed.condensed[0] == pytest.approx(lower.condensed[0], abs=1e-12)
+    assert mixed.condensed[0] == pytest.approx(0.527778, abs=1e-6)
+
+
+def test_build_comparison_reaches_the_mcs_builder():
+    # build_comparison is a module-level entry point that skips the
+    # validate_request call pdist makes first, so the builder is reached
+    # directly here, and must still consume its keyword options.
+    kwargs = {"match_level": "loose"}
+    obj, name, params = oecluster._comparisons.build_comparison(
+        _pair(ETHANE, ETHENE), "mcs", True, kwargs, symmetric=True)
+    assert name == "mcs"
+    assert params == {"comparison_type": "mcs", "similarity": True}
+    assert kwargs == {}
+    assert obj.Size() == 2
+    assert obj.Compare(0, 1) == pytest.approx(1.0)
