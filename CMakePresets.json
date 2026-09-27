@@ -21,10 +21,27 @@
                 "OPENEYE_ROOT": "/Users/johnss51/Support/openeye/lib/openeye/toolkits/2026.1.0/macOS-14-clang++16-universal",
                 "Python3_EXECUTABLE": "/Users/johnss51/Applications/micromamba/envs/main/bin/python"
             }
+        },
+        {
+            "name": "tsan",
+            "displayName": "Thread Sanitizer",
+            "binaryDir": "${sourceDir}/build-tsan",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "CMAKE_CXX_FLAGS": "-fsanitize=thread -fno-omit-frame-pointer -g",
+                "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=thread",
+                "CMAKE_SHARED_LINKER_FLAGS": "-fsanitize=thread",
+                "CMAKE_GTEST_DISCOVER_TESTS_DISCOVERY_MODE": "PRE_TEST",
+                "OECLUSTER_BUILD_PYTHON": "OFF",
+                "OECLUSTER_BUILD_TOOLS": "OFF",
+                "OPENEYE_ROOT": "/Users/johnss51/Support/openeye/lib/openeye/toolkits/2026.1.0/macOS-14-clang++16-universal",
+                "Python3_EXECUTABLE": "/Users/johnss51/Applications/micromamba/envs/main/bin/python"
+            }
         }
     ],
     "buildPresets": [
         {"name": "default", "configurePreset": "default"},
-        {"name": "debug", "configurePreset": "debug"}
+        {"name": "debug", "configurePreset": "debug"},
+        {"name": "tsan", "configurePreset": "tsan", "targets": ["oecluster_tests"]}
     ]
 }
