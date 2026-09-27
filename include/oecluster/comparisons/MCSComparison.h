@@ -174,6 +174,12 @@ public:
      * serves ``ROCSComparison``, where that loss changes every score, so the
      * ordering is load-bearing there and merely correct here.
      *
+     * C++ callers have to spell the conversion: an ``OEGraphMol*`` does not
+     * convert to an ``OEMolBase*`` implicitly, and a pointer ``static_cast``
+     * is rejected as well. Write ``&static_cast<OEChem::OEMolBase&>(graph_mol)``.
+     * Callers arriving through the bindings never see this; the typemap
+     * converts for them.
+     *
      * :param mols: Pointers to molecules.
      * :param opts: MCS options.
      */

@@ -56,6 +56,12 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   an `OEGraphMol` list at construction. A multi-conformer `OEMol` still binds
   to the `OEMol` overload and keeps its whole ensemble, so no Python call that
   worked before returns anything different now.
+
+  C++ callers have to spell the conversion. The new overload takes
+  `std::vector<OEChem::OEMolBase*>`, and an `OEGraphMol*` does not convert to
+  an `OEMolBase*` implicitly; a pointer `static_cast` is rejected too. Write
+  `&static_cast<OEChem::OEMolBase&>(graph_mol)`. Python callers are unaffected,
+  the bindings converting for them.
 - C++ callers keep source compatibility, but it was not free. A second vector
   overload made `MCSComparison({})` and `MCSComparison({nullptr})` ambiguous --
   either vector type can be brace-initialized from those, so neither candidate
