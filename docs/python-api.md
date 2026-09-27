@@ -1341,6 +1341,11 @@ Memory grows as `num_threads x n x 10.4 KB`, because each worker holds private
 copies of the molecules rather than sharing one set. That is the one cost here
 that grows with thread count instead of shrinking.
 
+Every measured number in this section is recorded in
+[MCS Comparison Measurements](mcs-measurements.md), together with what was
+measured and whether the inputs survive well enough to re-derive it. Several do
+not.
+
 ## Storage Backends
 
 `pdist()` selects the backend from its keywords: dense by default, sparse when
