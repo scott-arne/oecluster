@@ -6,6 +6,7 @@
 #include <limits>
 #include <random>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 #include "oecluster/StorageBackend.h"
@@ -2147,4 +2148,227 @@ TEST(KMedoidsFarthestFirstPinTest, MatchesThePreRefactorKernel) {
         EXPECT_TRUE(result.Converged());
         EXPECT_EQ(result.Cost(), pin.cost);
     }
+}
+
+namespace {
+
+// Delegates to MatrixRowProvider and records every FoldRow call, so a test
+// can assert which rows the kernel folded and in what mode.
+class RecordingRowProvider {
+public:
+    RecordingRowProvider(const double* data, size_t n, bool refuse_non_finite)
+        : rows_(data, n, refuse_non_finite) {}
+
+    void FoldRow(size_t p, const std::vector<bool>& selected,
+                 std::vector<double>& nearest, bool first) {
+        calls.emplace_back(p, first);
+        rows_.FoldRow(p, selected, nearest, first);
+    }
+
+    std::vector<std::pair<size_t, bool>> calls;
+
+private:
+    detail::MatrixRowProvider rows_;
+};
+
+detail::MaxMinKernelRequest MakeKernelRequest(size_t count, double threshold,
+                                              std::vector<size_t> initial) {
+    detail::MaxMinKernelRequest request;
+    request.count = count;
+    request.threshold = threshold;
+    request.initial = std::move(initial);
+    return request;
+}
+
+// Compares NaN-for-initial pick distances element by element: EXPECT_EQ on
+// the vectors would fail on NaN == NaN.
+void ExpectPickDistances(const std::vector<double>& actual,
+                         const std::vector<double>& expected) {
+    ASSERT_EQ(actual.size(), expected.size());
+    for (size_t i = 0; i < expected.size(); ++i) {
+        if (std::isnan(expected[i])) {
+            EXPECT_TRUE(std::isnan(actual[i])) << "position " << i;
+        } else {
+            EXPECT_EQ(actual[i], expected[i]) << "position " << i;
+        }
+    }
+}
+
+const double UNSET = std::numeric_limits<double>::quiet_NaN();
+
+}  // namespace
+
+TEST(MaxMinKernelTest, GlobalMedoidMatchesThePinnedSeeds) {
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    DenseStorage clean = MakeUnitLineStorage(6);
+    EXPECT_EQ(detail::global_medoid(clean.Data(), 6, 1, 1), 2u);
+
+    // A NaN poisons two sums; neither is ever strictly smaller than anything,
+    // so the argmin keeps whatever it held when it reached them.
+    DenseStorage seed_row = MakeUnitLineStorage(6);
+    seed_row.Set(0, 3, nan);
+    EXPECT_EQ(detail::global_medoid(seed_row.Data(), 6, 1, 1), 0u);
+
+    DenseStorage later_row = MakeUnitLineStorage(6);
+    later_row.Set(4, 5, nan);
+    EXPECT_EQ(detail::global_medoid(later_row.Data(), 6, 1, 1), 2u);
+}
+
+TEST(MaxMinKernelTest, GlobalMedoidIgnoresThreadCountAndChunkSize) {
+    const DenseStorage storage = MakeSmallIntegerStorage(23, 7);
+    const size_t expected =
+        detail::global_medoid(storage.Data(), 23, 1, 23);
+
+    for (const size_t threads : {size_t{1}, size_t{2}, size_t{8}}) {
+        for (const size_t chunk : {size_t{1}, size_t{2},
+                                   std::numeric_limits<size_t>::max()}) {
+            EXPECT_EQ(detail::global_medoid(storage.Data(), 23, threads, chunk),
+                      expected)
+                << "threads " << threads << ", chunk " << chunk;
+        }
+    }
+}
+
+TEST(MaxMinKernelTest, StopsAtTheCountWithoutFoldingTheLastPick) {
+    DenseStorage storage = MakeUnitLineStorage(6);
+    RecordingRowProvider rows(storage.Data(), 6, true);
+
+    const detail::MaxMinKernelResult result =
+        detail::maxmin_run(rows, 6, MakeKernelRequest(3, UNSET, {0}));
+
+    EXPECT_EQ(result.indices, std::vector<size_t>({0, 5, 2}));
+    ExpectPickDistances(result.pick_distances, {UNSET, 5.0, 2.0});
+    EXPECT_EQ(result.stop, detail::MaxMinKernelStop::Count);
+    // Row 2 completed the count and is never folded.
+    EXPECT_EQ(rows.calls, (std::vector<std::pair<size_t, bool>>{
+                              {0, true}, {5, false}}));
+}
+
+TEST(MaxMinKernelTest, NeverReadsTheRowOfThePickThatCompletesTheCount) {
+    // Row 5 is poisoned everywhere except (0, 5), the one pair read before 5
+    // is picked. With refusal on, any later read of row 5 would throw.
+    DenseStorage storage = MakeUnitLineStorage(6);
+    for (size_t j = 1; j < 5; ++j) {
+        storage.Set(j, 5, std::numeric_limits<double>::quiet_NaN());
+    }
+    detail::MatrixRowProvider rows(storage.Data(), 6, true);
+
+    const detail::MaxMinKernelResult result =
+        detail::maxmin_run(rows, 6, MakeKernelRequest(2, UNSET, {0}));
+
+    EXPECT_EQ(result.indices, std::vector<size_t>({0, 5}));
+}
+
+TEST(MaxMinKernelTest, StopsBeforeACandidateAtTheThreshold) {
+    DenseStorage storage = MakeUnitLineStorage(6);
+    detail::MatrixRowProvider rows(storage.Data(), 6, true);
+
+    const detail::MaxMinKernelResult result =
+        detail::maxmin_run(rows, 6, MakeKernelRequest(0, 2.0, {0}));
+
+    // After {0, 5} the best candidate is 2 at exactly 2.0: at the threshold
+    // is not beyond it, so it is not added.
+    EXPECT_EQ(result.indices, std::vector<size_t>({0, 5}));
+    ExpectPickDistances(result.pick_distances, {UNSET, 5.0});
+    EXPECT_EQ(result.stop, detail::MaxMinKernelStop::Threshold);
+}
+
+TEST(MaxMinKernelTest, ReportsExhaustionWhenEveryItemIsSelected) {
+    DenseStorage storage = MakeUnitLineStorage(3);
+    detail::MatrixRowProvider rows(storage.Data(), 3, true);
+
+    const detail::MaxMinKernelResult result =
+        detail::maxmin_run(rows, 3, MakeKernelRequest(0, 0.0, {0}));
+
+    EXPECT_EQ(result.indices, std::vector<size_t>({0, 2, 1}));
+    ExpectPickDistances(result.pick_distances, {UNSET, 2.0, 1.0});
+    EXPECT_EQ(result.stop, detail::MaxMinKernelStop::Exhausted);
+}
+
+TEST(MaxMinKernelTest, ChecksTheCountBeforeExhaustion) {
+    DenseStorage storage = MakeUnitLineStorage(3);
+    detail::MatrixRowProvider rows(storage.Data(), 3, true);
+
+    const detail::MaxMinKernelResult result =
+        detail::maxmin_run(rows, 3, MakeKernelRequest(3, UNSET, {1}));
+
+    EXPECT_EQ(result.indices, std::vector<size_t>({1, 0, 2}));
+    EXPECT_EQ(result.stop, detail::MaxMinKernelStop::Count);
+}
+
+TEST(MaxMinKernelTest, AnInitialSetThatMeetsTheCountFoldsNothing) {
+    DenseStorage storage = MakeUnitLineStorage(6);
+    RecordingRowProvider rows(storage.Data(), 6, true);
+
+    const detail::MaxMinKernelResult result =
+        detail::maxmin_run(rows, 6, MakeKernelRequest(2, UNSET, {3, 1}));
+
+    EXPECT_EQ(result.indices, std::vector<size_t>({3, 1}));
+    ExpectPickDistances(result.pick_distances, {UNSET, UNSET});
+    EXPECT_EQ(result.stop, detail::MaxMinKernelStop::Count);
+    EXPECT_TRUE(rows.calls.empty());
+}
+
+TEST(MaxMinKernelTest, FoldsEveryInitialRowAssigningOnlyTheFirst) {
+    DenseStorage storage = MakeUnitLineStorage(6);
+    RecordingRowProvider rows(storage.Data(), 6, true);
+
+    const detail::MaxMinKernelResult result =
+        detail::maxmin_run(rows, 6, MakeKernelRequest(4, UNSET, {4, 1}));
+
+    EXPECT_EQ(result.indices, std::vector<size_t>({4, 1, 0, 2}));
+    ExpectPickDistances(result.pick_distances, {UNSET, UNSET, 1.0, 1.0});
+    EXPECT_EQ(rows.calls, (std::vector<std::pair<size_t, bool>>{
+                              {4, true}, {1, false}, {0, false}}));
+}
+
+TEST(MaxMinKernelTest, NeverReadsAPairBetweenTwoInitialEntries) {
+    DenseStorage storage = MakeUnitLineStorage(6);
+    storage.Set(1, 4, std::numeric_limits<double>::quiet_NaN());
+    detail::MatrixRowProvider rows(storage.Data(), 6, true);
+
+    const detail::MaxMinKernelResult result =
+        detail::maxmin_run(rows, 6, MakeKernelRequest(4, UNSET, {4, 1}));
+
+    EXPECT_EQ(result.indices, std::vector<size_t>({4, 1, 0, 2}));
+}
+
+TEST(MaxMinKernelTest, MatrixRowProviderRefusesANonFiniteReadWhenAsked) {
+    for (const double bad : {std::numeric_limits<double>::quiet_NaN(),
+                             std::numeric_limits<double>::infinity()}) {
+        DenseStorage storage = MakeUnitLineStorage(6);
+        storage.Set(0, 3, bad);
+        detail::MatrixRowProvider rows(storage.Data(), 6, true);
+        std::vector<bool> selected(6, false);
+        selected[0] = true;
+        std::vector<double> nearest(6, 0.0);
+
+        try {
+            rows.FoldRow(0, selected, nearest, true);
+            FAIL() << "expected std::invalid_argument";
+        } catch (const std::invalid_argument& error) {
+            EXPECT_STREQ(error.what(),
+                         "Diversity selection read a non-finite distance "
+                         "between items 0 and 3");
+        }
+    }
+}
+
+// The legacy semantics k-medoids depends on: the first row assigns, so a NaN
+// lands in nearest and no later strict comparison ever displaces it.
+TEST(MaxMinKernelTest, MatrixRowProviderKeepsAFirstRowNaNWhenNotRefusing) {
+    DenseStorage storage = MakeUnitLineStorage(6);
+    storage.Set(0, 3, std::numeric_limits<double>::quiet_NaN());
+    detail::MatrixRowProvider rows(storage.Data(), 6, false);
+    std::vector<bool> selected(6, false);
+    selected[0] = true;
+    selected[5] = true;
+    std::vector<double> nearest(6, 0.0);
+
+    rows.FoldRow(0, selected, nearest, true);
+    rows.FoldRow(5, selected, nearest, false);
+
+    EXPECT_TRUE(std::isnan(nearest[3]));
+    EXPECT_EQ(nearest[1], 1.0);
+    EXPECT_EQ(nearest[4], 1.0);
 }

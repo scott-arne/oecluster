@@ -75,37 +75,12 @@ void validate_options(const StorageBackend& storage,
     throw std::invalid_argument("Unknown k-medoids initialization method");
 }
 
-size_t global_medoid(const double* data, size_t n, size_t num_threads,
-                     size_t chunk_size) {
-    std::vector<double> sums(n, 0.0);
-
-    ThreadPool pool(num_threads);
-    pool.ParallelFor(0, n, detail::effective_chunk_size(n, chunk_size),
-                     [&](size_t begin, size_t end) {
-        for (size_t candidate = begin; candidate < end; ++candidate) {
-            double sum = 0.0;
-            for (size_t j = 0; j < n; ++j) {
-                sum += detail::dense_distance(data, n, candidate, j);
-            }
-            sums[candidate] = sum;
-        }
-    });
-
-    size_t best = 0;
-    for (size_t candidate = 1; candidate < n; ++candidate) {
-        if (sums[candidate] < sums[best]) {
-            best = candidate;
-        }
-    }
-    return best;
-}
-
 std::vector<size_t> build_initialize(const double* data, size_t n, size_t k,
                                      size_t num_threads, size_t chunk_size) {
     std::vector<size_t> medoids;
     medoids.reserve(k);
 
-    const size_t first = global_medoid(data, n, num_threads, chunk_size);
+    const size_t first = detail::global_medoid(data, n, num_threads, chunk_size);
     medoids.push_back(first);
 
     std::vector<bool> selected(n, false);
@@ -167,7 +142,7 @@ std::vector<size_t> farthest_first_initialize(const double* data, size_t n,
     // Seeding at the global medoid rather than item 0 costs one O(n^2) pass and
     // buys permutation invariance: an item-0 seed makes the whole clustering
     // depend on input row order.
-    const size_t seed = global_medoid(data, n, num_threads, chunk_size);
+    const size_t seed = detail::global_medoid(data, n, num_threads, chunk_size);
     return detail::maxmin_select_from(data, n, k, seed);
 }
 
