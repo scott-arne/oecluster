@@ -2372,3 +2372,52 @@ TEST(MaxMinKernelTest, MatrixRowProviderKeepsAFirstRowNaNWhenNotRefusing) {
     EXPECT_EQ(nearest[1], 1.0);
     EXPECT_EQ(nearest[4], 1.0);
 }
+
+// Recorded from the pre-refactor kernel at commit 734bd43.
+TEST(MaxMinKernelTest, RawPickSequenceMatchesPreRefactorKernel) {
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const size_t n = 6;
+
+    // Fixture: ties (k=4)
+    {
+        DenseStorage storage = MakeUnitLineStorage(n);
+        const size_t seed = detail::global_medoid(storage.Data(), n, 1, 1);
+        EXPECT_EQ(seed, 2u);
+        const std::vector<size_t> sequence =
+            detail::maxmin_select_from(storage.Data(), n, 4, seed);
+        EXPECT_EQ(sequence, std::vector<size_t>({2, 5, 0, 1}));
+    }
+
+    // Fixture: nan_in_the_seed_row (k=3)
+    {
+        DenseStorage storage = MakeUnitLineStorage(n);
+        storage.Set(0, 3, nan);
+        const size_t seed = detail::global_medoid(storage.Data(), n, 1, 1);
+        EXPECT_EQ(seed, 0u);
+        const std::vector<size_t> sequence =
+            detail::maxmin_select_from(storage.Data(), n, 3, seed);
+        EXPECT_EQ(sequence, std::vector<size_t>({0, 5, 2}));
+    }
+
+    // Fixture: nan_in_a_later_row (k=4)
+    {
+        DenseStorage storage = MakeUnitLineStorage(n);
+        storage.Set(4, 5, nan);
+        const size_t seed = detail::global_medoid(storage.Data(), n, 1, 1);
+        EXPECT_EQ(seed, 2u);
+        const std::vector<size_t> sequence =
+            detail::maxmin_select_from(storage.Data(), n, 4, seed);
+        EXPECT_EQ(sequence, std::vector<size_t>({2, 5, 0, 4}));
+    }
+
+    // Fixture: nan_beside_the_seed (k=3)
+    {
+        DenseStorage storage = MakeUnitLineStorage(n);
+        storage.Set(0, 1, nan);
+        const size_t seed = detail::global_medoid(storage.Data(), n, 1, 1);
+        EXPECT_EQ(seed, 0u);
+        const std::vector<size_t> sequence =
+            detail::maxmin_select_from(storage.Data(), n, 3, seed);
+        EXPECT_EQ(sequence, std::vector<size_t>({0, 1, 5}));
+    }
+}
