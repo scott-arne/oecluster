@@ -20,9 +20,10 @@ class StorageBackend;
 struct PDistOptions {
     size_t num_threads = 0;   ///< Number of threads (0 = auto-detect)
     size_t chunk_size = 256;  ///< Number of pairs per work unit
-    /// Not read by pdist or by the bundled TryPDist overrides: filtering is the storage backend's job, so pass a
-    /// SparseStorage to drop distances above a cutoff. Kept for callers that
-    /// record the cutoff alongside the options.
+    /// Not read by pdist or by the bundled TryPDist overrides: filtering is
+    /// the storage backend's job, so pass a SparseStorage to drop distances
+    /// above a cutoff. Kept for callers that record the cutoff alongside the
+    /// options.
     double cutoff = 0.0;
 
     /// Progress callback: (completed_pairs, total_pairs)

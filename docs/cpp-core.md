@@ -40,7 +40,8 @@ for (size_t i = 0; i < mols.size(); ++i) {
 ```
 
 `PDistOptions` controls threading (`num_threads`, `0` for auto-detect),
-`chunk_size`, a sparse `cutoff`, and an optional progress callback. `CDist.h`
+`chunk_size`, and an optional progress callback; its `cutoff` field is not
+read, because a `SparseStorage` applies its own cutoff. `CDist.h`
 provides the matching cross-distance engine for the rectangular NxM case.
 
 ## Pairwise Comparisons
