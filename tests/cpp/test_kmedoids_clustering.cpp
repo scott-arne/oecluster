@@ -2085,3 +2085,66 @@ TEST(KMedoidsDegenerateTest, SingleClusterReturnsTheGlobalMedoid) {
     EXPECT_TRUE(result.Converged());
     EXPECT_EQ(result.NumClusters(), 1u);
 }
+
+namespace {
+
+// Items on a line at their own index, d(i, j) = j - i. Every distance ties
+// with several others, so FarthestFirst's tie rule decides most picks.
+DenseStorage MakeUnitLineStorage(size_t n) {
+    DenseStorage storage(n);
+    for (size_t i = 0; i < n; ++i) {
+        for (size_t j = i + 1; j < n; ++j) {
+            storage.Set(i, j, static_cast<double>(j - i));
+        }
+    }
+    return storage;
+}
+
+struct FarthestFirstPin {
+    const char* name;
+    size_t nan_i;  // SIZE_MAX leaves every distance finite.
+    size_t nan_j;
+    size_t k;
+    std::vector<size_t> medoids;
+    std::vector<ClusterLabel> labels;
+    size_t iterations;
+    double cost;
+};
+
+// Recorded from the pre-refactor kernel. FarthestFirst never validated
+// finiteness, and moving it onto the shared MaxMin kernel must not change a
+// single observable: the NaN rows pin the exact first-row assignment and
+// strict-improvement semantics a NaN exercises.
+std::vector<FarthestFirstPin> FarthestFirstPins() {
+    const size_t none = std::numeric_limits<size_t>::max();
+    return {
+        {"ties", none, none, 4, {0, 1, 2, 5}, {0, 1, 2, 2, 3, 3}, 0, 2.0},
+        {"nan_in_the_seed_row", 0, 3, 3, {0, 2, 5}, {0, 0, 1, 1, 2, 2}, 0, 3.0},
+        {"nan_in_a_later_row", 4, 5, 4, {0, 2, 4, 5}, {0, 0, 1, 1, 2, 3}, 0, 2.0},
+        {"nan_beside_the_seed", 0, 1, 3, {0, 2, 5}, {0, 1, 1, 1, 2, 2}, 1, 3.0},
+    };
+}
+
+}  // namespace
+
+TEST(KMedoidsFarthestFirstPinTest, MatchesThePreRefactorKernel) {
+    for (const FarthestFirstPin& pin : FarthestFirstPins()) {
+        SCOPED_TRACE(pin.name);
+        DenseStorage storage = MakeUnitLineStorage(6);
+        if (pin.nan_i != std::numeric_limits<size_t>::max()) {
+            storage.Set(pin.nan_i, pin.nan_j,
+                        std::numeric_limits<double>::quiet_NaN());
+        }
+        KMedoidsOptions options;
+        options.n_clusters = pin.k;
+        options.init = KMedoidsInit::FarthestFirst;
+
+        const KMedoidsResult result = k_medoids_cluster(storage, options);
+
+        EXPECT_EQ(result.Medoids(), pin.medoids);
+        EXPECT_EQ(result.Labels(), pin.labels);
+        EXPECT_EQ(result.NumIterations(), pin.iterations);
+        EXPECT_TRUE(result.Converged());
+        EXPECT_EQ(result.Cost(), pin.cost);
+    }
+}
