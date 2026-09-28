@@ -687,7 +687,8 @@ Options for parallel pairwise-distance computation.
 
 :ivar num_threads: Number of threads (0 = auto-detect).
 :ivar chunk_size: Pairs processed per work unit.
-:ivar cutoff: Distance cutoff for sparse storage (0 = store all).
+:ivar cutoff: Not read by the native pdist; a SparseStorage applies its own
+    cutoff.
 :ivar progress: Optional callback(completed, total) for progress reporting.
 """
 

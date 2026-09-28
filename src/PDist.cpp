@@ -31,6 +31,24 @@ void pdist(PairwiseComparison& comparison, StorageBackend& storage,
         throw ComparisonError("pdist storage size does not match the comparison size");
     }
 
+    // A SparseStorage keeps only values at or below its cutoff, which for a
+    // similarity discards exactly the most similar pairs. Every SparseStorage
+    // filters, whatever the sign of its cutoff, so the refusal keys on the
+    // backend type rather than on the value; PDistOptions::cutoff is not read
+    // by the driver at all. Only a reported similarity is refused: an Unknown
+    // orientation is accepted so comparisons without facts keep working. Placed
+    // ahead of the empty-domain shortcut and the bulk TryPDist path, which
+    // writes into the same storage, for the same reason as the size check.
+    if (dynamic_cast<SparseStorage*>(&storage) != nullptr &&
+        comparison.Facts().is_distance == Capability::No) {
+        throw ComparisonError(
+            "pdist cannot write a comparison that reports similarities into "
+            "SparseStorage: its cutoff keeps only values at or below the "
+            "threshold, which would discard the highest similarities. Use "
+            "DenseStorage or MMapStorage, or build the comparison to report "
+            "distances");
+    }
+
     const size_t total_pairs = n * (n - 1) / 2;
 
     if (total_pairs == 0) {

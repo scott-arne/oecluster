@@ -144,3 +144,71 @@ TEST(CDistBulkTest, UsesBulkComparisonWhenAvailable) {
     EXPECT_EQ(callback_count, 1);
     EXPECT_DOUBLE_EQ(output[0], 0.25);
 }
+
+// A positive cutoff zeroes every value above it, which for a similarity is
+// exactly the closest pairs, so the driver refuses the pairing. Fingerprint
+// comparisons take the bulk TryCDist path, so the refusal must precede it.
+TEST_F(CDistTest, SimilarityWithCutoffThrows) {
+    FingerprintOptions fp_opts;
+    fp_opts.similarity = true;
+    FingerprintComparison comparison(mols_, fp_opts);
+    ASSERT_EQ(comparison.Facts().is_distance, Capability::No);
+    std::vector<double> output(2 * 3, -1.0);
+    size_t progress_calls = 0;
+    CDistOptions opts;
+    opts.cutoff = 0.5;
+    opts.progress = [&](size_t, size_t) { ++progress_calls; };
+
+    EXPECT_THROW(cdist(comparison, 2, output.data(), opts), ComparisonError);
+    EXPECT_EQ(progress_calls, 0u);
+    for (double value : output) {
+        EXPECT_EQ(value, -1.0);
+    }
+}
+
+TEST_F(CDistTest, SimilarityWithCutoffThrowsEvenWithNoPairs) {
+    // The contract must not depend on how many pairs there are.
+    FingerprintOptions fp_opts;
+    fp_opts.similarity = true;
+    FingerprintComparison comparison(mols_, fp_opts);
+    CDistOptions opts;
+    opts.cutoff = 0.5;
+    EXPECT_THROW(cdist(comparison, mols_.size(), nullptr, opts), ComparisonError);
+}
+
+TEST_F(CDistTest, DistanceWithCutoffStillWorks) {
+    FingerprintComparison comparison(mols_);
+    ASSERT_EQ(comparison.Facts().is_distance, Capability::Yes);
+    const size_t n_a = 2;
+    const size_t n_b = 3;
+    const double cutoff = 0.9;
+    std::vector<double> output(n_a * n_b, -1.0);
+    CDistOptions opts;
+    opts.cutoff = cutoff;
+
+    cdist(comparison, n_a, output.data(), opts);
+
+    for (size_t i = 0; i < n_a; ++i) {
+        for (size_t j = 0; j < n_b; ++j) {
+            const double distance = comparison.Compare(i, n_a + j);
+            EXPECT_NEAR(output[i * n_b + j], distance > cutoff ? 0.0 : distance, 1e-12);
+        }
+    }
+}
+
+TEST_F(CDistTest, SimilarityWithoutCutoffStillWorks) {
+    FingerprintOptions fp_opts;
+    fp_opts.similarity = true;
+    FingerprintComparison comparison(mols_, fp_opts);
+    const size_t n_a = 2;
+    const size_t n_b = 3;
+    std::vector<double> output(n_a * n_b, -1.0);
+
+    cdist(comparison, n_a, output.data());
+
+    for (size_t i = 0; i < n_a; ++i) {
+        for (size_t j = 0; j < n_b; ++j) {
+            EXPECT_NEAR(output[i * n_b + j], comparison.Compare(i, n_a + j), 1e-12);
+        }
+    }
+}

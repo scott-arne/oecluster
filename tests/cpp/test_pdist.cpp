@@ -4,6 +4,9 @@
 #include "oecluster/Error.h"
 #include "oecluster/StorageBackend.h"
 #include "oecluster/PairwiseComparison.h"
+#include "oecluster/comparisons/FingerprintComparison.h"
+#include <oechem.h>
+#include <vector>
 
 using namespace OECluster;
 
@@ -139,4 +142,83 @@ TEST(PDistTest, RejectsStorageSizeMismatch) {
 
     DenseStorage too_large(5);
     EXPECT_THROW(pdist(comparison, too_large), ComparisonError);
+}
+
+// A sparse backend keeps only values at or below its cutoff. For a similarity
+// that discards exactly the closest pairs, so the driver refuses the pairing
+// outright. Fingerprint comparisons also take the bulk TryPDist path, which is
+// why the refusal has to land ahead of it.
+class PDistCutoffOrientationTest : public ::testing::Test {
+protected:
+    void SetUp() override {
+        for (const char* smiles : {"c1ccccc1", "Cc1ccccc1", "c1ccncc1"}) {
+            graph_mols_.emplace_back();
+            ASSERT_TRUE(OEChem::OESmilesToMol(graph_mols_.back(), smiles)) << smiles;
+        }
+        for (auto& mol : graph_mols_) {
+            mols_.push_back(&static_cast<OEChem::OEMolBase&>(mol));
+        }
+    }
+
+    FingerprintComparison MakeComparison(bool similarity) {
+        FingerprintOptions opts;
+        opts.similarity = similarity;
+        return FingerprintComparison(mols_, opts);
+    }
+
+    std::vector<OEChem::OEGraphMol> graph_mols_;
+    std::vector<OEChem::OEMolBase*> mols_;
+};
+
+TEST_F(PDistCutoffOrientationTest, SimilarityIntoSparseStorageThrows) {
+    FingerprintComparison comparison = MakeComparison(true);
+    ASSERT_EQ(comparison.Facts().is_distance, Capability::No);
+    SparseStorage storage(comparison.Size(), 0.5);
+    size_t progress_calls = 0;
+    PDistOptions opts;
+    opts.progress = [&](size_t, size_t) { ++progress_calls; };
+
+    EXPECT_THROW(pdist(comparison, storage, opts), ComparisonError);
+    EXPECT_EQ(progress_calls, 0u);
+}
+
+TEST_F(PDistCutoffOrientationTest, SimilarityIntoZeroCutoffSparseStorageThrows) {
+    // A zero cutoff still filters: SparseStorage drops every value above it.
+    FingerprintComparison comparison = MakeComparison(true);
+    SparseStorage storage(comparison.Size(), 0.0);
+    EXPECT_THROW(pdist(comparison, storage), ComparisonError);
+}
+
+TEST_F(PDistCutoffOrientationTest, DistanceIntoSparseStorageStillWorks) {
+    FingerprintComparison comparison = MakeComparison(false);
+    ASSERT_EQ(comparison.Facts().is_distance, Capability::Yes);
+    const double cutoff = 0.9;
+    SparseStorage storage(comparison.Size(), cutoff);
+
+    pdist(comparison, storage);
+
+    size_t expected = 0;
+    for (size_t i = 0; i < comparison.Size(); ++i) {
+        for (size_t j = i + 1; j < comparison.Size(); ++j) {
+            const double distance = comparison.Compare(i, j);
+            if (distance <= cutoff) {
+                ++expected;
+                EXPECT_NEAR(storage.Get(i, j), distance, 1e-12);
+            }
+        }
+    }
+    EXPECT_EQ(storage.Entries().size(), expected);
+}
+
+TEST_F(PDistCutoffOrientationTest, SimilarityIntoDenseStorageStillWorks) {
+    FingerprintComparison comparison = MakeComparison(true);
+    DenseStorage storage(comparison.Size());
+
+    pdist(comparison, storage);
+
+    for (size_t i = 0; i < comparison.Size(); ++i) {
+        for (size_t j = i + 1; j < comparison.Size(); ++j) {
+            EXPECT_NEAR(storage.Get(i, j), comparison.Compare(i, j), 1e-12);
+        }
+    }
 }

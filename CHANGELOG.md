@@ -79,8 +79,18 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   and the same corruption went through: the benzene-toluene MCS score of
   0.857 came back as `0.0`. The orientation is read from the object's own
   facts before any pair is scored. An object that reports no orientation is
-  still accepted, and `cdist` needs no change because it refuses prebuilt
-  objects outright.
+  still accepted, and the Python `cdist` needs no change because it refuses
+  prebuilt objects outright.
+- The native `pdist` and `cdist` drivers now refuse the same combination with
+  `ComparisonError`, which the Python bindings raise as `RuntimeError`. The
+  guards above live in the Python wrappers, so C++ callers and callers of the
+  raw SWIG bindings still reached the corruption. Native `pdist` refuses a
+  comparison whose facts report similarities when the storage is a
+  `SparseStorage`, whatever that storage's cutoff; native `cdist` refuses one
+  when `CDistOptions::cutoff > 0`. Both refuse before any pair is scored, and
+  a comparison that reports no orientation is still accepted.
+  `PDistOptions::cutoff` is not read by the native driver at all -- the
+  storage applies its own cutoff -- and is now documented that way.
 
 ### Changed
 

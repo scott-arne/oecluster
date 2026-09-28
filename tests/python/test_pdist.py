@@ -257,6 +257,40 @@ def test_pdist_prebuilt_similarity_without_sparse_storage_is_accepted(
     assert np.asarray(mapped.condensed) == pytest.approx([6.0 / 7.0])
 
 
+def test_raw_pdist_refuses_similarity_into_sparse_storage():
+    """The native driver refuses what the wrapper refuses, for raw callers.
+
+    The SWIG exception handler maps ``ComparisonError`` to ``RuntimeError``.
+    Without the native guard the benzene-toluene MCS similarity of 0.857 is
+    dropped by the sparse storage and reads back as 0.0.
+    """
+    import oecluster
+    from oecluster import oecluster as native
+
+    mols = _benzene_toluene()
+    comparison = oecluster.MCSComparison(mols, similarity=True)
+    storage = oecluster.SparseStorage(comparison.Size(), 0.5)
+
+    with pytest.raises(RuntimeError, match="reports similarities"):
+        native.pdist(comparison, storage, oecluster.PDistOptions())
+
+
+def test_raw_cdist_refuses_similarity_with_cutoff():
+    """The native cdist refuses a cutoff for a similarity comparison."""
+    import oecluster
+    from oecluster import oecluster as native
+
+    mols = _benzene_toluene()
+    comparison = oecluster.MCSComparison(mols, similarity=True)
+    output = np.full((1, 1), -1.0, dtype=np.float64)
+    options = oecluster.CDistOptions()
+    options.cutoff = 0.5
+
+    with pytest.raises(RuntimeError, match="reports similarities"):
+        native.cdist_into_address(comparison, 1, output.ctypes.data, options)
+    assert output[0, 0] == -1.0
+
+
 def test_pdist_cutoff_positivity_is_decided_once():
     """A cutoff whose truth value is unstable cannot slip past the guard.
 

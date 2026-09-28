@@ -9,6 +9,7 @@
 #include <mutex>
 #include <vector>
 
+#include "oecluster/Error.h"
 #include "oecluster/PairwiseComparison.h"
 #include "oecluster/ThreadPool.h"
 
@@ -19,6 +20,21 @@ void cdist(PairwiseComparison& comparison, size_t n_a, double* output,
     const size_t n_total = comparison.Size();
     const size_t n_b = n_total - n_a;
     const size_t total_pairs = n_a * n_b;
+
+    // A positive cutoff zeroes every value above it, which for a similarity
+    // discards exactly the most similar pairs. Only a reported similarity is
+    // refused: an Unknown orientation is accepted so comparisons without facts
+    // keep working. Placed ahead of the empty-domain return and the bulk
+    // TryCDist path, which applies the cutoff itself, so the contract does not
+    // depend on how many pairs there are or which path scores them.
+    if (options.cutoff > 0.0 &&
+        comparison.Facts().is_distance == Capability::No) {
+        throw ComparisonError(
+            "cdist cannot apply a cutoff to a comparison that reports "
+            "similarities: the cutoff zeroes values above the threshold, which "
+            "would discard the highest similarities. Set cutoff to 0.0, or "
+            "build the comparison to report distances");
+    }
 
     if (total_pairs == 0) return;
 
