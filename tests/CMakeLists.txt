@@ -34,6 +34,8 @@ add_executable(oecluster_tests
     cpp/test_descriptor_comparison.cpp
     cpp/test_sar_coherence.cpp
     cpp/test_kmedoids_clustering.cpp
+    cpp/test_maxmin_select.cpp
+    cpp/test_circles.cpp
     cpp/test_murcko_scaffold.cpp
     cpp/test_umbrella_header.cpp
 )

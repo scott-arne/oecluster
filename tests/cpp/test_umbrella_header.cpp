@@ -134,3 +134,15 @@ TEST(UmbrellaHeaderTest, ReachesTheClusterQualityHeaders) {
     const OECluster::ModelabilityOptions model_options;
     EXPECT_EQ(model_options.num_threads, 0u);
 }
+
+// DiversitySelection.h joined the umbrella in 5.8.0; naming both options
+// structs keeps it from silently dropping out, as ClusterReport.h once did.
+TEST(UmbrellaHeaderTest, ReachesTheDiversitySelectionHeader) {
+    const OECluster::MaxMinOptions maxmin_options;
+    EXPECT_EQ(maxmin_options.count, 0u);
+    EXPECT_EQ(maxmin_options.seed_mode, OECluster::MaxMinSeed::Index);
+    EXPECT_EQ(maxmin_options.chunk_size, 256u);
+
+    const OECluster::CirclesOptions circles_options;
+    EXPECT_EQ(circles_options.method, OECluster::CirclesMethod::MaxMin);
+}

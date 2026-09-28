@@ -145,6 +145,7 @@ set(OECLUSTER_SOURCES
     src/clustering/BitBirch.cpp
     src/clustering/PartitionAgreement.cpp
     src/clustering/SARCoherence.cpp
+    src/clustering/DiversitySelection.cpp
     src/clustering/MurckoScaffold.cpp
     src/DescriptorBuild.cpp
     src/DescriptorStatistics.cpp
