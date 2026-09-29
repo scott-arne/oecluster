@@ -344,6 +344,23 @@ def test_a_non_int_initial_entry_is_a_type_error(entry):
         oecluster.maxmin_select(_line_matrix(), count=2, initial=[entry])
 
 
+def test_a_one_shot_initial_iterable_is_consumed_exactly_once():
+    """A generator or iterator is materialized once; valid entries work."""
+    by_iterator = oecluster.maxmin_select(_line_matrix(), count=3,
+                                          initial=iter([1, 3]))
+    by_list = oecluster.maxmin_select(_line_matrix(), count=3,
+                                      initial=[1, 3])
+    assert by_iterator.indices == by_list.indices == [1, 3, 2]
+
+
+def test_an_invalid_one_shot_initial_iterable_is_refused():
+    """A generator with invalid entries still raises TypeError."""
+    with pytest.raises(TypeError, match="initial must be a sequence of ints"):
+        oecluster.maxmin_select(_line_matrix(), count=2, initial=iter([1.5]))
+    with pytest.raises(TypeError, match="initial must be a sequence of ints"):
+        oecluster.maxmin_select(_line_matrix(), count=2, initial=iter([True]))
+
+
 def test_the_medoid_seed_needs_a_matrix():
     mols = _mols(FP_SMILES)
     with pytest.raises(ValueError, match="requires a distance matrix"):

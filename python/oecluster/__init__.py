@@ -5326,10 +5326,12 @@ def maxmin_select(items, *, count=None, threshold=None, seed=_SEED_UNSET,
     else:
         # bool passes operator.index(); it is refused as _diversity_int
         # refuses it, so initial=[True] is not read as position 1.
+        # Materialize the iterable once so one-shot iterators work.
         try:
-            if any(isinstance(p, bool) for p in initial):
+            initial_list = list(initial)
+            if any(isinstance(p, bool) for p in initial_list):
                 raise TypeError("bool entry")
-            initial_positions = [operator.index(p) for p in initial]
+            initial_positions = [operator.index(p) for p in initial_list]
         except TypeError as error:
             raise TypeError(
                 "maxmin_select() initial must be a sequence of ints"
