@@ -703,3 +703,155 @@ def test_the_new_entry_points_release_the_gil():
         assert text.index(invocation) < include_at, (
             f"{invocation} must precede the %include that declares {name}, or "
             "SWIG applies the exception handler to nothing")
+
+
+# Five points on a line at these coordinates; the distance is the gap. Farthest
+# first from item 0 picks 4 (8 away), then 2 (3 from its nearest pick).
+_LINE = (0.0, 1.0, 3.0, 7.0, 8.0)
+
+
+def _line_storage(native, positions=_LINE):
+    storage = native.DenseStorage(len(positions))
+    for i in range(len(positions)):
+        for j in range(i + 1, len(positions)):
+            storage.Set(i, j, abs(positions[i] - positions[j]))
+    return storage
+
+
+def test_maxmin_select_is_exposed(native):
+    options = native.MaxMinOptions()
+    assert options.count == 0
+    assert math.isnan(options.threshold)
+    assert options.seed_mode == native.MaxMinSeed_Index
+    assert options.seed == 0
+    assert options.num_threads == 0
+    assert options.chunk_size == 256
+
+    options.count = 3
+    result = native.maxmin_select(_line_storage(native), options)
+    assert list(result.indices) == [0, 4, 2]
+    assert math.isnan(result.pick_distances[0])
+    assert list(result.pick_distances)[1:] == [8.0, 3.0]
+    assert result.stop == native.MaxMinStop_Count
+
+
+def test_maxmin_select_takes_an_initial_selection(native):
+    options = native.MaxMinOptions()
+    options.count = 3
+    initial = native.SizeTVector()
+    initial.push_back(1)
+    initial.push_back(3)
+    options.initial = initial
+    result = native.maxmin_select(_line_storage(native), options)
+    assert list(result.indices) == [1, 3, 2]
+    assert list(result.pick_distances)[2] == 2.0
+
+
+def test_maxmin_select_runs_on_a_comparison(native):
+    options = native.MaxMinOptions()
+    options.count = 2
+    options.seed_mode = native.MaxMinSeed_Farthest
+    comparison = native.FingerprintComparison(_benzene_series(),
+                                              native.FingerprintOptions())
+    result = native.maxmin_select(comparison, options)
+    assert len(result.indices) == 2
+    assert result.stop == native.MaxMinStop_Count
+
+
+def test_the_stop_and_seed_enums_are_exposed(native):
+    assert {native.MaxMinStop_Count, native.MaxMinStop_Threshold,
+            native.MaxMinStop_Exhausted} == {0, 1, 2}
+    assert {native.MaxMinSeed_Index, native.MaxMinSeed_Medoid,
+            native.MaxMinSeed_Farthest} == {0, 1, 2}
+    assert {native.CirclesMethod_MaxMin,
+            native.CirclesMethod_Sequential} == {0, 1}
+
+
+def test_circles_is_exposed(native):
+    options = native.CirclesOptions()
+    assert options.method == native.CirclesMethod_MaxMin
+    assert options.num_threads == 0
+    assert options.chunk_size == 256
+
+    packing = native.circles(_line_storage(native), 2.5, options)
+    assert packing.count == 3
+    assert list(packing.members) == [0, 4, 2]
+    assert packing.threshold == 2.5
+    assert packing.method == native.CirclesMethod_MaxMin
+
+    options.method = native.CirclesMethod_Sequential
+    packing = native.circles(_line_storage(native), 2.5, options)
+    assert list(packing.members) == [0, 2, 3]
+    assert packing.method == native.CirclesMethod_Sequential
+
+
+def test_maxmin_select_without_a_stop_condition_is_a_runtime_error(native):
+    with pytest.raises(RuntimeError,
+                       match="requires a count, a threshold, or both"):
+        native.maxmin_select(_line_storage(native), native.MaxMinOptions())
+
+
+def test_a_similarity_comparison_is_a_runtime_error(native):
+    fingerprint_options = native.FingerprintOptions()
+    fingerprint_options.similarity = True
+    comparison = native.FingerprintComparison(_benzene_series(),
+                                              fingerprint_options)
+    options = native.MaxMinOptions()
+    options.count = 2
+    with pytest.raises(RuntimeError, match="requires distances"):
+        native.maxmin_select(comparison, options)
+    with pytest.raises(RuntimeError, match="requires distances"):
+        native.circles(comparison, 0.5, native.CirclesOptions())
+
+
+def test_the_medoid_seed_on_a_comparison_is_a_runtime_error(native):
+    comparison = native.FingerprintComparison(_benzene_series(),
+                                              native.FingerprintOptions())
+    options = native.MaxMinOptions()
+    options.count = 2
+    options.seed_mode = native.MaxMinSeed_Medoid
+    with pytest.raises(RuntimeError,
+                       match="Medoid requires a distance matrix"):
+        native.maxmin_select(comparison, options)
+
+
+def test_a_nan_circles_threshold_is_a_runtime_error(native):
+    with pytest.raises(RuntimeError, match="finite and non-negative"):
+        native.circles(_line_storage(native), math.nan,
+                       native.CirclesOptions())
+
+
+def test_a_non_finite_distance_read_is_a_runtime_error(native):
+    """The Python matrix path refuses this up front through the gate, so the
+    native refusal is only reachable through the raw binding."""
+    storage = _line_storage(native)
+    storage.Set(0, 4, math.nan)
+    options = native.MaxMinOptions()
+    options.count = 2
+    with pytest.raises(RuntimeError,
+                       match="non-finite distance between items 0 and 4"):
+        native.maxmin_select(storage, options)
+
+
+def test_the_diversity_entry_points_release_the_gil():
+    """Both entry points fold O(N) rows per pick over native data, and the
+    comparison overloads run for as long as the comparisons do.
+
+    Asserted against the interface file for the reasons given in
+    test_the_new_entry_points_release_the_gil: a directive below the
+    ``%include`` that declares its function, or one inside a comment, is
+    silently inert.
+    """
+    interface = pathlib.Path(__file__).resolve().parents[2] / "swig" / "oecluster.i"
+    text = _SWIG_COMMENT.sub("", interface.read_text(encoding="utf-8"))
+
+    include = '%include "oecluster/clustering/DiversitySelection.h"'
+    assert text.count(include) == 1, "the position check needs an unambiguous anchor"
+    include_at = text.index(include)
+
+    for name in ("maxmin_select", "circles"):
+        invocation = f"OECLUSTER_GIL_EXCEPTION(OECluster::{name}, {name})"
+        assert invocation in text
+        assert text.index(invocation) < include_at, (
+            f"{invocation} must precede the %include that declares {name}, or "
+            "SWIG applies the exception handler to nothing")

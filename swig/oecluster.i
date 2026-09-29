@@ -31,6 +31,7 @@
 #include "oecluster/clustering/ClusterReport.h"
 #include "oecluster/clustering/PartitionAgreement.h"
 #include "oecluster/clustering/SARCoherence.h"
+#include "oecluster/clustering/DiversitySelection.h"
 #include "oecluster/clustering/KMedoids.h"
 #include "oecluster/clustering/MurckoScaffold.h"
 #include "oefp/batch.h"
@@ -823,6 +824,11 @@ OECLUSTER_GIL_EXCEPTION(OECluster::sar_coherence, sar_coherence)
 OECLUSTER_GIL_EXCEPTION(OECluster::activity_landscape, activity_landscape)
 OECLUSTER_GIL_EXCEPTION(OECluster::modelability, modelability)
 
+// maxmin_select and circles fold O(N) native rows per pick, and their
+// comparison overloads run for as long as the comparisons do.
+OECLUSTER_GIL_EXCEPTION(OECluster::maxmin_select, maxmin_select)
+OECLUSTER_GIL_EXCEPTION(OECluster::circles, circles)
+
 // ============================================================================
 // Ignore problematic members before %include
 //
@@ -1139,6 +1145,7 @@ public:
 %template(ClusterActivityVector) std::vector<OECluster::ClusterActivity>;
 %template(ClassConcordanceVector) std::vector<OECluster::ClassConcordance>;
 %include "oecluster/clustering/SARCoherence.h"
+%include "oecluster/clustering/DiversitySelection.h"
 %include "oecluster/clustering/DBSCAN.h"
 %include "oecluster/clustering/HDBSCAN.h"
 %include "oecluster/clustering/Agglomerative.h"
