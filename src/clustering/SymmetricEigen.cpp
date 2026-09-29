@@ -176,14 +176,12 @@ std::vector<double> symmetric_eigenvalues(std::vector<double> a, size_t n,
             max_abs = std::max(max_abs, std::fabs(a[i * n + j]));
         }
     }
-    double scale = 1.0;
     int exponent = 0;
     if (max_abs > 0.0 && std::isfinite(max_abs)) {
         std::frexp(max_abs, &exponent);
-        scale = std::ldexp(1.0, -exponent);
         for (size_t i = 0; i < n; ++i) {
             for (size_t j = 0; j <= i; ++j) {
-                a[i * n + j] *= scale;
+                a[i * n + j] = std::ldexp(a[i * n + j], -exponent);
             }
         }
     }
@@ -198,7 +196,7 @@ std::vector<double> symmetric_eigenvalues(std::vector<double> a, size_t n,
     e[n - 1] = 0.0;
     tridiagonal_ql(d, e, max_iterations);
     std::sort(d.begin(), d.end());
-    if (scale != 1.0) {
+    if (exponent != 0) {
         for (size_t k = 0; k < n; ++k) {
             d[k] = std::ldexp(d[k], exponent);
         }

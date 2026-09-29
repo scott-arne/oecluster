@@ -193,6 +193,18 @@ TEST(SymmetricEigenTest, LargeFiniteValuesDoNotOverflowInternally) {
     EXPECT_NEAR(eigenvalues[1], 1.1e308, 1e-12 * 1.1e308);
 }
 
+TEST(SymmetricEigenTest, SubnormalValuesDoNotOverflowTheScalingFactor) {
+    // Regression: denorm_min overflowed ldexp(1.0, -exponent) to infinity.
+    const double denorm = std::numeric_limits<double>::denorm_min();
+    EXPECT_EQ(symmetric_eigenvalues({denorm}, 1), std::vector<double>{denorm});
+    // A zero mixed with a subnormal became NaN through 0 * infinity.
+    const std::vector<double> eigenvalues =
+        symmetric_eigenvalues({denorm, 0.0, 0.0, 0.0}, 2);
+    ASSERT_EQ(eigenvalues.size(), 2u);
+    EXPECT_EQ(eigenvalues[0], 0.0);
+    EXPECT_EQ(eigenvalues[1], denorm);
+}
+
 TEST(SymmetricEigenTest, AnOverflowingSizeThrowsWithoutAllocating) {
     const size_t huge = size_t{1} << 33;  // n * n overflows size_t.
     EXPECT_THROW(dense_kernel_elements(huge), std::invalid_argument);
