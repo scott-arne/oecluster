@@ -146,3 +146,15 @@ TEST(UmbrellaHeaderTest, ReachesTheDiversitySelectionHeader) {
     const OECluster::CirclesOptions circles_options;
     EXPECT_EQ(circles_options.method, OECluster::CirclesMethod::MaxMin);
 }
+
+// SetDiversity.h joined the umbrella in 5.9.0; naming both options structs
+// keeps it from silently dropping out, as ClusterReport.h once did.
+TEST(UmbrellaHeaderTest, ReachesTheSetDiversityHeader) {
+    const OECluster::VendiOptions vendi_options;
+    EXPECT_EQ(vendi_options.order, 1u);
+    EXPECT_EQ(vendi_options.kernel, OECluster::DiversityKernel::Complement);
+    EXPECT_EQ(vendi_options.max_exact, 2048u);
+
+    const OECluster::LogDetOptions logdet_options;
+    EXPECT_DOUBLE_EQ(logdet_options.ridge, 0.0);
+}
