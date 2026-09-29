@@ -1060,6 +1060,14 @@ n = 10,000) and time as `n^3`.
 The comparison paths also hold one comparison clone per worker thread. A
 comparison that copies its items (`mcs`) costs O(n) per clone.
 
+The table's figures are for the native scoring pass. On the
+`SymmetricDistanceMatrix` path, the Python wrapper first validates the stored
+distances in two full passes over the n(n-1)/2 entries: the gate's non-finite
+check and the kernel range check. Each pass allocates a temporary boolean
+array of n(n-1)/2 bytes, so order 2 on a matrix uses O(n^2) transient memory
+even though its scoring pass is O(n). The comparison and named-item paths do
+not have this cost.
+
 ### Which exception you get
 
 `TypeError` is for arguments that fit none of the three paths, as for
