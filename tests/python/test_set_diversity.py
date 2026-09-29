@@ -231,6 +231,9 @@ def test_the_matrix_path_checks_the_kernel_range_up_front():
                        match=r"requires non-negative distances, but "
                              r"d\(0, 2\) = -0\.25"):
         oecluster.vendi_score(negative, kernel="laplacian", bandwidth=1.0)
+    all_bad = _constant_matrix(4, 1.5)
+    with pytest.raises(ValueError, match=r"d\(0, 1\) = 1\.5"):
+        oecluster.vendi_score(all_bad)
     # The Laplacian kernel takes distances above 1.
     assert oecluster.vendi_score(too_far, kernel="laplacian",
                                  bandwidth=1.0).size == 3

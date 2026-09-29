@@ -5700,13 +5700,15 @@ def _require_kernel_distances(matrix, kernel_key, caller):
         Laplacian distance, naming the first such pair.
     """
     condensed = np.asarray(matrix.condensed)
+    # A boolean mask and argmax, not flatnonzero: an input that is wrong
+    # throughout (distances above 1 under the complement kernel) would
+    # otherwise allocate an int64 index for every entry.
+    mask = condensed < 0.0
     if kernel_key == "complement":
-        bad = np.flatnonzero((condensed < 0.0) | (condensed > 1.0))
-    else:
-        bad = np.flatnonzero(condensed < 0.0)
-    if bad.size == 0:
+        mask |= condensed > 1.0
+    if not mask.any():
         return
-    index = int(bad[0])
+    index = int(np.argmax(mask))
     row, column = _condensed_pair(matrix.num_samples, index)
     value = float(condensed[index])
     if kernel_key == "complement":
