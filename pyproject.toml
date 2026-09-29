@@ -10,7 +10,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "oecluster"
-version = "5.7.0"
+version = "5.8.0"
 description = "High-performance pairwise distance and clustering for OpenEye Toolkits"
 license = "MIT"
 license-files = ["LICENSE"]

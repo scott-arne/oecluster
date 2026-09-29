@@ -2,6 +2,40 @@
 
 This file starts at 5.0.0; earlier releases are not recorded here.
 
+## [5.8.0] - 2026-09-28
+
+### Added
+
+- `maxmin_select`, farthest-first (MaxMin) selection of a diverse subset, with
+  the C++ entry point of the same name configured through `MaxMinOptions`.
+  Each pick is the unselected item farthest from the selection so far, ties to
+  the smaller index, so results never depend on `num_threads`. It stops at a
+  `count`, at a distance `threshold`, or at whichever comes first, starts from
+  an item, the item farthest from item 0, or (matrix input only) the global
+  medoid, and can extend an existing `initial` selection. The result reports
+  the picks, each pick's distance to the earlier selection, and why it
+  stopped.
+- `circles`, the #Circles coverage measure of Xie et al. (ICLR 2023): the size
+  of a packing whose members are pairwise strictly farther apart than a
+  threshold. `method="maxmin"` (the default) packs farthest-first;
+  `method="sequential"` is the paper's reference greedy pass over input order,
+  without its shuffle. Either count is a lower bound on the packing number.
+- Both take a precomputed `SymmetricDistanceMatrix`, a prebuilt comparison, or
+  a list of items with a comparison name, as `pdist` does. The last two are
+  evaluated lazily, comparing only the pairs the run needs, so a library too
+  large for an O(N^2) matrix can still be subset. Returned positions always
+  refer to the caller's items, including when normalization dropped some,
+  which are reported in `excluded`. A comparison whose distances cannot be
+  ranked -- a similarity, `missing='propagate'` or `missing='ignore'` -- is
+  refused before any pair is scored.
+
+### Changed
+
+- k-medoids' FarthestFirst initialization now runs on the farthest-first
+  kernel the new entry points share. Its output is identical, including on
+  matrices holding NaN, which it still does not validate; a regression test
+  recorded against the previous kernel pins that.
+
 ## [5.7.0] - 2026-09-26
 
 ### Added

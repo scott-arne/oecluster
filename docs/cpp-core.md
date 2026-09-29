@@ -121,6 +121,9 @@ their option/result types:
   `BitBirchRefinementOptions`, `BitBirchResult`).
 - `MurckoScaffold.h` — Bemis-Murcko scaffold assignment and scaffold-identity
   clustering of molecules (`ScaffoldType`, `MurckoOptions`, `MurckoResult`).
+- `DiversitySelection.h` — farthest-first subset selection and the #Circles
+  coverage measure (`MaxMinSeed`, `MaxMinStop`, `CirclesMethod`,
+  `MaxMinOptions`, `MaxMinSelection`, `CirclesOptions`, `CirclesResult`).
 
 `ClusterTypes.h` defines the shared cluster representation, `ClusterReport.h`
 defines the method-agnostic quality scorecard exposed in Python as
@@ -238,6 +241,40 @@ when every scored sample is its own cluster, `cliff_density` when
 nonzero distance, `rmodi`, `activity_stddev` and a row's `stddev_activity` when
 the `num_scored` each reads is below 2, `modi` when `num_classes < 2`, and a
 row's `fraction_same_class` when its class is the only one scored.
+
+### Diversity selection
+
+`maxmin_select` and `circles` are each overloaded on where distances come
+from: `const StorageBackend& storage`, which must hold complete dense or
+memory-mapped distances, or `PairwiseComparison& comparison`, evaluated
+lazily with one `Clone()` per concurrently running chunk. The comparison
+overloads compare only the pairs the run needs, always as
+`Compare(min(i, j), max(i, j))` and never a self-pair, and refuse a comparison
+whose `Facts()` report a similarity, a nonzero self-distance, `NaNPresent` or
+`SubsetScored` with `ComparisonError`. Every other refusal is
+`std::invalid_argument`.
+
+`MaxMinOptions` carries `count` 0 (no count limit), `threshold` NaN (unset),
+`seed_mode` `MaxMinSeed::Index`, `seed` 0, an empty `initial`, `num_threads` 0
+and `chunk_size` 256; at least one of `count` and `threshold` must be set.
+`MaxMinSeed::Medoid` is accepted by the storage overload only, and a non-empty
+`initial` only with the default seed. `MaxMinSelection` returns `indices`,
+`pick_distances` (NaN for the seed and every `initial` entry) and a
+`MaxMinStop`. `circles` takes the threshold as its own argument, finite and
+non-negative, with `CirclesOptions` carrying `method` `CirclesMethod::MaxMin`,
+`num_threads` 0 and `chunk_size` 256; `CirclesResult` returns `count`,
+`members`, `threshold` and `method`. An explicit `num_threads` is capped at the
+item count.
+
+Native code checks finiteness only on the distances it reads, plus a full
+scan for the medoid seed, so a non-finite matrix entry the run never reaches
+is not reported. The Python matrix path refuses one up front.
+
+Both entry points share `src/clustering/MaxMinKernel.h`, a farthest-first
+kernel templated on a row provider. k-medoids' FarthestFirst initialization
+runs on the same kernel through a provider that, as before, does not validate
+finiteness, and its global-medoid helper moved there too; its output is
+unchanged.
 
 ## Partition Agreement
 

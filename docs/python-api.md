@@ -838,6 +838,129 @@ cannot reach it at all, each being finiteness-guarded before use, so
 `ValueError: distance_threshold must be finite`; and a `nan` is a `ValueError`
 for all four.
 
+## Diversity Selection
+
+Two functions choose or count a spread-out subset of a collection rather than
+partition it. `maxmin_select()` picks a diverse subset farthest-first, and
+`circles()` measures coverage as the size of a packing at a distance
+threshold. Both run on the same deterministic kernel, and neither result is a
+clustering: each names a subset, not a partition.
+
+```python
+picked = oecluster.maxmin_select(mols, comparison="fingerprint", count=50)
+subset = [mols[i] for i in picked.indices]
+
+packing = oecluster.circles(mols, comparison="fingerprint", threshold=0.75)
+print(packing.count)
+```
+
+### Three ways to pass the data
+
+The first argument decides how distances are read:
+
+- a `SymmetricDistanceMatrix` reads a precomputed matrix, which passes the
+  same gate `k_medoids()` uses: a similarity matrix, a nonzero self-distance,
+  any non-finite entry and `missing='ignore'` data are refused up front;
+- a native comparison object, such as the one `FingerprintComparison(mols)`
+  returns, is evaluated lazily;
+- anything else is a sequence of items, and `comparison=` names how to compare
+  them, exactly as for `pdist()`, again evaluated lazily. Comparison options
+  go in as keywords.
+
+The lazy paths compare only the pairs the selection needs -- O(N·k) for k
+picks -- and never build the O(N^2) matrix, so they are the route for a library
+too large to hold one. Each worker thread holds one clone of the comparison;
+for a comparison that copies its items, such as `mcs`, that is O(N) memory per
+worker.
+
+A lazy comparison is refused before any pair is scored when its declared
+facts rule ranking out: a similarity orientation, a nonzero self-distance,
+`missing='propagate'` (values may be NaN) and `missing='ignore'` (distances
+scored on different feature subsets are not comparable). A NaN or infinite
+distance that is actually read during a lazy run raises `RuntimeError` naming
+the pair; on the matrix path the gate has already refused it.
+
+Every position -- `seed`, `initial`, the returned `indices` and `members`, and
+`excluded` -- refers to the caller's items, even when normalization dropped
+some of them. A descriptor comparison that drops a molecule for a missing
+value reports it in `excluded` as `[original_index, reason]`, and the indices
+around it keep their original numbering. A `seed` or `initial` entry that
+names a dropped item raises `ValueError`. A normalization that would add items
+-- RMSD's conformer expansion -- is refused, because one position would then
+name several selectable items; expand the conformers yourself, or pass
+`expand_conformers=False`.
+
+`similarity=True` is refused on every path: both functions rank distances.
+
+### `maxmin_select()`
+
+Each pick is the unselected item farthest from everything already selected,
+ties to the smaller index, so the result depends only on the distances and the
+arguments, never on `num_threads`. `count` is the total selection size and
+`threshold` stops before a candidate at or within that distance of the
+selection; at least one is required, and whichever is reached first ends the
+run. With a threshold and no `initial`, every pick is strictly farther than
+the threshold from every earlier pick.
+
+`seed` chooses the first pick: an item position (the default starts from the
+first item that survived normalization), `"farthest"` for the item farthest
+from item 0, or `"medoid"` for the item with the smallest distance sum.
+`"medoid"` needs every pairwise distance, so it is accepted on the matrix path
+only. `initial` extends an existing selection instead, and cannot be combined
+with an explicit `seed`.
+
+The result is a `MaxMinSelection`: `indices` in selection order, `initial`
+first; `pick_distances`, each pick's distance to the earlier selection, `nan`
+for the seed and every `initial` entry and never increasing after them;
+`stop`, one of `"count"`, `"threshold"` or `"exhausted"`; and `excluded`.
+
+### `circles()`
+
+#Circles (Xie et al., ICLR 2023) is the size of a set of items that are
+pairwise strictly farther apart than `threshold`; the paper's headline
+threshold is a Tanimoto distance of 0.75. The rule is strict, so a pair at
+exactly the threshold does not both belong. Finding the largest such set is
+NP-hard, and any valid packing is a lower bound on it, so `count` is a lower
+bound under either method, and the two methods can disagree.
+
+- `method="maxmin"` (the default) packs farthest-first from item 0. It is
+  `maxmin_select()` with this threshold, no count and the default seed, and it
+  tends to find the larger packing.
+- `method="sequential"` is the paper's reference greedy pass over input order:
+  an item joins when it is farther than `threshold` from every member so far.
+  The paper's implementation also shuffles and repeats that pass in chunks;
+  this one does not, so the result is deterministic and depends on input
+  order. Pick it to reproduce published #Circles values.
+
+The result is a `CirclesResult`: `count`, `members` (pick order for maxmin,
+input order for sequential), `threshold`, `method` and `excluded`.
+
+| Operation | Comparisons or reads | Working memory |
+|-----------|----------------------|----------------|
+| `maxmin_select`, k picks | O(N·k) | O(N) |
+| `seed="farthest"` | one extra row, O(N) | |
+| `seed="medoid"` | O(N^2) reads, matrix path only | O(N) |
+| `circles`, maxmin | O(N·m), m = `count` | O(N) |
+| `circles`, sequential | the sum of the member counts seen, at most O(N·m) | O(m) |
+
+Sequential #Circles over an expensive comparison such as `mcs` is serial
+between candidates, so its O(N·m) comparisons cannot overlap across them.
+
+### Which exception you get
+
+`TypeError` is for arguments that fit none of the three paths: a
+`CrossDistanceMatrix`, `comparison=` or comparison options beside a matrix or
+a prebuilt comparison, an item list without a comparison name, an unknown
+comparison option, a non-integer `initial` entry, an explicit `seed` together
+with `initial`, and `seed` or `initial` passed to `circles()`. `ValueError` is
+for a value that fits a path but not the data: a bad `count`, `threshold`,
+`seed`, `initial`, `method`, `num_threads` or `chunk_size`, `similarity=True`,
+`SparseStorage`, an empty input, a refused matrix or comparison, and the
+position errors above. `RuntimeError` comes from the native layer: a
+non-finite distance read during a lazy run, and a `"medoid"` seed whose
+distance sum overflows. The argument checks run before the input is resolved,
+so a bad option is reported ahead of a bad input.
+
 ## Metric Requirements
 
 `butina()`, `dbscan()`, `hdbscan()`, `agglomerative()`, and `cluster_report()`

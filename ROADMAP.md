@@ -25,7 +25,8 @@ they are not recoveries of the original intent.
 | D1 | k-medoids/PAM: exactly `k` clusters with real-member centers | shipped 5.5.0 |
 | C1 | Murcko scaffold assignment and scaffold-identity clustering | shipped 5.6.0 |
 | C2 | MCS-based comparison: Tanimoto over matched bonds | shipped 5.7.0 |
-| E | Diversity metrics and library-scale selection | planned |
+| E1 | Diversity selection: `maxmin_select` and #Circles | shipped 5.8.0 |
+| E2 | Set diversity scores: Vendi score and log-determinant diversity | planned |
 | D2 | Graph and leader algorithms: Leiden, Jarvis-Patrick, leader/DISE | planned |
 | B | Fingerprint-native O(N) counterparts of the A metrics | planned |
 | D3 | Workflow layer: clustering CLI, parameter selection, consensus, stability | planned |
@@ -92,6 +93,15 @@ within one cluster; E selects across a collection.
 
 These metrics score a set rather than a partition, which is why they were moved
 out of sub-project A.
+
+E was split in two. E1 shipped in 5.8.0 as `maxmin_select`, deterministic
+farthest-first selection, and `circles`, the #Circles coverage measure; both
+run on one kernel and read a precomputed matrix or evaluate a comparison
+lazily, so a library too large for an O(N^2) matrix can still be subset. E2
+adds the Vendi score and log-determinant diversity. Both rest on an
+eigendecomposition or determinant of a set's similarity kernel, and that
+decomposition dependency needs its own design, so it was split out rather than
+left to hold back E1.
 
 ## D2 - Graph and leader algorithms
 
