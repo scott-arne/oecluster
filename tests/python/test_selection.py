@@ -444,3 +444,139 @@ def test_the_diversity_surface_is_exported():
     missing = [name for name in exported if name not in oecluster.__all__]
     assert missing == []
     assert all(hasattr(oecluster, name) for name in exported)
+
+
+def _reference_circles(square, threshold):
+    """get_circles from Xie et al. (ICLR 2023), minus its shuffle and chunking:
+    one greedy pass in input order, keeping an item strictly farther than the
+    threshold from every item kept so far."""
+    members = []
+    for i in range(len(square)):
+        if all(square[i][m] > threshold for m in members):
+            members.append(i)
+    return members
+
+
+def test_sequential_circles_matches_the_reference_at_the_papers_threshold():
+    mols = _mols(FP_SMILES)
+    matrix = oecluster.pdist(mols, "fingerprint")
+    expected = _reference_circles(matrix.squareform(), 0.75)
+    assert expected == [0, 3, 5, 6, 10]
+
+    for items, extra in ((matrix, {}),
+                         (oecluster.FingerprintComparison(mols), {}),
+                         (mols, {"comparison": "fingerprint"})):
+        packing = oecluster.circles(items, threshold=0.75,
+                                    method="sequential", **extra)
+        assert packing.members == expected
+        assert packing.count == 5
+        assert packing.threshold == 0.75
+        assert packing.method == "sequential"
+        assert packing.excluded == []
+
+
+def test_maxmin_circles_is_a_threshold_only_maxmin_selection():
+    mols = _mols(FP_SMILES)
+    packing = oecluster.circles(mols, comparison="fingerprint",
+                                threshold=0.75)
+    selection = oecluster.maxmin_select(mols, comparison="fingerprint",
+                                        threshold=0.75)
+    assert packing.members == selection.indices == [0, 3, 10, 7, 5]
+    assert packing.count == 5
+    assert packing.method == "maxmin"
+
+
+def test_circles_members_are_pairwise_farther_than_the_threshold():
+    mols = _mols(FP_SMILES)
+    square = oecluster.pdist(mols, "fingerprint").squareform()
+    for method in ("maxmin", "sequential"):
+        members = oecluster.circles(mols, comparison="fingerprint",
+                                    threshold=0.75, method=method).members
+        assert all(square[a][b] > 0.75
+                   for a in members for b in members if a != b)
+
+
+def test_circles_members_refer_to_the_callers_items():
+    mols = _mols(["O"] + DESCRIPTOR_SMILES)
+    by_name = oecluster.circles(mols, comparison="descriptor", threshold=3.0,
+                                method="Sequential")
+    by_matrix = oecluster.circles(oecluster.pdist(mols, "descriptor"),
+                                  threshold=3.0, method="sequential")
+    assert by_name.excluded == [[0, "missing-descriptor"]]
+    assert by_name.members == [index + 1 for index in by_matrix.members]
+    assert by_name.members == [1, 2, 4, 8]
+    assert by_name.method == "sequential"
+
+
+def test_circles_on_the_line():
+    maxmin = oecluster.circles(_line_matrix(), threshold=2.5)
+    sequential = oecluster.circles(_line_matrix(), threshold=2.5,
+                                   method="sequential")
+    assert maxmin.members == [0, 4, 2]
+    assert sequential.members == [0, 2, 3]
+    assert repr(maxmin) == (
+        "CirclesResult(count=3, threshold=2.5, method='maxmin', excluded=0)")
+
+
+@pytest.mark.parametrize(("kwargs", "match"), [
+    ({"threshold": math.nan}, "not NaN"),
+    ({"threshold": math.inf}, "finite"),
+    ({"threshold": -0.5}, "non-negative"),
+    ({"threshold": 1.0, "method": "random"}, "Unknown circles method"),
+    ({"threshold": 1.0, "method": None}, "Unknown circles method"),
+    ({"threshold": 1.0, "chunk_size": 0}, "chunk_size must be at least 1"),
+    ({"threshold": 1.0, "num_threads": -2}, "num_threads must be at least 0"),
+    ({"threshold": 1.0, "num_threads": True}, "num_threads must be an integer"),
+    ({"threshold": 1.0, "similarity": True},
+     "similarity=True is not supported"),
+])
+def test_invalid_circles_arguments_are_value_errors(kwargs, match):
+    with pytest.raises(ValueError, match=match):
+        oecluster.circles(_line_matrix(), **kwargs)
+
+
+@pytest.mark.parametrize("extra", [{"seed": 0}, {"initial": [1]}])
+def test_circles_takes_no_seed_or_initial(extra):
+    with pytest.raises(TypeError, match="no seed or initial"):
+        oecluster.circles(_line_matrix(), threshold=1.0, **extra)
+
+
+def test_circles_refuses_what_maxmin_select_refuses():
+    mols = _mols(FP_SMILES)
+    with pytest.raises(TypeError, match="CrossDistanceMatrix"):
+        oecluster.circles(oecluster.cdist(mols[:2], mols[2:4], "fingerprint"),
+                          threshold=0.5)
+    with pytest.raises(ValueError, match="requires distances"):
+        oecluster.circles(
+            oecluster.FingerprintComparison(mols, similarity=True),
+            threshold=0.5)
+    with pytest.raises(ValueError, match="per-pair feature subsets"):
+        oecluster.circles(_mols(DESCRIPTOR_SMILES), comparison="descriptor",
+                          threshold=1.0, metric="euclidean", missing="ignore")
+    with pytest.raises(ValueError, match="requires at least one item"):
+        oecluster.circles([], comparison="fingerprint", threshold=0.5)
+
+
+def test_circles_forwards_threading_options(monkeypatch):
+    native = oecluster.oecluster
+    real = native.circles
+    seen = []
+
+    def spy(target, threshold, options):
+        seen.append((threshold, options.num_threads, options.chunk_size,
+                     options.method))
+        return real(target, threshold, options)
+
+    monkeypatch.setattr(native, "circles", spy)
+    oecluster.circles(_mols(FP_SMILES), comparison="fingerprint",
+                      threshold=0.75, method="sequential", num_threads=2,
+                      chunk_size=5)
+    assert seen == [(0.75, 2, 5, native.CirclesMethod_Sequential)]
+
+
+def test_the_circles_surface_is_exported():
+    exported = ("circles", "CirclesResult")
+
+    missing = [name for name in exported if name not in oecluster.__all__]
+    assert missing == []
+    assert all(hasattr(oecluster, name) for name in exported)

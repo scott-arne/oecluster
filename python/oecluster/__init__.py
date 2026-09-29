@@ -60,6 +60,7 @@ __all__ = [  # noqa: RUF022
     "Modelability",
     "ClassConcordance",
     "MaxMinSelection",
+    "CirclesResult",
     "cluster_report",
     "compare_reports",
     "partition_agreement",
@@ -68,6 +69,7 @@ __all__ = [  # noqa: RUF022
     "activity_landscape",
     "modelability",
     "maxmin_select",
+    "circles",
     "ButinaResult",
     "DBSCANResult",
     "HDBSCANResult",
@@ -4983,6 +4985,11 @@ _MAXMIN_STOP_NAMES = {
     _oecluster.MaxMinStop_Exhausted: "exhausted",
 }
 
+_CIRCLES_METHODS = {
+    "maxmin": _oecluster.CirclesMethod_MaxMin,
+    "sequential": _oecluster.CirclesMethod_Sequential,
+}
+
 
 class MaxMinSelection:
     """A farthest-first selection, returned by :func:`maxmin_select`.
@@ -5018,6 +5025,45 @@ class MaxMinSelection:
     def __repr__(self):
         return (f"MaxMinSelection(indices={self.indices!r}, "
                 f"stop={self.stop!r}, excluded={len(self.excluded)})")
+
+
+class CirclesResult:
+    """A #Circles packing, returned by :func:`circles`.
+
+    :ivar count: Number of members; the #Circles value. A lower bound on the
+        packing number under either method.
+    :ivar members: Members as positions in the caller's input, in pick order
+        (``"maxmin"``) or input order (``"sequential"``). Pairwise strictly
+        farther apart than the threshold.
+    :ivar threshold: The distance threshold the packing was built at.
+    :ivar method: ``"maxmin"`` or ``"sequential"``.
+    :ivar excluded: ``[original_index, reason]`` pairs for the items
+        normalization dropped; empty outside the named-comparison path.
+    """
+
+    # Field order mirrors the :ivar: list above.
+    __slots__ = ("count", "members", "threshold", "method", "excluded")  # noqa: RUF023
+
+    def __init__(self, count, members, threshold, method, excluded):
+        """
+        Construct a packing from values already copied out of native memory.
+
+        :param count: Number of members.
+        :param members: Member caller positions.
+        :param threshold: The distance threshold.
+        :param method: Method name.
+        :param excluded: ``[original_index, reason]`` pairs.
+        """
+        self.count = count
+        self.members = members
+        self.threshold = threshold
+        self.method = method
+        self.excluded = excluded
+
+    def __repr__(self):
+        return (f"CirclesResult(count={self.count}, "
+                f"threshold={self.threshold!r}, method={self.method!r}, "
+                f"excluded={len(self.excluded)})")
 
 
 class _DiversitySource:
@@ -5389,6 +5435,90 @@ def maxmin_select(items, *, count=None, threshold=None, seed=_SEED_UNSET,
         indices=[source.caller_position(i) for i in native.indices],
         pick_distances=[float(d) for d in native.pick_distances],
         stop=_MAXMIN_STOP_NAMES[native.stop],
+        excluded=source.excluded,
+    )
+
+
+def circles(items, *, threshold, method="maxmin", comparison=None,
+            similarity=False, num_threads=0, chunk_size=256,
+            **kwargs) -> "CirclesResult":
+    """
+    Count the #Circles coverage of a set: a packing at a distance threshold.
+
+    #Circles (Xie et al., ICLR 2023) is the size of a set of items that are
+    pairwise strictly farther apart than ``threshold``. The paper's headline
+    threshold is a Tanimoto distance of 0.75. Any valid packing is a lower
+    bound on the true packing number, so ``count`` is a lower bound under
+    either method, and the two methods can disagree.
+
+    ``method="maxmin"`` packs farthest-first from item 0: it is
+    :func:`maxmin_select` with this threshold, no count, and the default seed.
+    ``method="sequential"`` is the paper's reference greedy pass over input
+    order, accepting an item when it is farther than ``threshold`` from every
+    member so far. The paper's implementation also shuffles and repeats that
+    pass in chunks; this one does not.
+
+    ``items`` selects the path exactly as for :func:`maxmin_select`, and
+    ``members`` and ``excluded`` refer to the caller's positions.
+
+    :param items: Matrix, prebuilt comparison, or sequence of items.
+    :param threshold: Distance threshold; finite and non-negative.
+    :param method: ``"maxmin"`` (the default) or ``"sequential"``.
+    :param comparison: Comparison name, required with a sequence of items.
+    :param similarity: Refused when True; the threshold is a distance.
+    :param num_threads: Worker threads for the lazy paths; 0 selects the
+        hardware concurrency.
+    :param chunk_size: Items per work unit, at least one.
+    :param kwargs: Comparison options for a named comparison.
+    :returns: A :class:`CirclesResult`.
+    :raises TypeError: If the arguments fit none of the three paths, a
+        comparison option is unknown, or ``seed`` or ``initial`` is passed.
+    :raises ValueError: On an invalid ``threshold``, ``method``,
+        ``num_threads`` or ``chunk_size``; ``similarity=True``; sparse
+        storage; an empty input; normalization that expanded the input; or a
+        matrix or comparison whose distances cannot be ranked.
+    :raises RuntimeError: If a distance read during the packing is NaN or
+        infinite.
+
+    Example::
+
+        packing = oecluster.circles(mols, comparison="fingerprint",
+                                    threshold=0.75)
+        print(packing.count)
+    """
+    if "seed" in kwargs or "initial" in kwargs:
+        raise TypeError(
+            "circles() takes no seed or initial: the packing always starts "
+            "from item 0")
+    if similarity:
+        raise ValueError(
+            "circles() packs on distances; similarity=True is not supported")
+    threshold_value = _diversity_threshold(threshold)
+    method_key = method.lower() if isinstance(method, str) else None
+    if method_key not in _CIRCLES_METHODS:
+        raise ValueError(
+            f"Unknown circles method: {method!r}; expected 'maxmin' or "
+            "'sequential'")
+    num_threads_value = _diversity_int(num_threads, "num_threads", 0)
+    chunk_size_value = _diversity_int(chunk_size, "chunk_size", 1)
+
+    source = _diversity_source(items, comparison, kwargs, "circles")
+    if source.size == 0:
+        raise ValueError("circles() requires at least one item")
+    if source.matrix is not None:
+        _gate.require_comparable(source.matrix, "circles")
+
+    options = _oecluster.CirclesOptions()
+    options.method = _CIRCLES_METHODS[method_key]
+    options.num_threads = num_threads_value
+    options.chunk_size = chunk_size_value
+
+    native = _oecluster.circles(source.target, threshold_value, options)
+    return CirclesResult(
+        count=int(native.count),
+        members=[source.caller_position(i) for i in native.members],
+        threshold=float(native.threshold),
+        method=method_key,
         excluded=source.excluded,
     )
 
