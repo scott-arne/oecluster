@@ -12,6 +12,8 @@
 #include <thread>
 #include <vector>
 
+#include "ThreadPoolLaunch.h"
+
 namespace OECluster {
 
 struct ThreadPool::Impl {
@@ -80,16 +82,10 @@ void ThreadPool::ParallelFor(size_t begin, size_t end, size_t chunk_size,
         }
     };
 
-    std::vector<std::thread> threads;
-    threads.reserve(pimpl_->num_threads_);
-
-    for (size_t i = 0; i < pimpl_->num_threads_; ++i) {
-        threads.emplace_back(worker);
-    }
-
-    for (auto& t : threads) {
-        t.join();
-    }
+    detail::launch_threads(
+        pimpl_->num_threads_,
+        [&worker]() { return std::thread(worker); },
+        [this]() { pimpl_->cancelled_.store(true, std::memory_order_relaxed); });
 
     if (captured_exception) {
         std::rethrow_exception(captured_exception);

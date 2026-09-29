@@ -58,3 +58,58 @@ TEST(ThreadPoolTest, ExceptionPropagation) {
         OECluster::OEClusterError
     );
 }
+
+// Tests for spawn failure recovery.
+#include "../src/ThreadPoolLaunch.h"
+#include <system_error>
+
+TEST(ThreadPoolLaunchTest, PropagatesTheSpawnFailure) {
+    std::atomic<size_t> spawn_count{0};
+    std::atomic<bool> failure_callback_ran{false};
+    std::atomic<size_t> threads_exited{0};
+
+    auto spawn = [&]() {
+        size_t count = spawn_count.fetch_add(1);
+        if (count == 2) {
+            throw std::system_error(std::make_error_code(std::errc::resource_unavailable_try_again));
+        }
+        return std::thread([&threads_exited]() {
+            threads_exited.fetch_add(1);
+        });
+    };
+
+    auto on_failure = [&]() {
+        failure_callback_ran.store(true);
+    };
+
+    try {
+        OECluster::detail::launch_threads(5, spawn, on_failure);
+        FAIL() << "Expected std::system_error";
+    } catch (const std::system_error& e) {
+        EXPECT_EQ(e.code(), std::errc::resource_unavailable_try_again);
+    }
+
+    EXPECT_TRUE(failure_callback_ran.load());
+    EXPECT_EQ(threads_exited.load(), 2u);
+    EXPECT_EQ(spawn_count.load(), 3u);
+}
+
+TEST(ThreadPoolLaunchTest, JoinsAllThreadsOnSuccess) {
+    std::atomic<size_t> threads_exited{0};
+    std::atomic<bool> failure_callback_ran{false};
+
+    auto spawn = [&]() {
+        return std::thread([&threads_exited]() {
+            threads_exited.fetch_add(1);
+        });
+    };
+
+    auto on_failure = [&]() {
+        failure_callback_ran.store(true);
+    };
+
+    OECluster::detail::launch_threads(4, spawn, on_failure);
+
+    EXPECT_EQ(threads_exited.load(), 4u);
+    EXPECT_FALSE(failure_callback_ran.load());
+}
