@@ -124,6 +124,9 @@ their option/result types:
 - `DiversitySelection.h` — farthest-first subset selection and the #Circles
   coverage measure (`MaxMinSeed`, `MaxMinStop`, `CirclesMethod`,
   `MaxMinOptions`, `MaxMinSelection`, `CirclesOptions`, `CirclesResult`).
+- `SetDiversity.h` — the Vendi score and log-determinant diversity of a set
+  (`DiversityKernel`, `VendiOptions`, `VendiResult`, `LogDetOptions`,
+  `LogDetResult`).
 
 `ClusterTypes.h` defines the shared cluster representation, `ClusterReport.h`
 defines the method-agnostic quality scorecard exposed in Python as
@@ -275,6 +278,42 @@ kernel templated on a row provider. k-medoids' FarthestFirst initialization
 runs on the same kernel through a provider that, as before, does not validate
 finiteness, and its global-medoid helper moved there too; its output is
 unchanged.
+
+### Set diversity scores
+
+`vendi_score` and `logdet_diversity` are overloaded on the same two distance
+sources as `maxmin_select`, with the same `ComparisonError` fact refusals.
+Every pair is compared once as `Compare(i, j)` with `i < j`. Each distance
+becomes a kernel entry through `DiversityKernel::Complement` (`1 - d`, which
+refuses d outside [0, 1]) or `DiversityKernel::Laplacian`
+(`exp(-d / bandwidth)`, which refuses a negative d). Either kernel refuses a
+non-finite d, and every refusal is `std::invalid_argument`.
+
+`VendiOptions` carries `order` 1, `kernel` `Complement`, `bandwidth` NaN
+(unset, required finite and positive for `Laplacian`), `max_exact` 2048,
+`num_threads` 0 and `chunk_size` 256. `LogDetOptions` swaps `order` for
+`ridge` 0.0, which must be finite and non-negative. Options are validated
+first, then storage or facts, then the item count, then the `max_exact`
+ceiling, on the exact paths only. `VendiResult` returns `score`, `order`,
+`size`, `kernel`, `min_eigenvalue` and `negative_mass` (both NaN at order 2).
+`LogDetResult` returns `score` (`-infinity` when `K + ridge I` is not
+numerically positive definite), `ridge`, `size`, `kernel`, `min_eigenvalue`
+and `nonpositive_count`.
+
+Order-2 Vendi sums each row's squared kernel entries in one slot and then
+sums the slots in row order. Chunks own whole rows, so the score is
+bit-identical for every `num_threads` and `chunk_size`, and between the two
+sources.
+
+The exact scores decompose the dense kernel with a private solver,
+`src/clustering/SymmetricEigen.h`: Householder tridiagonalization, then
+implicit QL, eigenvalues only, single-threaded and deterministic. It is in
+the tree rather than taken from LAPACK or Eigen, because the build's
+FetchContent cannot reach either from behind the firewall. The solver throws
+`std::runtime_error` if an eigenvalue fails to converge. The shared
+validators and the clone-leasing comparison runner that E1 and E2 both use
+live in `src/clustering/DiversityValidation.h` and
+`src/clustering/ChunkedComparisons.h`.
 
 ## Partition Agreement
 

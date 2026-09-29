@@ -2,6 +2,34 @@
 
 This file starts at 5.0.0; earlier releases are not recorded here.
 
+## [5.9.0] - 2026-09-29
+
+### Added
+
+- `vendi_score`, the Vendi score of Friedman and Dieng (TMLR 2023): the
+  effective number of distinct items in a set, from the similarity kernel its
+  distances define. The C++ entry point of the same name is configured
+  through `VendiOptions`.
+  - `order=1` is exact, from the kernel's eigenvalues. It drops non-positive
+    eigenvalues without renormalizing, as the reference implementation does,
+    and reports `min_eigenvalue` and `negative_mass` so a kernel that is not
+    positive semidefinite can be judged. It is capped at `max_exact` items
+    (default 2048).
+  - `order=2` is `n^2 / ||K||_F^2`. It needs no spectrum, runs at any size,
+    and on a comparison holds only O(N) memory.
+- `logdet_diversity`, `log det(K + ridge I)` from the same spectrum. It is a
+  positive-definite log-determinant: a singular or indefinite ridged kernel
+  scores `-inf`, and `nonpositive_count` and `min_eigenvalue` tell the two
+  apart. The C++ entry point of the same name is configured through
+  `LogDetOptions`.
+- Both build the kernel as `1 - d` (`kernel="complement"`, distances in
+  [0, 1]) or `exp(-d / bandwidth)` (`kernel="laplacian"`). They take a
+  precomputed `SymmetricDistanceMatrix`, a prebuilt comparison, or a list of
+  items with a comparison name, as `maxmin_select` does. Results are
+  bit-identical for every `num_threads` and `chunk_size`.
+- The exact scores use an in-tree symmetric eigenvalue solver, so the project
+  gains no linear-algebra dependency.
+
 ## [5.8.0] - 2026-09-28
 
 ### Added

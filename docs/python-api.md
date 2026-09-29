@@ -962,6 +962,123 @@ non-finite distance read during a lazy run, and a `"medoid"` seed whose
 distance sum overflows. The argument checks run before the input is resolved,
 so a bad option is reported ahead of a bad input.
 
+## Set Diversity Scores
+
+`vendi_score()` and `logdet_diversity()` score how diverse a whole set is,
+from the similarity kernel K that its distances define. They take the same
+three kinds of input as `maxmin_select()`: a `SymmetricDistanceMatrix`, a
+prebuilt comparison, or a list of items with a comparison name. On the lazy
+paths every pair is compared once. `excluded` reports the items that
+normalization dropped, and native error messages name positions among the
+items that survived.
+
+```python
+v = oecluster.vendi_score(mols, comparison="fingerprint")
+v2 = oecluster.vendi_score(library, comparison="fingerprint", order=2)
+ld = oecluster.logdet_diversity(mols, comparison="fingerprint", ridge=1e-6)
+```
+
+### The kernel
+
+`kernel="complement"` (the default) is `K = 1 - d`, which needs every distance
+in [0, 1]. Tanimoto distances qualify, and `1 - d` is then the Tanimoto
+similarity, a positive semidefinite (PSD) kernel on binary fingerprints.
+`kernel="laplacian"` is `K = exp(-d / bandwidth)` for any non-negative
+distance, with a positive `bandwidth`. The diagonal is always 1.
+
+A distance the kernel cannot use raises `ValueError` on the matrix path,
+where the whole matrix is checked up front. On the comparison paths it raises
+`RuntimeError` when the pair is read.
+
+### `vendi_score()`
+
+The Vendi score (Friedman and Dieng, TMLR 2023) is the effective number of
+distinct items: 1 when all items are identical, and n when every pair is at
+distance 1 under the complement kernel.
+
+- `order=1` (the default) is `exp(-sum p log p)` over `p = lambda / n`, for
+  the eigenvalues `lambda` of K above the tolerance `n * eps * max|lambda|`.
+  As in the reference implementation, the remaining eigenvalues are dropped
+  and the kept ones are **not** renormalized. A kernel that is not PSD can
+  have negative eigenvalues; the result reports the smallest as
+  `min_eigenvalue`, and the dropped negative mass, `sum |lambda| / n`, as
+  `negative_mass`, so you can judge how far from PSD the kernel was.
+- `order=2` is `n^2 / ||K||_F^2`. It needs no eigendecomposition, so it has
+  no size ceiling, and on a comparison it holds only O(N) memory. For a PSD
+  kernel it equals the reference's order-2 value. For a non-PSD kernel it
+  includes the squares of the negative eigenvalues, which the reference
+  drops, and so reads lower. `min_eigenvalue` and `negative_mass` are `None`.
+
+The result is a `VendiResult`: `score`, `order`, `size`, `kernel`,
+`min_eigenvalue`, `negative_mass` and `excluded`.
+
+### `logdet_diversity()`
+
+`logdet_diversity()` is `log det(K + ridge I)` computed from the same
+spectrum. It is a **positive-definite** log-determinant: if any eigenvalue of
+`K + ridge I` is at or below `n * eps * max|mu|`, the score is `-inf`. Two
+cases produce this:
+
+- a singular kernel, as duplicate items give, where `min_eigenvalue` is about
+  0;
+- an indefinite kernel, where `min_eigenvalue` is clearly negative. It scores
+  `-inf` even when an even number of negative eigenvalues makes the
+  determinant positive, because such a K is not a valid similarity kernel.
+
+`nonpositive_count` counts the offending eigenvalues. A `ridge` lifts every
+eigenvalue, but it rescues a singular PSD kernel only if it clears the
+tolerance. For n identical items that tolerance is about `n * eps * n`, so a
+ridge such as `1e-20` still scores `-inf`.
+
+The result is a `LogDetResult`: `score`, `ridge`, `size`, `kernel`,
+`min_eigenvalue`, `nonpositive_count` and `excluded`.
+
+### The tolerance
+
+Duplicate items make K exactly singular, but round-off leaves its zero
+eigenvalues near `±1e-16`. Without a tolerance, a tiny positive one would
+make the log-determinant about -36 instead of `-inf`, and the value would
+depend on the platform. Both scores therefore treat eigenvalues within
+`n * eps * max|lambda|` of zero as zero, which is numpy's `matrix_rank`
+rule. An eigenvalue that is genuinely positive but below that tolerance is
+treated as zero too.
+
+### The exact-size ceiling
+
+`vendi_score(order=1)` and `logdet_diversity()` build and decompose a dense
+n x n kernel, so they refuse more than `max_exact` items (default 2048) with
+a `ValueError` naming `order=2`. The ceiling is applied after normalization.
+Raising `max_exact` is allowed, but memory grows as `8 n^2` bytes (800 MB at
+n = 10,000) and time as `n^3`.
+
+| Score | Comparisons or reads | Working memory | Time |
+|-------|----------------------|----------------|------|
+| `vendi_score`, order 1 | n(n-1)/2 | O(n^2) | O(n^3) |
+| `vendi_score`, order 2 | n(n-1)/2 | O(n) | O(n^2) |
+| `logdet_diversity` | n(n-1)/2 | O(n^2) | O(n^3) |
+
+The comparison paths also hold one comparison clone per worker thread. A
+comparison that copies its items (`mcs`) costs O(n) per clone.
+
+### Which exception you get
+
+`TypeError` is for arguments that fit none of the three paths, as for
+`maxmin_select()`, and for a `bandwidth` or `ridge` that is not a number.
+
+`ValueError` is for:
+
+- a bad `order` (only the ints 1 and 2), `kernel`, `bandwidth`, `ridge`,
+  `max_exact`, `num_threads` or `chunk_size`;
+- `similarity=True`;
+- `SparseStorage`, or an empty input;
+- more than `max_exact` items on an exact path;
+- a refused matrix or comparison;
+- a matrix distance the kernel cannot use.
+
+`RuntimeError` comes from the native layer: a comparison distance that is
+non-finite or that the kernel cannot use, or an eigenvalue solver that did
+not converge.
+
 ## Metric Requirements
 
 `butina()`, `dbscan()`, `hdbscan()`, `agglomerative()`, and `cluster_report()`

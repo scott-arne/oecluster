@@ -26,7 +26,7 @@ they are not recoveries of the original intent.
 | C1 | Murcko scaffold assignment and scaffold-identity clustering | shipped 5.6.0 |
 | C2 | MCS-based comparison: Tanimoto over matched bonds | shipped 5.7.0 |
 | E1 | Diversity selection: `maxmin_select` and #Circles | shipped 5.8.0 |
-| E2 | Set diversity scores: Vendi score and log-determinant diversity | planned |
+| E2 | Set diversity scores: Vendi score and log-determinant diversity | shipped 5.9.0 |
 | D2 | Graph and leader algorithms: Leiden, Jarvis-Patrick, leader/DISE | planned |
 | B | Fingerprint-native O(N) counterparts of the A metrics | planned |
 | D3 | Workflow layer: clustering CLI, parameter selection, consensus, stability | planned |
@@ -98,10 +98,13 @@ E was split in two. E1 shipped in 5.8.0 as `maxmin_select`, deterministic
 farthest-first selection, and `circles`, the #Circles coverage measure; both
 run on one kernel and read a precomputed matrix or evaluate a comparison
 lazily, so a library too large for an O(N^2) matrix can still be subset. E2
-adds the Vendi score and log-determinant diversity. Both rest on an
-eigendecomposition or determinant of a set's similarity kernel, and that
-decomposition dependency needs its own design, so it was split out rather than
-left to hold back E1.
+shipped in 5.9.0 as `vendi_score` and `logdet_diversity`. Both read a
+set's similarity kernel. The exact scores decompose it with an in-tree
+symmetric eigenvalue solver (Householder tridiagonalization and implicit QL),
+chosen over Eigen, LAPACK through numpy, and a Jacobi solver. It adds no
+dependency behind the build firewall, keeps the exact scores in the C++ core,
+and is several times faster than Jacobi. Order-2 Vendi needs no spectrum and
+runs lazily at any size.
 
 ## D2 - Graph and leader algorithms
 
