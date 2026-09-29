@@ -5117,7 +5117,7 @@ def _refuse_comparison_facts(comparison_obj, caller):
     """
     Refuse a comparison whose declared facts rule out ranking its distances.
 
-    Mirrors validate_comparison_facts in src/clustering/DiversitySelection.cpp,
+    Mirrors validate_comparison_facts in src/clustering/DiversityValidation.h,
     ahead of it, because SWIG turns the native ComparisonError into
     RuntimeError. Every fact read here is declared before any pair is scored,
     so a count-limited call cannot pass merely by never reaching a bad pair.

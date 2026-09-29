@@ -7,22 +7,23 @@
 
 #include <algorithm>
 #include <cmath>
-#include <memory>
-#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "ChunkedComparisons.h"
 #include "DistanceAccess.h"
+#include "DiversityValidation.h"
 #include "MaxMinKernel.h"
-#include "oecluster/Error.h"
-#include "oecluster/GateFacts.h"
-#include "oecluster/ThreadPool.h"
 
 namespace OECluster {
 
 namespace {
+
+using detail::ChunkedComparisons;
+using detail::validate_comparison_facts;
+using detail::validate_size_and_chunk;
 
 constexpr const char* SELECTION_NAME = "MaxMin selection";
 constexpr const char* CIRCLES_NAME = "#Circles";
@@ -44,47 +45,6 @@ void validate_circles_method(CirclesMethod method) {
             return;
     }
     throw std::invalid_argument("Unknown #Circles method");
-}
-
-// The pre-scoring half of the Python gate's require_comparable: every refusal
-// here is decided by the comparison's declared facts, before any pair is
-// scored, so a count-limited call cannot succeed merely because it stopped
-// short of a pair the comparison already said was bad. Unknown is accepted.
-void validate_comparison_facts(const PairwiseComparison& comparison,
-                               const std::string& caller) {
-    const GateFacts facts = comparison.Facts();
-    if (facts.is_distance == Capability::No) {
-        throw ComparisonError(
-            caller + " requires distances, but the comparison reports "
-            "similarities");
-    }
-    if (facts.zero_self == Capability::No) {
-        throw ComparisonError(
-            caller + " requires a zero self-distance, but the comparison "
-            "reports that d(x, x) is not zero");
-    }
-    if (facts.data_integrity == DataIntegrity::NaNPresent) {
-        throw ComparisonError(
-            caller + " cannot rank distances the comparison declares may be "
-            "non-finite (missing='propagate')");
-    }
-    if (facts.data_integrity == DataIntegrity::SubsetScored) {
-        throw ComparisonError(
-            caller + " cannot rank distances scored on per-pair feature "
-            "subsets (missing='ignore'); they are not mutually comparable");
-    }
-}
-
-void validate_size_and_chunk(size_t n, size_t chunk_size,
-                             const std::string& caller) {
-    if (n == 0) {
-        throw std::invalid_argument(caller + " requires at least one item");
-    }
-    // ParallelFor silently does no work for a zero chunk, which would read
-    // as a selection with nothing folded rather than as an error.
-    if (chunk_size == 0) {
-        throw std::invalid_argument(caller + " chunk_size must be at least one");
-    }
 }
 
 void validate_selection(const MaxMinOptions& options, size_t n) {
@@ -137,14 +97,6 @@ void validate_circles_threshold(double threshold) {
         throw std::invalid_argument(
             "#Circles threshold must be finite and non-negative");
     }
-}
-
-// Follows the k-medoids precedent (KMedoids.cpp): a huge explicit request can
-// terminate the process, so it is capped at the item count. Zero passes
-// through and keeps meaning hardware concurrency; n >= 1 here, so the minimum
-// never manufactures a zero from a nonzero request.
-size_t capped_threads(size_t num_threads, size_t n) {
-    return std::min(num_threads, n);
 }
 
 MaxMinStop to_public_stop(detail::MaxMinKernelStop stop) {
@@ -264,77 +216,6 @@ detail::MaxMinKernelRequest circles_request(double threshold) {
     request.initial = {0};
     return request;
 }
-
-// Runs chunked Compare() work with one clone per concurrently running chunk.
-// A thread_local ordinal (the pdist pattern) is safe only for a single
-// ParallelFor call; these entry points make one per row or candidate, so
-// clones circulate through a free list instead and their number is bounded by
-// the concurrency actually reached.
-class ChunkedComparisons {
-public:
-    ChunkedComparisons(const PairwiseComparison& prototype, size_t n,
-                       size_t num_threads, size_t chunk_size)
-        : prototype_(prototype),
-          pool_(capped_threads(num_threads, n)),
-          chunk_size_(chunk_size) {}
-
-    // body(PairwiseComparison& clone, size_t begin, size_t end) over [0, range).
-    template <typename Body>
-    void Run(size_t range, Body&& body) {
-        if (range == 0) {
-            return;
-        }
-        // Capped at the range so a near-SIZE_MAX chunk_size cannot overflow
-        // ParallelFor's ceiling arithmetic.
-        const size_t chunk = std::min(chunk_size_, range);
-        if (chunk == range) {
-            // One chunk: ParallelFor would start every worker to run it on
-            // one of them, once per row or candidate.
-            Lease lease(*this);
-            body(*lease.clone, 0, range);
-            return;
-        }
-        pool_.ParallelFor(0, range, chunk, [&](size_t begin, size_t end) {
-            Lease lease(*this);
-            body(*lease.clone, begin, end);
-        });
-    }
-
-private:
-    struct Lease {
-        explicit Lease(ChunkedComparisons& owner)
-            : owner(owner), clone(owner.Acquire()) {}
-        ~Lease() { owner.Release(std::move(clone)); }
-        Lease(const Lease&) = delete;
-        Lease& operator=(const Lease&) = delete;
-
-        ChunkedComparisons& owner;
-        std::unique_ptr<PairwiseComparison> clone;
-    };
-
-    // Clone() runs under the lock: it is const, but nothing promises that a
-    // const call is safe to make concurrently on the prototype.
-    std::unique_ptr<PairwiseComparison> Acquire() {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (free_.empty()) {
-            return prototype_.Clone();
-        }
-        std::unique_ptr<PairwiseComparison> clone = std::move(free_.back());
-        free_.pop_back();
-        return clone;
-    }
-
-    void Release(std::unique_ptr<PairwiseComparison> clone) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        free_.push_back(std::move(clone));
-    }
-
-    const PairwiseComparison& prototype_;
-    ThreadPool pool_;
-    size_t chunk_size_;
-    std::mutex mutex_;
-    std::vector<std::unique_ptr<PairwiseComparison>> free_;
-};
 
 // Row provider over a comparison. Always refuses non-finite reads: every
 // entry point that builds one is new, so there is no legacy to preserve.
