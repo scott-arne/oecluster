@@ -127,6 +127,38 @@ private:
     std::shared_ptr<std::atomic<size_t>> clones_;
 };
 
+/**
+ * @brief A comparison that counts how many times Compare is called.
+ *
+ * Used to prove that facts-based refusals happen before any pair is scored.
+ */
+class CountingComparison : public OECluster::PairwiseComparison {
+public:
+    CountingComparison(size_t n, OECluster::GateFacts facts)
+        : n_(n), facts_(facts), count_(std::make_shared<std::atomic<size_t>>(0)) {}
+
+    double Compare(size_t, size_t) override {
+        count_->fetch_add(1);
+        return 0.0;
+    }
+
+    OECluster::GateFacts Facts() const override { return facts_; }
+
+    std::unique_ptr<OECluster::PairwiseComparison> Clone() const override {
+        return std::make_unique<CountingComparison>(*this);
+    }
+
+    size_t Size() const override { return n_; }
+    std::string ComparisonName() const override { return "counting"; }
+
+    size_t Count() const { return count_->load(); }
+
+private:
+    size_t n_;
+    OECluster::GateFacts facts_;
+    std::shared_ptr<std::atomic<size_t>> count_;
+};
+
 // Storage whose Data() is null while pairs exist, which every diversity entry
 // point must refuse rather than dereference.
 class NullDataStorage : public OECluster::StorageBackend {

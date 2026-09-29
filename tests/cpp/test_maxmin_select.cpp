@@ -540,9 +540,11 @@ TEST(MaxMinSelectComparisonTest, RefusesANonFiniteDistanceItReads) {
 TEST(MaxMinSelectComparisonTest, RefusesComparisonsItsFactsRuleOut) {
     const auto expect = [](GateFacts facts, const std::string& message) {
         SCOPED_TRACE(message);
-        TableComparison table(4, Line(4), facts);
-        ExpectComparisonError([&] { maxmin_select(table, CountOptions(1)); },
+        // count=2 would call Compare if the facts gate didn't refuse first.
+        CountingComparison counter(4, facts);
+        ExpectComparisonError([&] { maxmin_select(counter, CountOptions(2)); },
                               message);
+        EXPECT_EQ(counter.Count(), 0u) << "Compare called before facts refusal";
     };
 
     expect(FactsWith(Capability::No, Capability::Unknown, DataIntegrity::Complete),

@@ -324,19 +324,47 @@ TEST(CirclesComparisonTest, SequentialRefusesANaNEvenAfterAnEarlyRejection) {
     }
 }
 
-TEST(CirclesComparisonTest, RefusesAComparisonReportingSimilarities) {
-    GateFacts facts;
-    facts.is_distance = Capability::No;
-    TableComparison table(4, Line(4), facts);
+TEST(CirclesComparisonTest, RefusesComparisonsItsFactsRuleOut) {
+    const auto expect = [](GateFacts facts, const std::string& message) {
+        SCOPED_TRACE(message);
+        CountingComparison counter(6, facts);
+        try {
+            circles(counter, 1.0, CirclesOptions());
+            FAIL() << "expected ComparisonError: " << message;
+        } catch (const ComparisonError& error) {
+            EXPECT_EQ(std::string(error.what()), message);
+        }
+        EXPECT_EQ(counter.Count(), 0u) << "Compare called before facts refusal";
+    };
 
-    try {
-        circles(table, 1.0, CirclesOptions());
-        FAIL() << "expected ComparisonError";
-    } catch (const ComparisonError& error) {
-        EXPECT_STREQ(error.what(),
-                     "#Circles requires distances, but the comparison reports "
-                     "similarities");
-    }
+    GateFacts similarity;
+    similarity.is_distance = Capability::No;
+    expect(similarity,
+           "#Circles requires distances, but the comparison reports "
+           "similarities");
+
+    GateFacts nonzero_self;
+    nonzero_self.is_distance = Capability::Yes;
+    nonzero_self.zero_self = Capability::No;
+    expect(nonzero_self,
+           "#Circles requires a zero self-distance, but the comparison "
+           "reports that d(x, x) is not zero");
+
+    GateFacts nan_present;
+    nan_present.is_distance = Capability::Yes;
+    nan_present.zero_self = Capability::Yes;
+    nan_present.data_integrity = DataIntegrity::NaNPresent;
+    expect(nan_present,
+           "#Circles cannot rank distances the comparison declares may be "
+           "non-finite (missing='propagate')");
+
+    GateFacts subset_scored;
+    subset_scored.is_distance = Capability::Yes;
+    subset_scored.zero_self = Capability::Yes;
+    subset_scored.data_integrity = DataIntegrity::SubsetScored;
+    expect(subset_scored,
+           "#Circles cannot rank distances scored on per-pair feature "
+           "subsets (missing='ignore'); they are not mutually comparable");
 }
 
 TEST(CirclesComparisonTest, SharesTheMatrixValidation) {
