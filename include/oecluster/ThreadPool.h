@@ -29,14 +29,22 @@ public:
     /**
      * @brief Execute body(begin, end) for chunks spanning [begin, end).
      *
-     * Chunks of size chunk_size are claimed by threads via atomic counter.
+     * Chunks of size chunk_size are claimed by threads via atomic counter,
+     * and at most one worker per chunk is started, so a call with fewer
+     * chunks than NumThreads() starts only as many threads as it has chunks.
      * Exceptions from any worker are captured and re-thrown after all
      * workers complete.
+     *
+     * If a worker thread cannot be spawned, the workers already started are
+     * joined and the std::system_error is propagated. A body exception or a
+     * spawn failure leaves the pool cancelled, exactly as Cancel() does, so
+     * later ParallelFor calls on the same pool do no work.
      *
      * :param begin: Start of range.
      * :param end: End of range (exclusive).
      * :param chunk_size: Items per work unit.
      * :param body: Callable(size_t chunk_begin, size_t chunk_end).
+     * :raises std::system_error: When a worker thread cannot be spawned.
      */
     void ParallelFor(size_t begin, size_t end, size_t chunk_size,
                      std::function<void(size_t, size_t)> body);
