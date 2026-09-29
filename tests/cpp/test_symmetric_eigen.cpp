@@ -183,6 +183,16 @@ TEST(SymmetricEigenTest, ASizeMismatchThrows) {
     EXPECT_THROW(symmetric_eigenvalues({1.0}, 0), std::invalid_argument);
 }
 
+TEST(SymmetricEigenTest, LargeFiniteValuesDoNotOverflowInternally) {
+    // Regression: [[1e308,1e307],[1e307,1e308]] overflowed the QL deflation
+    // threshold, silently corrupting the spectrum.
+    const std::vector<double> eigenvalues =
+        symmetric_eigenvalues({1e308, 1e307, 1e307, 1e308}, 2);
+    ASSERT_EQ(eigenvalues.size(), 2u);
+    EXPECT_NEAR(eigenvalues[0], 9e307, 1e-12 * 9e307);
+    EXPECT_NEAR(eigenvalues[1], 1.1e308, 1e-12 * 1.1e308);
+}
+
 TEST(SymmetricEigenTest, AnOverflowingSizeThrowsWithoutAllocating) {
     const size_t huge = size_t{1} << 33;  // n * n overflows size_t.
     EXPECT_THROW(dense_kernel_elements(huge), std::invalid_argument);
