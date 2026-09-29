@@ -930,7 +930,8 @@ bound under either method, and the two methods can disagree.
   an item joins when it is farther than `threshold` from every member so far.
   The paper's implementation also shuffles and repeats that pass in chunks;
   this one does not, so the result is deterministic and depends on input
-  order. Pick it to reproduce published #Circles values.
+  order. Because greedy packing is order-dependent, its count can differ
+  from values published with the paper's full procedure.
 
 The result is a `CirclesResult`: `count`, `members` (pick order for maxmin,
 input order for sequential), `threshold`, `method` and `excluded`.
