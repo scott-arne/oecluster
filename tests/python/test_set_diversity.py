@@ -216,6 +216,12 @@ def test_arguments_that_fit_no_path_are_type_errors():
         oecluster.vendi_score(mols)
 
 
+@pytest.mark.parametrize("function", ["vendi_score", "logdet_diversity"])
+def test_an_empty_matrix_is_refused(function):
+    with pytest.raises(ValueError, match="requires at least one item"):
+        getattr(oecluster, function)(_dense_distance_matrix([]))
+
+
 def test_the_matrix_path_checks_the_kernel_range_up_front():
     too_far = _dense_distance_matrix([[0, 0.2, 1.5], [0.2, 0, 0.3],
                                       [1.5, 0.3, 0]])
