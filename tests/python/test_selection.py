@@ -574,6 +574,53 @@ def test_circles_forwards_threading_options(monkeypatch):
     assert seen == [(0.75, 2, 5, native.CirclesMethod_Sequential)]
 
 
+@pytest.mark.parametrize(("fact", "value", "match"), [
+    ("zero_self", False, "zero self-distance"),
+    ("is_distance", False, "requires distances"),
+])
+def test_circles_refuses_gated_matrices(fact, value, match, monkeypatch):
+    """The matrix gate refuses facts before the native call."""
+    native = oecluster.oecluster
+
+    def fail_if_called(*args, **kwargs):
+        pytest.fail("native circles() was called; the gate should have refused")
+
+    monkeypatch.setattr(native, "circles", fail_if_called)
+
+    matrix = oecluster.pdist(_mols(FP_SMILES), "fingerprint")
+    matrix._facts[fact] = value
+    with pytest.raises(ValueError, match=match):
+        oecluster.circles(matrix, threshold=0.75)
+
+
+def test_circles_refuses_empty_matrix_input(monkeypatch):
+    """An empty matrix is refused by the wrapper's own guard."""
+    native = oecluster.oecluster
+
+    def fail_if_called(*args, **kwargs):
+        pytest.fail("native circles() was called; the wrapper should have refused")
+
+    monkeypatch.setattr(native, "circles", fail_if_called)
+
+    matrix = oecluster.pdist([], "fingerprint")
+    with pytest.raises(ValueError, match="requires at least one item"):
+        oecluster.circles(matrix, threshold=0.75)
+
+
+def test_circles_refuses_empty_comparison_input(monkeypatch):
+    """An empty comparison is refused by the wrapper's own guard."""
+    native = oecluster.oecluster
+
+    def fail_if_called(*args, **kwargs):
+        pytest.fail("native circles() was called; the wrapper should have refused")
+
+    monkeypatch.setattr(native, "circles", fail_if_called)
+
+    comparison = oecluster.FingerprintComparison([])
+    with pytest.raises(ValueError, match="requires at least one item"):
+        oecluster.circles(comparison, threshold=0.75)
+
+
 def test_the_circles_surface_is_exported():
     exported = ("circles", "CirclesResult")
 
