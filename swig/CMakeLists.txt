@@ -34,6 +34,7 @@ set(_OECLUSTER_SWIG_DEPENDS
     ${CMAKE_SOURCE_DIR}/include/oecluster/clustering/PartitionAgreement.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/clustering/SARCoherence.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/clustering/DiversitySelection.h
+    ${CMAKE_SOURCE_DIR}/include/oecluster/clustering/SetDiversity.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/clustering/DBSCAN.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/clustering/HDBSCAN.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/clustering/Agglomerative.h

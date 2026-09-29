@@ -32,6 +32,7 @@
 #include "oecluster/clustering/PartitionAgreement.h"
 #include "oecluster/clustering/SARCoherence.h"
 #include "oecluster/clustering/DiversitySelection.h"
+#include "oecluster/clustering/SetDiversity.h"
 #include "oecluster/clustering/KMedoids.h"
 #include "oecluster/clustering/MurckoScaffold.h"
 #include "oefp/batch.h"
@@ -829,6 +830,11 @@ OECLUSTER_GIL_EXCEPTION(OECluster::modelability, modelability)
 OECLUSTER_GIL_EXCEPTION(OECluster::maxmin_select, maxmin_select)
 OECLUSTER_GIL_EXCEPTION(OECluster::circles, circles)
 
+// vendi_score and logdet_diversity build and decompose an O(N^2) kernel, or
+// at order 2 run O(N^2) comparisons, with no Python object in reach.
+OECLUSTER_GIL_EXCEPTION(OECluster::vendi_score, vendi_score)
+OECLUSTER_GIL_EXCEPTION(OECluster::logdet_diversity, logdet_diversity)
+
 // ============================================================================
 // Ignore problematic members before %include
 //
@@ -1146,6 +1152,7 @@ public:
 %template(ClassConcordanceVector) std::vector<OECluster::ClassConcordance>;
 %include "oecluster/clustering/SARCoherence.h"
 %include "oecluster/clustering/DiversitySelection.h"
+%include "oecluster/clustering/SetDiversity.h"
 %include "oecluster/clustering/DBSCAN.h"
 %include "oecluster/clustering/HDBSCAN.h"
 %include "oecluster/clustering/Agglomerative.h"

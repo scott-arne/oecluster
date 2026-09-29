@@ -61,6 +61,8 @@ __all__ = [  # noqa: RUF022
     "ClassConcordance",
     "MaxMinSelection",
     "CirclesResult",
+    "VendiResult",
+    "LogDetResult",
     "cluster_report",
     "compare_reports",
     "partition_agreement",
@@ -70,6 +72,8 @@ __all__ = [  # noqa: RUF022
     "modelability",
     "maxmin_select",
     "circles",
+    "vendi_score",
+    "logdet_diversity",
     "ButinaResult",
     "DBSCANResult",
     "HDBSCANResult",
@@ -4990,6 +4994,11 @@ _CIRCLES_METHODS = {
     "sequential": _oecluster.CirclesMethod_Sequential,
 }
 
+_DIVERSITY_KERNELS = {
+    "complement": _oecluster.DiversityKernel_Complement,
+    "laplacian": _oecluster.DiversityKernel_Laplacian,
+}
+
 
 class MaxMinSelection:
     """A farthest-first selection, returned by :func:`maxmin_select`.
@@ -5063,6 +5072,99 @@ class CirclesResult:
     def __repr__(self):
         return (f"CirclesResult(count={self.count}, "
                 f"threshold={self.threshold!r}, method={self.method!r}, "
+                f"excluded={len(self.excluded)})")
+
+
+class VendiResult:
+    """A Vendi score, returned by :func:`vendi_score`.
+
+    :ivar score: The Vendi score; between 1 and ``size`` for a PSD kernel.
+    :ivar order: 1 or 2.
+    :ivar size: Number of items scored, after normalization.
+    :ivar kernel: ``"complement"`` or ``"laplacian"``.
+    :ivar min_eigenvalue: The smallest kernel eigenvalue, on the scale of K;
+        None for order 2.
+    :ivar negative_mass: Sum of ``|lambda| / size`` over the eigenvalues order 1
+        dropped as negative; None for order 2.
+    :ivar excluded: ``[original_index, reason]`` pairs for the items
+        normalization dropped; empty outside the named-comparison path.
+    """
+
+    # Field order mirrors the :ivar: list above.
+    __slots__ = ("score", "order", "size", "kernel", "min_eigenvalue",  # noqa: RUF023
+                 "negative_mass", "excluded")
+
+    def __init__(self, score, order, size, kernel, min_eigenvalue,
+                 negative_mass, excluded):
+        """
+        Construct a result from values already copied out of native memory.
+
+        :param score: The score.
+        :param order: The order.
+        :param size: Items scored.
+        :param kernel: Kernel name.
+        :param min_eigenvalue: Smallest eigenvalue, or None.
+        :param negative_mass: Dropped negative mass, or None.
+        :param excluded: ``[original_index, reason]`` pairs.
+        """
+        self.score = score
+        self.order = order
+        self.size = size
+        self.kernel = kernel
+        self.min_eigenvalue = min_eigenvalue
+        self.negative_mass = negative_mass
+        self.excluded = excluded
+
+    def __repr__(self):
+        return (f"VendiResult(score={self.score!r}, order={self.order}, "
+                f"size={self.size}, kernel={self.kernel!r}, "
+                f"excluded={len(self.excluded)})")
+
+
+class LogDetResult:
+    """A log-determinant diversity, returned by :func:`logdet_diversity`.
+
+    :ivar score: ``log det(K + ridge I)``, or ``-inf`` when the ridged kernel
+        is not numerically positive definite.
+    :ivar ridge: The ridge added to every eigenvalue.
+    :ivar size: Number of items scored, after normalization.
+    :ivar kernel: ``"complement"`` or ``"laplacian"``.
+    :ivar min_eigenvalue: The smallest kernel eigenvalue, before the ridge.
+    :ivar nonpositive_count: Number of ridged eigenvalues at or below the
+        tolerance; nonzero exactly when ``score`` is ``-inf``.
+    :ivar excluded: ``[original_index, reason]`` pairs for the items
+        normalization dropped; empty outside the named-comparison path.
+    """
+
+    # Field order mirrors the :ivar: list above.
+    __slots__ = ("score", "ridge", "size", "kernel", "min_eigenvalue",  # noqa: RUF023
+                 "nonpositive_count", "excluded")
+
+    def __init__(self, score, ridge, size, kernel, min_eigenvalue,
+                 nonpositive_count, excluded):
+        """
+        Construct a result from values already copied out of native memory.
+
+        :param score: The score.
+        :param ridge: The ridge.
+        :param size: Items scored.
+        :param kernel: Kernel name.
+        :param min_eigenvalue: Smallest eigenvalue before the ridge.
+        :param nonpositive_count: Ridged eigenvalues at or below tolerance.
+        :param excluded: ``[original_index, reason]`` pairs.
+        """
+        self.score = score
+        self.ridge = ridge
+        self.size = size
+        self.kernel = kernel
+        self.min_eigenvalue = min_eigenvalue
+        self.nonpositive_count = nonpositive_count
+        self.excluded = excluded
+
+    def __repr__(self):
+        return (f"LogDetResult(score={self.score!r}, ridge={self.ridge!r}, "
+                f"size={self.size}, "
+                f"nonpositive_count={self.nonpositive_count}, "
                 f"excluded={len(self.excluded)})")
 
 
@@ -5521,6 +5623,303 @@ def circles(items, *, threshold, method="maxmin", comparison=None,
         members=[source.caller_position(i) for i in native.members],
         threshold=float(native.threshold),
         method=method_key,
+        excluded=source.excluded,
+    )
+
+
+def _diversity_number(value, name):
+    """
+    Coerce a real-valued option, refusing a non-number with TypeError.
+
+    :param value: Caller value.
+    :param name: Option name for the messages.
+    :returns: The coerced float; an int beyond double range becomes infinity,
+        which every caller refuses as non-finite.
+    :raises TypeError: If the value is a bool, a string, or not a real number.
+    """
+    if isinstance(value, bool) or not isinstance(
+            value, (int, float, np.integer, np.floating)):
+        raise TypeError(f"{name} must be a number, got {value!r}")
+    try:
+        return float(value)
+    except OverflowError:
+        return math.inf
+
+
+def _diversity_kernel(kernel, bandwidth):
+    """
+    Resolve the kernel name and its bandwidth.
+
+    :param kernel: ``"complement"`` or ``"laplacian"``.
+    :param bandwidth: None for complement; a positive finite number for
+        laplacian.
+    :returns: ``(kernel_key, bandwidth_value)``; the bandwidth is NaN (the
+        native "unset") for complement.
+    :raises ValueError: If the kernel is unknown or the bandwidth does not fit
+        it.
+    :raises TypeError: If the bandwidth is not a number.
+    """
+    key = kernel.lower() if isinstance(kernel, str) else None
+    if key not in _DIVERSITY_KERNELS:
+        raise ValueError(
+            f"Unknown kernel: {kernel!r}; expected 'complement' or "
+            "'laplacian'")
+    if key == "complement":
+        if bandwidth is not None:
+            raise ValueError("bandwidth applies only to kernel='laplacian'")
+        return key, math.nan
+    if bandwidth is None:
+        raise ValueError("kernel='laplacian' requires a bandwidth")
+    value = _diversity_number(bandwidth, "bandwidth")
+    if not math.isfinite(value) or value <= 0.0:
+        raise ValueError("bandwidth must be positive and finite")
+    return key, value
+
+
+def _condensed_pair(n, index):
+    """Map a condensed index back to its (row, column) pair, row < column."""
+    row = 0
+    while index >= n - 1 - row:
+        index -= n - 1 - row
+        row += 1
+    return row, row + 1 + index
+
+
+def _require_kernel_distances(matrix, kernel_key, caller):
+    """
+    Refuse a matrix holding a distance the kernel cannot use.
+
+    Native code would refuse it too, but as a RuntimeError, after reading up
+    to the offending pair; checking the whole matrix here makes it a
+    ValueError, as the gate's refusal of a non-finite entry is.
+
+    :param matrix: A SymmetricDistanceMatrix that already passed the gate.
+    :param kernel_key: ``"complement"`` or ``"laplacian"``.
+    :param caller: Entry point name for the messages.
+    :raises ValueError: On a complement distance outside [0, 1], or a negative
+        Laplacian distance, naming the first such pair.
+    """
+    condensed = np.asarray(matrix.condensed)
+    if kernel_key == "complement":
+        bad = np.flatnonzero((condensed < 0.0) | (condensed > 1.0))
+    else:
+        bad = np.flatnonzero(condensed < 0.0)
+    if bad.size == 0:
+        return
+    index = int(bad[0])
+    row, column = _condensed_pair(matrix.num_samples, index)
+    value = float(condensed[index])
+    if kernel_key == "complement":
+        raise ValueError(
+            f"{caller}() kernel='complement' requires distances in [0, 1], "
+            f"but d({row}, {column}) = {value!r}; use kernel='laplacian' for "
+            "other distances")
+    raise ValueError(
+        f"{caller}() kernel='laplacian' requires non-negative distances, "
+        f"but d({row}, {column}) = {value!r}")
+
+
+def _require_exact_size(size, max_exact, caller):
+    """
+    Refuse an input above the exact-score ceiling, ahead of native code.
+
+    :param size: Items that survived normalization.
+    :param max_exact: The ceiling.
+    :param caller: Entry point name for the messages.
+    :raises ValueError: If size exceeds max_exact.
+    """
+    if size > max_exact:
+        raise ValueError(
+            f"{caller}() computes an exact spectrum of at most "
+            f"max_exact={max_exact} items, but the input has {size}; raise "
+            "max_exact (memory grows as 8n^2 bytes and time as n^3) or use "
+            "vendi_score(order=2), which needs no spectrum")
+
+
+def vendi_score(items, *, order=1, kernel="complement", bandwidth=None,
+                max_exact=2048, comparison=None, similarity=False,
+                num_threads=0, chunk_size=256, **kwargs) -> "VendiResult":
+    """
+    Score a set's diversity as its Vendi score.
+
+    The Vendi score (Friedman and Dieng, TMLR 2023) is the effective number of
+    distinct items in a set: 1 when every item is identical, and the item
+    count when every pair is maximally dissimilar. It reads the similarity
+    kernel K built from the distances by ``kernel``: ``"complement"`` is
+    ``1 - d`` and needs distances in [0, 1]; ``"laplacian"`` is
+    ``exp(-d / bandwidth)``.
+
+    ``order=1`` is ``exp(-sum p log p)`` over ``p = lambda / n`` for the
+    eigenvalues of K above ``n * eps * max|lambda|``. The rest are dropped
+    without renormalizing, as the reference implementation does, and
+    ``min_eigenvalue`` and ``negative_mass`` report what a non-PSD kernel
+    lost. It decomposes an n x n kernel, so it refuses more than
+    ``max_exact`` items. ``order=2`` is ``n^2 / ||K||_F^2``: it needs no
+    spectrum, has no ceiling, and on a comparison runs in O(N) memory. For a
+    non-PSD kernel it includes the negative eigenvalues' squares, and so
+    differs from the reference.
+
+    ``items`` selects the path exactly as for :func:`maxmin_select`.
+
+    :param items: Matrix, prebuilt comparison, or sequence of items.
+    :param order: 1 or 2.
+    :param kernel: ``"complement"`` (the default) or ``"laplacian"``.
+    :param bandwidth: Laplacian bandwidth, positive and finite; None for
+        complement.
+    :param max_exact: Largest input order 1 decomposes. Memory grows as
+        ``8 n^2`` bytes and time as ``n^3``.
+    :param comparison: Comparison name, required with a sequence of items.
+    :param similarity: Refused when True; the kernel is built from distances.
+    :param num_threads: Worker threads for the lazy paths; 0 selects the
+        hardware concurrency. Each worker holds one clone of the comparison,
+        which for comparisons that copy their items (MCS) costs O(N) apiece.
+    :param chunk_size: Rows per work unit, at least one.
+    :param kwargs: Comparison options for a named comparison.
+    :returns: A :class:`VendiResult`.
+    :raises TypeError: If the arguments fit none of the three paths, a
+        comparison option is unknown, or ``bandwidth`` is not a number.
+    :raises ValueError: On an invalid ``order``, ``kernel``, ``bandwidth``,
+        ``max_exact``, ``num_threads`` or ``chunk_size``; ``similarity=True``;
+        sparse storage; an empty input; normalization that expanded the
+        input; more than ``max_exact`` items at order 1; a refused matrix or
+        comparison; or a matrix distance the kernel cannot use.
+    :raises RuntimeError: If a distance read from a comparison is NaN,
+        infinite, or one the kernel cannot use, or the eigenvalue solver does
+        not converge.
+
+    Example::
+
+        result = oecluster.vendi_score(mols, comparison="fingerprint")
+        print(result.score)
+    """
+    if similarity:
+        raise ValueError(
+            "vendi_score() scores distances; similarity=True is not "
+            "supported")
+    if (isinstance(order, bool)
+            or not isinstance(order, (int, np.integer))
+            or order not in (1, 2)):
+        raise ValueError(f"vendi_score() order must be 1 or 2, got {order!r}")
+    order_value = int(order)
+    kernel_key, bandwidth_value = _diversity_kernel(kernel, bandwidth)
+    max_exact_value = _diversity_int(max_exact, "max_exact", 1)
+    num_threads_value = _diversity_int(num_threads, "num_threads", 0)
+    chunk_size_value = _diversity_int(chunk_size, "chunk_size", 1)
+
+    source = _diversity_source(items, comparison, kwargs, "vendi_score")
+    if source.size == 0:
+        raise ValueError("vendi_score() requires at least one item")
+    if order_value == 1:
+        _require_exact_size(source.size, max_exact_value, "vendi_score")
+    if source.matrix is not None:
+        _gate.require_comparable(source.matrix, "vendi_score")
+        _require_kernel_distances(source.matrix, kernel_key, "vendi_score")
+
+    options = _oecluster.VendiOptions()
+    options.order = order_value
+    options.kernel = _DIVERSITY_KERNELS[kernel_key]
+    options.bandwidth = bandwidth_value
+    options.max_exact = max_exact_value
+    options.num_threads = num_threads_value
+    options.chunk_size = chunk_size_value
+
+    native = _oecluster.vendi_score(source.target, options)
+    exact = order_value == 1
+    return VendiResult(
+        score=float(native.score),
+        order=order_value,
+        size=int(native.size),
+        kernel=kernel_key,
+        min_eigenvalue=float(native.min_eigenvalue) if exact else None,
+        negative_mass=float(native.negative_mass) if exact else None,
+        excluded=source.excluded,
+    )
+
+
+def logdet_diversity(items, *, ridge=0.0, kernel="complement",
+                     bandwidth=None, max_exact=2048, comparison=None,
+                     similarity=False, num_threads=0, chunk_size=256,
+                     **kwargs) -> "LogDetResult":
+    """
+    Score a set's diversity as the log-determinant of its kernel.
+
+    The score is ``log det(K + ridge I)`` over the similarity kernel K that
+    ``kernel`` builds from the distances, as for :func:`vendi_score`. It is a
+    positive-definite log-determinant: when any eigenvalue of ``K + ridge I``
+    is at or below ``n * eps * max|mu|``, the score is ``-inf``. That covers a
+    singular kernel (duplicate items) and an indefinite one, even when an
+    even number of negative eigenvalues leaves the determinant positive.
+    ``nonpositive_count`` and ``min_eigenvalue`` tell the two apart. A ridge
+    makes a singular PSD kernel finite only when it clears that tolerance; for
+    n identical items the smallest useful ridge is about ``n * eps * n``.
+
+    It decomposes an n x n kernel, so it refuses more than ``max_exact``
+    items.
+
+    :param items: Matrix, prebuilt comparison, or sequence of items.
+    :param ridge: Added to every eigenvalue; finite and non-negative.
+    :param kernel: ``"complement"`` (the default) or ``"laplacian"``.
+    :param bandwidth: Laplacian bandwidth, positive and finite; None for
+        complement.
+    :param max_exact: Largest input decomposed. Memory grows as ``8 n^2``
+        bytes and time as ``n^3``.
+    :param comparison: Comparison name, required with a sequence of items.
+    :param similarity: Refused when True; the kernel is built from distances.
+    :param num_threads: Worker threads for the lazy paths; 0 selects the
+        hardware concurrency.
+    :param chunk_size: Rows per work unit, at least one.
+    :param kwargs: Comparison options for a named comparison.
+    :returns: A :class:`LogDetResult`.
+    :raises TypeError: If the arguments fit none of the three paths, a
+        comparison option is unknown, or ``ridge`` or ``bandwidth`` is not a
+        number.
+    :raises ValueError: As :func:`vendi_score`, plus a negative or non-finite
+        ``ridge``.
+    :raises RuntimeError: As :func:`vendi_score`.
+
+    Example::
+
+        result = oecluster.logdet_diversity(mols, comparison="fingerprint",
+                                            ridge=1e-6)
+        print(result.score, result.nonpositive_count)
+    """
+    if similarity:
+        raise ValueError(
+            "logdet_diversity() scores distances; similarity=True is not "
+            "supported")
+    ridge_value = _diversity_number(ridge, "ridge")
+    if not math.isfinite(ridge_value) or ridge_value < 0.0:
+        raise ValueError("ridge must be finite and non-negative")
+    kernel_key, bandwidth_value = _diversity_kernel(kernel, bandwidth)
+    max_exact_value = _diversity_int(max_exact, "max_exact", 1)
+    num_threads_value = _diversity_int(num_threads, "num_threads", 0)
+    chunk_size_value = _diversity_int(chunk_size, "chunk_size", 1)
+
+    source = _diversity_source(items, comparison, kwargs, "logdet_diversity")
+    if source.size == 0:
+        raise ValueError("logdet_diversity() requires at least one item")
+    _require_exact_size(source.size, max_exact_value, "logdet_diversity")
+    if source.matrix is not None:
+        _gate.require_comparable(source.matrix, "logdet_diversity")
+        _require_kernel_distances(source.matrix, kernel_key,
+                                  "logdet_diversity")
+
+    options = _oecluster.LogDetOptions()
+    options.ridge = ridge_value
+    options.kernel = _DIVERSITY_KERNELS[kernel_key]
+    options.bandwidth = bandwidth_value
+    options.max_exact = max_exact_value
+    options.num_threads = num_threads_value
+    options.chunk_size = chunk_size_value
+
+    native = _oecluster.logdet_diversity(source.target, options)
+    return LogDetResult(
+        score=float(native.score),
+        ridge=ridge_value,
+        size=int(native.size),
+        kernel=kernel_key,
+        min_eigenvalue=float(native.min_eigenvalue),
+        nonpositive_count=int(native.nonpositive_count),
         excluded=source.excluded,
     )
 
