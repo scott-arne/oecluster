@@ -376,3 +376,22 @@ TEST(CirclesComparisonTest, SharesTheMatrixValidation) {
     ExpectInvalidArgument([&] { circles(empty, 1.0, CirclesOptions()); },
                           "#Circles requires at least one item");
 }
+
+TEST(CirclesComparisonTest, ProvesCloneIsolation) {
+    const size_t n = 40;
+    const std::vector<double> condensed = Scrambled(n);
+    const DenseStorage storage = MakeStorage(n, condensed);
+    const CirclesResult expected = circles(storage, 2.0, MethodOptions(CirclesMethod::Sequential));
+
+    CirclesOptions options = MethodOptions(CirclesMethod::Sequential);
+    options.num_threads = 4;
+    options.chunk_size = 1;
+    IsolationComparison comparison(n, condensed);
+
+    const CirclesResult result = circles(comparison, 2.0, options);
+
+    EXPECT_EQ(comparison.Violations(), 0u);
+    EXPECT_TRUE(comparison.OverlapObserved())
+        << "Overlap not observed; test may be flaky on this machine";
+    EXPECT_EQ(result.members, expected.members);
+}

@@ -600,3 +600,22 @@ TEST(MaxMinSelectComparisonTest, SharesTheMatrixValidation) {
     ExpectInvalidArgument([&] { maxmin_select(empty, CountOptions(1)); },
                           "MaxMin selection requires at least one item");
 }
+
+TEST(MaxMinSelectComparisonTest, ProvesCloneIsolation) {
+    const size_t n = 40;
+    const std::vector<double> condensed = Scrambled(n);
+    const DenseStorage storage = MakeStorage(n, condensed);
+    const MaxMinSelection expected = maxmin_select(storage, CountOptions(n));
+
+    MaxMinOptions options = CountOptions(n);
+    options.num_threads = 4;
+    options.chunk_size = 1;
+    IsolationComparison comparison(n, condensed);
+
+    const MaxMinSelection result = maxmin_select(comparison, options);
+
+    EXPECT_EQ(comparison.Violations(), 0u);
+    EXPECT_TRUE(comparison.OverlapObserved())
+        << "Overlap not observed; test may be flaky on this machine";
+    ExpectSameSelection(result, expected);
+}

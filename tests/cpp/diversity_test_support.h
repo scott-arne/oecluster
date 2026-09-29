@@ -7,6 +7,7 @@
 #define OECLUSTER_TESTS_CPP_DIVERSITY_TEST_SUPPORT_H
 
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <functional>
@@ -14,6 +15,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -157,6 +159,93 @@ private:
     size_t n_;
     OECluster::GateFacts facts_;
     std::shared_ptr<std::atomic<size_t>> count_;
+};
+
+/**
+ * @brief A comparison that detects concurrent use of one instance, prototype
+ * use, or clone sharing.
+ *
+ * Each instance has an atomic in-use guard; Compare records a violation if it
+ * finds the guard already set. The prototype records a violation if its own
+ * Compare is ever called. All instances share a violations counter and an
+ * overlap witness. Compare spins (bounded) until at least two instances are
+ * inside Compare at once, proving real concurrency.
+ */
+class IsolationComparison : public OECluster::PairwiseComparison {
+public:
+    explicit IsolationComparison(size_t n, const std::vector<double>& condensed)
+        : n_(n),
+          condensed_(std::make_shared<const std::vector<double>>(condensed)),
+          is_prototype_(true),
+          in_use_(std::make_shared<std::atomic<bool>>(false)),
+          shared_state_(std::make_shared<SharedState>()) {}
+
+    double Compare(size_t i, size_t j) override {
+        if (is_prototype_) {
+            shared_state_->violations.fetch_add(1);
+        }
+
+        bool already_in_use = in_use_->exchange(true);
+        if (already_in_use) {
+            shared_state_->violations.fetch_add(1);
+        }
+
+        // Wait until at least two instances are inside Compare concurrently.
+        // Bounded spin to avoid deadlock. Only spin if overlap hasn't been
+        // observed yet to avoid slowing down the entire test.
+        shared_state_->active_count.fetch_add(1);
+        if (!shared_state_->overlap_observed.load()) {
+            const auto start = std::chrono::steady_clock::now();
+            while (shared_state_->active_count.load() < 2) {
+                auto elapsed = std::chrono::steady_clock::now() - start;
+                if (elapsed > std::chrono::milliseconds(5)) {
+                    break;
+                }
+                std::this_thread::yield();
+            }
+        }
+        if (shared_state_->active_count.load() >= 2) {
+            shared_state_->overlap_observed.store(true);
+        }
+
+        // Actually compute the distance.
+        const size_t min_idx = std::min(i, j);
+        const size_t max_idx = std::max(i, j);
+        const double distance =
+            (*condensed_)[n_ * min_idx - min_idx * (min_idx + 1) / 2 + max_idx - min_idx - 1];
+
+        shared_state_->active_count.fetch_sub(1);
+        in_use_->store(false);
+        return distance;
+    }
+
+    OECluster::GateFacts Facts() const override { return OECluster::GateFacts(); }
+
+    std::unique_ptr<OECluster::PairwiseComparison> Clone() const override {
+        auto clone = std::make_unique<IsolationComparison>(*this);
+        clone->is_prototype_ = false;
+        clone->in_use_ = std::make_shared<std::atomic<bool>>(false);
+        return clone;
+    }
+
+    size_t Size() const override { return n_; }
+    std::string ComparisonName() const override { return "isolation"; }
+
+    size_t Violations() const { return shared_state_->violations.load(); }
+    bool OverlapObserved() const { return shared_state_->overlap_observed.load(); }
+
+private:
+    struct SharedState {
+        std::atomic<size_t> violations{0};
+        std::atomic<size_t> active_count{0};
+        std::atomic<bool> overlap_observed{false};
+    };
+
+    size_t n_;
+    std::shared_ptr<const std::vector<double>> condensed_;
+    bool is_prototype_;
+    std::shared_ptr<std::atomic<bool>> in_use_;
+    std::shared_ptr<SharedState> shared_state_;
 };
 
 // Storage whose Data() is null while pairs exist, which every diversity entry
