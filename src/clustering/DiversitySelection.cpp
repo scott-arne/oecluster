@@ -7,6 +7,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -14,6 +16,8 @@
 
 #include "DistanceAccess.h"
 #include "MaxMinKernel.h"
+#include "oecluster/Error.h"
+#include "oecluster/GateFacts.h"
 #include "oecluster/ThreadPool.h"
 
 namespace OECluster {
@@ -40,6 +44,35 @@ void validate_circles_method(CirclesMethod method) {
             return;
     }
     throw std::invalid_argument("Unknown #Circles method");
+}
+
+// The pre-scoring half of the Python gate's require_comparable: every refusal
+// here is decided by the comparison's declared facts, before any pair is
+// scored, so a count-limited call cannot succeed merely because it stopped
+// short of a pair the comparison already said was bad. Unknown is accepted.
+void validate_comparison_facts(const PairwiseComparison& comparison,
+                               const std::string& caller) {
+    const GateFacts facts = comparison.Facts();
+    if (facts.is_distance == Capability::No) {
+        throw ComparisonError(
+            caller + " requires distances, but the comparison reports "
+            "similarities");
+    }
+    if (facts.zero_self == Capability::No) {
+        throw ComparisonError(
+            caller + " requires a zero self-distance, but the comparison "
+            "reports that d(x, x) is not zero");
+    }
+    if (facts.data_integrity == DataIntegrity::NaNPresent) {
+        throw ComparisonError(
+            caller + " cannot rank distances the comparison declares may be "
+            "non-finite (missing='propagate')");
+    }
+    if (facts.data_integrity == DataIntegrity::SubsetScored) {
+        throw ComparisonError(
+            caller + " cannot rank distances scored on per-pair feature "
+            "subsets (missing='ignore'); they are not mutually comparable");
+    }
 }
 
 void validate_size_and_chunk(size_t n, size_t chunk_size,
@@ -104,6 +137,14 @@ void validate_circles_threshold(double threshold) {
         throw std::invalid_argument(
             "#Circles threshold must be finite and non-negative");
     }
+}
+
+// Follows the k-medoids precedent (KMedoids.cpp): a huge explicit request can
+// terminate the process, so it is capped at the item count. Zero passes
+// through and keeps meaning hardware concurrency; n >= 1 here, so the minimum
+// never manufactures a zero from a nonzero request.
+size_t capped_threads(size_t num_threads, size_t n) {
+    return std::min(num_threads, n);
 }
 
 MaxMinStop to_public_stop(detail::MaxMinKernelStop stop) {
@@ -224,6 +265,109 @@ detail::MaxMinKernelRequest circles_request(double threshold) {
     return request;
 }
 
+// Runs chunked Compare() work with one clone per concurrently running chunk.
+// A thread_local ordinal (the pdist pattern) is safe only for a single
+// ParallelFor call; these entry points make one per row or candidate, so
+// clones circulate through a free list instead and their number is bounded by
+// the concurrency actually reached.
+class ChunkedComparisons {
+public:
+    ChunkedComparisons(const PairwiseComparison& prototype, size_t n,
+                       size_t num_threads, size_t chunk_size)
+        : prototype_(prototype),
+          pool_(capped_threads(num_threads, n)),
+          chunk_size_(chunk_size) {}
+
+    // body(PairwiseComparison& clone, size_t begin, size_t end) over [0, range).
+    template <typename Body>
+    void Run(size_t range, Body&& body) {
+        if (range == 0) {
+            return;
+        }
+        // Capped at the range so a near-SIZE_MAX chunk_size cannot overflow
+        // ParallelFor's ceiling arithmetic.
+        const size_t chunk = std::min(chunk_size_, range);
+        if (chunk == range) {
+            // One chunk: ParallelFor would start every worker to run it on
+            // one of them, once per row or candidate.
+            Lease lease(*this);
+            body(*lease.clone, 0, range);
+            return;
+        }
+        pool_.ParallelFor(0, range, chunk, [&](size_t begin, size_t end) {
+            Lease lease(*this);
+            body(*lease.clone, begin, end);
+        });
+    }
+
+private:
+    struct Lease {
+        explicit Lease(ChunkedComparisons& owner)
+            : owner(owner), clone(owner.Acquire()) {}
+        ~Lease() { owner.Release(std::move(clone)); }
+        Lease(const Lease&) = delete;
+        Lease& operator=(const Lease&) = delete;
+
+        ChunkedComparisons& owner;
+        std::unique_ptr<PairwiseComparison> clone;
+    };
+
+    // Clone() runs under the lock: it is const, but nothing promises that a
+    // const call is safe to make concurrently on the prototype.
+    std::unique_ptr<PairwiseComparison> Acquire() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (free_.empty()) {
+            return prototype_.Clone();
+        }
+        std::unique_ptr<PairwiseComparison> clone = std::move(free_.back());
+        free_.pop_back();
+        return clone;
+    }
+
+    void Release(std::unique_ptr<PairwiseComparison> clone) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        free_.push_back(std::move(clone));
+    }
+
+    const PairwiseComparison& prototype_;
+    ThreadPool pool_;
+    size_t chunk_size_;
+    std::mutex mutex_;
+    std::vector<std::unique_ptr<PairwiseComparison>> free_;
+};
+
+// Row provider over a comparison. Always refuses non-finite reads: every
+// entry point that builds one is new, so there is no legacy to preserve.
+// Compare(min, max) reads the orientation pdist stores, so an asymmetric
+// comparison gives the lazy and matrix paths the same numbers.
+class ComparisonRowProvider {
+public:
+    explicit ComparisonRowProvider(ChunkedComparisons& work) : work_(work) {}
+
+    void FoldRow(size_t p, const std::vector<bool>& selected,
+                 std::vector<double>& nearest, bool first) {
+        work_.Run(selected.size(),
+                  [&](PairwiseComparison& local, size_t begin, size_t end) {
+            for (size_t j = begin; j < end; ++j) {
+                if (selected[j]) {
+                    continue;
+                }
+                const double distance =
+                    local.Compare(std::min(p, j), std::max(p, j));
+                if (!std::isfinite(distance)) {
+                    throw detail::non_finite_distance_error(p, j);
+                }
+                if (first || distance < nearest[j]) {
+                    nearest[j] = distance;
+                }
+            }
+        });
+    }
+
+private:
+    ChunkedComparisons& work_;
+};
+
 }  // namespace
 
 MaxMinSelection maxmin_select(const StorageBackend& storage,
@@ -243,6 +387,31 @@ MaxMinSelection maxmin_select(const StorageBackend& storage,
         } else if (options.seed_mode == MaxMinSeed::Medoid) {
             seed = medoid_seed(data, n);
         }
+    }
+    return to_selection(
+        detail::maxmin_run(rows, n, selection_request(options, seed)));
+}
+
+MaxMinSelection maxmin_select(PairwiseComparison& comparison,
+                              const MaxMinOptions& options) {
+    validate_seed_mode(options.seed_mode);
+    validate_comparison_facts(comparison, SELECTION_NAME);
+    const size_t n = comparison.Size();
+    validate_size_and_chunk(n, options.chunk_size, SELECTION_NAME);
+    validate_selection(options, n);
+    // Refused rather than computed: a medoid needs all O(N^2) comparisons,
+    // which is exactly what the lazy path exists to avoid.
+    if (options.seed_mode == MaxMinSeed::Medoid) {
+        throw std::invalid_argument(
+            "MaxMin selection seed mode Medoid requires a distance matrix");
+    }
+
+    ChunkedComparisons work(comparison, n, options.num_threads,
+                            options.chunk_size);
+    ComparisonRowProvider rows(work);
+    size_t seed = options.seed;
+    if (options.initial.empty() && options.seed_mode == MaxMinSeed::Farthest) {
+        seed = farthest_seed(rows, n);
     }
     return to_selection(
         detail::maxmin_run(rows, n, selection_request(options, seed)));
@@ -272,6 +441,42 @@ CirclesResult circles(const StorageBackend& storage, double threshold,
             distances[position] =
                 detail::dense_distance(data, n, members[position], candidate);
         }
+        if (accept_candidate(distances, members, candidate, threshold)) {
+            members.push_back(candidate);
+        }
+    }
+    return circles_result(std::move(members), threshold, options.method);
+}
+
+CirclesResult circles(PairwiseComparison& comparison, double threshold,
+                      const CirclesOptions& options) {
+    validate_circles_method(options.method);
+    validate_comparison_facts(comparison, CIRCLES_NAME);
+    const size_t n = comparison.Size();
+    validate_size_and_chunk(n, options.chunk_size, CIRCLES_NAME);
+    validate_circles_threshold(threshold);
+
+    ChunkedComparisons work(comparison, n, options.num_threads,
+                            options.chunk_size);
+    if (options.method == CirclesMethod::MaxMin) {
+        ComparisonRowProvider rows(work);
+        return circles_result(
+            detail::maxmin_run(rows, n, circles_request(threshold)).indices,
+            threshold, options.method);
+    }
+
+    std::vector<size_t> members;
+    std::vector<double> distances;
+    for (size_t candidate = 0; candidate < n; ++candidate) {
+        distances.resize(members.size());
+        // Members precede the candidate in input order, so member < candidate
+        // is already the (min, max) orientation.
+        work.Run(members.size(),
+                 [&](PairwiseComparison& local, size_t begin, size_t end) {
+            for (size_t position = begin; position < end; ++position) {
+                distances[position] = local.Compare(members[position], candidate);
+            }
+        });
         if (accept_candidate(distances, members, candidate, threshold)) {
             members.push_back(candidate);
         }

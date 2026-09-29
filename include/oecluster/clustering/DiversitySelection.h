@@ -115,6 +115,24 @@ MaxMinSelection maxmin_select(const StorageBackend& storage,
                               const MaxMinOptions& options);
 
 /**
+ * @brief Farthest-first (MaxMin) selection over a lazily evaluated comparison.
+ *
+ * Only the pairs the selection needs are compared, each as
+ * ``Compare(min(i, j), max(i, j))``, and never a self-pair.
+ *
+ * :param comparison: Distances to select over; cloned once per worker.
+ * :param options: Stop conditions, seed and threading. The Medoid seed is
+ *     refused.
+ * :returns: The selection, its pick distances and the stop reason.
+ * :raises ComparisonError: If the comparison's facts report a similarity, a
+ *     nonzero self-distance, NaN-present data or subset-scored data.
+ * :raises std::invalid_argument: As the matrix overload, except that the
+ *     Medoid seed is refused outright.
+ */
+MaxMinSelection maxmin_select(PairwiseComparison& comparison,
+                              const MaxMinOptions& options);
+
+/**
  * @brief The #Circles packing of a precomputed distance matrix.
  *
  * :param storage: Complete dense or memory-mapped distances.
@@ -126,6 +144,19 @@ MaxMinSelection maxmin_select(const StorageBackend& storage,
  *     threshold, or a non-finite distance read.
  */
 CirclesResult circles(const StorageBackend& storage, double threshold,
+                      const CirclesOptions& options);
+
+/**
+ * @brief The #Circles packing of a lazily evaluated comparison.
+ *
+ * :param comparison: Distances to pack; cloned once per worker.
+ * :param threshold: Members are pairwise strictly farther apart than this.
+ * :param options: Method and threading.
+ * :returns: The packing.
+ * :raises ComparisonError: As maxmin_select's comparison overload.
+ * :raises std::invalid_argument: As the matrix overload.
+ */
+CirclesResult circles(PairwiseComparison& comparison, double threshold,
                       const CirclesOptions& options);
 
 }  // namespace OECluster

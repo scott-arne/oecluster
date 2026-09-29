@@ -15,6 +15,8 @@
 #include <string>
 #include <vector>
 
+#include "oecluster/Error.h"
+#include "oecluster/GateFacts.h"
 #include "oecluster/StorageBackend.h"
 #include "oecluster/clustering/DiversitySelection.h"
 
@@ -386,4 +388,213 @@ TEST(MaxMinSelectTest, AThresholdOnlySelectionExtendsAnInitialSelection) {
     EXPECT_EQ(selection.indices, std::vector<size_t>({2, 3, 0, 5}));
     EXPECT_EQ(selection.stop, MaxMinStop::Threshold);
     ExpectSameSelection(selection, OracleSelect(6, Line(6), 0, 1.0, {2, 3}));
+}
+
+namespace {
+
+GateFacts FactsWith(Capability is_distance, Capability zero_self,
+                    DataIntegrity data_integrity) {
+    GateFacts facts;
+    facts.is_distance = is_distance;
+    facts.zero_self = zero_self;
+    facts.data_integrity = data_integrity;
+    return facts;
+}
+
+void ExpectComparisonError(const std::function<void()>& call,
+                           const std::string& message) {
+    try {
+        call();
+        FAIL() << "expected ComparisonError: " << message;
+    } catch (const ComparisonError& error) {
+        EXPECT_EQ(std::string(error.what()), message);
+    }
+}
+
+}  // namespace
+
+// TableComparison throws on a self-pair or a reversed pair, so a clean run is
+// itself the proof that the lazy path read only (min, max) off-diagonal pairs.
+TEST(MaxMinSelectComparisonTest, TheTableEnforcesItsReadingContract) {
+    TableComparison table(3, Line(3));
+
+    EXPECT_EQ(table.Compare(0, 2), 2.0);
+    EXPECT_THROW(table.Compare(1, 1), std::logic_error);
+    EXPECT_THROW(table.Compare(2, 0), std::logic_error);
+}
+
+TEST(MaxMinSelectComparisonTest, MatchesTheMatrixAtEveryThreadCountAndChunkSize) {
+    for (const size_t n : {size_t{1}, size_t{2}, size_t{7}, size_t{12}}) {
+        const std::vector<double> condensed = Scrambled(n);
+        const DenseStorage storage = MakeStorage(n, condensed);
+        std::vector<MaxMinOptions> requests;
+        for (const size_t count : {size_t{1}, (n + 1) / 2, n}) {
+            requests.push_back(CountOptions(count, n / 2));
+        }
+        MaxMinOptions threshold_request;
+        threshold_request.threshold = 2.0;
+        requests.push_back(threshold_request);
+        MaxMinOptions farthest = CountOptions(n);
+        farthest.seed_mode = MaxMinSeed::Farthest;
+        requests.push_back(farthest);
+        if (n >= 3) {
+            MaxMinOptions extend = CountOptions(n);
+            extend.initial = {n - 1, 1};
+            requests.push_back(extend);
+        }
+
+        for (size_t r = 0; r < requests.size(); ++r) {
+            const MaxMinSelection expected = maxmin_select(storage, requests[r]);
+            for (const size_t threads : {size_t{1}, size_t{2}, size_t{8}}) {
+                for (const size_t chunk : {size_t{1}, size_t{2}, size_t{256}}) {
+                    SCOPED_TRACE("n " + std::to_string(n) + ", request " +
+                                 std::to_string(r) + ", threads " +
+                                 std::to_string(threads) + ", chunk " +
+                                 std::to_string(chunk));
+                    MaxMinOptions options = requests[r];
+                    options.num_threads = threads;
+                    options.chunk_size = chunk;
+                    TableComparison table(n, condensed);
+                    ExpectSameSelection(maxmin_select(table, options), expected);
+                }
+            }
+        }
+    }
+}
+
+TEST(MaxMinSelectComparisonTest, AcceptsAnExtremeChunkSize) {
+    const size_t n = 9;
+    const std::vector<double> condensed = Scrambled(n);
+    const MaxMinSelection expected =
+        maxmin_select(MakeStorage(n, condensed), CountOptions(n));
+
+    MaxMinOptions options = CountOptions(n);
+    options.num_threads = 4;
+    options.chunk_size = std::numeric_limits<size_t>::max();
+    TableComparison table(n, condensed);
+
+    ExpectSameSelection(maxmin_select(table, options), expected);
+}
+
+// chunk_size 1 keeps every fold on the ThreadPool path; a larger chunk would
+// take the single-chunk serial shortcut and never construct the workers the
+// cap exists to bound. Uncapped, the pool's reserve for this count terminates
+// the process, as KMedoidsThreadCapTest documents.
+TEST(MaxMinSelectComparisonTest, CapsAnAbsurdThreadCount) {
+    const size_t n = 9;
+    const std::vector<double> condensed = Scrambled(n);
+    const MaxMinSelection expected =
+        maxmin_select(MakeStorage(n, condensed), CountOptions(n));
+
+    MaxMinOptions options = CountOptions(n);
+    options.num_threads = std::size_t{1} << 61;
+    options.chunk_size = 1;
+    TableComparison table(n, condensed);
+
+    ExpectSameSelection(maxmin_select(table, options), expected);
+}
+
+// Clones circulate through a free list, so their number is bounded by the
+// workers that ran at once, not by the rows folded.
+TEST(MaxMinSelectComparisonTest, ClonesAtMostOncePerWorker) {
+    const size_t n = 40;
+    TableComparison table(n, Scrambled(n));
+    MaxMinOptions options = CountOptions(n);
+    options.num_threads = 3;
+    options.chunk_size = 1;
+
+    maxmin_select(table, options);
+
+    EXPECT_GE(table.NumClones(), 1u);
+    EXPECT_LE(table.NumClones(), 3u);
+}
+
+// Masking item 0 keeps the diagonal unread, so a comparison whose d(x, x) is
+// not zero -- and does not claim it is -- still picks the matrix's seed.
+TEST(MaxMinSelectComparisonTest, TheFarthestSeedNeverReadsTheDiagonal) {
+    const std::vector<double> condensed = Positions({0, 4, 1, 9, 9});
+    TableComparison table(5, condensed, GateFacts(), 100.0);
+    MaxMinOptions options = CountOptions(3);
+    options.seed_mode = MaxMinSeed::Farthest;
+
+    ExpectSameSelection(maxmin_select(table, options),
+                        maxmin_select(MakeStorage(5, condensed), options));
+}
+
+TEST(MaxMinSelectComparisonTest, RefusesANonFiniteDistanceItReads) {
+    std::vector<double> condensed = Line(6);
+    condensed[2] = NaN;  // (0, 3)
+    for (const size_t threads : {size_t{1}, size_t{4}}) {
+        MaxMinOptions options = CountOptions(3);
+        options.num_threads = threads;
+        options.chunk_size = 1;
+        TableComparison table(6, condensed);
+
+        ExpectInvalidArgument(
+            [&] { maxmin_select(table, options); },
+            "Diversity selection read a non-finite distance between items 0 "
+            "and 3");
+    }
+}
+
+TEST(MaxMinSelectComparisonTest, RefusesComparisonsItsFactsRuleOut) {
+    const auto expect = [](GateFacts facts, const std::string& message) {
+        SCOPED_TRACE(message);
+        TableComparison table(4, Line(4), facts);
+        ExpectComparisonError([&] { maxmin_select(table, CountOptions(1)); },
+                              message);
+    };
+
+    expect(FactsWith(Capability::No, Capability::Unknown, DataIntegrity::Complete),
+           "MaxMin selection requires distances, but the comparison reports "
+           "similarities");
+    expect(FactsWith(Capability::Yes, Capability::No, DataIntegrity::Complete),
+           "MaxMin selection requires a zero self-distance, but the comparison "
+           "reports that d(x, x) is not zero");
+    expect(FactsWith(Capability::Yes, Capability::Yes, DataIntegrity::NaNPresent),
+           "MaxMin selection cannot rank distances the comparison declares may "
+           "be non-finite (missing='propagate')");
+    expect(FactsWith(Capability::Yes, Capability::Yes,
+                     DataIntegrity::SubsetScored),
+           "MaxMin selection cannot rank distances scored on per-pair feature "
+           "subsets (missing='ignore'); they are not mutually comparable");
+}
+
+TEST(MaxMinSelectComparisonTest, AcceptsFactsThatAreKnownGoodOrUnknown) {
+    TableComparison known(4, Line(4),
+                          FactsWith(Capability::Yes, Capability::Yes,
+                                    DataIntegrity::Complete));
+    TableComparison unknown(4, Line(4));
+
+    EXPECT_EQ(maxmin_select(known, CountOptions(2)).indices,
+              std::vector<size_t>({0, 3}));
+    EXPECT_EQ(maxmin_select(unknown, CountOptions(2)).indices,
+              std::vector<size_t>({0, 3}));
+}
+
+TEST(MaxMinSelectComparisonTest, RefusesTheMedoidSeed) {
+    TableComparison table(4, Line(4));
+    MaxMinOptions options = CountOptions(2);
+    options.seed_mode = MaxMinSeed::Medoid;
+
+    ExpectInvalidArgument(
+        [&] { maxmin_select(table, options); },
+        "MaxMin selection seed mode Medoid requires a distance matrix");
+
+    // Option validation comes first, in the matrix overload's order.
+    options.count = 5;
+    ExpectInvalidArgument(
+        [&] { maxmin_select(table, options); },
+        "MaxMin selection count must be at most the item count (4)");
+}
+
+TEST(MaxMinSelectComparisonTest, SharesTheMatrixValidation) {
+    TableComparison table(6, Line(6));
+    ExpectInvalidArgument([&] { maxmin_select(table, MaxMinOptions()); },
+                          "MaxMin selection requires a count, a threshold, or "
+                          "both");
+
+    TableComparison empty(0, {});
+    ExpectInvalidArgument([&] { maxmin_select(empty, CountOptions(1)); },
+                          "MaxMin selection requires at least one item");
 }

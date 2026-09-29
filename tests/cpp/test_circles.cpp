@@ -14,6 +14,8 @@
 #include <string>
 #include <vector>
 
+#include "oecluster/Error.h"
+#include "oecluster/GateFacts.h"
 #include "oecluster/StorageBackend.h"
 #include "oecluster/clustering/DiversitySelection.h"
 
@@ -257,4 +259,92 @@ TEST(CirclesTest, NeitherMethodExceedsTheMaximumIndependentSet) {
             }
         }
     }
+}
+
+TEST(CirclesComparisonTest, MatchesTheMatrixAtEveryThreadCountAndChunkSize) {
+    for (const size_t n : {size_t{1}, size_t{2}, size_t{7}, size_t{12}}) {
+        const std::vector<double> condensed = Scrambled(n);
+        const DenseStorage storage = MakeStorage(n, condensed);
+        for (const CirclesMethod method :
+             {CirclesMethod::MaxMin, CirclesMethod::Sequential}) {
+            for (const double threshold : {0.0, 2.5, 6.0}) {
+                const CirclesResult expected =
+                    circles(storage, threshold, MethodOptions(method));
+                for (const size_t threads : {size_t{1}, size_t{2}, size_t{8}}) {
+                    for (const size_t chunk :
+                         {size_t{1}, size_t{2}, size_t{256}}) {
+                        CirclesOptions options = MethodOptions(method);
+                        options.num_threads = threads;
+                        options.chunk_size = chunk;
+                        TableComparison table(n, condensed);
+                        EXPECT_EQ(circles(table, threshold, options).members,
+                                  expected.members)
+                            << "n " << n << ", threshold " << threshold
+                            << ", threads " << threads << ", chunk " << chunk;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// chunk_size 1 keeps the comparisons on the ThreadPool path, as in
+// MaxMinSelectComparisonTest.CapsAnAbsurdThreadCount.
+TEST(CirclesComparisonTest, CapsAnAbsurdThreadCount) {
+    const size_t n = 9;
+    const std::vector<double> condensed =
+        Positions({0, 1, 3, 7, 8, 12, 13, 20, 21});
+    for (const CirclesMethod method :
+         {CirclesMethod::MaxMin, CirclesMethod::Sequential}) {
+        const CirclesResult expected =
+            circles(MakeStorage(n, condensed), 1.5, MethodOptions(method));
+        CirclesOptions options = MethodOptions(method);
+        options.num_threads = std::size_t{1} << 61;
+        options.chunk_size = 1;
+        TableComparison table(n, condensed);
+        EXPECT_EQ(circles(table, 1.5, options).members, expected.members);
+    }
+}
+
+TEST(CirclesComparisonTest, SequentialRefusesANaNEvenAfterAnEarlyRejection) {
+    std::vector<double> condensed = Positions({0, 5, 0.5});
+    condensed[2] = NaN;  // (1, 2)
+    for (const size_t threads : {size_t{1}, size_t{2}, size_t{8}}) {
+        for (const size_t chunk : {size_t{1}, size_t{256}}) {
+            CirclesOptions options = MethodOptions(CirclesMethod::Sequential);
+            options.num_threads = threads;
+            options.chunk_size = chunk;
+            TableComparison table(3, condensed);
+
+            ExpectInvalidArgument(
+                [&] { circles(table, 1.0, options); },
+                "Diversity selection read a non-finite distance between "
+                "items 1 and 2");
+        }
+    }
+}
+
+TEST(CirclesComparisonTest, RefusesAComparisonReportingSimilarities) {
+    GateFacts facts;
+    facts.is_distance = Capability::No;
+    TableComparison table(4, Line(4), facts);
+
+    try {
+        circles(table, 1.0, CirclesOptions());
+        FAIL() << "expected ComparisonError";
+    } catch (const ComparisonError& error) {
+        EXPECT_STREQ(error.what(),
+                     "#Circles requires distances, but the comparison reports "
+                     "similarities");
+    }
+}
+
+TEST(CirclesComparisonTest, SharesTheMatrixValidation) {
+    TableComparison table(4, Line(4));
+    ExpectInvalidArgument([&] { circles(table, -1.0, CirclesOptions()); },
+                          "#Circles threshold must be finite and non-negative");
+
+    TableComparison empty(0, {});
+    ExpectInvalidArgument([&] { circles(empty, 1.0, CirclesOptions()); },
+                          "#Circles requires at least one item");
 }
