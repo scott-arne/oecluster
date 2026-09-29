@@ -6,9 +6,11 @@
 #ifndef OECLUSTER_SRC_THREADPOOLLAUNCH_H
 #define OECLUSTER_SRC_THREADPOOLLAUNCH_H
 
+#include <algorithm>
 #include <cstddef>
 #include <functional>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace OECluster {
@@ -48,6 +50,26 @@ void launch_threads(size_t num_threads, Spawn&& spawn, OnFailure&& on_failure) {
     for (auto& t : threads) {
         t.join();
     }
+}
+
+/**
+ * @brief Launch at most one worker per chunk, then join them.
+ *
+ * Workers claim chunks from a shared counter, so any worker beyond the chunk
+ * count would find nothing to do. Skipping those workers avoids the spawn
+ * cost, which dominates when the per-chunk work is cheap. Spawn failures are
+ * handled as in launch_threads.
+ *
+ * :param num_threads: Pool size, the upper bound on workers.
+ * :param total_chunks: Number of chunks to be claimed; 0 starts no threads.
+ * :param spawn: Callable that returns std::thread (typically constructs one).
+ * :param on_failure: Callback invoked if spawn throws.
+ */
+template <typename Spawn, typename OnFailure>
+void launch_workers(size_t num_threads, size_t total_chunks, Spawn&& spawn,
+                    OnFailure&& on_failure) {
+    launch_threads(std::min(num_threads, total_chunks), std::forward<Spawn>(spawn),
+                   std::forward<OnFailure>(on_failure));
 }
 
 }  // namespace detail

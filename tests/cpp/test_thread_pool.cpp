@@ -1,8 +1,11 @@
 #include <gtest/gtest.h>
 #include <atomic>
+#include <system_error>
+#include <thread>
 #include <vector>
 #include "oecluster/ThreadPool.h"
 #include "oecluster/Error.h"
+#include "../src/ThreadPoolLaunch.h"
 
 using namespace OECluster;
 
@@ -60,8 +63,6 @@ TEST(ThreadPoolTest, ExceptionPropagation) {
 }
 
 // Tests for spawn failure recovery.
-#include "../src/ThreadPoolLaunch.h"
-#include <system_error>
 
 TEST(ThreadPoolLaunchTest, PropagatesTheSpawnFailure) {
     std::atomic<size_t> spawn_count{0};
@@ -112,4 +113,47 @@ TEST(ThreadPoolLaunchTest, JoinsAllThreadsOnSuccess) {
 
     EXPECT_EQ(threads_exited.load(), 4u);
     EXPECT_FALSE(failure_callback_ran.load());
+}
+
+namespace {
+
+// Counts spawns through the same launcher ParallelFor uses, so the worker cap
+// is checked deterministically rather than by racing against thread exit.
+size_t CountLaunchedWorkers(size_t num_threads, size_t total_chunks) {
+    std::atomic<size_t> spawn_count{0};
+    OECluster::detail::launch_workers(
+        num_threads, total_chunks,
+        [&spawn_count]() {
+            spawn_count.fetch_add(1);
+            return std::thread([]() {});
+        },
+        []() {});
+    return spawn_count.load();
+}
+
+}  // namespace
+
+TEST(ThreadPoolLaunchTest, StartsNoMoreWorkersThanChunks) {
+    EXPECT_EQ(CountLaunchedWorkers(8, 2), 2u);
+}
+
+TEST(ThreadPoolLaunchTest, StartsTheFullPoolWhenChunksAreAbundant) {
+    EXPECT_EQ(CountLaunchedWorkers(4, 100), 4u);
+}
+
+TEST(ThreadPoolLaunchTest, StartsNoWorkersForZeroChunks) {
+    EXPECT_EQ(CountLaunchedWorkers(8, 0), 0u);
+}
+
+TEST(ThreadPoolTest, ParallelForWithFewerChunksThanThreadsCoversTheRange) {
+    ThreadPool pool(8);
+    std::vector<int> hits(20, 0);
+    pool.ParallelFor(0, 20, 10, [&hits](size_t begin, size_t end) {
+        for (size_t i = begin; i < end; ++i) {
+            hits[i] += 1;
+        }
+    });
+    for (size_t i = 0; i < hits.size(); ++i) {
+        EXPECT_EQ(hits[i], 1) << "item " << i;
+    }
 }

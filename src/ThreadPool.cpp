@@ -82,8 +82,8 @@ void ThreadPool::ParallelFor(size_t begin, size_t end, size_t chunk_size,
         }
     };
 
-    detail::launch_threads(
-        pimpl_->num_threads_,
+    detail::launch_workers(
+        pimpl_->num_threads_, total_chunks,
         [&worker]() { return std::thread(worker); },
         [this]() { pimpl_->cancelled_.store(true, std::memory_order_relaxed); });
 
