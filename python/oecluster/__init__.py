@@ -5326,7 +5326,8 @@ def maxmin_select(items, *, count=None, threshold=None, seed=_SEED_UNSET,
         At least one of ``count`` and ``threshold`` is required.
     :param seed: Starting position (default 0), ``"medoid"`` for the item
         with the smallest distance sum (matrix path only), or
-        ``"farthest"`` for the item farthest from item 0.
+        ``"farthest"`` for the item farthest from the first item that
+        survived normalization.
     :param initial: An existing selection to extend, reported first. Cannot
         be combined with an explicit ``seed``.
     :param comparison: Comparison name, required with a sequence of items.
@@ -5451,8 +5452,9 @@ def circles(items, *, threshold, method="maxmin", comparison=None,
     bound on the true packing number, so ``count`` is a lower bound under
     either method, and the two methods can disagree.
 
-    ``method="maxmin"`` packs farthest-first from item 0: it is
-    :func:`maxmin_select` with this threshold, no count, and the default seed.
+    ``method="maxmin"`` packs farthest-first from the first item that
+    survived normalization: it is :func:`maxmin_select` with this threshold,
+    no count, and the default seed.
     ``method="sequential"`` is the paper's reference greedy pass over input
     order, accepting an item when it is farther than ``threshold`` from every
     member so far. The paper's implementation also shuffles and repeats that
@@ -5489,7 +5491,7 @@ def circles(items, *, threshold, method="maxmin", comparison=None,
     if "seed" in kwargs or "initial" in kwargs:
         raise TypeError(
             "circles() takes no seed or initial: the packing always starts "
-            "from item 0")
+            "from the first item that survived normalization")
     if similarity:
         raise ValueError(
             "circles() packs on distances; similarity=True is not supported")

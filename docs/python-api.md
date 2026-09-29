@@ -904,7 +904,7 @@ the threshold from every earlier pick.
 
 `seed` chooses the first pick: an item position (the default starts from the
 first item that survived normalization), `"farthest"` for the item farthest
-from item 0, or `"medoid"` for the item with the smallest distance sum.
+from that first surviving item, or `"medoid"` for the item with the smallest distance sum.
 `"medoid"` needs every pairwise distance, so it is accepted on the matrix path
 only. `initial` extends an existing selection instead, and cannot be combined
 with an explicit `seed`.
@@ -923,9 +923,9 @@ exactly the threshold does not both belong. Finding the largest such set is
 NP-hard, and any valid packing is a lower bound on it, so `count` is a lower
 bound under either method, and the two methods can disagree.
 
-- `method="maxmin"` (the default) packs farthest-first from item 0. It is
-  `maxmin_select()` with this threshold, no count and the default seed, and it
-  tends to find the larger packing.
+- `method="maxmin"` (the default) packs farthest-first from the first item
+  that survived normalization. It is `maxmin_select()` with this threshold, no
+  count and the default seed.
 - `method="sequential"` is the paper's reference greedy pass over input order:
   an item joins when it is farther than `threshold` from every member so far.
   The paper's implementation also shuffles and repeats that pass in chunks;

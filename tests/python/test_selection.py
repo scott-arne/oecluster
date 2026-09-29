@@ -163,6 +163,17 @@ def test_positions_refer_to_the_callers_items_after_normalization_drops_one():
     assert by_name.indices == [1, 8, 4]
 
 
+def test_the_farthest_seed_measures_from_the_first_surviving_item():
+    """With caller item 0 dropped, "farthest" measures from caller item 1."""
+    mols = _mols(["O"] + DESCRIPTOR_SMILES)
+    by_name = oecluster.maxmin_select(mols, comparison="descriptor", count=3,
+                                      seed="farthest")
+    by_matrix = oecluster.maxmin_select(oecluster.pdist(mols, "descriptor"),
+                                        count=3, seed="farthest")
+    assert by_name.indices == [index + 1 for index in by_matrix.indices]
+    assert by_name.indices == [8, 7, 4]
+
+
 def test_a_dropped_position_cannot_seed_or_start_the_selection():
     mols = _mols(["O"] + DESCRIPTOR_SMILES)
     with pytest.raises(ValueError,
@@ -506,6 +517,15 @@ def test_circles_members_refer_to_the_callers_items():
     assert by_name.members == [index + 1 for index in by_matrix.members]
     assert by_name.members == [1, 2, 4, 8]
     assert by_name.method == "sequential"
+
+
+def test_maxmin_circles_starts_from_the_first_surviving_item():
+    mols = _mols(["O"] + DESCRIPTOR_SMILES)
+    by_name = oecluster.circles(mols, comparison="descriptor", threshold=3.0)
+    by_matrix = oecluster.circles(oecluster.pdist(mols, "descriptor"),
+                                  threshold=3.0)
+    assert by_name.members == [index + 1 for index in by_matrix.members]
+    assert by_name.members == [1, 8, 4, 3]
 
 
 def test_circles_on_the_line():

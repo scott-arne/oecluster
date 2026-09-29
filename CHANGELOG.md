@@ -11,10 +11,10 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   Each pick is the unselected item farthest from the selection so far, ties to
   the smaller index, so results never depend on `num_threads`. It stops at a
   `count`, at a distance `threshold`, or at whichever comes first, starts from
-  an item, the item farthest from item 0, or (matrix input only) the global
-  medoid, and can extend an existing `initial` selection. The result reports
-  the picks, each pick's distance to the earlier selection, and why it
-  stopped.
+  an item, the item farthest from the first item that survived normalization,
+  or (matrix input only) the global medoid, and can extend an existing
+  `initial` selection. The result reports the picks, each pick's distance to
+  the earlier selection, and why it stopped.
 - `circles`, the #Circles coverage measure of Xie et al. (ICLR 2023): the size
   of a packing whose members are pairwise strictly farther apart than a
   threshold. `method="maxmin"` (the default) packs farthest-first;
