@@ -88,6 +88,22 @@ TEST(SymmetricEigenTest, AllOnesHasOneNonzeroEigenvalue) {
         {0.0, 0.0, 0.0, 0.0, 0.0, 6.0}, 1e-12);
 }
 
+TEST(SymmetricEigenTest, AllOnesConvergesWhenTheNullSpaceIsLarge) {
+    // Round-off leaves a subnormal block in the null space, where a purely
+    // relative deflation test underflows and QL stalls.
+    for (const size_t n : {size_t{120}, size_t{200}}) {
+        SCOPED_TRACE("n = " + std::to_string(n));
+        std::vector<double> expected(n, 0.0);
+        expected.back() = static_cast<double>(n);
+        const double tolerance = static_cast<double>(n * n) *
+                                 std::numeric_limits<double>::epsilon();
+        ExpectEigenvalues(
+            symmetric_eigenvalues(Square(n, [](size_t, size_t) { return 1.0; }),
+                                  n),
+            expected, tolerance);
+    }
+}
+
 TEST(SymmetricEigenTest, TridiagonalToeplitzMatchesItsKnownSpectrum) {
     const size_t n = 50;
     const std::vector<double> a = Square(n, [](size_t i, size_t j) {

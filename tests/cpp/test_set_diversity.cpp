@@ -115,6 +115,17 @@ TEST(SetDiversityTest, IdenticalItemsScoreOne) {
     EXPECT_NEAR(ridged.score, 3.0 * std::log(0.5) + std::log(4.5), 1e-12);
 }
 
+TEST(SetDiversityTest, ManyIdenticalItemsScoreOne) {
+    // A large null space, which once stalled the eigenvalue solver.
+    const DenseStorage storage = MakeStorage(200, Constant(200, 0.0));
+
+    EXPECT_NEAR(vendi_score(storage, Order(1)).score, 1.0, 1e-9);
+
+    const LogDetResult singular = logdet_diversity(storage, Ridge(0.0));
+    EXPECT_EQ(singular.score, -INF);
+    EXPECT_EQ(singular.nonpositive_count, 199u);
+}
+
 TEST(SetDiversityTest, EqualBlocksScoreTheBlockCount) {
     // Three blocks of four identical items, the blocks at distance 1.
     const DenseStorage storage = MakeStorage(12, Condensed(12, [](size_t i, size_t j) {

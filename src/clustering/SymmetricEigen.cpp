@@ -14,7 +14,6 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
-#include <utility>
 #include <vector>
 
 namespace OECluster::detail {
@@ -100,13 +99,21 @@ void tridiagonal_ql(std::vector<double>& d, std::vector<double>& e,
                     unsigned max_iterations) {
     const auto n = static_cast<std::ptrdiff_t>(d.size());
     const double epsilon = std::numeric_limits<double>::epsilon();
+    double norm = 0.0;
+    for (std::ptrdiff_t k = 0; k < n; ++k) {
+        norm = std::max(norm, std::fabs(d[k]) + std::fabs(e[k]));
+    }
     for (std::ptrdiff_t l = 0; l < n; ++l) {
         unsigned iterations = 0;
         std::ptrdiff_t m = l;
         do {
             for (m = l; m < n - 1; ++m) {
                 const double dd = std::fabs(d[m]) + std::fabs(d[m + 1]);
-                if (std::fabs(e[m]) <= epsilon * dd) {
+                // The absolute floor, as in EISPACK tql1/tql2, lets deflation
+                // fire on round-off-level subnormal blocks, where the relative
+                // test underflows to zero.
+                if (std::fabs(e[m]) <= epsilon * dd ||
+                    std::fabs(e[m]) <= epsilon * norm) {
                     break;
                 }
             }
