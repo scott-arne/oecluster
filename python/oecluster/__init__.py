@@ -59,6 +59,7 @@ __all__ = [  # noqa: RUF022
     "ActivityLandscape",
     "Modelability",
     "ClassConcordance",
+    "MaxMinSelection",
     "cluster_report",
     "compare_reports",
     "partition_agreement",
@@ -66,6 +67,7 @@ __all__ = [  # noqa: RUF022
     "sar_coherence",
     "activity_landscape",
     "modelability",
+    "maxmin_select",
     "ButinaResult",
     "DBSCANResult",
     "HDBSCANResult",
@@ -4968,6 +4970,425 @@ def modelability(distance_matrix, activity_classes, *, num_threads=0):
     native = _oecluster.modelability(
         distance_matrix.storage, classes, options)
     return Modelability(native)
+
+
+# Stands for the default seed=0 while letting maxmin_select() tell an explicit
+# seed apart from none: an explicit seed together with initial is a conflict to
+# report, not one to resolve silently in either argument's favour.
+_SEED_UNSET = object()
+
+_MAXMIN_STOP_NAMES = {
+    _oecluster.MaxMinStop_Count: "count",
+    _oecluster.MaxMinStop_Threshold: "threshold",
+    _oecluster.MaxMinStop_Exhausted: "exhausted",
+}
+
+
+class MaxMinSelection:
+    """A farthest-first selection, returned by :func:`maxmin_select`.
+
+    :ivar indices: Selected items in selection order, initial entries first, as
+        positions in the caller's input.
+    :ivar pick_distances: Each pick's distance to the earlier selection when it
+        was picked; NaN for the seed and for every initial entry. Never
+        increases after them.
+    :ivar stop: Why the selection stopped: ``"count"``, ``"threshold"`` or
+        ``"exhausted"``.
+    :ivar excluded: ``[original_index, reason]`` pairs for the items
+        normalization dropped; empty outside the named-comparison path.
+    """
+
+    # Field order mirrors the :ivar: list above.
+    __slots__ = ("indices", "pick_distances", "stop", "excluded")  # noqa: RUF023
+
+    def __init__(self, indices, pick_distances, stop, excluded):
+        """
+        Construct a selection from values already copied out of native memory.
+
+        :param indices: Selected caller positions.
+        :param pick_distances: One distance per index.
+        :param stop: Stop reason name.
+        :param excluded: ``[original_index, reason]`` pairs.
+        """
+        self.indices = indices
+        self.pick_distances = pick_distances
+        self.stop = stop
+        self.excluded = excluded
+
+    def __repr__(self):
+        return (f"MaxMinSelection(indices={self.indices!r}, "
+                f"stop={self.stop!r}, excluded={len(self.excluded)})")
+
+
+class _DiversitySource:
+    """What one diversity call runs on, after its input has been dispatched.
+
+    ``positions`` maps a native index to a caller position and is None when
+    the two coincide; ``num_positions`` is the caller's item count.
+    """
+
+    # A plain class rather than a NamedTuple: in this module, a NamedTuple
+    # with methods drives mypy into an internal error.
+    def __init__(self, target, size, num_positions, positions, excluded,
+                 matrix):
+        self.target = target
+        self.size = size
+        self.num_positions = num_positions
+        self.positions = positions
+        self.excluded = excluded
+        self.matrix = matrix
+
+    def caller_position(self, index):
+        """Map a native index back to the caller's position."""
+        return index if self.positions is None else self.positions[index]
+
+    def native_index(self, position, what):
+        """
+        Map a caller position to a native index.
+
+        :param position: Non-negative caller position.
+        :param what: Argument name for the messages.
+        :returns: The native index.
+        :raises ValueError: If the position is out of range, or names an item
+            normalization dropped.
+        """
+        if position >= self.num_positions:
+            raise ValueError(
+                f"{what} {position} is outside the item range "
+                f"(0 to {self.num_positions - 1})")
+        if self.positions is None:
+            return position
+        for index, kept in enumerate(self.positions):
+            if kept == position:
+                return index
+        reason = next(r for p, r in self.excluded if p == position)
+        raise ValueError(
+            f"{what} {position} names an item that normalization dropped "
+            f"({reason})")
+
+
+def _refuse_comparison_facts(comparison_obj, caller):
+    """
+    Refuse a comparison whose declared facts rule out ranking its distances.
+
+    Mirrors validate_comparison_facts in src/clustering/DiversitySelection.cpp,
+    ahead of it, because SWIG turns the native ComparisonError into
+    RuntimeError. Every fact read here is declared before any pair is scored,
+    so a count-limited call cannot pass merely by never reaching a bad pair.
+    "unknown" is accepted throughout.
+
+    :param comparison_obj: Native comparison about to be run.
+    :param caller: Entry point name for the messages.
+    :raises ValueError: If a fact refuses.
+    """
+    facts = _gate.facts_from_comparison(comparison_obj)
+    if facts['is_distance'] is False:
+        raise ValueError(
+            f"{caller} requires distances, but the comparison reports "
+            "similarities; build it with similarity=False")
+    if facts['zero_self'] is False:
+        raise ValueError(
+            f"{caller} requires a zero self-distance, but the comparison "
+            "reports that d(x, x) is not zero")
+    if facts['data_integrity'] == "nan_present":
+        raise ValueError(
+            f"{caller} cannot rank distances the comparison declares may be "
+            "non-finite (missing='propagate'); use "
+            "missing='complete_case'")
+    if facts['data_integrity'] == "subset_scored":
+        raise ValueError(
+            f"{caller} cannot rank distances scored on per-pair feature "
+            "subsets (missing='ignore'); they are not mutually comparable. "
+            "Use missing='complete_case'")
+
+
+def _diversity_source(items, comparison, kwargs, caller):
+    """
+    Dispatch a diversity entry point's input onto one of its three paths.
+
+    :param items: A SymmetricDistanceMatrix, a native PairwiseComparison, or a
+        sequence of items for a named comparison.
+    :param comparison: Comparison name; the named path only.
+    :param kwargs: Comparison options; the named path only. Consumed.
+    :param caller: Entry point name for the messages.
+    :returns: A :class:`_DiversitySource`.
+    :raises TypeError: If the input and the comparison arguments do not fit
+        one path.
+    :raises ValueError: If the storage is sparse, normalization expanded or
+        emptied the item list, or the comparison's facts refuse it.
+    """
+    if isinstance(items, CrossDistanceMatrix):
+        raise TypeError(
+            f"{caller}() requires a SymmetricDistanceMatrix; a "
+            "CrossDistanceMatrix is rectangular and has no storage backend")
+
+    if isinstance(items, (SymmetricDistanceMatrix,
+                          _oecluster.PairwiseComparison)):
+        if comparison is not None or kwargs:
+            raise TypeError(
+                f"{caller}() takes no comparison or comparison options with a "
+                "distance matrix or a prebuilt comparison, which already fix "
+                "the distances")
+        if isinstance(items, SymmetricDistanceMatrix):
+            # ValueError, not TypeError: the argument's type is right, its
+            # storage is not.
+            if isinstance(items.storage, SparseStorage):
+                raise ValueError(  # noqa: TRY004
+                    f"{caller} requires complete pairwise distances; "
+                    "SparseStorage is not supported")
+            size = items.num_samples
+            return _DiversitySource(items.storage, size, size, None, [], items)
+        _refuse_comparison_facts(items, caller)
+        size = items.Size()
+        return _DiversitySource(items, size, size, None, [], None)
+
+    if not isinstance(comparison, str):
+        raise TypeError(
+            f"{caller}() requires comparison= to name a comparison, such as "
+            "'fingerprint', when items is a sequence of items")
+
+    items = list(items)
+    _comparisons.validate_request(comparison, False, kwargs)
+    kept, excluded = _comparisons.normalize_items(comparison, items, kwargs)
+    # Normalization may drop items but must not add them: conformer expansion
+    # would map one caller position onto several selectable items, and no
+    # index this function returns could then name what was selected.
+    if len(kept) + len(excluded) != len(items):
+        raise ValueError(
+            f"normalizing the inputs for the {comparison!r} comparison turned "
+            f"{len(items)} items into {len(kept)}; {caller} reports caller "
+            "positions and cannot map expanded items back to them. Expand "
+            "conformers up front, or pass expand_conformers=False")
+    if not kept:
+        raise ValueError(f"{caller}() requires at least one item")
+    dropped = {index for index, _ in excluded}
+    positions = [p for p in range(len(items)) if p not in dropped]
+    comparison_obj, _, _ = _comparisons.build_comparison(
+        kept, comparison, False, kwargs, symmetric=True)
+    _refuse_comparison_facts(comparison_obj, caller)
+    return _DiversitySource(comparison_obj, comparison_obj.Size(), len(items),
+                            positions, [list(entry) for entry in excluded],
+                            None)
+
+
+def _diversity_int(value, name, minimum):
+    """
+    Coerce an integer option, refusing a non-integer with ValueError.
+
+    :param value: Caller value.
+    :param name: Option name for the messages.
+    :param minimum: Smallest accepted value.
+    :returns: The coerced int.
+    :raises ValueError: If the value is not an integer, is below the minimum,
+        or does not fit a size_t.
+    """
+    # operator.index() accepts int and numpy integers and refuses
+    # float/str/None; int() would silently truncate 2.5. The design's error
+    # table makes a non-integer a ValueError, so the TypeError is translated.
+    # bool is an int subclass that index() also accepts, and count=True is a
+    # caller mistake rather than a count of one, so it is refused first.
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be an integer, got {value!r}")  # noqa: TRY004
+    try:
+        coerced = operator.index(value)
+    except TypeError:
+        raise ValueError(f"{name} must be an integer, got {value!r}") from None
+    if coerced < minimum:
+        raise ValueError(f"{name} must be at least {minimum}")
+    if coerced > _SIZE_T_MAX:
+        raise ValueError(f"{name} exceeds size_t maximum")
+    return coerced
+
+
+def _diversity_threshold(value):
+    """
+    Coerce a distance threshold, refusing NaN, infinity and negatives.
+
+    :param value: Caller value.
+    :returns: The coerced float.
+    :raises ValueError: If the value is NaN, infinite or negative.
+    """
+    try:
+        coerced = float(value)
+    except OverflowError as error:
+        # An int beyond double range is the infinity refused below, failing
+        # one step earlier.
+        raise ValueError("threshold must be finite") from error
+    if math.isnan(coerced):
+        raise ValueError("threshold must be a number, not NaN")
+    if math.isinf(coerced):
+        raise ValueError("threshold must be finite")
+    if coerced < 0.0:
+        raise ValueError("threshold must be non-negative")
+    return coerced
+
+
+def _maxmin_seed(seed):
+    """
+    Resolve maxmin_select()'s seed argument.
+
+    :param seed: ``_SEED_UNSET``, a non-negative int, ``"medoid"`` or
+        ``"farthest"``.
+    :returns: ``(seed_mode, position)``; position is None unless the mode is
+        Index with an explicit seed.
+    :raises ValueError: If the seed is none of those.
+    """
+    if seed is _SEED_UNSET:
+        return _oecluster.MaxMinSeed_Index, None
+    if isinstance(seed, str):
+        modes = {"medoid": _oecluster.MaxMinSeed_Medoid,
+                 "farthest": _oecluster.MaxMinSeed_Farthest}
+        mode = modes.get(seed.lower())
+        if mode is None:
+            raise ValueError(
+                f"Unknown seed: {seed!r}; expected a non-negative int, "
+                "'medoid' or 'farthest'")
+        return mode, None
+    return _oecluster.MaxMinSeed_Index, _diversity_int(seed, "seed", 0)
+
+
+def maxmin_select(items, *, count=None, threshold=None, seed=_SEED_UNSET,
+                  initial=None, comparison=None, similarity=False,
+                  num_threads=0, chunk_size=256,
+                  **kwargs) -> "MaxMinSelection":
+    """
+    Select a diverse subset by farthest-first (MaxMin) picking.
+
+    Each pick is the unselected item farthest from everything already
+    selected, ties to the smaller index, so the result depends only on the
+    distances and the arguments. With a threshold, a candidate at or within
+    that distance of the selection is not added, and every pick after the
+    seed and ``initial`` is strictly farther than the threshold from all
+    earlier picks.
+
+    ``items`` selects the path: a :class:`SymmetricDistanceMatrix` reads a
+    precomputed matrix; a native comparison object (for example the one
+    :class:`FingerprintComparison` returns) is evaluated lazily; anything else
+    is a sequence of items and ``comparison`` names how to compare them, as in
+    :func:`pdist`, again evaluated lazily. The lazy paths compare only the
+    pairs the selection needs, O(N·k) for k picks, and never build the O(N^2)
+    matrix.
+
+    Every position argument and result -- ``seed``, ``initial``, ``indices``,
+    ``excluded`` -- refers to the caller's ``items``, even when normalization
+    dropped some of them. Left unset, ``seed`` starts from the first item that
+    survived normalization.
+
+    :param items: Matrix, prebuilt comparison, or sequence of items.
+    :param count: Total selection size, ``initial`` included; a positive int.
+    :param threshold: Stop before a candidate at or within this distance.
+        At least one of ``count`` and ``threshold`` is required.
+    :param seed: Starting position (default 0), ``"medoid"`` for the item
+        with the smallest distance sum (matrix path only), or
+        ``"farthest"`` for the item farthest from item 0.
+    :param initial: An existing selection to extend, reported first. Cannot
+        be combined with an explicit ``seed``.
+    :param comparison: Comparison name, required with a sequence of items.
+    :param similarity: Refused when True; selection runs on distances.
+    :param num_threads: Worker threads for the lazy paths; 0 selects the
+        hardware concurrency. Each worker holds one clone of the comparison,
+        which for comparisons that copy their items (MCS) costs O(N) apiece.
+    :param chunk_size: Items per work unit, at least one.
+    :param kwargs: Comparison options for a named comparison.
+    :returns: A :class:`MaxMinSelection`.
+    :raises TypeError: If the arguments fit none of the three paths, a
+        comparison option is unknown, an ``initial`` entry is not an int, or
+        ``initial`` comes with an explicit ``seed``.
+    :raises ValueError: On an invalid ``count``, ``threshold``, ``seed``,
+        ``initial``, ``num_threads`` or ``chunk_size``; ``similarity=True``;
+        sparse storage; an empty input; normalization that expanded the
+        input or dropped a named position; ``seed="medoid"`` without a
+        matrix; or a matrix or comparison whose distances cannot be ranked.
+    :raises RuntimeError: If a distance read during the selection is NaN or
+        infinite, or a medoid seed's distance sum overflows.
+
+    Example::
+
+        picked = oecluster.maxmin_select(mols, comparison="fingerprint",
+                                         count=50)
+        subset = [mols[i] for i in picked.indices]
+    """
+    if similarity:
+        raise ValueError(
+            "maxmin_select() selects on distances; similarity=True is not "
+            "supported")
+    count_value = None if count is None else _diversity_int(count, "count", 1)
+    threshold_value = (None if threshold is None
+                       else _diversity_threshold(threshold))
+    if count_value is None and threshold_value is None:
+        raise ValueError(
+            "maxmin_select() requires count, threshold, or both")
+    num_threads_value = _diversity_int(num_threads, "num_threads", 0)
+    chunk_size_value = _diversity_int(chunk_size, "chunk_size", 1)
+    seed_mode, seed_position = _maxmin_seed(seed)
+    if initial is None:
+        initial_positions = []
+    else:
+        # bool passes operator.index(); it is refused as _diversity_int
+        # refuses it, so initial=[True] is not read as position 1.
+        try:
+            if any(isinstance(p, bool) for p in initial):
+                raise TypeError("bool entry")
+            initial_positions = [operator.index(p) for p in initial]
+        except TypeError as error:
+            raise TypeError(
+                "maxmin_select() initial must be a sequence of ints"
+            ) from error
+    if initial_positions and seed is not _SEED_UNSET:
+        raise TypeError(
+            "maxmin_select() takes initial or seed, not both: an initial "
+            "selection replaces the seed")
+    if any(p < 0 for p in initial_positions):
+        raise ValueError("initial entries must be non-negative")
+    if len(set(initial_positions)) != len(initial_positions):
+        raise ValueError("initial entries must be unique")
+    if (count_value is not None and len(initial_positions) > count_value):
+        raise ValueError("initial holds more entries than count")
+
+    source = _diversity_source(items, comparison, kwargs, "maxmin_select")
+    if source.size == 0:
+        raise ValueError("maxmin_select() requires at least one item")
+    # Tested on the caller's string rather than seed_mode: mypy reports a
+    # comparison against a wrapper enum attribute as a cyclic definition.
+    wants_medoid = isinstance(seed, str) and seed.lower() == "medoid"
+    if wants_medoid and source.matrix is None:
+        raise ValueError(
+            "seed='medoid' requires a distance matrix: on a comparison it "
+            "would cost every pairwise comparison, which the lazy path exists "
+            "to avoid")
+    if count_value is not None and count_value > source.size:
+        raise ValueError(
+            f"count must be at most the item count ({source.size})")
+    seed_index = (0 if seed_position is None
+                  else source.native_index(seed_position, "seed"))
+    initial_indices = [source.native_index(p, "initial entry")
+                       for p in initial_positions]
+    if source.matrix is not None:
+        _gate.require_comparable(source.matrix, "maxmin_select")
+
+    options = _oecluster.MaxMinOptions()
+    options.count = 0 if count_value is None else count_value
+    options.threshold = (math.nan if threshold_value is None
+                         else threshold_value)
+    options.seed_mode = seed_mode
+    options.seed = seed_index
+    if initial_indices:
+        native_initial = _oecluster.SizeTVector()
+        for index in initial_indices:
+            native_initial.push_back(index)
+        options.initial = native_initial
+    options.num_threads = num_threads_value
+    options.chunk_size = chunk_size_value
+
+    native = _oecluster.maxmin_select(source.target, options)
+    # Copied out while the native result is alive: its vectors are owned by
+    # it and read as empty once it is gone.
+    return MaxMinSelection(
+        indices=[source.caller_position(i) for i in native.indices],
+        pick_distances=[float(d) for d in native.pick_distances],
+        stop=_MAXMIN_STOP_NAMES[native.stop],
+        excluded=source.excluded,
+    )
 
 
 def descriptor_statistics(mols, *, sources=None, columns=None, groups=None,
