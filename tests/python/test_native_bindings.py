@@ -855,3 +855,23 @@ def test_the_diversity_entry_points_release_the_gil():
         assert text.index(invocation) < include_at, (
             f"{invocation} must precede the %include that declares {name}, or "
             "SWIG applies the exception handler to nothing")
+
+
+def test_sphere_exclusion_releases_the_gil():
+    """sphere_exclusion reads O(N*k) native rows or builds the O(N^2)
+    threshold graph, and its comparison overload runs for as long as the
+    comparisons do.
+
+    Asserted against the interface file for the reasons given in
+    test_the_new_entry_points_release_the_gil.
+    """
+    interface = pathlib.Path(__file__).resolve().parents[2] / "swig" / "oecluster.i"
+    text = _SWIG_COMMENT.sub("", interface.read_text(encoding="utf-8"))
+
+    include = '%include "oecluster/clustering/SphereExclusion.h"'
+    assert text.count(include) == 1, "the position check needs an unambiguous anchor"
+    invocation = "OECLUSTER_GIL_EXCEPTION(OECluster::sphere_exclusion, sphere_exclusion)"
+    assert invocation in text
+    assert text.index(invocation) < text.index(include), (
+        f"{invocation} must precede the %include that declares sphere_exclusion, "
+        "or SWIG applies the exception handler to nothing")

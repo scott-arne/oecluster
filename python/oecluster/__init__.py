@@ -74,12 +74,14 @@ __all__ = [  # noqa: RUF022
     "circles",
     "vendi_score",
     "logdet_diversity",
+    "sphere_exclusion",
     "ButinaResult",
     "DBSCANResult",
     "HDBSCANResult",
     "AgglomerativeResult",
     "BitBirchResult",
     "KMedoidsResult",
+    "SphereExclusionResult",
     "MurckoResult",
     "RepresentativeMetrics",
     "ClusterRepresentative",
@@ -1947,6 +1949,36 @@ class KMedoidsResult(ClusteringResult):
     @property
     def method(self):
         return "k_medoids"
+
+
+class SphereExclusionResult(ClusteringResult):
+    """Sphere-exclusion clustering result with one center per cluster.
+
+    Clusters are in center order and list their center first, then the other
+    members in ascending position. ``centers[i]`` is ``clusters[i][0]``.
+    Positions refer to the caller's items; an item that normalization dropped
+    has the label -1, appears in no cluster, and is listed in ``excluded``.
+    """
+
+    def __init__(self, labels, clusters, *, centers=(), excluded=(),
+                 native_owner=None):
+        super().__init__(labels, clusters, native_owner=native_owner)
+        self._centers = tuple(int(center) for center in centers)
+        self._excluded = [list(entry) for entry in excluded]
+
+    @property
+    def centers(self):
+        """Center position per cluster, in cluster order."""
+        return self._centers
+
+    @property
+    def excluded(self):
+        """``[position, reason]`` for each item normalization dropped."""
+        return [list(entry) for entry in self._excluded]
+
+    @property
+    def method(self):
+        return "sphere_exclusion"
 
 
 class MurckoResult(ClusteringResult):
@@ -5922,6 +5954,198 @@ def logdet_diversity(items, *, ridge=0.0, kernel="complement",
         kernel=kernel_key,
         min_eigenvalue=float(native.min_eigenvalue),
         nonpositive_count=int(native.nonpositive_count),
+        excluded=source.excluded,
+    )
+
+
+_SPHERE_ORDERS = {
+    "input": _oecluster.SphereOrder_Input,
+    "neighbors": _oecluster.SphereOrder_Neighbors,
+}
+
+_SPHERE_ASSIGNMENTS = {
+    "first": _oecluster.SphereAssignment_First,
+    "nearest": _oecluster.SphereAssignment_Nearest,
+}
+
+_SPHERE_ORDER_TYPE = (
+    "sphere_exclusion() order must be 'input', 'neighbors' or a sequence of "
+    "ints")
+
+
+def _sphere_order(order):
+    """
+    Resolve sphere_exclusion()'s order argument.
+
+    :param order: ``"input"``, ``"neighbors"``, or an iterable of caller
+        positions.
+    :returns: ``(native_order, positions)``; positions is None unless the
+        order is a sequence.
+    :raises ValueError: If a string names no order.
+    :raises TypeError: If the order is neither a string nor an iterable of
+        ints, or an entry is a bool.
+    """
+    if isinstance(order, str):
+        native = _SPHERE_ORDERS.get(order.lower())
+        if native is None:
+            raise ValueError(
+                f"Unknown sphere_exclusion order: {order!r}; expected "
+                "'input', 'neighbors' or a sequence of positions")
+        return native, None
+    try:
+        entries = list(order)
+    except TypeError:
+        raise TypeError(_SPHERE_ORDER_TYPE) from None
+    positions = []
+    for entry in entries:
+        # bool is an int subclass; order=[0, True] is a mistake, not item 1.
+        if isinstance(entry, bool):
+            raise TypeError(_SPHERE_ORDER_TYPE)
+        try:
+            positions.append(operator.index(entry))
+        except TypeError:
+            raise TypeError(_SPHERE_ORDER_TYPE) from None
+    return _oecluster.SphereOrder_Permutation, positions
+
+
+def _sphere_native_order(positions, source):
+    """
+    Map a permutation of caller positions to native indices.
+
+    :param positions: Caller positions from :func:`_sphere_order`.
+    :param source: The call's :class:`_DiversitySource`.
+    :returns: Native indices in the caller's order, dropped positions skipped.
+    :raises ValueError: If ``positions`` is not a permutation of every caller
+        position, dropped ones included.
+    """
+    count = source.num_positions
+    if len(positions) != count:
+        raise ValueError(
+            f"sphere_exclusion order has {len(positions)} entries for "
+            f"{count} items")
+    seen = set()
+    for position in positions:
+        if position < 0 or position >= count:
+            raise ValueError(
+                f"sphere_exclusion order entry {position} is outside the "
+                f"item range (0 to {count - 1})")
+        if position in seen:
+            raise ValueError(
+                f"sphere_exclusion order repeats position {position}")
+        seen.add(position)
+    if source.positions is None:
+        return positions
+    native = {kept: index for index, kept in enumerate(source.positions)}
+    return [native[position] for position in positions if position in native]
+
+
+def sphere_exclusion(items, threshold, *, order="input", reordering=False,
+                     assignment="first", comparison=None, similarity=False,
+                     num_threads=0, chunk_size=4096,
+                     **kwargs) -> "SphereExclusionResult":
+    """
+    Cluster by sphere exclusion: leader, Butina or DISE, by seed order.
+
+    Centers are taken in ``order``. Each center claims every unclaimed item
+    at or within ``threshold`` of it. ``order="input"`` is leader clustering.
+    ``order="neighbors"`` is Butina: descending neighbor count, with equal
+    counts going to the larger index, and optional ``reordering``. With
+    ``assignment="first"`` it equals :func:`butina` on every matrix both
+    accept; nearest assignment keeps Butina's centers but may move members.
+    A sequence of caller positions is Directed Sphere Exclusion (DISE): for
+    example, ``argsort`` of the distances to a reference item. The sequence
+    must name every caller position, including positions that normalization
+    dropped.
+
+    ``assignment="nearest"`` keeps the centers and moves each other item to
+    its nearest center, with ties going to the earlier center.
+
+    ``items`` selects the path exactly as for :func:`maxmin_select`. Labels,
+    clusters, centers and ``excluded`` refer to the caller's positions.
+
+    :param items: Matrix, prebuilt comparison, or sequence of items.
+    :param threshold: Distance threshold; finite and non-negative.
+    :param order: ``"input"`` (the default), ``"neighbors"``, or a sequence
+        of caller positions.
+    :param reordering: Butina's reordering; ``order="neighbors"`` only.
+    :param assignment: ``"first"`` (the default) or ``"nearest"``.
+    :param comparison: Comparison name, required with a sequence of items.
+    :param similarity: Refused when True; the threshold is a distance.
+    :param num_threads: Worker threads for the lazy paths and the neighbor
+        graph; 0 selects the hardware concurrency.
+    :param chunk_size: Items or pairs per work unit, at least one.
+    :param kwargs: Comparison options for a named comparison.
+    :returns: A :class:`SphereExclusionResult`.
+    :raises TypeError: If the arguments fit none of the three paths, a
+        comparison option is unknown, ``order`` is not a string or a sequence
+        of ints, or ``reordering`` is a string.
+    :raises ValueError: On an invalid ``threshold``, ``order``,
+        ``assignment``, ``num_threads`` or ``chunk_size``; ``reordering``
+        without the neighbor order; ``similarity=True``; sparse storage; an
+        empty sequence; the neighbor order on a lazy path; or a matrix or
+        comparison whose distances cannot be ranked.
+    :raises RuntimeError: If a comparison returns a NaN or infinite distance.
+
+    Example::
+
+        reference = distances_to_reference  # one distance per item
+        result = oecluster.sphere_exclusion(
+            mols, 0.6, comparison="fingerprint",
+            order=numpy.argsort(reference, kind="stable"))
+        print(result.centers)
+    """
+    if similarity:
+        raise ValueError(
+            "sphere_exclusion() clusters on distances; similarity=True is not "
+            "supported")
+    threshold_value = _diversity_threshold(threshold)
+    order_native, order_positions = _sphere_order(order)
+    reordering_value = _flag(reordering, "reordering")
+    if reordering_value and order_native != _oecluster.SphereOrder_Neighbors:
+        raise ValueError(
+            "sphere_exclusion() reordering requires order='neighbors'")
+    assignment_key = (assignment.lower() if isinstance(assignment, str)
+                      else None)
+    if assignment_key not in _SPHERE_ASSIGNMENTS:
+        raise ValueError(
+            f"Unknown sphere_exclusion assignment: {assignment!r}; expected "
+            "'first' or 'nearest'")
+    num_threads_value = _diversity_int(num_threads, "num_threads", 0)
+    chunk_size_value = _diversity_int(chunk_size, "chunk_size", 1)
+
+    source = _diversity_source(items, comparison, kwargs, "sphere_exclusion")
+    if (order_native == _oecluster.SphereOrder_Neighbors
+            and source.matrix is None):
+        raise ValueError(
+            "sphere_exclusion() with order='neighbors' needs every pairwise "
+            "distance; pass a precomputed distance matrix from pdist()")
+    native_order = (None if order_positions is None
+                    else _sphere_native_order(order_positions, source))
+    if source.matrix is not None:
+        _gate.require_comparable(source.matrix, "sphere_exclusion")
+
+    options = _oecluster.SphereExclusionOptions()
+    options.distance_threshold = threshold_value
+    options.order = order_native
+    if native_order is not None:
+        permutation = _oecluster.SizeTVector()
+        for index in native_order:
+            permutation.push_back(index)
+        options.permutation = permutation
+    options.reordering = reordering_value
+    options.assignment = _SPHERE_ASSIGNMENTS[assignment_key]
+    options.num_threads = num_threads_value
+    options.chunk_size = chunk_size_value
+
+    native = _oecluster.sphere_exclusion(source.target, options)
+    labels = [-1] * source.num_positions
+    for index, label in enumerate(native.Labels()):
+        labels[source.caller_position(index)] = int(label)
+    return SphereExclusionResult(
+        labels,
+        [[source.caller_position(i) for i in cluster]
+         for cluster in native.Members()],
+        centers=[source.caller_position(i) for i in native.Centers()],
         excluded=source.excluded,
     )
 

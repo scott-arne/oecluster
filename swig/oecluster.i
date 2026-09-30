@@ -33,6 +33,7 @@
 #include "oecluster/clustering/SARCoherence.h"
 #include "oecluster/clustering/DiversitySelection.h"
 #include "oecluster/clustering/SetDiversity.h"
+#include "oecluster/clustering/SphereExclusion.h"
 #include "oecluster/clustering/KMedoids.h"
 #include "oecluster/clustering/MurckoScaffold.h"
 #include "oefp/batch.h"
@@ -835,6 +836,11 @@ OECLUSTER_GIL_EXCEPTION(OECluster::circles, circles)
 OECLUSTER_GIL_EXCEPTION(OECluster::vendi_score, vendi_score)
 OECLUSTER_GIL_EXCEPTION(OECluster::logdet_diversity, logdet_diversity)
 
+// sphere_exclusion reads O(N*k) native rows, or builds the O(N^2) threshold
+// graph under the neighbor order, and its comparison overload runs clones on
+// worker threads for as long as the comparisons do.
+OECLUSTER_GIL_EXCEPTION(OECluster::sphere_exclusion, sphere_exclusion)
+
 // ============================================================================
 // Ignore problematic members before %include
 //
@@ -1153,6 +1159,7 @@ public:
 %include "oecluster/clustering/SARCoherence.h"
 %include "oecluster/clustering/DiversitySelection.h"
 %include "oecluster/clustering/SetDiversity.h"
+%include "oecluster/clustering/SphereExclusion.h"
 %include "oecluster/clustering/DBSCAN.h"
 %include "oecluster/clustering/HDBSCAN.h"
 %include "oecluster/clustering/Agglomerative.h"
