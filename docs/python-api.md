@@ -1154,6 +1154,64 @@ result.excluded    # [position, reason] for items normalization dropped
 `RuntimeError` comes from the native layer when a comparison returns a
 non-finite distance.
 
+## k-Nearest-Neighbor Graph and Jarvis-Patrick
+
+`knn_graph(items, k, ...)` returns each item's `k` nearest other items as a
+`KNNGraph`. `jarvis_patrick(items, *, kmin, k=None, ...)` clusters by the
+classic Jarvis-Patrick rule, from a `KNNGraph` or from any input `knn_graph`
+accepts.
+
+```python
+graph = oecluster.knn_graph(mols, 6, comparison="fingerprint")
+result = oecluster.jarvis_patrick(graph, kmin=3)
+same = oecluster.jarvis_patrick(mols, k=6, kmin=3, comparison="fingerprint")
+```
+
+**Inputs.** A `SymmetricDistanceMatrix` (dense, memory-mapped or sparse), a
+prebuilt comparison, or a sequence of items with `comparison=` and
+comparison options, as for `sphere_exclusion`. Lazy paths evaluate every
+ordered pair, N(N-1) comparisons, and keep only the O(N*k) graph.
+
+**Rows.** Each row lists `k` items other than its own, ordered by ascending
+(distance, position); equal distances go to the lower position. The result
+does not depend on `num_threads` or `chunk_size`. The stored values are raw
+distances, not affinities.
+
+**Sparse matrices.** The matrix must hold every pair at or within its
+cutoff, as `pdist(..., cutoff=...)` produces, and every item needs at least
+`k` stored neighbors. Otherwise the call raises `RuntimeError`; raise the
+cutoff or lower `k`.
+
+**Linkage.** Items i and j are linked when each is in the other's list and
+the lists share at least `kmin` items. Clusters are the connected components,
+and an unlinked item is a singleton. `kmin` must be below `k`.
+
+**Converting from a self-inclusive formulation.** Some references count an
+item among its own neighbors. Their `k` is this `k + 1`, and their `kmin` for
+a mutual pair is this `kmin + 2`.
+
+| `KNNGraph` member | Meaning |
+| --- | --- |
+| `k` | Neighbors per row |
+| `indices` | `(rows, k)` `int64` array of neighbor caller positions |
+| `distances` | `(rows, k)` `float64` array of distances |
+| `positions` | `(rows,)` `int64` caller position of each row |
+| `excluded` | `[position, reason]` for items normalization dropped |
+| `len(graph)` | Number of rows |
+
+`JarvisPatrickResult` adds `k`, `kmin` and `excluded` to the common result
+members. Excluded items have label -1 and appear in no cluster.
+
+With a `KNNGraph`, `k` must be omitted or equal `graph.k`, comparison
+arguments raise `TypeError`, and `num_threads` and `chunk_size` are validated
+but unused. With raw input, `k` is required.
+
+| Condition | Exception |
+| --- | --- |
+| Input fits no path; comparison arguments with a graph; missing `k` with raw input | `TypeError` |
+| Invalid `k`, `kmin`, `num_threads`, `chunk_size` (including one item, `k > n - 1`, `kmin >= k`); a graph whose `k` differs; `similarity=True`; an empty sequence; a matrix or comparison that cannot be ranked | `ValueError` |
+| A sparse item with fewer than `k` stored neighbors; a NaN or infinite comparison distance | `RuntimeError` |
+
 ## Metric Requirements
 
 `butina()`, `dbscan()`, `hdbscan()`, `agglomerative()`, and `cluster_report()`

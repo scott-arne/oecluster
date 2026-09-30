@@ -348,6 +348,50 @@ Other refusals throw `std::invalid_argument`. A non-finite distance throws
 `std::runtime_error`. The storage overload scans every distance first under
 the neighbor order, so a NaN cannot pass as "not a neighbor".
 
+### k-nearest-neighbor graph and Jarvis-Patrick
+
+`include/oecluster/clustering/KNNGraph.h` declares `KNNGraphOptions{k,
+num_threads, chunk_size}`, the `KNNGraph` type, and `knn_graph` overloads for
+`const StorageBackend&` and `PairwiseComparison&`.
+`include/oecluster/clustering/JarvisPatrick.h` declares
+`JarvisPatrickOptions{k, kmin, num_threads, chunk_size}`,
+`JarvisPatrickResult` (`K()`, `KMin()`, `Method() == "jarvis_patrick"`), and
+`jarvis_patrick` overloads for a `KNNGraph` plus `kmin`, for storage, and for
+a comparison.
+
+```cpp
+OECluster::KNNGraphOptions options;
+options.k = 6;
+const OECluster::KNNGraph graph = OECluster::knn_graph(storage, options);
+const auto result = OECluster::jarvis_patrick(graph, 3);
+```
+
+- `Indices()` and `Distances()` are row-major with `NumItems() * K()`
+  entries. Row i never names i and is ordered by ascending (distance,
+  index). The values are raw distances, not affinities.
+- Every row is an independent bounded selection. Matrix paths distribute
+  rows with `ThreadPool::ParallelFor`, and the comparison path uses one
+  clone per running unit. A unit covers `max(1, chunk_size / (n - 1))` rows,
+  and the result is identical for every `num_threads` and `chunk_size`.
+- The comparison overload calls `Compare(min(i, j), max(i, j))` N(N-1)
+  times. `Compare` must be repeatable across calls and clones.
+- Sparse storage must hold every pair at or within its cutoff. An item with
+  fewer than `k` distinct stored neighbors is refused with
+  `std::invalid_argument`. Duplicate entries count once, with the value
+  `Get()` reports.
+- Validation order on every entry point: `chunk_size`, then zero items
+  (empty result whatever `k` and `kmin` are), then `1 <= k <= n - 1`, then
+  `kmin < k`, then the input checks. A NaN or infinite distance raises
+  `std::runtime_error`.
+- The `KNNGraph` constructor validates its arrays: size, `k` range, index
+  range, no self, no repeats, finite distances and row order. It throws
+  `std::invalid_argument` otherwise, including when `num_items * k`
+  overflows.
+- Jarvis-Patrick links i and j when each is in the other's row and the rows
+  share at least `kmin` items. Clusters are ordered by smallest member. A
+  self-inclusive formulation's `k` is this `k + 1`, and its `kmin` is this
+  `kmin + 2`.
+
 ## Partition Agreement
 
 `PartitionAgreement.h` scores two labelings of the same samples against each

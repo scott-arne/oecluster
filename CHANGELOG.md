@@ -2,6 +2,27 @@
 
 This file starts at 5.0.0; earlier releases are not recorded here.
 
+## [5.11.0] - 2026-09-30
+
+### Added
+
+- `knn_graph`, a public k-nearest-neighbor graph. Each row lists an item's
+  `k` nearest other items and their distances, ordered by (distance,
+  position), with ties going to the lower position. The result is a
+  `KNNGraph` with `indices`, `distances` and `positions` arrays.
+  - It takes a `SymmetricDistanceMatrix` (dense, memory-mapped or sparse), a
+    prebuilt comparison, or a list of items with a comparison name. The lazy
+    paths keep only the O(N·k) graph.
+  - Sparse matrices must hold every pair within their cutoff, as `pdist()`
+    writes them. An item with fewer than `k` stored neighbors is refused.
+- `jarvis_patrick`, classic Jarvis-Patrick clustering. Two items link when
+  each is among the other's `k` nearest neighbors and they share at least
+  `kmin` of them. Clusters are the connected components. It takes a
+  `KNNGraph` or any input `knn_graph` accepts, and returns
+  `JarvisPatrickResult` with `k` and `kmin`.
+- The C++ entry points of the same names, configured through
+  `KNNGraphOptions` and `JarvisPatrickOptions`.
+
 ## [5.10.0] - 2026-09-29
 
 ### Added
