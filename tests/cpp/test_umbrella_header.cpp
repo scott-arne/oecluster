@@ -158,3 +158,12 @@ TEST(UmbrellaHeaderTest, ReachesTheSetDiversityHeader) {
     const OECluster::LogDetOptions logdet_options;
     EXPECT_DOUBLE_EQ(logdet_options.ridge, 0.0);
 }
+
+// SphereExclusion.h joined the umbrella in 5.10.0.
+TEST(UmbrellaHeaderTest, ReachesTheSphereExclusionHeader) {
+    const OECluster::SphereExclusionOptions options;
+    EXPECT_EQ(options.order, OECluster::SphereOrder::Input);
+    EXPECT_EQ(options.assignment, OECluster::SphereAssignment::First);
+    EXPECT_EQ(options.chunk_size, 4096u);
+    EXPECT_EQ(OECluster::SphereExclusionResult().Method(), "sphere_exclusion");
+}
