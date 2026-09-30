@@ -76,6 +76,7 @@ __all__ = [  # noqa: RUF022
     "logdet_diversity",
     "sphere_exclusion",
     "knn_graph",
+    "jarvis_patrick",
     "ButinaResult",
     "DBSCANResult",
     "HDBSCANResult",
@@ -84,6 +85,7 @@ __all__ = [  # noqa: RUF022
     "KMedoidsResult",
     "SphereExclusionResult",
     "KNNGraph",
+    "JarvisPatrickResult",
     "MurckoResult",
     "RepresentativeMetrics",
     "ClusterRepresentative",
@@ -2055,6 +2057,42 @@ class KNNGraph:
 
     def __repr__(self):
         return f"KNNGraph(num_rows={len(self)}, k={self._k})"
+
+
+class JarvisPatrickResult(ClusteringResult):
+    """Jarvis-Patrick clustering result with the ``k`` and ``kmin`` used.
+
+    Clusters are ordered by their smallest member and list members in
+    ascending position; an item that links to nothing is a singleton.
+    Positions refer to the caller's items; an item that normalization dropped
+    has the label -1, appears in no cluster, and is listed in ``excluded``.
+    """
+
+    def __init__(self, labels, clusters, *, k=0, kmin=0, excluded=(),
+                 native_owner=None):
+        super().__init__(labels, clusters, native_owner=native_owner)
+        self._k = int(k)
+        self._kmin = int(kmin)
+        self._excluded = [list(entry) for entry in excluded]
+
+    @property
+    def k(self):
+        """Neighbors per item in the graph."""
+        return self._k
+
+    @property
+    def kmin(self):
+        """Shared neighbors required to link a mutual pair."""
+        return self._kmin
+
+    @property
+    def excluded(self):
+        """``[position, reason]`` for each item normalization dropped."""
+        return [list(entry) for entry in self._excluded]
+
+    @property
+    def method(self):
+        return "jarvis_patrick"
 
 
 class MurckoResult(ClusteringResult):
@@ -6328,6 +6366,138 @@ def knn_graph(items, k, *, comparison=None, similarity=False, num_threads=0,
     options.chunk_size = chunk_size_value
     native = _oecluster.knn_graph(source.target, options)
     return KNNGraph._from_native(native, source)
+
+
+def _jarvis_patrick_check_kmin(kmin, k, size):
+    """
+    Refuse a shared-neighbor count no mutual pair can reach.
+
+    :param kmin: Coerced shared-neighbor count.
+    :param k: Neighbors per item.
+    :param size: Item count; nothing is refused for zero items.
+    :raises ValueError: If kmin >= k with items.
+    """
+    if size and kmin >= k:
+        raise ValueError(
+            f"jarvis_patrick() kmin must be less than k = {k}, got {kmin}; a "
+            "mutual pair shares at most k - 1 neighbors")
+
+
+def _jarvis_patrick_result(native, positions, num_positions, excluded):
+    """
+    Map a native result's labels and clusters back to caller positions.
+
+    :param native: The native JarvisPatrickResult.
+    :param positions: Caller position per native index, or None for identity.
+    :param num_positions: The caller's item count.
+    :param excluded: ``[position, reason]`` entries normalization dropped.
+    :returns: A :class:`JarvisPatrickResult`.
+    """
+    def caller(index):
+        return index if positions is None else positions[index]
+
+    labels = [-1] * num_positions
+    for index, label in enumerate(native.Labels()):
+        labels[caller(index)] = int(label)
+    return JarvisPatrickResult(
+        labels,
+        [[caller(i) for i in cluster] for cluster in native.Members()],
+        k=native.K(), kmin=native.KMin(), excluded=excluded)
+
+
+def jarvis_patrick(items, *, kmin, k=None, comparison=None, similarity=False,
+                   num_threads=0, chunk_size=4096,
+                   **kwargs) -> "JarvisPatrickResult":
+    """
+    Cluster by the classic Jarvis-Patrick shared-nearest-neighbor rule.
+
+    Items i and j are linked when each is among the other's ``k`` nearest
+    items and the two neighbor lists share at least ``kmin`` items; clusters
+    are the connected components of the links, and an unlinked item is a
+    singleton. Neighbor lists exclude the item itself, so a formulation that
+    counts the item among its own neighbors uses ``k + 1`` for this ``k`` and
+    ``kmin + 2`` for this ``kmin``.
+
+    ``items`` is a :class:`KNNGraph` from :func:`knn_graph`, or any input
+    :func:`knn_graph` accepts, in which case ``k`` is required and the graph
+    is built first. ``k`` and ``kmin`` are keyword-only so they cannot be
+    swapped by position. With a graph, ``k`` must be omitted or equal
+    ``graph.k``, and ``num_threads`` and ``chunk_size`` are validated but
+    unused.
+
+    :param items: A KNNGraph, matrix, prebuilt comparison, or sequence of
+        items.
+    :param kmin: Shared neighbors required to link a mutual pair; below k.
+    :param k: Neighbors per item, 1 to n - 1; required unless items is a
+        KNNGraph.
+    :param comparison: Comparison name, required with a sequence of items.
+    :param similarity: Refused when True; the graph ranks distances.
+    :param num_threads: Worker threads for the graph; 0 selects the hardware
+        concurrency.
+    :param chunk_size: Pairwise distances per work unit, at least one.
+    :param kwargs: Comparison options for a named comparison.
+    :returns: A :class:`JarvisPatrickResult`.
+    :raises TypeError: If the arguments fit no path, comparison arguments
+        accompany a KNNGraph, or ``k`` is missing with raw input.
+    :raises ValueError: On an invalid ``k``, ``kmin``, ``num_threads`` or
+        ``chunk_size`` (including ``kmin >= k``); a graph whose ``k``
+        differs from ``k``; ``similarity=True``; an empty sequence; or a
+        matrix or comparison whose distances cannot be ranked.
+    :raises RuntimeError: If a sparse item has fewer than ``k`` stored
+        neighbors, or a comparison returns a NaN or infinite distance.
+
+    Example::
+
+        result = oecluster.jarvis_patrick(mols, k=6, kmin=3,
+                                          comparison="fingerprint")
+        print(result.clusters)
+    """
+    if similarity:
+        raise ValueError(
+            "jarvis_patrick() clusters on distances; similarity=True is not "
+            "supported")
+    kmin_value = _diversity_int(kmin, "kmin", 0)
+    num_threads_value = _diversity_int(num_threads, "num_threads", 0)
+    chunk_size_value = _diversity_int(chunk_size, "chunk_size", 1)
+
+    if isinstance(items, KNNGraph):
+        if comparison is not None or kwargs:
+            raise TypeError(
+                "jarvis_patrick() takes no comparison or comparison options "
+                "with a KNNGraph, which already fixes the neighbors")
+        if k is not None:
+            k_value = _diversity_int(k, "k", 0)
+            if k_value != items.k:
+                raise ValueError(
+                    f"jarvis_patrick() k={k_value} does not match the graph's "
+                    f"k={items.k}")
+        _jarvis_patrick_check_kmin(kmin_value, items.k, len(items))
+        native = _oecluster.jarvis_patrick(items._native, kmin_value)  # type: ignore[attr-defined]
+        return _jarvis_patrick_result(native, items._positions,  # type: ignore[attr-defined]
+                                      items._num_positions, items._excluded)  # type: ignore[attr-defined]
+
+    if k is None:
+        raise TypeError(
+            "jarvis_patrick() requires k= unless items is a KNNGraph")
+    k_value = _diversity_int(k, "k", 0)
+    source = _diversity_source(items, comparison, kwargs, "jarvis_patrick",
+                               allow_sparse=True, defer_comparable_check=True)
+    _knn_check_k(k_value, source.size, "jarvis_patrick")
+    _jarvis_patrick_check_kmin(kmin_value, k_value, source.size)
+    if source.size > 0:
+        if source.matrix is not None:
+            _gate.require_comparable(source.matrix, "jarvis_patrick")
+        else:
+            _refuse_comparison_facts(source.target, "jarvis_patrick")
+
+    options = _oecluster.JarvisPatrickOptions()
+    options.k = k_value
+    options.kmin = kmin_value
+    options.num_threads = num_threads_value
+    options.chunk_size = chunk_size_value
+    native = _oecluster.jarvis_patrick(source.target, options)
+    return _jarvis_patrick_result(native, source.positions,
+                                  source.num_positions, source.excluded)
 
 
 def descriptor_statistics(mols, *, sources=None, columns=None, groups=None,
