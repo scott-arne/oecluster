@@ -191,7 +191,11 @@ TEST(JarvisPatrickTest, ZeroItemsGiveAnEmptyResultOnEveryOverload) {
         EXPECT_EQ(from_storage.K(), 4u);
         EXPECT_EQ(from_storage.KMin(), kmin);
         CountingComparison empty(0, GateFacts());
-        EXPECT_TRUE(jarvis_patrick(empty, Options(4, kmin)).Labels().empty());
+        const JarvisPatrickResult from_comparison =
+            jarvis_patrick(empty, Options(4, kmin));
+        EXPECT_TRUE(from_comparison.Labels().empty());
+        EXPECT_EQ(from_comparison.K(), 4u);
+        EXPECT_EQ(from_comparison.KMin(), kmin);
     }
 }
 

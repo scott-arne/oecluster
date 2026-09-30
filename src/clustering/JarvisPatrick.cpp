@@ -7,7 +7,6 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <iterator>
 #include <limits>
 #include <numeric>
 #include <stdexcept>
