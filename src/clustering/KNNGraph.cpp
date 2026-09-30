@@ -9,14 +9,17 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "ChunkedComparisons.h"
 #include "DistanceAccess.h"
 #include "DiversityValidation.h"
 #include "KNNGraphBuild.h"
+#include "oecluster/Error.h"
 #include "oecluster/ThreadPool.h"
 
 namespace OECluster {
@@ -111,6 +114,59 @@ KNNGraph matrix_graph(const double* data, size_t n,
     return KNNGraph(n, k, std::move(indices), std::move(distances));
 }
 
+std::string format_cutoff(double cutoff) {
+    std::ostringstream text;
+    text << cutoff;
+    return text.str();
+}
+
+// Get() answers a missing pair with 0.0, so pairs are discovered from
+// Entries() only. Each item's distinct neighbors are gathered first; the
+// storage keeps every Set() call, and a pair written twice must count once,
+// carrying the value Get() reports for it.
+KNNGraph sparse_graph(const SparseStorage& storage, size_t n,
+                      const KNNGraphOptions& options,
+                      const std::string& caller) {
+    const size_t k = options.k;
+    std::vector<std::vector<size_t>> neighbors(n);
+    for (const auto& [i, j, value] : storage.Entries()) {
+        neighbors[i].push_back(j);
+        neighbors[j].push_back(i);
+    }
+    // Serial and ascending, so the item named is always the lowest short one.
+    for (size_t i = 0; i < n; ++i) {
+        std::vector<size_t>& group = neighbors[i];
+        std::sort(group.begin(), group.end());
+        group.erase(std::unique(group.begin(), group.end()), group.end());
+        if (group.size() < k) {
+            throw std::invalid_argument(
+                caller + " item " + std::to_string(i) + " has only " +
+                std::to_string(group.size()) + " of the k = " +
+                std::to_string(k) + " neighbors it needs within the sparse cutoff " +
+                format_cutoff(storage.Cutoff()) + "; raise the cutoff or lower k");
+        }
+    }
+
+    std::vector<size_t> indices(checked_graph_size(n, k));
+    std::vector<double> distances(indices.size());
+    ThreadPool pool(detail::capped_threads(options.num_threads, n));
+    pool.ParallelFor(0, n, rows_per_unit(n, options.chunk_size),
+                     [&](size_t begin, size_t end) {
+        RowSelector row(k);
+        for (size_t i = begin; i < end; ++i) {
+            for (const size_t j : neighbors[i]) {
+                const double distance = storage.Get(i, j);
+                if (!std::isfinite(distance)) {
+                    throw knn_non_finite_error(caller, i, j);
+                }
+                row.Offer(distance, j);
+            }
+            row.Drain(&indices[i * k], &distances[i * k]);
+        }
+    });
+    return KNNGraph(n, k, std::move(indices), std::move(distances));
+}
+
 }  // namespace
 
 KNNGraph::KNNGraph(size_t num_items, size_t k, std::vector<size_t> indices,
@@ -179,6 +235,9 @@ KNNGraph build_knn_graph(const StorageBackend& storage,
         return KNNGraph(0, options.k, {}, {});
     }
     validate_knn_k(n, options.k, caller);
+    if (const auto* sparse = dynamic_cast<const SparseStorage*>(&storage)) {
+        return sparse_graph(*sparse, n, options, caller);
+    }
     const double* data = storage.Data();
     if (data == nullptr) {
         throw std::invalid_argument(
@@ -188,9 +247,40 @@ KNNGraph build_knn_graph(const StorageBackend& storage,
     return matrix_graph(data, n, options, caller);
 }
 
-KNNGraph build_knn_graph(PairwiseComparison&, const KNNGraphOptions&,
-                         const std::string&) {
-    throw std::logic_error("knn_graph over a comparison is not implemented yet");
+KNNGraph build_knn_graph(PairwiseComparison& comparison,
+                         const KNNGraphOptions& options,
+                         const std::string& caller) {
+    validate_chunk_size(options.chunk_size, caller);
+    const size_t n = comparison.Size();
+    if (n == 0) {
+        return KNNGraph(0, options.k, {}, {});
+    }
+    validate_knn_k(n, options.k, caller);
+    validate_comparison_facts(comparison, caller);
+
+    const size_t k = options.k;
+    std::vector<size_t> indices(checked_graph_size(n, k));
+    std::vector<double> distances(indices.size());
+    ChunkedComparisons work(comparison, n, options.num_threads,
+                            rows_per_unit(n, options.chunk_size));
+    work.Run(n, [&](PairwiseComparison& local, size_t begin, size_t end) {
+        RowSelector row(k);
+        for (size_t i = begin; i < end; ++i) {
+            for (size_t j = 0; j < n; ++j) {
+                if (j == i) {
+                    continue;
+                }
+                const double distance =
+                    local.Compare(std::min(i, j), std::max(i, j));
+                if (!std::isfinite(distance)) {
+                    throw knn_non_finite_error(caller, i, j);
+                }
+                row.Offer(distance, j);
+            }
+            row.Drain(&indices[i * k], &distances[i * k]);
+        }
+    });
+    return KNNGraph(n, k, std::move(indices), std::move(distances));
 }
 
 }  // namespace detail
