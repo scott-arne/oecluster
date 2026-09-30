@@ -26,9 +26,10 @@ This file starts at 5.0.0; earlier releases are not recorded here.
 ### Fixed
 
 - `butina()`, `butina_cluster()`, `dbscan()`, and `dbscan_cluster()` no longer
-  return every item as a singleton when `chunk_size` is near `SIZE_MAX`. The
-  threshold-graph build wrapped its chunk count to zero and skipped every pair;
-  it now clamps the chunk size to the pair count.
+  skip every pair when `chunk_size` is near `SIZE_MAX`, which made Butina
+  return every item as a singleton and DBSCAN label every item noise. The
+  threshold-graph build wrapped its chunk count to zero; it now clamps the
+  chunk size to the pair count.
 
 ### Changed
 

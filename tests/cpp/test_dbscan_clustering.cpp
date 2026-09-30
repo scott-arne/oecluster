@@ -81,6 +81,7 @@ TEST(DBSCANClusteringTest, IgnoresAHugeChunkSize) {
     options.chunk_size = 1;
     options.num_threads = 1;
     const DBSCANResult expected = dbscan_cluster(storage, options);
+    ASSERT_EQ(expected.Labels(), (std::vector<ClusterLabel>{0, 0, -1, 1, 1}));
 
     for (const size_t chunk : {size_t{1}, size_t{4096},
                                std::numeric_limits<size_t>::max()}) {
@@ -91,11 +92,6 @@ TEST(DBSCANClusteringTest, IgnoresAHugeChunkSize) {
             options.num_threads = threads;
             const DBSCANResult result = dbscan_cluster(storage, options);
             EXPECT_EQ(result.Labels(), expected.Labels());
-            for (const auto& cluster : result.Members()) {
-                for (const size_t idx : cluster) {
-                    EXPECT_NE(expected.Labels()[idx], -1);
-                }
-            }
         }
     }
 }
