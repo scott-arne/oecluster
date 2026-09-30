@@ -232,6 +232,28 @@ def test_a_similarity_comparison_is_refused():
         oecluster.knn_graph(prebuilt, 2)
 
 
+def test_an_empty_similarity_matrix_returns_an_empty_graph():
+    matrix = oecluster.pdist([], "fingerprint", similarity=True)
+    graph = oecluster.knn_graph(matrix, 7)
+    assert len(graph) == 0
+    assert graph.k == 7
+    assert graph.indices.shape == (0, 7)
+
+
+def test_an_empty_similarity_comparison_returns_an_empty_graph():
+    comparison = oecluster.FingerprintComparison([], similarity=True)
+    graph = oecluster.knn_graph(comparison, 7)
+    assert len(graph) == 0
+    assert graph.k == 7
+    assert graph.indices.shape == (0, 7)
+
+
+def test_non_empty_similarity_matrix_is_still_refused():
+    matrix = oecluster.pdist(_mols(FP_SMILES), "fingerprint", similarity=True)
+    with pytest.raises(ValueError, match="holds a similarity"):
+        oecluster.knn_graph(matrix, 2)
+
+
 def test_other_diversity_callers_still_refuse_sparse_storage():
     matrix = _sparse_distance_matrix(_square(_POINTS), 100.0)
     with pytest.raises(ValueError, match="SparseStorage is not supported"):

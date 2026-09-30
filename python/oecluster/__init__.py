@@ -5359,7 +5359,7 @@ def _refuse_comparison_facts(comparison_obj, caller):
 
 
 def _diversity_source(items, comparison, kwargs, caller, *,
-                      allow_sparse=False):
+                      allow_sparse=False, defer_comparable_check=False):
     """
     Dispatch a diversity entry point's input onto one of its three paths.
 
@@ -5370,12 +5370,14 @@ def _diversity_source(items, comparison, kwargs, caller, *,
     :param caller: Entry point name for the messages.
     :param allow_sparse: Accept SparseStorage; for callers whose native entry
         points read sparse entries directly.
+    :param defer_comparable_check: Skip the up-front comparison fact check;
+        for callers that need to inspect source.size before gating.
     :returns: A :class:`_DiversitySource`.
     :raises TypeError: If the input and the comparison arguments do not fit
         one path.
     :raises ValueError: If the storage is sparse and allow_sparse is False,
         normalization expanded or emptied the item list, or the comparison's
-        facts refuse it.
+        facts refuse it (unless defer_comparable_check defers the check).
     """
     if isinstance(items, CrossDistanceMatrix):
         raise TypeError(
@@ -5398,7 +5400,8 @@ def _diversity_source(items, comparison, kwargs, caller, *,
                     "SparseStorage is not supported")
             size = items.num_samples
             return _DiversitySource(items.storage, size, size, None, [], items)
-        _refuse_comparison_facts(items, caller)
+        if not defer_comparable_check:
+            _refuse_comparison_facts(items, caller)
         size = items.Size()
         return _DiversitySource(items, size, size, None, [], None)
 
@@ -6311,10 +6314,13 @@ def knn_graph(items, k, *, comparison=None, similarity=False, num_threads=0,
     chunk_size_value = _diversity_int(chunk_size, "chunk_size", 1)
 
     source = _diversity_source(items, comparison, kwargs, "knn_graph",
-                               allow_sparse=True)
+                               allow_sparse=True, defer_comparable_check=True)
     _knn_check_k(k_value, source.size, "knn_graph")
-    if source.matrix is not None:
-        _gate.require_comparable(source.matrix, "knn_graph")
+    if source.size > 0:
+        if source.matrix is not None:
+            _gate.require_comparable(source.matrix, "knn_graph")
+        else:
+            _refuse_comparison_facts(source.target, "knn_graph")
 
     options = _oecluster.KNNGraphOptions()
     options.k = k_value
