@@ -1,13 +1,17 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <limits>
 #include <vector>
 
 #include "oecluster/StorageBackend.h"
 #include "oecluster/clustering/ClusterTypes.h"
 #include "oecluster/clustering/DBSCAN.h"
 
+#include "diversity_test_support.h"
+
 using namespace OECluster;
+using namespace diversity_test;
 
 TEST(ClusteringResultTest, ConvertsLabelsToClustersInLabelOrder) {
     const std::vector<ClusterLabel> labels{1, -1, 0, 1, 0, -1};
@@ -66,4 +70,32 @@ TEST(DBSCANClusteringTest, AllNoiseWhenNoCoreSamples) {
     EXPECT_TRUE(result.CoreSampleIndices().empty());
     EXPECT_EQ(result.Labels(), std::vector<ClusterLabel>({-1, -1, -1}));
     EXPECT_TRUE(result.Members().empty());
+}
+
+TEST(DBSCANClusteringTest, IgnoresAHugeChunkSize) {
+    const DenseStorage storage = MakeStorage(5, Positions({0, 1, 3, 7, 8}));
+    DBSCANOptions options;
+    options.eps = 1.5;
+    options.min_samples = 2;
+
+    options.chunk_size = 1;
+    options.num_threads = 1;
+    const DBSCANResult expected = dbscan_cluster(storage, options);
+
+    for (const size_t chunk : {size_t{1}, size_t{4096},
+                               std::numeric_limits<size_t>::max()}) {
+        SCOPED_TRACE(::testing::Message() << "chunk " << chunk);
+        options.chunk_size = chunk;
+        for (const size_t threads : {size_t{1}, size_t{4}}) {
+            SCOPED_TRACE(::testing::Message() << "threads " << threads);
+            options.num_threads = threads;
+            const DBSCANResult result = dbscan_cluster(storage, options);
+            EXPECT_EQ(result.Labels(), expected.Labels());
+            for (const auto& cluster : result.Members()) {
+                for (const size_t idx : cluster) {
+                    EXPECT_NE(expected.Labels()[idx], -1);
+                }
+            }
+        }
+    }
 }
