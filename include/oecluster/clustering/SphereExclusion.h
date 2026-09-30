@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "oecluster/PairwiseComparison.h"
 #include "oecluster/StorageBackend.h"
 #include "oecluster/clustering/ClusterTypes.h"
 
@@ -96,6 +97,27 @@ private:
  *     the neighbor order every distance is read up front.
  */
 SphereExclusionResult sphere_exclusion(const StorageBackend& storage,
+                                       const SphereExclusionOptions& options);
+
+/**
+ * @brief Sphere exclusion over a comparison, evaluated lazily.
+ *
+ * Supports SphereOrder::Input and SphereOrder::Permutation. Each center
+ * compares against the still-unclaimed items in parallel chunks, as
+ * Compare(min, max); nearest assignment compares every non-center item with
+ * every center. The result equals the matrix overload's on the same
+ * distances, for every num_threads and chunk_size.
+ *
+ * :param comparison: Distance comparison; cloned once per running chunk.
+ * :param options: Threshold, order, assignment and threading options.
+ * :returns: The clustering; empty for zero items.
+ * :raises std::invalid_argument: On the matrix overload's option refusals,
+ *     or SphereOrder::Neighbors, which needs every pairwise distance.
+ * :raises ComparisonError: If the comparison's facts rule out ranking its
+ *     distances.
+ * :raises std::runtime_error: If a comparison returns NaN or infinity.
+ */
+SphereExclusionResult sphere_exclusion(PairwiseComparison& comparison,
                                        const SphereExclusionOptions& options);
 
 }  // namespace OECluster

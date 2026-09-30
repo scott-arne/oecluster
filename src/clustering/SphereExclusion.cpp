@@ -15,6 +15,7 @@
 #include <utility>
 #include <vector>
 
+#include "ChunkedComparisons.h"
 #include "DistanceAccess.h"
 #include "DiversityValidation.h"
 #include "SphereExclusionEngine.h"
@@ -158,6 +159,48 @@ private:
     size_t n_;
 };
 
+// Runs a comparison in parallel chunks. Each chunk writes only its own slots
+// of the output vectors, which are sized before Run() starts; the engine
+// reads them, and commits claims, on the caller thread after Run() returns.
+class ComparisonSphereSource {
+public:
+    explicit ComparisonSphereSource(detail::ChunkedComparisons& work)
+        : work_(work) {}
+
+    void Row(size_t center, const std::vector<size_t>& targets,
+             std::vector<double>& distances) {
+        distances.resize(targets.size());
+        work_.Run(targets.size(), [&](PairwiseComparison& local, size_t begin,
+                                      size_t end) {
+            for (size_t p = begin; p < end; ++p) {
+                const size_t item = targets[p];
+                distances[p] = local.Compare(std::min(center, item),
+                                             std::max(center, item));
+            }
+        });
+    }
+
+    void Nearest(const std::vector<size_t>& items,
+                 const std::vector<size_t>& centers, std::vector<size_t>& best,
+                 std::vector<double>& best_distance) {
+        best.resize(items.size());
+        best_distance.resize(items.size());
+        work_.Run(items.size(), [&](PairwiseComparison& local, size_t begin,
+                                    size_t end) {
+            const auto read = [&local](size_t a, size_t b) {
+                return local.Compare(std::min(a, b), std::max(a, b));
+            };
+            for (size_t p = begin; p < end; ++p) {
+                detail::nearest_center(items[p], centers, read, best[p],
+                                       best_distance[p]);
+            }
+        });
+    }
+
+private:
+    detail::ChunkedComparisons& work_;
+};
+
 void validate_sphere_options(const SphereExclusionOptions& options) {
     if (!std::isfinite(options.distance_threshold)) {
         throw std::invalid_argument(
@@ -287,6 +330,32 @@ SphereExclusionResult sphere_exclusion(const StorageBackend& storage,
                                               permutation_or_null(options),
                                               options.distance_threshold);
     }
+    if (options.assignment == SphereAssignment::Nearest) {
+        detail::sphere_assign_nearest(source, n, result);
+    }
+    return to_public_result(std::move(result));
+}
+
+SphereExclusionResult sphere_exclusion(PairwiseComparison& comparison,
+                                       const SphereExclusionOptions& options) {
+    validate_sphere_options(options);
+    detail::validate_comparison_facts(comparison, SPHERE_NAME);
+    if (options.order == SphereOrder::Neighbors) {
+        throw std::invalid_argument(
+            "sphere_exclusion with the Neighbors order needs every pairwise "
+            "distance; pass a precomputed distance matrix");
+    }
+    const size_t n = comparison.Size();
+    validate_sphere_permutation(options, n);
+    if (n < 2) {
+        return small_sphere_result(n);
+    }
+
+    detail::ChunkedComparisons work(comparison, n, options.num_threads,
+                                    options.chunk_size);
+    ComparisonSphereSource source(work);
+    detail::SphereEngineResult result = detail::sphere_ordered_first(
+        source, n, permutation_or_null(options), options.distance_threshold);
     if (options.assignment == SphereAssignment::Nearest) {
         detail::sphere_assign_nearest(source, n, result);
     }

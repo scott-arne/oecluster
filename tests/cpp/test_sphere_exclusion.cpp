@@ -610,3 +610,208 @@ TEST(SphereExclusionTest, MemoryMappedStorageRefusesANonFiniteDistance) {
         },
         message);
 }
+
+TEST(SphereExclusionComparisonTest, MatchesTheMatrixAtEveryThreadCountAndChunkSize) {
+    struct Case {
+        size_t n;
+        std::vector<double> condensed;
+    };
+    const std::vector<Case> cases{{2, Scrambled(2)},
+                                  {7, Scrambled(7)},
+                                  {12, Scrambled(12)},
+                                  {25, Scrambled(25)},
+                                  {40, Quantized(40, 3, 5)}};
+    for (const Case& fixture : cases) {
+        const DenseStorage storage = MakeStorage(fixture.n, fixture.condensed);
+        for (const double threshold : {0.0, 0.2, 2.5, 4.0}) {
+            std::vector<SphereExclusionOptions> configurations{
+                Options(threshold),
+                PermutationOptions(threshold,
+                                   Shuffled(fixture.n,
+                                            static_cast<unsigned>(fixture.n)))};
+            for (size_t c = 0; c < 2; ++c) {
+                SphereExclusionOptions nearest = configurations[c];
+                nearest.assignment = SphereAssignment::Nearest;
+                configurations.push_back(nearest);
+            }
+            for (SphereExclusionOptions options : configurations) {
+                const SphereExclusionResult expected =
+                    sphere_exclusion(storage, options);
+                for (const size_t threads : {size_t{1}, size_t{2}, size_t{4}}) {
+                    for (const size_t chunk :
+                         {size_t{1}, size_t{3}, size_t{4096}}) {
+                        SCOPED_TRACE(::testing::Message()
+                                     << "n " << fixture.n << ", threshold "
+                                     << threshold << ", order "
+                                     << static_cast<int>(options.order)
+                                     << ", assignment "
+                                     << static_cast<int>(options.assignment)
+                                     << ", threads " << threads << ", chunk "
+                                     << chunk);
+                        options.num_threads = threads;
+                        options.chunk_size = chunk;
+                        TableComparison table(fixture.n, fixture.condensed);
+                        const SphereExclusionResult result =
+                            sphere_exclusion(table, options);
+                        EXPECT_EQ(result.Members(), expected.Members());
+                        EXPECT_EQ(result.Labels(), expected.Labels());
+                        EXPECT_EQ(result.Centers(), expected.Centers());
+                    }
+                }
+            }
+        }
+    }
+}
+
+// chunk_size 1 keeps the comparisons on the ThreadPool path, as in
+// CirclesComparisonTest.CapsAnAbsurdThreadCount.
+TEST(SphereExclusionComparisonTest, CapsAnAbsurdThreadCount) {
+    const size_t n = 9;
+    const std::vector<double> condensed =
+        Positions({0, 1, 3, 7, 8, 12, 13, 20, 21});
+    for (const SphereAssignment assignment :
+         {SphereAssignment::First, SphereAssignment::Nearest}) {
+        SphereExclusionOptions options = Options(1.5);
+        options.assignment = assignment;
+        const SphereExclusionResult expected =
+            sphere_exclusion(MakeStorage(n, condensed), options);
+        options.num_threads = std::size_t{1} << 61;
+        options.chunk_size = 1;
+        TableComparison table(n, condensed);
+        EXPECT_EQ(sphere_exclusion(table, options).Members(),
+                  expected.Members());
+    }
+}
+
+TEST(SphereExclusionComparisonTest, ProvesCloneIsolation) {
+    const size_t n = 40;
+    const std::vector<double> condensed = Scrambled(n);
+    SphereExclusionOptions options = Options(2.0);
+    options.assignment = SphereAssignment::Nearest;
+    const SphereExclusionResult expected =
+        sphere_exclusion(MakeStorage(n, condensed), options);
+
+    options.num_threads = 4;
+    options.chunk_size = 1;
+    IsolationComparison comparison(n, condensed);
+    const SphereExclusionResult result = sphere_exclusion(comparison, options);
+
+    EXPECT_EQ(comparison.Violations(), 0u);
+    EXPECT_TRUE(comparison.OverlapObserved())
+        << "Overlap not observed; test may be flaky on this machine";
+    EXPECT_EQ(result.Members(), expected.Members());
+}
+
+TEST(SphereExclusionComparisonTest, RefusesANonFiniteDistance) {
+    std::vector<double> condensed = Positions({0.0, 5.0, 10.0});
+    condensed[2] = NaN;  // (1, 2)
+    for (const size_t threads : {size_t{1}, size_t{2}, size_t{8}}) {
+        for (const size_t chunk : {size_t{1}, size_t{256}}) {
+            SphereExclusionOptions options = Options(1.0);
+            options.num_threads = threads;
+            options.chunk_size = chunk;
+            TableComparison table(3, condensed);
+            ExpectRuntimeError(
+                [&] { sphere_exclusion(table, options); },
+                "sphere_exclusion read a non-finite distance between items 1 "
+                "and 2");
+
+            TableComparison nearest_table(3, {1.0, 5.0, NaN});
+            ExpectClusters(sphere_exclusion(nearest_table, options),
+                           {{0, 1}, {2}});
+            options.assignment = SphereAssignment::Nearest;
+            ExpectRuntimeError(
+                [&] { sphere_exclusion(nearest_table, options); },
+                "sphere_exclusion read a non-finite distance between items 2 "
+                "and 1");
+        }
+    }
+}
+
+TEST(SphereExclusionComparisonTest, RefusesTheNeighborsOrder) {
+    TableComparison table(4, Line(4));
+    SphereExclusionOptions options = Options(1.0, SphereOrder::Neighbors);
+    const std::string message =
+        "sphere_exclusion with the Neighbors order needs every pairwise "
+        "distance; pass a precomputed distance matrix";
+    ExpectInvalidArgument([&] { sphere_exclusion(table, options); }, message);
+    options.reordering = true;
+    ExpectInvalidArgument([&] { sphere_exclusion(table, options); }, message);
+}
+
+TEST(SphereExclusionComparisonTest, RefusesComparisonsItsFactsRuleOut) {
+    const auto expect = [](GateFacts facts, const std::string& message) {
+        SCOPED_TRACE(message);
+        CountingComparison counter(6, facts);
+        try {
+            sphere_exclusion(counter, Options(1.0));
+            FAIL() << "expected ComparisonError: " << message;
+        } catch (const ComparisonError& error) {
+            EXPECT_EQ(std::string(error.what()), message);
+        }
+        EXPECT_EQ(counter.Count(), 0u) << "Compare called before facts refusal";
+    };
+
+    GateFacts similarity;
+    similarity.is_distance = Capability::No;
+    expect(similarity,
+           "sphere_exclusion requires distances, but the comparison reports "
+           "similarities");
+
+    GateFacts nonzero_self;
+    nonzero_self.is_distance = Capability::Yes;
+    nonzero_self.zero_self = Capability::No;
+    expect(nonzero_self,
+           "sphere_exclusion requires a zero self-distance, but the comparison "
+           "reports that d(x, x) is not zero");
+
+    GateFacts nan_present;
+    nan_present.is_distance = Capability::Yes;
+    nan_present.zero_self = Capability::Yes;
+    nan_present.data_integrity = DataIntegrity::NaNPresent;
+    expect(nan_present,
+           "sphere_exclusion cannot rank distances the comparison declares may "
+           "be non-finite (missing='propagate')");
+
+    GateFacts subset_scored;
+    subset_scored.is_distance = Capability::Yes;
+    subset_scored.zero_self = Capability::Yes;
+    subset_scored.data_integrity = DataIntegrity::SubsetScored;
+    expect(subset_scored,
+           "sphere_exclusion cannot rank distances scored on per-pair feature "
+           "subsets (missing='ignore'); they are not mutually comparable");
+}
+
+TEST(SphereExclusionComparisonTest, SharesTheValidationOrder) {
+    TableComparison table(4, Line(4));
+    ExpectInvalidArgument([&] { sphere_exclusion(table, Options(-1.0)); },
+                          "sphere_exclusion distance_threshold must be "
+                          "non-negative");
+    ExpectInvalidArgument(
+        [&] { sphere_exclusion(table, PermutationOptions(1.0, {0, 1})); },
+        "sphere_exclusion permutation has 2 entries for 4 items");
+
+    GateFacts similarity;
+    similarity.is_distance = Capability::No;
+    CountingComparison counter(4, similarity);
+    // Options before facts; facts before the Neighbors refusal.
+    ExpectInvalidArgument([&] { sphere_exclusion(counter, Options(-1.0)); },
+                          "sphere_exclusion distance_threshold must be "
+                          "non-negative");
+    EXPECT_THROW(sphere_exclusion(counter, Options(1.0, SphereOrder::Neighbors)),
+                 ComparisonError);
+}
+
+TEST(SphereExclusionComparisonTest, ZeroAndOneItems) {
+    TableComparison empty(0, {});
+    TableComparison single(1, {});
+    SphereExclusionOptions nearest = Options(1.0);
+    nearest.assignment = SphereAssignment::Nearest;
+    for (const SphereExclusionOptions& options : {Options(1.0), nearest}) {
+        const SphereExclusionResult none = sphere_exclusion(empty, options);
+        EXPECT_EQ(none.NumSamples(), 0u);
+        EXPECT_TRUE(none.Centers().empty());
+        ExpectClusters(sphere_exclusion(single, options), {{0}});
+    }
+    ExpectClusters(sphere_exclusion(single, PermutationOptions(1.0, {0})), {{0}});
+}
