@@ -1093,9 +1093,11 @@ not converge.
 `sphere_exclusion()` is one clustering loop with a pluggable seed order.
 Centers are taken in order. Each center claims every unclaimed item at or
 within `threshold` of it, so centers are pairwise farther apart than the
-threshold. Every item is assigned. Clusters are in center order and list their
-center first, then the rest in ascending position. An item's label is its
-cluster's position, and `centers[i]` is `clusters[i][0]`.
+threshold. Every non-excluded item is assigned. An item that normalization
+dropped has the label -1, appears in no cluster, and is listed in
+`result.excluded`. Clusters are in center order and list their center first,
+then the rest in ascending position. A kept item's label is its cluster's
+position, and `centers[i]` is `clusters[i][0]`.
 
 ```python
 result = oecluster.sphere_exclusion(dm, 0.6)                     # leader
@@ -1144,6 +1146,7 @@ result.excluded    # [position, reason] for items normalization dropped
 
 `TypeError` covers:
 - arguments that fit no input path;
+- a comparison option is unknown;
 - an `order` that is neither a string nor a sequence of ints, or has a bool entry;
 - a string `reordering`.
 
