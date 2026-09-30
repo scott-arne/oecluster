@@ -12,9 +12,12 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   `KNNGraph` with `indices`, `distances` and `positions` arrays.
   - It takes a `SymmetricDistanceMatrix` (dense, memory-mapped or sparse), a
     prebuilt comparison, or a list of items with a comparison name. The lazy
-    paths keep only the O(N·k) graph.
+    paths keep only the O(N·k) graph, plus one comparison clone per running
+    worker during the build.
   - Sparse matrices must hold every pair within their cutoff, as `pdist()`
-    writes them. An item with fewer than `k` stored neighbors is refused.
+    writes them; the builder cannot verify that, and a missing nearer pair
+    silently changes a row. An item with fewer than `k` stored neighbors is
+    refused.
 - `jarvis_patrick`, classic Jarvis-Patrick clustering. Two items link when
   each is among the other's `k` nearest neighbors and they share at least
   `kmin` of them. Clusters are the connected components. It takes a

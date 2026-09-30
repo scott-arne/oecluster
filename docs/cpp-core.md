@@ -375,14 +375,18 @@ const auto result = OECluster::jarvis_patrick(graph, 3);
   and the result is identical for every `num_threads` and `chunk_size`.
 - The comparison overload calls `Compare(min(i, j), max(i, j))` N(N-1)
   times. `Compare` must be repeatable across calls and clones.
-- Sparse storage must hold every pair at or within its cutoff. An item with
-  fewer than `k` distinct stored neighbors is refused with
+- Sparse storage must hold every pair at or within its cutoff; the builder
+  cannot verify that, and a missing nearer pair silently changes a row. An
+  item with fewer than `k` distinct stored neighbors is refused with
   `std::invalid_argument`. Duplicate entries count once, with the value
   `Get()` reports.
-- Validation order on every entry point: `chunk_size`, then zero items
-  (empty result whatever `k` and `kmin` are), then `1 <= k <= n - 1`, then
-  `kmin < k`, then the input checks. A NaN or infinite distance raises
-  `std::runtime_error`.
+- Validation order on every storage and comparison entry point: `chunk_size`,
+  then zero items (empty result whatever `k` and `kmin` are), then
+  `1 <= k <= n - 1`, then `kmin < k`, then the input checks. The
+  `jarvis_patrick(const KNNGraph&, kmin)` overload checks zero items then
+  `kmin < k`. A NaN or infinite distance read raises `std::runtime_error`
+  (sparse: stored entries only). Comparison-facts refusals raise
+  `ComparisonError`.
 - The `KNNGraph` constructor validates its arrays: size, `k` range, index
   range, no self, no repeats, finite distances and row order. It throws
   `std::invalid_argument` otherwise, including when `num_items * k`

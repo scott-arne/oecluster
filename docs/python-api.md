@@ -1170,7 +1170,9 @@ same = oecluster.jarvis_patrick(mols, k=6, kmin=3, comparison="fingerprint")
 **Inputs.** A `SymmetricDistanceMatrix` (dense, memory-mapped or sparse), a
 prebuilt comparison, or a sequence of items with `comparison=` and
 comparison options, as for `sphere_exclusion`. Lazy paths evaluate every
-ordered pair, N(N-1) comparisons, and keep only the O(N*k) graph.
+ordered pair, N(N-1) comparisons, and keep only the O(N*k) graph, plus one
+comparison clone per running worker during the build. A comparison that copies
+its items, such as `mcs`, costs O(N) per clone.
 
 **Rows.** Each row lists `k` items other than its own, ordered by ascending
 (distance, position); equal distances go to the lower position. The result
@@ -1178,9 +1180,9 @@ does not depend on `num_threads` or `chunk_size`. The stored values are raw
 distances, not affinities.
 
 **Sparse matrices.** The matrix must hold every pair at or within its
-cutoff, as `pdist(..., cutoff=...)` produces, and every item needs at least
-`k` stored neighbors. Otherwise the call raises `RuntimeError`; raise the
-cutoff or lower `k`.
+cutoff, as `pdist(..., cutoff=...)` produces; the builder cannot verify that,
+and a missing nearer pair silently changes a row. An item with fewer than `k`
+stored neighbors raises `RuntimeError`; raise the cutoff or lower `k`.
 
 **Linkage.** Items i and j are linked when each is in the other's list and
 the lists share at least `kmin` items. Clusters are the connected components,
@@ -1199,12 +1201,17 @@ a mutual pair is this `kmin + 2`.
 | `excluded` | `[position, reason]` for items normalization dropped |
 | `len(graph)` | Number of rows |
 
+The `indices`, `distances` and `positions` properties return copies; mutating
+them does not change the graph.
+
 `JarvisPatrickResult` adds `k`, `kmin` and `excluded` to the common result
 members. Excluded items have label -1 and appear in no cluster.
 
 With a `KNNGraph`, `k` must be omitted or equal `graph.k`, comparison
 arguments raise `TypeError`, and `num_threads` and `chunk_size` are validated
-but unused. With raw input, `k` is required.
+but unused. With raw input, `k` is required. A zero-item matrix, comparison or
+graph returns an empty result before the `k`, `kmin` and rankability checks;
+an empty item sequence still raises `ValueError`.
 
 | Condition | Exception |
 | --- | --- |
@@ -1217,14 +1224,16 @@ but unused. With raw input, `k` is required.
 `butina()`, `dbscan()`, `hdbscan()`, `agglomerative()`, and `cluster_report()`
 assume their input is a metric: an item's distance to itself is zero, and the
 triangle inequality holds. Those five are the entry points that check.
-`k_medoids()`, `sphere_exclusion()`, `activity_landscape()` and
-`modelability()` check a weaker standard described below -- they rank,
-threshold and add distances but never assume the triangle inequality.
-`k_medoids()` and `sphere_exclusion()` are the *clustering* algorithms in that
-weaker group, which is not an oversight. PAM's objective is a sum of distances
-and its swap step compares two such sums. Sphere exclusion only compares each
-distance with the threshold and, under nearest assignment, with other
-distances. Neither appeals to the triangle inequality, so neither takes an
+`k_medoids()`, `knn_graph()`, `jarvis_patrick()`, `sphere_exclusion()`,
+`activity_landscape()` and `modelability()` check a weaker standard described
+below -- they rank, threshold and add distances but never assume the triangle
+inequality. `k_medoids()`, `knn_graph()`, `jarvis_patrick()` and
+`sphere_exclusion()` are the *clustering* algorithms in that weaker group,
+which is not an oversight. PAM's objective is a sum of distances and its swap
+step compares two such sums. Sphere exclusion only compares each distance with
+the threshold and, under nearest assignment, with other distances. The k-NN
+graph and Jarvis-Patrick rank distances to select neighbors and count shared
+neighbors. None of these appeals to the triangle inequality, so none takes an
 `allow_nonmetric` parameter: there is no assumption for a flag to override.
 
 That produces one asymmetry worth expecting. A Dice matrix that `k_medoids()`
