@@ -7,8 +7,10 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <filesystem>
 #include <functional>
 #include <limits>
+#include <memory>
 #include <numeric>
 #include <random>
 #include <set>
@@ -128,6 +130,32 @@ void ExpectInvariants(const SphereExclusionResult& result, size_t n,
         }
     }
 }
+
+// A temp-file MMapStorage holding the given condensed distances. The file is
+// removed first, because MMapStorage reuses an existing file of the right
+// size, and removed again on destruction so a failing test leaves nothing.
+class TempMMap {
+public:
+    TempMMap(const std::string& name, size_t n,
+             const std::vector<double>& condensed)
+        : path_(std::filesystem::temp_directory_path() / name) {
+        std::filesystem::remove(path_);
+        storage_ = std::make_unique<MMapStorage>(path_.string(), n);
+        std::copy(condensed.begin(), condensed.end(), storage_->Data());
+    }
+    ~TempMMap() {
+        storage_.reset();
+        std::filesystem::remove(path_);
+    }
+    TempMMap(const TempMMap&) = delete;
+    TempMMap& operator=(const TempMMap&) = delete;
+
+    const MMapStorage& Storage() const { return *storage_; }
+
+private:
+    std::filesystem::path path_;
+    std::unique_ptr<MMapStorage> storage_;
+};
 
 void ExpectInvalidArgument(const std::function<void()>& call,
                            const std::string& message) {
@@ -521,4 +549,64 @@ TEST(SphereExclusionTest, ZeroAndOneItems) {
     ExpectInvalidArgument([&] { sphere_exclusion(empty, Options(-1.0)); },
                           "sphere_exclusion distance_threshold must be "
                           "non-negative");
+}
+
+// Both matrix backends are read through StorageBackend::Data(); memory-mapped
+// storage must cluster exactly as dense storage does on every path.
+TEST(SphereExclusionTest, MemoryMappedStorageMatchesDense) {
+    const size_t n = 40;
+    const std::vector<double> condensed = Quantized(n, 2, 5);
+    const DenseStorage dense = MakeStorage(n, condensed);
+    const TempMMap mapped("test_sphere_exclusion_mmap.bin", n, condensed);
+
+    std::vector<SphereExclusionOptions> configurations{
+        Options(0.2), PermutationOptions(0.2, Shuffled(n, 3))};
+    for (const size_t threads : {size_t{1}, size_t{4}}) {
+        for (const bool reordering : {false, true}) {
+            SphereExclusionOptions neighbors =
+                Options(0.2, SphereOrder::Neighbors);
+            neighbors.num_threads = threads;
+            neighbors.chunk_size = 7;
+            neighbors.reordering = reordering;
+            configurations.push_back(neighbors);
+        }
+    }
+    const size_t first_count = configurations.size();
+    for (size_t c = 0; c < first_count; ++c) {
+        SphereExclusionOptions nearest = configurations[c];
+        nearest.assignment = SphereAssignment::Nearest;
+        configurations.push_back(nearest);
+    }
+
+    for (const SphereExclusionOptions& options : configurations) {
+        SCOPED_TRACE(::testing::Message()
+                     << "order " << static_cast<int>(options.order)
+                     << ", assignment " << static_cast<int>(options.assignment)
+                     << ", threads " << options.num_threads
+                     << ", reordering " << options.reordering);
+        const SphereExclusionResult expected = sphere_exclusion(dense, options);
+        const SphereExclusionResult actual =
+            sphere_exclusion(mapped.Storage(), options);
+        EXPECT_GT(expected.NumClusters(), 1u);
+        EXPECT_LT(expected.NumClusters(), n);
+        EXPECT_EQ(actual.Labels(), expected.Labels());
+        EXPECT_EQ(actual.Members(), expected.Members());
+        EXPECT_EQ(actual.Centers(), expected.Centers());
+    }
+}
+
+TEST(SphereExclusionTest, MemoryMappedStorageRefusesANonFiniteDistance) {
+    std::vector<double> condensed = Positions({0.0, 5.0, 10.0});
+    condensed[2] = NaN;  // (1, 2)
+    const TempMMap mapped("test_sphere_exclusion_mmap_nan.bin", 3, condensed);
+    const std::string message =
+        "sphere_exclusion read a non-finite distance between items 1 and 2";
+    ExpectRuntimeError(
+        [&] { sphere_exclusion(mapped.Storage(), Options(1.0)); }, message);
+    ExpectRuntimeError(
+        [&] {
+            sphere_exclusion(mapped.Storage(),
+                             Options(1.0, SphereOrder::Neighbors));
+        },
+        message);
 }
