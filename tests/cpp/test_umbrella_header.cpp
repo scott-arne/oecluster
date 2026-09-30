@@ -167,3 +167,12 @@ TEST(UmbrellaHeaderTest, ReachesTheSphereExclusionHeader) {
     EXPECT_EQ(options.chunk_size, 4096u);
     EXPECT_EQ(OECluster::SphereExclusionResult().Method(), "sphere_exclusion");
 }
+
+// KNNGraph.h joined the umbrella in 5.11.0.
+TEST(UmbrellaHeaderTest, ReachesTheKNNGraphHeader) {
+    const OECluster::KNNGraphOptions options;
+    EXPECT_EQ(options.k, 0u);
+    EXPECT_EQ(options.num_threads, 0u);
+    EXPECT_EQ(options.chunk_size, 4096u);
+    EXPECT_EQ(OECluster::KNNGraph().NumItems(), 0u);
+}
