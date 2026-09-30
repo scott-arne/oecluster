@@ -1117,10 +1117,11 @@ result.excluded    # [position, reason] for items normalization dropped
 
 - Under `order="neighbors"` with `assignment="first"` the result equals
   `butina()` with the same `threshold` and `reordering`. Nearest assignment
-  keeps Butina's centers but may move members between them. Equal neighbor counts go to the *larger* index,
-  as in Butina, and not to the smaller-index rule used elsewhere in the
-  library. `reordering=True` is accepted only with this order. The lazy paths
-  refuse it because it needs every pair.
+  keeps Butina's centers but may move members between them. Equal neighbor
+  counts go to the *larger* index, as in Butina, and not to the smaller-index
+  rule used elsewhere in the library. `reordering=True` is accepted only with
+  this order. The lazy paths refuse the neighbor order because it needs every
+  pair.
 - A sequence order must name every caller position exactly once, dropped
   positions included. Dropped positions are skipped. A DISE direction is one
   `argsort` of whatever ranks the items: distance to a reference compound, an

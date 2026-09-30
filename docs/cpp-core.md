@@ -323,8 +323,12 @@ live in `src/clustering/DiversityValidation.h` and
 `sphere_exclusion` is overloaded on a `StorageBackend` and on a
 `PairwiseComparison`:
 - `SphereOrder::Input` takes centers in index order.
-- `SphereOrder::Permutation` takes them in `SphereExclusionOptions::permutation` order, which must be a complete permutation.
-- `SphereOrder::Neighbors` takes them in Butina's descending neighbor-count order, with optional `reordering`, and is available on the storage overload only.
+- `SphereOrder::Permutation` takes them in
+  `SphereExclusionOptions::permutation` order, which must be a complete
+  permutation.
+- `SphereOrder::Neighbors` takes them in Butina's descending neighbor-count
+  order, with optional `reordering`, and is available on the storage overload
+  only.
 
 `SphereAssignment::Nearest` reassigns non-center items to their nearest center
 after the centers are fixed. `SphereExclusionResult::Centers()` returns one
