@@ -14,6 +14,8 @@
 
 #include "oecluster/StorageBackend.h"
 #include "oecluster/clustering/Butina.h"
+#include "../../src/clustering/SphereExclusionEngine.h"
+#include "../../src/clustering/ThresholdGraph.h"
 
 #include "diversity_test_support.h"
 
@@ -188,6 +190,26 @@ TEST(ButinaGoldenTest, MatchesTheLegacyLoopOnRandomMatrices) {
                     }
                 }
             }
+        }
+    }
+}
+
+TEST(SphereEngineTest, NeighborsFirstReportsButinaClustersAndTheirCenters) {
+    const DenseStorage storage = MakeStorage(20, Hashed(20));
+    for (const bool reordering : {false, true}) {
+        ThresholdGraphOptions graph_options;
+        graph_options.threshold = 0.2;
+        const ThresholdNeighborGraph graph =
+            BuildThresholdNeighborGraph(storage, graph_options);
+        const detail::SphereEngineResult result =
+            detail::sphere_neighbors_first(graph, reordering);
+        const ButinaResult butina = RunButina(storage, 0.2, reordering);
+
+        EXPECT_EQ(result.clusters, butina.Members());
+        EXPECT_EQ(result.labels, butina.Labels());
+        ASSERT_EQ(result.centers.size(), result.clusters.size());
+        for (size_t c = 0; c < result.clusters.size(); ++c) {
+            EXPECT_EQ(result.centers[c], result.clusters[c][0]);
         }
     }
 }

@@ -131,6 +131,7 @@ set(OECLUSTER_SOURCES
     src/clustering/ClusterTypes.cpp
     src/clustering/ThresholdGraph.cpp
     src/clustering/Butina.cpp
+    src/clustering/SphereExclusion.cpp
     src/clustering/ClusterMetrics.cpp
     src/clustering/Representative.cpp
     src/clustering/ClusterReport.cpp
