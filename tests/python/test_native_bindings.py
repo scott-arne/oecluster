@@ -916,3 +916,34 @@ def test_knn_graph_and_jarvis_patrick_release_the_gil():
         assert text.index(invocation) < text.index(include), (
             f"{invocation} must precede the %include that declares {name}, "
             "or SWIG applies the exception handler to nothing")
+
+
+def test_by_value_returns_convert_inside_an_exception_handler():
+    """Every by-value return is heap-allocated into its Python wrapper after
+    ``%exception`` has closed, so SWIG's stock ``out`` typemap would let a
+    ``std::bad_alloc`` from that allocation escape into the interpreter and
+    abort it. The interface overrides the typemap with one that moves the value
+    inside its own try block.
+
+    Asserted against the interface file for the reasons given in
+    test_the_new_entry_points_release_the_gil. A typemap binds only to
+    declarations parsed after it, so it must precede the STL includes whose
+    container templates are the first by-value returns.
+    """
+    interface = pathlib.Path(__file__).resolve().parents[2] / "swig" / "oecluster.i"
+    text = _SWIG_COMMENT.sub("", interface.read_text(encoding="utf-8"))
+
+    typemap = "%typemap(out, noblock=1) SWIGTYPE {"
+    assert text.count(typemap) == 1
+    start = text.index(typemap)
+    anchor = '%include "std_vector.i"'
+    assert text.count(anchor) == 1, "the position check needs an unambiguous anchor"
+    assert start < text.index(anchor), (
+        "the by-value typemap must precede the first by-value return")
+
+    body = text[start:text.index("\n}\n", start)]
+    assert "try {" in body
+    assert "SWIG_STD_MOVE($1)" in body
+    assert "catch (const std::bad_alloc&)" in body
+    assert "SWIG_MemoryError" in body
+    assert "catch (...)" in body

@@ -700,6 +700,25 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, _oecluster_is_oereceptor, "
     // Prevent copy-on-scope-exit; the shared_ptr guard handles Py_DECREF
 }
 
+// ---- Return by value ----
+// SWIG's stock typemap copies the returned value onto the heap after
+// %exception has closed, so a bad_alloc there would escape into the
+// interpreter and abort it. Moving instead of copying also avoids holding two
+// full copies of a large result at once. This must precede the STL includes,
+// whose container templates are the first by-value returns.
+%typemap(out, noblock=1) SWIGTYPE {
+  try {
+    $result = SWIG_NewPointerObj((new $1_ltype(SWIG_STD_MOVE($1))), $&descriptor,
+                                 SWIG_POINTER_OWN | %newpointer_flags);
+  } catch (const std::bad_alloc&) {
+    SWIG_exception_fail(SWIG_MemoryError, "out of memory returning $1_basetype");
+  } catch (const std::exception& e) {
+    SWIG_exception_fail(SWIG_RuntimeError, e.what());
+  } catch (...) {
+    SWIG_exception_fail(SWIG_RuntimeError, "Unknown C++ exception returning $1_basetype");
+  }
+}
+
 // ============================================================================
 // Include STL typemaps
 // ============================================================================
@@ -1197,11 +1216,11 @@ public:
 // ============================================================================
 #define OECLUSTER_VERSION_MAJOR 5
 #define OECLUSTER_VERSION_MINOR 11
-#define OECLUSTER_VERSION_PATCH 0
+#define OECLUSTER_VERSION_PATCH 1
 
 // ============================================================================
 // Module-level Python convenience code
 // ============================================================================
 %pythoncode %{
-__version__ = "5.11.0"
+__version__ = "5.11.1"
 %}

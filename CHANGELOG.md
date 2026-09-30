@@ -2,6 +2,17 @@
 
 This file starts at 5.0.0; earlier releases are not recorded here.
 
+## [5.11.1] - 2026-09-30
+
+### Fixed
+
+- Python functions that return a result object (every `*Result`, `KNNGraph`,
+  `ClusterReport`, `PartitionAgreement` and the rest) no longer abort the
+  interpreter when memory runs out while the result is handed to Python. That
+  step used to happen outside the binding's exception handler; it now raises
+  `MemoryError`. The result is also moved into its Python wrapper instead of
+  copied, so a large result no longer needs twice its memory for a moment.
+
 ## [5.11.0] - 2026-09-30
 
 ### Added
