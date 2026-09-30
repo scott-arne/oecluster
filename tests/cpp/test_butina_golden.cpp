@@ -35,6 +35,11 @@ ButinaResult RunButina(const DenseStorage& storage, double threshold,
 
 void ExpectClusters(const ButinaResult& result, const Clusters& expected) {
     EXPECT_EQ(result.Members(), expected);
+    size_t n = 0;
+    for (const auto& cluster : expected) {
+        n += cluster.size();
+    }
+    ASSERT_EQ(result.Labels().size(), n);
     for (size_t c = 0; c < expected.size(); ++c) {
         for (const size_t member : expected[c]) {
             EXPECT_EQ(result.Labels()[member], static_cast<ClusterLabel>(c));
