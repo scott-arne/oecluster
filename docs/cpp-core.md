@@ -127,6 +127,9 @@ their option/result types:
 - `SetDiversity.h` — the Vendi score and log-determinant diversity of a set
   (`DiversityKernel`, `VendiOptions`, `VendiResult`, `LogDetOptions`,
   `LogDetResult`).
+- `SphereExclusion.h` — sphere-exclusion clustering under a leader, Butina
+  or DISE seed order (`SphereOrder`, `SphereAssignment`,
+  `SphereExclusionOptions`, `SphereExclusionResult`).
 
 `ClusterTypes.h` defines the shared cluster representation, `ClusterReport.h`
 defines the method-agnostic quality scorecard exposed in Python as
@@ -314,6 +317,32 @@ FetchContent cannot reach either from behind the firewall. The solver throws
 validators and the clone-leasing comparison runner that E1 and E2 both use
 live in `src/clustering/DiversityValidation.h` and
 `src/clustering/ChunkedComparisons.h`.
+
+### Sphere exclusion
+
+`sphere_exclusion` is overloaded on a `StorageBackend` and on a
+`PairwiseComparison`:
+- `SphereOrder::Input` takes centers in index order.
+- `SphereOrder::Permutation` takes them in `SphereExclusionOptions::permutation` order, which must be a complete permutation.
+- `SphereOrder::Neighbors` takes them in Butina's descending neighbor-count order, with optional `reordering`, and is available on the storage overload only.
+
+`SphereAssignment::Nearest` reassigns non-center items to their nearest center
+after the centers are fixed. `SphereExclusionResult::Centers()` returns one
+center per cluster.
+
+`butina_cluster` runs on the same engine (`src/clustering/SphereExclusionEngine.h`)
+and its outputs are unchanged. Under the neighbor order with
+`SphereAssignment::First`, `sphere_exclusion` returns exactly what
+`butina_cluster` returns.
+
+The comparison overload evaluates lazily through the clone-leasing
+`ChunkedComparisons` runner. Workers write only their own distance slots, and
+claims are committed on the calling thread. As a result, results do not depend
+on `num_threads` or `chunk_size`. Its fact refusals throw `ComparisonError`.
+
+Other refusals throw `std::invalid_argument`. A non-finite distance throws
+`std::runtime_error`. The storage overload scans every distance first under
+the neighbor order, so a NaN cannot pass as "not a neighbor".
 
 ## Partition Agreement
 

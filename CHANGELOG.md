@@ -2,6 +2,40 @@
 
 This file starts at 5.0.0; earlier releases are not recorded here.
 
+## [5.10.0] - 2026-09-29
+
+### Added
+
+- `sphere_exclusion`, sphere-exclusion clustering with a pluggable seed order.
+  Each center claims every unclaimed item at or within the threshold, and the
+  result lists one center per cluster.
+  - `order="input"` is leader clustering. `order="neighbors"` is
+    Taylor-Butina, and with the default first-claim assignment equals
+    `butina()` with the same `threshold` and `reordering`. A sequence of
+    positions is Directed Sphere Exclusion (DISE), such as an `argsort` by
+    distance to a reference compound.
+  - `assignment="nearest"` keeps the centers and moves each other item to its
+    nearest center, with ties going to the earlier center.
+  - It takes a precomputed `SymmetricDistanceMatrix`, a prebuilt comparison, or
+    a list of items with a comparison name, as `maxmin_select` does. The input
+    and permutation orders run lazily in O(N·k) comparisons. The neighbor
+    order needs a matrix.
+  - The C++ entry point of the same name is configured through
+    `SphereExclusionOptions` and returns `SphereExclusionResult`.
+
+### Fixed
+
+- `butina()` and `butina_cluster()` no longer return every item as a singleton
+  when `chunk_size` is near `SIZE_MAX`. The threshold-graph build wrapped its
+  chunk count to zero and skipped every pair; it now clamps the chunk size to
+  the pair count.
+
+### Changed
+
+- `butina_cluster()` runs on the shared sphere-exclusion engine. Its outputs
+  are unchanged, and its candidate loop no longer erases from the front of a
+  vector, which removes a quadratic cost on large inputs.
+
 ## [5.9.0] - 2026-09-29
 
 ### Added

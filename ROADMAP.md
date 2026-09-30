@@ -14,7 +14,7 @@ they are not recoveries of the original intent.
 
 ## Order
 
-    F -> A -> D1 -> C -> E -> D2 -> B -> D3/D4
+    F -> A -> D1 -> C -> E -> D2a -> D2b -> D2c -> B -> D3/D4
 
 | Piece | Content | Status |
 | --- | --- | --- |
@@ -27,7 +27,9 @@ they are not recoveries of the original intent.
 | C2 | MCS-based comparison: Tanimoto over matched bonds | shipped 5.7.0 |
 | E1 | Diversity selection: `maxmin_select` and #Circles | shipped 5.8.0 |
 | E2 | Set diversity scores: Vendi score and log-determinant diversity | shipped 5.9.0 |
-| D2 | Graph and leader algorithms: Leiden, Jarvis-Patrick, leader/DISE | planned |
+| D2a | Sphere exclusion: leader, Butina and DISE as one engine | shipped 5.10.0 |
+| D2b | k-nearest-neighbor graph and Jarvis-Patrick clustering | planned |
+| D2c | Leiden community detection over the D2b graph | planned |
 | B | Fingerprint-native O(N) counterparts of the A metrics | planned |
 | D3 | Workflow layer: clustering CLI, parameter selection, consensus, stability | planned |
 | D4 | Out-of-core and streaming clustering | planned |
@@ -109,7 +111,14 @@ runs lazily at any size.
 ## D2 - Graph and leader algorithms
 
 *Pinned by the A1 and A2 specs.* Adds Leiden, Jarvis-Patrick and leader/DISE to
-the algorithm roster.
+the algorithm roster, in three slices:
+
+- **D2a** (shipped 5.10.0): `sphere_exclusion()`, one engine with input
+  (leader), neighbor-count (Butina) and caller-permutation (DISE) seed orders
+  and first-claim or nearest assignment. `butina_cluster()` became an adapter
+  over it with unchanged outputs.
+- **D2b**: a k-nearest-neighbor graph primitive and Jarvis-Patrick clustering.
+- **D2c**: Leiden community detection over the D2b graph.
 
 Bootstrap-Jaccard cluster stability is deferred until after D2: it must re-run
 the clustering algorithm, which inverts the current layering, and it is not

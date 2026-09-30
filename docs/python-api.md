@@ -102,6 +102,7 @@ The available algorithms and their key parameters:
 | Function | Input | Key parameters |
 |----------|-------|----------------|
 | `butina(dm, threshold, ...)` | `DistanceMatrix` | `threshold`, `reordering` |
+| `sphere_exclusion(items, threshold, ...)` | `DistanceMatrix`, comparison, or items | `threshold`, `order`, `assignment` |
 | `dbscan(dm, eps, ...)` | `DistanceMatrix` | `eps`, `min_samples` |
 | `hdbscan(dm, ...)` | `DistanceMatrix` | `min_cluster_size`, `min_samples`, `cluster_selection_method` |
 | `agglomerative(dm, ...)` | `DistanceMatrix` | `n_clusters`, `distance_threshold`, `linkage` |
@@ -1087,24 +1088,94 @@ not have this cost.
 non-finite or that the kernel cannot use, or an eigenvalue solver that did
 not converge.
 
+## Sphere Exclusion (Leader / DISE)
+
+`sphere_exclusion()` is one clustering loop with a pluggable seed order.
+Centers are taken in order. Each center claims every unclaimed item at or
+within `threshold` of it, so centers are pairwise farther apart than the
+threshold. Every item is assigned. Clusters are in center order and list their
+center first, then the rest in ascending position. An item's label is its
+cluster's position, and `centers[i]` is `clusters[i][0]`.
+
+```python
+result = oecluster.sphere_exclusion(dm, 0.6)                     # leader
+result = oecluster.sphere_exclusion(dm, 0.6, order="neighbors")  # Butina
+result = oecluster.sphere_exclusion(mols, 0.6, comparison="fingerprint",
+                                    order=numpy.argsort(to_reference,
+                                                        kind="stable"))  # DISE
+result.centers     # one caller position per cluster
+result.excluded    # [position, reason] for items normalization dropped
+```
+
+| `order` | Algorithm | Inputs | Cost |
+|---------|-----------|--------|------|
+| `"input"` | Leader (Hartigan) | matrix, comparison, items | O(N·k) distances for k centers |
+| `"neighbors"` | Taylor-Butina | matrix only | O(N²) to build the threshold graph |
+| sequence of positions | Directed Sphere Exclusion (Gobbi and Lee) | matrix, comparison, items | O(N·k) distances |
+
+- Under `order="neighbors"` with `assignment="first"` the result equals
+  `butina()` with the same `threshold` and `reordering`. Nearest assignment
+  keeps Butina's centers but may move members between them. Equal neighbor counts go to the *larger* index,
+  as in Butina, and not to the smaller-index rule used elsewhere in the
+  library. `reordering=True` is accepted only with this order. The lazy paths
+  refuse it because it needs every pair.
+- A sequence order must name every caller position exactly once, dropped
+  positions included. Dropped positions are skipped. A DISE direction is one
+  `argsort` of whatever ranks the items: distance to a reference compound, an
+  activity, or a shuffled range.
+- `assignment="nearest"` keeps the centers and moves each other item to its
+  nearest center, with ties going to the earlier center. Members stay within
+  the threshold of their center. It costs another O(N·k) distances.
+- `items` dispatches as for `maxmin_select()`. A matrix passes the
+  `require_comparable` gate, so a non-finite entry is a `ValueError`. A matrix
+  or prebuilt comparison with no items gives an empty result, but an empty
+  sequence of items is refused.
+- `num_threads` and `chunk_size` reach the comparison chunks on the lazy paths
+  and the threshold graph under `order="neighbors"`. The ordered matrix path is
+  single-threaded. Results do not depend on either option.
+
+`ValueError` covers:
+- a bad `threshold`, `order`, `assignment`, `num_threads` or `chunk_size`;
+- `reordering` without the neighbor order;
+- `similarity=True`;
+- sparse storage;
+- the neighbor order on a lazy path;
+- comparison facts that rule out ranking.
+
+`TypeError` covers:
+- arguments that fit no input path;
+- an `order` that is neither a string nor a sequence of ints, or has a bool entry;
+- a string `reordering`.
+
+`RuntimeError` comes from the native layer when a comparison returns a
+non-finite distance.
+
 ## Metric Requirements
 
 `butina()`, `dbscan()`, `hdbscan()`, `agglomerative()`, and `cluster_report()`
 assume their input is a metric: an item's distance to itself is zero, and the
 triangle inequality holds. Those five are the entry points that check.
-`k_medoids()`, `activity_landscape()` and `modelability()` check a weaker
-standard described below -- they rank, threshold and add distances but never
-assume the triangle inequality. `k_medoids()` is the one *clustering* algorithm
-in that weaker group, which is not an oversight: PAM's objective is a sum of
-distances and its swap step compares two such sums, so nothing in it appeals to
-the triangle inequality and it takes no `allow_nonmetric` parameter because
-there is no assumption for a flag to override.
+`k_medoids()`, `sphere_exclusion()`, `activity_landscape()` and
+`modelability()` check a weaker standard described below -- they rank,
+threshold and add distances but never assume the triangle inequality.
+`k_medoids()` and `sphere_exclusion()` are the *clustering* algorithms in that
+weaker group, which is not an oversight. PAM's objective is a sum of distances
+and its swap step compares two such sums. Sphere exclusion only compares each
+distance with the threshold and, under nearest assignment, with other
+distances. Neither appeals to the triangle inequality, so neither takes an
+`allow_nonmetric` parameter: there is no assumption for a flag to override.
 
 That produces one asymmetry worth expecting. A Dice matrix that `k_medoids()`
 clusters without complaint will be refused by `cluster_report()` unless you pass
 `allow_nonmetric=True`, because the internal validity indices do lean on metric
 behavior where PAM does not. Both calls are behaving correctly; it is the
 sequence that surprises.
+
+A second asymmetry follows from the same rule. `sphere_exclusion(...,
+order="neighbors")` computes exactly what `butina()` computes, yet it accepts a
+non-metric matrix that `butina()` refuses without `allow_nonmetric=True`.
+`butina()` keeps its metric check for compatibility; the computation itself
+needs only comparable distances.
 
 `representative()`, `rank_representatives()`, and
 `select_representatives()` also take a distance matrix, and consult none of
