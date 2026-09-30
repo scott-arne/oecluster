@@ -177,6 +177,10 @@ TEST(KNNGraphConstructorTest, EveryRuleHasARefusingCase) {
         [] { KNNGraph(3, 1, {1, 0}, {1.0, 1.0, 1.0}); },
         "KNNGraph needs 3 indices and distances for 3 items at k = 1, got 2 "
         "indices and 3 distances");
+    ExpectInvalidArgument(
+        [] { KNNGraph(3, 1, {1, 0, 0}, {1.0, 1.0}); },
+        "KNNGraph needs 3 indices and distances for 3 items at k = 1, got 3 "
+        "indices and 2 distances");
     ExpectInvalidArgument([] { KNNGraph(3, 0, {}, {}); },
                           "KNNGraph k must be between 1 and 2 for 3 items, got 0");
     ExpectInvalidArgument(
