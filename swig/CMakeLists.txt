@@ -36,6 +36,8 @@ set(_OECLUSTER_SWIG_DEPENDS
     ${CMAKE_SOURCE_DIR}/include/oecluster/clustering/DiversitySelection.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/clustering/SetDiversity.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/clustering/SphereExclusion.h
+    ${CMAKE_SOURCE_DIR}/include/oecluster/clustering/KNNGraph.h
+    ${CMAKE_SOURCE_DIR}/include/oecluster/clustering/JarvisPatrick.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/clustering/DBSCAN.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/clustering/HDBSCAN.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/clustering/Agglomerative.h

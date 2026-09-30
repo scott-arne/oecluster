@@ -875,3 +875,44 @@ def test_sphere_exclusion_releases_the_gil():
     assert text.index(invocation) < text.index(include), (
         f"{invocation} must precede the %include that declares sphere_exclusion, "
         "or SWIG applies the exception handler to nothing")
+
+
+def test_knn_graph_and_jarvis_patrick_refuse_a_non_finite_read(native):
+    """The Python matrix path refuses this up front through the gate, so the
+    native refusal is only reachable through the raw binding."""
+    storage = _line_storage(native)
+    storage.Set(0, 4, math.nan)
+    knn_options = native.KNNGraphOptions()
+    knn_options.k = 2
+    with pytest.raises(RuntimeError,
+                       match="knn_graph read a non-finite distance between "
+                             "items 0 and 4"):
+        native.knn_graph(storage, knn_options)
+    jp_options = native.JarvisPatrickOptions()
+    jp_options.k = 2
+    jp_options.kmin = 1
+    with pytest.raises(RuntimeError,
+                       match="jarvis_patrick read a non-finite distance "
+                             "between items 0 and 4"):
+        native.jarvis_patrick(storage, jp_options)
+
+
+def test_knn_graph_and_jarvis_patrick_release_the_gil():
+    """knn_graph reads O(N^2) native distances or runs O(N^2) comparisons on
+    worker threads, and jarvis_patrick builds the same graph.
+
+    Asserted against the interface file for the reasons given in
+    test_the_new_entry_points_release_the_gil.
+    """
+    interface = pathlib.Path(__file__).resolve().parents[2] / "swig" / "oecluster.i"
+    text = _SWIG_COMMENT.sub("", interface.read_text(encoding="utf-8"))
+
+    for name, header in (("knn_graph", "KNNGraph.h"),
+                         ("jarvis_patrick", "JarvisPatrick.h")):
+        include = f'%include "oecluster/clustering/{header}"'
+        assert text.count(include) == 1, "the position check needs an unambiguous anchor"
+        invocation = f"OECLUSTER_GIL_EXCEPTION(OECluster::{name}, {name})"
+        assert invocation in text
+        assert text.index(invocation) < text.index(include), (
+            f"{invocation} must precede the %include that declares {name}, "
+            "or SWIG applies the exception handler to nothing")

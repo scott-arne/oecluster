@@ -75,6 +75,7 @@ __all__ = [  # noqa: RUF022
     "vendi_score",
     "logdet_diversity",
     "sphere_exclusion",
+    "knn_graph",
     "ButinaResult",
     "DBSCANResult",
     "HDBSCANResult",
@@ -82,6 +83,7 @@ __all__ = [  # noqa: RUF022
     "BitBirchResult",
     "KMedoidsResult",
     "SphereExclusionResult",
+    "KNNGraph",
     "MurckoResult",
     "RepresentativeMetrics",
     "ClusterRepresentative",
@@ -1979,6 +1981,80 @@ class SphereExclusionResult(ClusteringResult):
     @property
     def method(self):
         return "sphere_exclusion"
+
+
+class KNNGraph:
+    """Each item's ``k`` nearest other items, with their raw distances.
+
+    Built only by :func:`knn_graph`. Rows are the items kept after
+    normalization, in native order; ``positions[r]`` is row ``r``'s caller
+    position. ``indices`` holds caller positions, and each row is ordered by
+    ascending (distance, position), so equal distances go to the lower
+    position. The values are distances, not affinities. Excluded items have
+    no row and appear in no neighbor list.
+    """
+
+    def __init__(self):
+        raise TypeError("KNNGraph is built by knn_graph()")
+
+    @classmethod
+    def _from_native(cls, native, source):
+        """
+        Wrap a native graph built over a dispatched input.
+
+        :param native: The native KNNGraph.
+        :param source: The :class:`_DiversitySource` it was built from.
+        :returns: A :class:`KNNGraph`.
+        """
+        graph = cls.__new__(cls)
+        graph._native = native
+        graph._k = int(native.K())
+        rows = int(native.NumItems())
+        count = rows * graph._k
+        positions = (np.arange(rows, dtype=np.int64) if source.positions is None
+                     else np.asarray(source.positions, dtype=np.int64))
+        native_indices = np.fromiter(native.Indices(), dtype=np.int64,
+                                     count=count).reshape(rows, graph._k)
+        graph._indices = positions[native_indices]
+        graph._distances = np.fromiter(native.Distances(), dtype=np.float64,
+                                       count=count).reshape(rows, graph._k)
+        graph._row_positions = positions
+        graph._positions = source.positions
+        graph._num_positions = source.num_positions
+        graph._excluded = [list(entry) for entry in source.excluded]
+        return graph
+
+    @property
+    def k(self):
+        """Neighbors per row."""
+        return self._k
+
+    @property
+    def indices(self):
+        """``(rows, k)`` ``int64`` array of neighbor caller positions."""
+        return self._indices.copy()
+
+    @property
+    def distances(self):
+        """``(rows, k)`` ``float64`` array of neighbor distances."""
+        return self._distances.copy()
+
+    @property
+    def positions(self):
+        """``(rows,)`` ``int64`` array: the caller position of each row."""
+        return self._row_positions.copy()
+
+    @property
+    def excluded(self):
+        """``[position, reason]`` for each item normalization dropped."""
+        return [list(entry) for entry in self._excluded]
+
+    def __len__(self):
+        """Number of rows."""
+        return len(self._row_positions)
+
+    def __repr__(self):
+        return f"KNNGraph(num_rows={len(self)}, k={self._k})"
 
 
 class MurckoResult(ClusteringResult):
@@ -5282,7 +5358,8 @@ def _refuse_comparison_facts(comparison_obj, caller):
             "Use missing='complete_case'")
 
 
-def _diversity_source(items, comparison, kwargs, caller):
+def _diversity_source(items, comparison, kwargs, caller, *,
+                      allow_sparse=False):
     """
     Dispatch a diversity entry point's input onto one of its three paths.
 
@@ -5291,11 +5368,14 @@ def _diversity_source(items, comparison, kwargs, caller):
     :param comparison: Comparison name; the named path only.
     :param kwargs: Comparison options; the named path only. Consumed.
     :param caller: Entry point name for the messages.
+    :param allow_sparse: Accept SparseStorage; for callers whose native entry
+        points read sparse entries directly.
     :returns: A :class:`_DiversitySource`.
     :raises TypeError: If the input and the comparison arguments do not fit
         one path.
-    :raises ValueError: If the storage is sparse, normalization expanded or
-        emptied the item list, or the comparison's facts refuse it.
+    :raises ValueError: If the storage is sparse and allow_sparse is False,
+        normalization expanded or emptied the item list, or the comparison's
+        facts refuse it.
     """
     if isinstance(items, CrossDistanceMatrix):
         raise TypeError(
@@ -5312,8 +5392,8 @@ def _diversity_source(items, comparison, kwargs, caller):
         if isinstance(items, SymmetricDistanceMatrix):
             # ValueError, not TypeError: the argument's type is right, its
             # storage is not.
-            if isinstance(items.storage, SparseStorage):
-                raise ValueError(  # noqa: TRY004
+            if isinstance(items.storage, SparseStorage) and not allow_sparse:
+                raise ValueError(
                     f"{caller} requires complete pairwise distances; "
                     "SparseStorage is not supported")
             size = items.num_samples
@@ -6148,6 +6228,100 @@ def sphere_exclusion(items, threshold, *, order="input", reordering=False,
         centers=[source.caller_position(i) for i in native.Centers()],
         excluded=source.excluded,
     )
+
+
+_INTP_MAX = int(np.iinfo(np.intp).max)
+
+
+def _knn_check_k(k, size, caller):
+    """
+    Refuse a neighbor count that does not fit the item count.
+
+    Mirrors validate_knn_k in src/clustering/KNNGraphBuild.h ahead of it,
+    because SWIG turns the native invalid_argument into RuntimeError.
+
+    :param k: Coerced neighbor count.
+    :param size: Native item count.
+    :param caller: Entry point name for the messages.
+    :raises ValueError: If there is one item, or k is outside 1..size - 1.
+    """
+    if size == 0:
+        return
+    if size == 1:
+        raise ValueError(
+            f"{caller}() needs at least two items: a single item has no "
+            "neighbors")
+    if not 1 <= k <= size - 1:
+        raise ValueError(
+            f"{caller}() k must be between 1 and {size - 1} for {size} items, "
+            f"got {k}")
+
+
+def knn_graph(items, k, *, comparison=None, similarity=False, num_threads=0,
+              chunk_size=4096, **kwargs) -> "KNNGraph":
+    """
+    Find each item's ``k`` nearest other items.
+
+    Each row lists ``k`` items other than its own, ordered by ascending
+    (distance, position); equal distances go to the lower position. The
+    result does not depend on ``num_threads`` or ``chunk_size``.
+
+    ``items`` selects the path as for :func:`sphere_exclusion`, and sparse
+    storage is also accepted. A sparse matrix must hold every pair at or
+    within its cutoff, as :func:`pdist` with a cutoff produces, and every item
+    needs at least ``k`` stored neighbors; raise the cutoff or lower ``k``
+    otherwise. The lazy paths evaluate every ordered pair, N(N-1)
+    comparisons, and keep only the graph.
+
+    :param items: Matrix, prebuilt comparison, or sequence of items.
+    :param k: Neighbors per item, 1 to n - 1.
+    :param comparison: Comparison name, required with a sequence of items.
+    :param similarity: Refused when True; the graph ranks distances.
+    :param num_threads: Worker threads; 0 selects the hardware concurrency.
+    :param chunk_size: Pairwise distances per work unit, at least one.
+    :param kwargs: Comparison options for a named comparison.
+    :returns: A :class:`KNNGraph`.
+    :raises TypeError: If the arguments fit none of the three paths, or a
+        comparison option is unknown.
+    :raises ValueError: On an invalid ``k``, ``num_threads`` or
+        ``chunk_size`` (including one item, ``k`` outside 1 to n - 1, or
+        ``k`` above the largest NumPy array dimension);
+        ``similarity=True``; an empty sequence; or a matrix or comparison
+        whose distances cannot be ranked.
+    :raises RuntimeError: If a sparse item has fewer than ``k`` stored
+        neighbors, or a comparison returns a NaN or infinite distance.
+
+    Example::
+
+        graph = oecluster.knn_graph(mols, 5, comparison="fingerprint")
+        print(graph.indices[0], graph.distances[0])
+    """
+    if similarity:
+        raise ValueError(
+            "knn_graph() ranks distances; similarity=True is not supported")
+    k_value = _diversity_int(k, "k", 0)
+    # The arrays are shaped (rows, k) even with zero rows, and NumPy refuses
+    # a dimension above intp's maximum, so a zero-item call cannot accept
+    # every size_t k the native layer does.
+    if k_value > _INTP_MAX:
+        raise ValueError(
+            f"knn_graph() k must be at most {_INTP_MAX}, the largest NumPy "
+            f"array dimension, got {k_value}")
+    num_threads_value = _diversity_int(num_threads, "num_threads", 0)
+    chunk_size_value = _diversity_int(chunk_size, "chunk_size", 1)
+
+    source = _diversity_source(items, comparison, kwargs, "knn_graph",
+                               allow_sparse=True)
+    _knn_check_k(k_value, source.size, "knn_graph")
+    if source.matrix is not None:
+        _gate.require_comparable(source.matrix, "knn_graph")
+
+    options = _oecluster.KNNGraphOptions()
+    options.k = k_value
+    options.num_threads = num_threads_value
+    options.chunk_size = chunk_size_value
+    native = _oecluster.knn_graph(source.target, options)
+    return KNNGraph._from_native(native, source)
 
 
 def descriptor_statistics(mols, *, sources=None, columns=None, groups=None,

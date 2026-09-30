@@ -34,6 +34,8 @@
 #include "oecluster/clustering/DiversitySelection.h"
 #include "oecluster/clustering/SetDiversity.h"
 #include "oecluster/clustering/SphereExclusion.h"
+#include "oecluster/clustering/KNNGraph.h"
+#include "oecluster/clustering/JarvisPatrick.h"
 #include "oecluster/clustering/KMedoids.h"
 #include "oecluster/clustering/MurckoScaffold.h"
 #include "oefp/batch.h"
@@ -841,6 +843,11 @@ OECLUSTER_GIL_EXCEPTION(OECluster::logdet_diversity, logdet_diversity)
 // worker threads for as long as the comparisons do.
 OECLUSTER_GIL_EXCEPTION(OECluster::sphere_exclusion, sphere_exclusion)
 
+// knn_graph reads O(N^2) native distances or runs O(N^2) comparisons on worker
+// threads, and jarvis_patrick builds the same graph before linking it.
+OECLUSTER_GIL_EXCEPTION(OECluster::knn_graph, knn_graph)
+OECLUSTER_GIL_EXCEPTION(OECluster::jarvis_patrick, jarvis_patrick)
+
 // ============================================================================
 // Ignore problematic members before %include
 //
@@ -888,6 +895,10 @@ OECLUSTER_GIL_EXCEPTION(OECluster::sphere_exclusion, sphere_exclusion)
 
 // Ignore SparseStorage internals that use unordered_map/shared_mutex/thread
 %ignore OECluster::SparseStorage::Entries;
+
+// The Python KNNGraph is built only by knn_graph(), which maps rows to caller
+// positions; a graph adopted from raw arrays would carry no such mapping.
+%ignore OECluster::KNNGraph::KNNGraph(size_t, size_t, std::vector<size_t>, std::vector<double>);
 
 // Accept high-level oefp.OEFPBatch and native oefp._native._NativeOEFPBatch
 // objects without making oecluster own or duplicate fingerprint wrappers.
@@ -1160,6 +1171,8 @@ public:
 %include "oecluster/clustering/DiversitySelection.h"
 %include "oecluster/clustering/SetDiversity.h"
 %include "oecluster/clustering/SphereExclusion.h"
+%include "oecluster/clustering/KNNGraph.h"
+%include "oecluster/clustering/JarvisPatrick.h"
 %include "oecluster/clustering/DBSCAN.h"
 %include "oecluster/clustering/HDBSCAN.h"
 %include "oecluster/clustering/Agglomerative.h"
