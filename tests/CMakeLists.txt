@@ -41,6 +41,7 @@ add_executable(oecluster_tests
     cpp/test_butina_golden.cpp
     cpp/test_sphere_exclusion.cpp
     cpp/test_knn_graph.cpp
+    cpp/test_jarvis_patrick.cpp
     cpp/test_murcko_scaffold.cpp
     cpp/test_umbrella_header.cpp
 )

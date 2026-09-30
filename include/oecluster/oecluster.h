@@ -58,6 +58,7 @@ class DistanceMatrix;
 #include "oecluster/clustering/SetDiversity.h"
 #include "oecluster/clustering/SphereExclusion.h"
 #include "oecluster/clustering/KNNGraph.h"
+#include "oecluster/clustering/JarvisPatrick.h"
 #include "oecluster/clustering/MurckoScaffold.h"
 
 #endif  // OECLUSTER_OECLUSTER_H

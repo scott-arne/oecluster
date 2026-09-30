@@ -176,3 +176,12 @@ TEST(UmbrellaHeaderTest, ReachesTheKNNGraphHeader) {
     EXPECT_EQ(options.chunk_size, 4096u);
     EXPECT_EQ(OECluster::KNNGraph().NumItems(), 0u);
 }
+
+// JarvisPatrick.h joined the umbrella in 5.11.0.
+TEST(UmbrellaHeaderTest, ReachesTheJarvisPatrickHeader) {
+    const OECluster::JarvisPatrickOptions options;
+    EXPECT_EQ(options.k, 0u);
+    EXPECT_EQ(options.kmin, 0u);
+    EXPECT_EQ(options.chunk_size, 4096u);
+    EXPECT_EQ(OECluster::JarvisPatrickResult().Method(), "jarvis_patrick");
+}

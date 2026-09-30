@@ -133,6 +133,7 @@ set(OECLUSTER_SOURCES
     src/clustering/Butina.cpp
     src/clustering/SphereExclusion.cpp
     src/clustering/KNNGraph.cpp
+    src/clustering/JarvisPatrick.cpp
     src/clustering/ClusterMetrics.cpp
     src/clustering/Representative.cpp
     src/clustering/ClusterReport.cpp
