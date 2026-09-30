@@ -13,6 +13,7 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -70,6 +71,34 @@ inline std::vector<double> Positions(const std::vector<double>& x) {
 inline std::vector<double> Scrambled(size_t n) {
     return Condensed(n, [](size_t i, size_t j) {
         return static_cast<double>((i * 7 + j * 13) % 6 + 1);
+    });
+}
+
+// Scrambled's integer pattern scaled to sixths, so thresholds such as 2/6
+// and 0.5 fall between levels and the neighbor counts tie often.
+inline std::vector<double> ScrambledSixths(size_t n) {
+    return Condensed(n, [](size_t i, size_t j) {
+        return static_cast<double>((i * 7 + j * 13) % 6 + 1) / 6.0;
+    });
+}
+
+// A second tie-heavy pattern whose rows differ in neighbor count, so Butina
+// under reordering meets candidates that are already claimed and whose counts
+// are stale.
+inline std::vector<double> Hashed(size_t n) {
+    return Condensed(n, [](size_t i, size_t j) {
+        return static_cast<double>((i * 31 + j * 17 + i * j * 5) % 10) / 10.0 +
+               0.05;
+    });
+}
+
+// Seeded random distances on the levels 0, 1/levels, ..., 1: exact ties
+// without a visible pattern.
+inline std::vector<double> Quantized(size_t n, unsigned seed, int levels) {
+    std::mt19937 generator(seed);
+    std::uniform_int_distribution<int> level(0, levels);
+    return Condensed(n, [&](size_t, size_t) {
+        return static_cast<double>(level(generator)) / levels;
     });
 }
 

@@ -38,6 +38,7 @@ add_executable(oecluster_tests
     cpp/test_circles.cpp
     cpp/test_symmetric_eigen.cpp
     cpp/test_set_diversity.cpp
+    cpp/test_butina_golden.cpp
     cpp/test_murcko_scaffold.cpp
     cpp/test_umbrella_header.cpp
 )
