@@ -241,7 +241,12 @@ void leiden_local_move(const LeidenLevel& level, std::vector<uint32_t>& communit
         const double node_size = static_cast<double>(level.size[v]);
         total_strength[d] -= node_strength;
         total_size[d] -= node_size;
-        --members[d];
+        // Exact zeros for an emptied community: subtraction can leave a
+        // residue that would give d a nonzero gain as the empty candidate.
+        if (--members[d] == 0) {
+            total_strength[d] = 0.0;
+            total_size[d] = 0.0;
+        }
 
         weight_to.Begin();
         for (size_t e = level.offsets[v]; e < level.offsets[v + 1]; ++e) {
@@ -281,7 +286,7 @@ void leiden_local_move(const LeidenLevel& level, std::vector<uint32_t>& communit
         const uint32_t target = best_gain > gain_of(d) ? best : d;
 
         if (target != d) {
-            if (target == empty_candidate && target != d) {
+            if (target == empty_candidate) {
                 empty.pop_back();
             }
             if (members[d] == 0) {
