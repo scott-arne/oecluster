@@ -185,3 +185,15 @@ TEST(UmbrellaHeaderTest, ReachesTheJarvisPatrickHeader) {
     EXPECT_EQ(options.chunk_size, 4096u);
     EXPECT_EQ(OECluster::JarvisPatrickResult().Method(), "jarvis_patrick");
 }
+
+// Leiden.h joined the umbrella in 5.12.0.
+TEST(UmbrellaHeaderTest, ReachesTheLeidenHeader) {
+    const OECluster::LeidenOptions options;
+    EXPECT_EQ(options.k, 0u);
+    EXPECT_TRUE(options.objective == OECluster::LeidenObjective::Modularity);
+    EXPECT_EQ(options.resolution, 1.0);
+    EXPECT_EQ(options.n_iterations, -1);
+    EXPECT_EQ(options.seed, 0u);
+    EXPECT_EQ(options.chunk_size, 4096u);
+    EXPECT_EQ(OECluster::LeidenResult().Method(), "leiden");
+}

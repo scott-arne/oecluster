@@ -178,6 +178,22 @@ WeightedGraph RandomSNN(size_t n, unsigned seed, size_t k) {
     return snn_weights(Oracle(n, Quantized(n, seed, 9), k), 1.0 / 15.0, 1);
 }
 
+LeidenOptions Options(size_t k) {
+    LeidenOptions options;
+    options.k = k;
+    return options;
+}
+
+void ExpectSameResult(const LeidenResult& actual, const LeidenResult& expected) {
+    EXPECT_EQ(actual.Labels(), expected.Labels());
+    EXPECT_EQ(actual.Members(), expected.Members());
+    EXPECT_EQ(actual.Quality(), expected.Quality());
+    EXPECT_EQ(actual.Iterations(), expected.Iterations());
+    EXPECT_EQ(actual.Objective(), expected.Objective());
+    EXPECT_EQ(actual.Resolution(), expected.Resolution());
+    EXPECT_EQ(actual.K(), expected.K());
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -635,4 +651,162 @@ TEST(LeidenEngineTest, EveryClusterIsConnected) {
                 graph, run_leiden(graph, Params(objective, resolution), -1, seed).labels);
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Public overloads and the result type.
+
+TEST(LeidenTest, TheGraphAndRawInputOverloadsAgree) {
+    const size_t n = 40;
+    const std::vector<double> condensed = Quantized(n, 9, 7);
+    const DenseStorage dense = MakeStorage(n, condensed);
+    const auto sparse = MakeSparse(n, condensed, 2.0);
+    TableComparison comparison(n, condensed);
+    LeidenOptions options = Options(6);
+    options.seed = 5;
+    const LeidenResult expected = leiden(Oracle(n, condensed, 6), options);
+    EXPECT_EQ(expected.K(), 6u);
+    for (const size_t threads : {size_t{1}, size_t{4}}) {
+        options.num_threads = threads;
+        ExpectSameResult(leiden(dense, options), expected);
+        ExpectSameResult(leiden(*sparse, options), expected);
+        ExpectSameResult(leiden(comparison, options), expected);
+    }
+}
+
+TEST(LeidenTest, TheResultCarriesTheEngineOutput) {
+    const size_t n = 40;
+    const std::vector<double> condensed = Quantized(n, 10, 7);
+    LeidenOptions options = Options(5);
+    options.objective = LeidenObjective::CPM;
+    options.resolution = 0.05;
+    options.seed = 3;
+    const KNNGraph graph = Oracle(n, condensed, 5);
+    const LeidenResult result = leiden(graph, options);
+    LeidenParams params = Params(LeidenObjective::CPM, 0.05);
+    const LeidenRun run = run_leiden(snn_weights(graph, options.prune, 1), params, -1, 3);
+    EXPECT_EQ(result.Labels(), run.labels);
+    EXPECT_EQ(result.Members(), labels_to_clusters(run.labels));
+    EXPECT_EQ(result.Quality(), run.quality);
+    EXPECT_EQ(result.Iterations(), run.iterations);
+    EXPECT_EQ(result.Objective(), LeidenObjective::CPM);
+    EXPECT_EQ(result.Resolution(), 0.05);
+    EXPECT_EQ(result.K(), 5u);
+    EXPECT_EQ(result.Method(), "leiden");
+}
+
+TEST(LeidenTest, InvalidOptionsAreRefusedBeforeAnyComparison) {
+    const auto refused = [](LeidenOptions options, const std::string& message) {
+        CountingComparison comparison(8, GateFacts());
+        ExpectInvalidArgument([&] { leiden(comparison, options); }, message);
+        EXPECT_EQ(comparison.Count(), 0u) << message;
+        ExpectInvalidArgument([&] { leiden(Oracle(4, Line(4), 2), options); }, message);
+    };
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const double inf = std::numeric_limits<double>::infinity();
+    LeidenOptions forged = Options(3);
+    forged.objective = static_cast<LeidenObjective>(7);
+    refused(forged, "leiden objective is not a known LeidenObjective");
+    for (const double resolution : {-0.5, nan, inf}) {
+        LeidenOptions options = Options(3);
+        options.resolution = resolution;
+        refused(options, "leiden resolution must be finite and non-negative");
+    }
+    for (const double prune : {-0.1, 1.0, nan, inf}) {
+        LeidenOptions options = Options(3);
+        options.prune = prune;
+        refused(options, "leiden prune must be finite and in [0, 1)");
+    }
+    for (const double theta : {0.0, -1.0, nan, inf}) {
+        LeidenOptions options = Options(3);
+        options.theta = theta;
+        refused(options, "leiden theta must be finite and positive");
+    }
+    LeidenOptions iterations = Options(3);
+    iterations.n_iterations = -2;
+    refused(iterations, "leiden n_iterations must be -1 or non-negative, got -2");
+}
+
+TEST(LeidenTest, RawInputBoundsNameLeiden) {
+    CountingComparison comparison(4, GateFacts());
+    LeidenOptions chunk = Options(1);
+    chunk.chunk_size = 0;
+    ExpectInvalidArgument([&] { leiden(comparison, chunk); },
+                          "leiden chunk_size must be at least one");
+    ExpectInvalidArgument([] { leiden(DenseStorage(1), Options(1)); },
+                          "leiden needs at least two items: a single item has no "
+                          "neighbors");
+    ExpectInvalidArgument([&] { leiden(comparison, Options(4)); },
+                          "leiden k must be between 1 and 3 for 4 items, got 4");
+    ExpectInvalidArgument([&] { leiden(comparison, Options(0)); },
+                          "leiden k must be between 1 and 3 for 4 items, got 0");
+    EXPECT_EQ(comparison.Count(), 0u);
+}
+
+// Each case breaks two adjacent rules of the validation order and pins that
+// the earlier rule's message wins.
+TEST(LeidenTest, ValidationOrderHoldsWhenSeveralInputsAreInvalid) {
+    LeidenOptions both = Options(9);
+    both.chunk_size = 0;
+    both.theta = 0.0;
+    // chunk_size before the options.
+    ExpectInvalidArgument([&] { leiden(MakeStorage(4, Line(4)), both); },
+                          "leiden chunk_size must be at least one");
+    // The options before zero items.
+    LeidenOptions theta = Options(9);
+    theta.theta = 0.0;
+    ExpectInvalidArgument([&] { leiden(DenseStorage(0), theta); },
+                          "leiden theta must be finite and positive");
+    // The options before k.
+    ExpectInvalidArgument([&] { leiden(MakeStorage(4, Line(4)), theta); },
+                          "leiden theta must be finite and positive");
+    // The options before the comparison facts.
+    GateFacts similarity;
+    similarity.is_distance = Capability::No;
+    CountingComparison counting(4, similarity);
+    ExpectInvalidArgument([&] { leiden(counting, theta); },
+                          "leiden theta must be finite and positive");
+    EXPECT_EQ(counting.Count(), 0u);
+}
+
+TEST(LeidenTest, ZeroItemsGiveAnEmptyResultOnEveryOverload) {
+    LeidenOptions options = Options(4);
+    options.objective = LeidenObjective::CPM;
+    options.resolution = 0.25;
+    CountingComparison empty(0, GateFacts());
+    for (const LeidenResult& result :
+         {leiden(KNNGraph(), options), leiden(DenseStorage(0), options),
+          leiden(empty, options)}) {
+        EXPECT_TRUE(result.Labels().empty());
+        EXPECT_TRUE(result.Members().empty());
+        EXPECT_EQ(result.Quality(), 0.0);
+        EXPECT_EQ(result.Iterations(), 0u);
+        EXPECT_EQ(result.Objective(), LeidenObjective::CPM);
+        EXPECT_EQ(result.Resolution(), 0.25);
+    }
+    EXPECT_EQ(leiden(KNNGraph(), options).K(), 0u);
+    EXPECT_EQ(leiden(DenseStorage(0), options).K(), 4u);
+}
+
+TEST(LeidenTest, TheDefaultResultHasZeroFields) {
+    const LeidenResult result;
+    EXPECT_TRUE(result.Labels().empty());
+    EXPECT_EQ(result.Quality(), 0.0);
+    EXPECT_EQ(result.Iterations(), 0u);
+    EXPECT_EQ(result.Objective(), LeidenObjective::Modularity);
+    EXPECT_EQ(result.Resolution(), 0.0);
+    EXPECT_EQ(result.K(), 0u);
+    EXPECT_EQ(result.Method(), "leiden");
+}
+
+TEST(LeidenTest, TheValueConstructorStoresEveryField) {
+    const LeidenResult result({0, 1, 0}, {{0, 2}, {1}}, 0.75, 4, LeidenObjective::CPM,
+                              0.2, 7);
+    EXPECT_EQ(result.Labels(), (std::vector<ClusterLabel>{0, 1, 0}));
+    EXPECT_EQ(result.Members(), (Clusters{{0, 2}, {1}}));
+    EXPECT_EQ(result.Quality(), 0.75);
+    EXPECT_EQ(result.Iterations(), 4u);
+    EXPECT_EQ(result.Objective(), LeidenObjective::CPM);
+    EXPECT_EQ(result.Resolution(), 0.2);
+    EXPECT_EQ(result.K(), 7u);
 }
