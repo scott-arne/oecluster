@@ -86,6 +86,14 @@ std::vector<uint32_t> Iota(size_t n) {
     return values;
 }
 
+std::vector<ClusterLabel> Blocks(const std::vector<size_t>& sizes) {
+    std::vector<ClusterLabel> labels;
+    for (size_t block = 0; block < sizes.size(); ++block) {
+        labels.insert(labels.end(), sizes[block], static_cast<ClusterLabel>(block));
+    }
+    return labels;
+}
+
 // Whether the nodes labeled `label` induce a connected subgraph.
 template <typename Label>
 bool InducesConnected(const WeightedGraph& graph, const std::vector<Label>& labels,
@@ -119,6 +127,34 @@ bool InducesConnected(const WeightedGraph& graph, const std::vector<Label>& labe
         }
     }
     return reached == members;
+}
+
+void ExpectAllClustersConnected(const WeightedGraph& graph,
+                                const std::vector<ClusterLabel>& labels) {
+    const std::set<ClusterLabel> distinct(labels.begin(), labels.end());
+    for (const ClusterLabel label : distinct) {
+        EXPECT_TRUE(InducesConnected(graph, labels, label)) << "cluster " << label;
+    }
+}
+
+// Two 5-cliques, 0-4 and 5-9, joined by the bridge 4-5.
+WeightedGraph Barbell() {
+    std::vector<Edge> edges;
+    AddClique(edges, 0, 5);
+    AddClique(edges, 5, 5);
+    edges.emplace_back(4, 5, 1.0);
+    return Graph(10, edges);
+}
+
+// Six 5-cliques in a ring, clique c holding 5c..5c+4, each joined to the
+// next by one edge.
+WeightedGraph RingOfCliques() {
+    std::vector<Edge> edges;
+    for (uint32_t c = 0; c < 6; ++c) {
+        AddClique(edges, 5 * c, 5);
+        edges.emplace_back(5 * c + 4, 5 * ((c + 1) % 6), 1.0);
+    }
+    return Graph(30, edges);
 }
 
 // Four unit triangles A, B, C, D (0-2, 3-5, 6-8, 9-11). A-B and C-D are each
@@ -419,6 +455,184 @@ TEST(LeidenEngineTest, RefinedCommunitiesNestAndAreConnected) {
         for (size_t v = 0; v < 80; ++v) {
             EXPECT_EQ(community[refined[v]], community[v]);
             EXPECT_TRUE(InducesConnected(graph, refined, refined[v]));
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Aggregation, one pass and the driver.
+
+TEST(LeidenEngineTest, AggregationBuildsTheExactNextLevel) {
+    LeidenLevel level =
+        Level(4, {{0, 1, 1.0}, {0, 2, 2.0}, {1, 2, 0.5}, {2, 3, 4.0}, {1, 3, 0.25}});
+    level.self = {0.5, 0.0, 0.25, 0.0};
+    level.size = {1, 2, 1, 3};
+    level.strength = {4.0, 1.75, 7.0, 4.25};
+    level.m = 8.5;
+    const std::vector<uint32_t> refined = {0, 1, 0, 3};
+    const std::vector<uint32_t> community = {1, 0, 1, 0};
+    const LeidenAggregate aggregate = leiden_aggregate(level, refined, community);
+    EXPECT_EQ(aggregate.node_of, (std::vector<uint32_t>{0, 1, 0, 2}));
+    EXPECT_EQ(aggregate.community, (std::vector<uint32_t>{0, 1, 1}));
+    const LeidenLevel& next = aggregate.level;
+    EXPECT_EQ(next.num_nodes, 3u);
+    EXPECT_EQ(next.offsets, (std::vector<size_t>{0, 2, 4, 6}));
+    EXPECT_EQ(next.neighbors, (std::vector<uint32_t>{1, 2, 0, 2, 0, 1}));
+    EXPECT_EQ(next.weights, (std::vector<double>{1.5, 4.0, 1.5, 0.25, 4.0, 0.25}));
+    EXPECT_EQ(next.self, (std::vector<double>{2.75, 0.0, 0.0}));
+    EXPECT_EQ(next.strength, (std::vector<double>{11.0, 1.75, 4.25}));
+    EXPECT_EQ(next.size, (std::vector<size_t>{2, 2, 3}));
+    EXPECT_EQ(next.m, 8.5);
+    for (const LeidenObjective objective :
+         {LeidenObjective::Modularity, LeidenObjective::CPM}) {
+        const LeidenParams params = Params(objective, 0.3);
+        EXPECT_DOUBLE_EQ(leiden_quality(next, aggregate.community, params),
+                         leiden_quality(level, community, params));
+    }
+}
+
+TEST(LeidenEngineTest, APassProjectsAMultiLevelPartitionToTheBase) {
+    const LeidenLevel base = make_base_level(CliquesOfCliques());
+    for (const uint64_t seed : {0u, 1u, 2u, 3u, 4u}) {
+        LeidenRng rng(seed);
+        const std::vector<uint32_t> labels =
+            leiden_pass(base, Iota(12), Params(LeidenObjective::CPM, 0.2), rng);
+        for (uint32_t v = 1; v < 6; ++v) {
+            EXPECT_EQ(labels[v], labels[0]) << "seed " << seed;
+            EXPECT_EQ(labels[6 + v], labels[6]) << "seed " << seed;
+        }
+        EXPECT_NE(labels[0], labels[6]) << "seed " << seed;
+    }
+}
+
+TEST(LeidenEngineTest, ABridgedPairOfCliquesSplitsUnderBothObjectives) {
+    const std::vector<ClusterLabel> expected = Blocks({5, 5});
+    for (const uint64_t seed : {0u, 1u, 2u}) {
+        EXPECT_EQ(run_leiden(Barbell(), Params(LeidenObjective::Modularity, 1.0), -1,
+                             seed)
+                      .labels,
+                  expected);
+        EXPECT_EQ(run_leiden(Barbell(), Params(LeidenObjective::CPM, 0.1), -1, seed)
+                      .labels,
+                  expected);
+    }
+}
+
+TEST(LeidenEngineTest, CPMResolutionSpansSingletonsToComponents) {
+    std::vector<Edge> edges;
+    AddClique(edges, 0, 3);
+    AddClique(edges, 3, 3);
+    const WeightedGraph graph = Graph(7, edges);
+    EXPECT_EQ(run_leiden(graph, Params(LeidenObjective::CPM, 1.5), -1, 0).labels,
+              (std::vector<ClusterLabel>{0, 1, 2, 3, 4, 5, 6}));
+    EXPECT_EQ(run_leiden(graph, Params(LeidenObjective::CPM, 0.0), -1, 0).labels,
+              (std::vector<ClusterLabel>{0, 0, 0, 1, 1, 1, 2}));
+}
+
+TEST(LeidenEngineTest, ARingOfCliquesSplitsIntoTheCliques) {
+    const std::vector<ClusterLabel> expected = Blocks({5, 5, 5, 5, 5, 5});
+    for (const uint64_t seed : {0u, 1u, 2u, 3u, 4u}) {
+        const LeidenRun run =
+            run_leiden(RingOfCliques(), Params(LeidenObjective::Modularity, 1.0), -1, seed);
+        EXPECT_EQ(run.labels, expected) << "seed " << seed;
+    }
+}
+
+TEST(LeidenEngineTest, TheSameSeedGivesTheSameRun) {
+    const WeightedGraph graph = RandomSNN(120, 6, 8);
+    const LeidenParams params = Params(LeidenObjective::Modularity, 1.0);
+    const LeidenRun first = run_leiden(graph, params, -1, 11);
+    const LeidenRun second = run_leiden(graph, params, -1, 11);
+    EXPECT_EQ(first.labels, second.labels);
+    EXPECT_EQ(first.quality, second.quality);
+    EXPECT_EQ(first.iterations, second.iterations);
+    for (const uint64_t seed : {0u, 1u, 2u, 3u}) {
+        const LeidenRun run = run_leiden(graph, params, -1, seed);
+        ASSERT_EQ(run.labels.size(), 120u);
+        EXPECT_EQ(run.labels[0], 0);
+        ClusterLabel highest = 0;
+        for (const ClusterLabel label : run.labels) {
+            EXPECT_LE(label, highest + 1);
+            highest = std::max(highest, label);
+        }
+    }
+}
+
+TEST(LeidenEngineTest, AFixedIterationCountRunsThatManyPasses) {
+    const WeightedGraph graph = RandomSNN(60, 7, 5);
+    const LeidenParams params = Params(LeidenObjective::Modularity, 1.0);
+    const LeidenRun none = run_leiden(graph, params, 0, 0);
+    EXPECT_EQ(none.iterations, 0u);
+    std::vector<ClusterLabel> singletons(60);
+    std::iota(singletons.begin(), singletons.end(), 0);
+    EXPECT_EQ(none.labels, singletons);
+    EXPECT_EQ(run_leiden(graph, params, 3, 0).iterations, 3u);
+}
+
+TEST(LeidenEngineTest, IteratingToConvergenceStopsAfterTheFirstUnchangedPass) {
+    for (const unsigned seed : {1u, 2u, 3u, 4u}) {
+        const WeightedGraph graph = RandomSNN(60, seed, 5);
+        const LeidenParams params = Params(LeidenObjective::Modularity, 1.0);
+        const LeidenRun converged = run_leiden(graph, params, -1, seed);
+        ASSERT_GE(converged.iterations, 1u);
+        const int64_t passes = static_cast<int64_t>(converged.iterations);
+        EXPECT_EQ(run_leiden(graph, params, passes - 1, seed).labels, converged.labels)
+            << "seed " << seed;
+        if (passes >= 2) {
+            EXPECT_NE(run_leiden(graph, params, passes - 2, seed).labels,
+                      converged.labels)
+                << "seed " << seed;
+        }
+    }
+}
+
+TEST(LeidenEngineTest, AGraphWithoutEdgesGivesSingletonsAndZeroQuality) {
+    const WeightedGraph graph = Graph(4, {});
+    for (const LeidenObjective objective :
+         {LeidenObjective::Modularity, LeidenObjective::CPM}) {
+        const LeidenRun run = run_leiden(graph, Params(objective, 1.0), -1, 0);
+        EXPECT_EQ(run.labels, (std::vector<ClusterLabel>{0, 1, 2, 3}));
+        EXPECT_EQ(run.quality, 0.0);
+    }
+}
+
+TEST(LeidenEngineTest, ZeroNodesGiveAnEmptyRun) {
+    const LeidenRun run =
+        run_leiden(Graph(0, {}), Params(LeidenObjective::Modularity, 1.0), -1, 0);
+    EXPECT_TRUE(run.labels.empty());
+    EXPECT_EQ(run.quality, 0.0);
+}
+
+TEST(LeidenEngineTest, EveryClusterIsConnected) {
+    // A Fig. 2-style graph: node 0 bridges triangles 1-3 and 4-6 and is
+    // pulled toward the 4-clique 7-10.
+    std::vector<Edge> edges;
+    AddClique(edges, 1, 3);
+    AddClique(edges, 4, 3);
+    AddClique(edges, 7, 4);
+    for (const uint32_t v : {1u, 4u}) {
+        edges.emplace_back(0, v, 1.0);
+    }
+    for (const uint32_t v : {7u, 8u, 9u}) {
+        edges.emplace_back(0, v, 1.0);
+    }
+    edges.emplace_back(3, 6, 0.5);
+    const WeightedGraph figure = Graph(11, edges);
+    for (const uint64_t seed : {0u, 1u, 2u, 3u, 4u, 5u, 6u, 7u}) {
+        for (const LeidenObjective objective :
+             {LeidenObjective::Modularity, LeidenObjective::CPM}) {
+            ExpectAllClustersConnected(
+                figure, run_leiden(figure, Params(objective, 0.3), -1, seed).labels);
+        }
+    }
+    for (const unsigned seed : {1u, 2u, 3u, 4u, 5u}) {
+        const WeightedGraph graph = RandomSNN(150, seed, 7);
+        for (const LeidenObjective objective :
+             {LeidenObjective::Modularity, LeidenObjective::CPM}) {
+            const double resolution =
+                objective == LeidenObjective::Modularity ? 1.0 : 0.05;
+            ExpectAllClustersConnected(
+                graph, run_leiden(graph, Params(objective, resolution), -1, seed).labels);
         }
     }
 }

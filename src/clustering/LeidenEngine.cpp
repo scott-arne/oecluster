@@ -20,6 +20,22 @@ namespace {
 
 constexpr uint32_t NO_COMMUNITY = std::numeric_limits<uint32_t>::max();
 
+// Communities renumbered by first appearance in node order, so numbering by
+// smallest member.
+std::vector<uint32_t> canonical(const std::vector<uint32_t>& community) {
+    std::vector<uint32_t> label_of(community.size(), NO_COMMUNITY);
+    std::vector<uint32_t> labels(community.size());
+    uint32_t next = 0;
+    for (size_t v = 0; v < community.size(); ++v) {
+        uint32_t& label = label_of[community[v]];
+        if (label == NO_COMMUNITY) {
+            label = next++;
+        }
+        labels[v] = label;
+    }
+    return labels;
+}
+
 // Per-target weight sums that reset in O(1): a slot is live only while its
 // stamp matches the current epoch, so no O(n) clear runs per node.
 class WeightAccumulator {
@@ -424,6 +440,186 @@ std::vector<uint32_t> leiden_refine(const LeidenLevel& level,
         }
     }
     return refined;
+}
+
+LeidenAggregate leiden_aggregate(const LeidenLevel& level,
+                                 const std::vector<uint32_t>& refined,
+                                 const std::vector<uint32_t>& community) {
+    const size_t n = level.num_nodes;
+    LeidenAggregate result;
+    result.node_of.resize(n);
+    // Ascending nodes meet each refined community first at its smallest
+    // member, which numbers the new nodes by smallest member.
+    std::vector<uint32_t> id_of(n, NO_COMMUNITY);
+    std::vector<uint32_t> first_member;
+    for (size_t v = 0; v < n; ++v) {
+        uint32_t& id = id_of[refined[v]];
+        if (id == NO_COMMUNITY) {
+            id = static_cast<uint32_t>(first_member.size());
+            first_member.push_back(static_cast<uint32_t>(v));
+        }
+        result.node_of[v] = id;
+    }
+    const size_t count = first_member.size();
+
+    std::vector<uint32_t> initial_of(n, NO_COMMUNITY);
+    result.community.resize(count);
+    uint32_t next_community = 0;
+    for (size_t a = 0; a < count; ++a) {
+        uint32_t& initial = initial_of[community[first_member[a]]];
+        if (initial == NO_COMMUNITY) {
+            initial = next_community++;
+        }
+        result.community[a] = initial;
+    }
+
+    LeidenLevel& next = result.level;
+    next.num_nodes = count;
+    next.self.assign(count, 0.0);
+    next.strength.assign(count, 0.0);
+    next.size.assign(count, 0);
+    next.m = level.m;
+
+    std::vector<size_t> start(count + 1, 0);
+    for (size_t v = 0; v < n; ++v) {
+        const uint32_t a = result.node_of[v];
+        ++start[a + 1];
+        next.self[a] += level.self[v];
+        next.strength[a] += level.strength[v];
+        next.size[a] += level.size[v];
+    }
+    for (size_t a = 0; a < count; ++a) {
+        start[a + 1] += start[a];
+    }
+    std::vector<uint32_t> members(n);
+    {
+        std::vector<size_t> cursor(start.begin(), start.end() - 1);
+        for (size_t v = 0; v < n; ++v) {
+            members[cursor[result.node_of[v]]++] = static_cast<uint32_t>(v);
+        }
+    }
+
+    // Each cross pair is summed from its smaller node, once to count the
+    // rows and again, in the same order, to fill them, so both directions
+    // hold the same double and no O(E) edge table is ever alive beside the
+    // two levels.
+    WeightAccumulator weight_to(count);
+    const auto sum_cross = [&](size_t a, bool add_self) {
+        weight_to.Begin();
+        for (size_t p = start[a]; p < start[a + 1]; ++p) {
+            const uint32_t v = members[p];
+            for (size_t e = level.offsets[v]; e < level.offsets[v + 1]; ++e) {
+                const uint32_t u = level.neighbors[e];
+                const uint32_t b = result.node_of[u];
+                if (b == a) {
+                    if (add_self && u > v) {
+                        next.self[a] += level.weights[e];
+                    }
+                } else if (b > a) {
+                    weight_to.Add(b, level.weights[e]);
+                }
+            }
+        }
+    };
+
+    next.offsets.assign(count + 1, 0);
+    for (size_t a = 0; a < count; ++a) {
+        sum_cross(a, true);
+        next.offsets[a + 1] += weight_to.Touched().size();
+        for (const uint32_t b : weight_to.Touched()) {
+            ++next.offsets[b + 1];
+        }
+    }
+    for (size_t a = 0; a < count; ++a) {
+        next.offsets[a + 1] += next.offsets[a];
+    }
+    next.neighbors.resize(next.offsets[count]);
+    next.weights.resize(next.offsets[count]);
+    std::vector<size_t> cursor(next.offsets.begin(), next.offsets.end() - 1);
+    for (size_t a = 0; a < count; ++a) {
+        sum_cross(a, false);
+        for (const uint32_t b : weight_to.Touched()) {
+            const double weight = weight_to.Get(b);
+            next.neighbors[cursor[a]] = b;
+            next.weights[cursor[a]++] = weight;
+            next.neighbors[cursor[b]] = static_cast<uint32_t>(a);
+            next.weights[cursor[b]++] = weight;
+        }
+    }
+    std::vector<std::pair<uint32_t, double>> row;
+    for (size_t a = 0; a < count; ++a) {
+        row.clear();
+        for (size_t e = next.offsets[a]; e < next.offsets[a + 1]; ++e) {
+            row.emplace_back(next.neighbors[e], next.weights[e]);
+        }
+        std::sort(row.begin(), row.end(),
+                  [](const auto& x, const auto& y) { return x.first < y.first; });
+        for (size_t e = next.offsets[a]; e < next.offsets[a + 1]; ++e) {
+            next.neighbors[e] = row[e - next.offsets[a]].first;
+            next.weights[e] = row[e - next.offsets[a]].second;
+        }
+    }
+    return result;
+}
+
+std::vector<uint32_t> leiden_pass(const LeidenLevel& base,
+                                  const std::vector<uint32_t>& partition,
+                                  const LeidenParams& params, LeidenRng& rng) {
+    const size_t n = base.num_nodes;
+    std::vector<uint32_t> community = partition;
+    std::vector<uint32_t> node_of_base(n);
+    std::iota(node_of_base.begin(), node_of_base.end(), uint32_t{0});
+    // Aggregates only shrink; the base level is read in place, not copied.
+    const LeidenLevel* current = &base;
+    LeidenLevel owned;
+    for (;;) {
+        leiden_local_move(*current, community, params, rng);
+        const std::vector<uint32_t> refined =
+            leiden_refine(*current, community, params, rng);
+        LeidenAggregate aggregate = leiden_aggregate(*current, refined, community);
+        if (aggregate.level.num_nodes == current->num_nodes) {
+            break;
+        }
+        for (size_t i = 0; i < n; ++i) {
+            node_of_base[i] = aggregate.node_of[node_of_base[i]];
+        }
+        community = std::move(aggregate.community);
+        owned = std::move(aggregate.level);
+        current = &owned;
+    }
+    std::vector<uint32_t> result(n);
+    for (size_t i = 0; i < n; ++i) {
+        result[i] = community[node_of_base[i]];
+    }
+    return result;
+}
+
+LeidenRun run_leiden(WeightedGraph graph, const LeidenParams& params,
+                     int64_t n_iterations, uint64_t seed) {
+    const LeidenLevel base = make_base_level(std::move(graph));
+    LeidenRng rng(seed);
+    std::vector<uint32_t> labels(base.num_nodes);
+    std::iota(labels.begin(), labels.end(), uint32_t{0});
+    LeidenRun run;
+    if (n_iterations >= 0) {
+        for (int64_t pass = 0; pass < n_iterations; ++pass) {
+            labels = canonical(leiden_pass(base, labels, params, rng));
+            ++run.iterations;
+        }
+    } else {
+        for (;;) {
+            std::vector<uint32_t> next =
+                canonical(leiden_pass(base, labels, params, rng));
+            ++run.iterations;
+            if (next == labels) {
+                break;
+            }
+            labels = std::move(next);
+        }
+    }
+    run.quality = leiden_quality(base, labels, params);
+    run.labels.assign(labels.begin(), labels.end());
+    return run;
 }
 
 }  // namespace OECluster::detail
