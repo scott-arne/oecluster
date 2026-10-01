@@ -6,7 +6,6 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
-#include <climits>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -693,6 +692,20 @@ TEST(LeidenTest, TheResultCarriesTheEngineOutput) {
     EXPECT_EQ(result.Resolution(), 0.05);
     EXPECT_EQ(result.K(), 5u);
     EXPECT_EQ(result.Method(), "leiden");
+    // Also test with non-default prune, theta, n_iterations and seed.
+    LeidenOptions custom = Options(5);
+    custom.objective = LeidenObjective::CPM;
+    custom.resolution = 0.05;
+    custom.prune = 0.3;
+    custom.theta = 0.5;
+    custom.n_iterations = 2;
+    custom.seed = 42;
+    const LeidenResult custom_result = leiden(graph, custom);
+    LeidenParams custom_params = Params(LeidenObjective::CPM, 0.05, 0.5);
+    const LeidenRun custom_run = run_leiden(snn_weights(graph, 0.3, 1), custom_params, 2, 42);
+    EXPECT_EQ(custom_result.Labels(), custom_run.labels);
+    EXPECT_EQ(custom_result.Quality(), custom_run.quality);
+    EXPECT_EQ(custom_result.Iterations(), custom_run.iterations);
 }
 
 TEST(LeidenTest, InvalidOptionsAreRefusedBeforeAnyComparison) {

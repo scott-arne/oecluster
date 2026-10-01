@@ -1285,14 +1285,14 @@ items have label -1 and appear in no cluster.
 
 The `k`, graph, empty-input and comparison rules are those of
 `jarvis_patrick`: with a `KNNGraph`, `k` must be omitted or equal
-`graph.k`, comparison arguments raise `TypeError`, and `num_threads` and
-`chunk_size` are validated but unused by the graph build. `objective` is
-matched exactly, without case folding.
+`graph.k`, comparison arguments raise `TypeError`, `num_threads` drives
+the SNN weight computation, and `chunk_size` is validated but unused by
+the graph build. `objective` is matched exactly, without case folding.
 
 | Condition | Exception |
 | --- | --- |
 | Input fits no path; comparison arguments with a graph; missing `k` with raw input | `TypeError` |
-| Invalid `k`, `objective`, `resolution` (negative or not finite), `prune` (outside [0, 1)), `theta` (not finite and positive), `n_iterations` (outside [-1, 2**63 - 1]), `seed` (outside [0, 2**64 - 1]), `num_threads`, `chunk_size`; a graph whose `k` differs; `similarity=True`; more than 2,147,483,647 items; an empty sequence; a matrix or comparison that cannot be ranked | `ValueError` |
+| Invalid `k`, `objective`, `resolution` (negative or not finite), `prune` (outside [0, 1)), `theta` (not positive and finite), `n_iterations` (outside [-1, 2**63 - 1]), `seed` (outside [0, 2**64 - 1]), `num_threads`, `chunk_size`; a graph whose `k` differs; `similarity=True`; more than 2,147,483,647 items; an empty sequence; a matrix or comparison that cannot be ranked | `ValueError` |
 | A sparse item with fewer than `k` stored neighbors; a NaN or infinite comparison distance | `RuntimeError` |
 
 ## Metric Requirements

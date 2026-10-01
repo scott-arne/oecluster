@@ -6614,8 +6614,13 @@ def _leiden_real(value, name, requirement, accepts):
     :param requirement: Phrase completing "must be" in the message.
     :param accepts: Predicate a finite value must also satisfy.
     :returns: The coerced float.
-    :raises ValueError: If the value is NaN, infinite or refused by accepts.
+    :raises ValueError: If the value is a bool, not a real number, NaN,
+        infinite or refused by accepts.
     """
+    if isinstance(value, bool) or not isinstance(
+            value, (int, float, np.integer, np.floating)):
+        raise ValueError(  # noqa: TRY004
+            f"leiden() {name} must be {requirement}, got {value!r}")
     try:
         coerced = float(value)
     except OverflowError:

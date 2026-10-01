@@ -104,7 +104,7 @@ private:
  * :returns: The clustering; empty for a zero-item graph.
  * :raises std::invalid_argument: On an unknown objective, a resolution that
  *     is negative or not finite, a prune outside [0, 1), a theta that is not
- *     finite and positive, n_iterations < -1, or more than INT_MAX items.
+ *     a positive finite number, n_iterations < -1, or more than INT_MAX items.
  */
 LeidenResult leiden(const KNNGraph& graph, const LeidenOptions& options);
 
