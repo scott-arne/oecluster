@@ -86,6 +86,41 @@ std::vector<uint32_t> Iota(size_t n) {
     return values;
 }
 
+// Whether the nodes labeled `label` induce a connected subgraph.
+template <typename Label>
+bool InducesConnected(const WeightedGraph& graph, const std::vector<Label>& labels,
+                      Label label) {
+    std::vector<char> seen(graph.num_nodes, 0);
+    size_t start = graph.num_nodes;
+    size_t members = 0;
+    for (size_t v = 0; v < graph.num_nodes; ++v) {
+        if (labels[v] == label) {
+            ++members;
+            start = std::min(start, v);
+        }
+    }
+    if (members == 0) {
+        return true;
+    }
+    std::queue<size_t> frontier;
+    frontier.push(start);
+    seen[start] = 1;
+    size_t reached = 1;
+    while (!frontier.empty()) {
+        const size_t v = frontier.front();
+        frontier.pop();
+        for (size_t e = graph.offsets[v]; e < graph.offsets[v + 1]; ++e) {
+            const uint32_t u = graph.neighbors[e];
+            if (labels[u] == label && !seen[u]) {
+                seen[u] = 1;
+                ++reached;
+                frontier.push(u);
+            }
+        }
+    }
+    return reached == members;
+}
+
 // Four unit triangles A, B, C, D (0-2, 3-5, 6-8, 9-11). A-B and C-D are each
 // joined by all nine cross edges at 0.25; the two halves share no edge.
 WeightedGraph CliquesOfCliques() {
@@ -101,6 +136,10 @@ WeightedGraph CliquesOfCliques() {
         }
     }
     return Graph(12, edges);
+}
+
+WeightedGraph RandomSNN(size_t n, unsigned seed, size_t k) {
+    return snn_weights(Oracle(n, Quantized(n, seed, 9), k), 1.0 / 15.0, 1);
 }
 
 }  // namespace
@@ -302,5 +341,79 @@ TEST(LeidenEngineTest, LocalMovingFromSingletonsFindsTheTriangles) {
         }
         EXPECT_EQ((std::set<uint32_t>(community.begin(), community.end())).size(), 4u)
             << "seed " << seed;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Refinement.
+
+TEST(LeidenEngineTest, RefinementLeavesAPoorlyConnectedNodeAlone) {
+    // Node 0 hangs off triangle 1-2-3 by 0.5, below 0.4 * 1 * (4 - 1) = 1.2,
+    // so {0} is neither a mover nor a target.
+    const LeidenLevel level =
+        Level(4, {{0, 1, 0.5}, {1, 2, 4.0}, {1, 3, 4.0}, {2, 3, 4.0}});
+    for (const uint64_t seed : {0u, 1u, 2u, 3u, 4u}) {
+        LeidenRng rng(seed);
+        const std::vector<uint32_t> refined =
+            leiden_refine(level, {0, 0, 0, 0}, Params(LeidenObjective::CPM, 0.4), rng);
+        EXPECT_EQ(refined[0], 0u) << "seed " << seed;
+        for (uint32_t v = 1; v < 4; ++v) {
+            EXPECT_NE(refined[v], 0u) << "seed " << seed;
+        }
+    }
+}
+
+TEST(LeidenEngineTest, RefinementSkipsTargetsThatAreNotWellConnected) {
+    // Path 0-1-2 at CPM 0.6: the ends' weight 1 to the rest is below
+    // 0.6 * 1 * 2 = 1.2, so node 1 has no target and the ends do not move.
+    const LeidenLevel level = Level(3, {{0, 1, 1.0}, {1, 2, 1.0}});
+    for (const uint64_t seed : {0u, 1u, 2u, 3u, 4u}) {
+        LeidenRng rng(seed);
+        EXPECT_EQ(leiden_refine(level, {0, 0, 0}, Params(LeidenObjective::CPM, 0.6), rng),
+                  Iota(3))
+            << "seed " << seed;
+    }
+}
+
+TEST(LeidenEngineTest, RefinementNeverJoinsTheDisconnectedPiecesOfACommunity) {
+    // Community 0 holds two 4-cliques with no edge between them, as local
+    // moving can leave a community after its bridge node moves away; node 8
+    // is the departed bridge in community 1.
+    std::vector<Edge> edges;
+    AddClique(edges, 0, 4);
+    AddClique(edges, 4, 4);
+    edges.emplace_back(3, 8, 1.0);
+    edges.emplace_back(4, 8, 1.0);
+    const LeidenLevel level = Level(9, edges);
+    const std::vector<uint32_t> community = {0, 0, 0, 0, 0, 0, 0, 0, 1};
+    for (const LeidenObjective objective :
+         {LeidenObjective::Modularity, LeidenObjective::CPM}) {
+        for (const uint64_t seed : {0u, 1u, 2u, 3u, 4u, 5u, 6u, 7u}) {
+            LeidenRng rng(seed);
+            const std::vector<uint32_t> refined =
+                leiden_refine(level, community, Params(objective, 0.05), rng);
+            for (uint32_t a = 0; a < 4; ++a) {
+                for (uint32_t b = 4; b < 8; ++b) {
+                    EXPECT_NE(refined[a], refined[b]) << "seed " << seed;
+                }
+            }
+            EXPECT_EQ(refined[8], 8u);
+        }
+    }
+}
+
+TEST(LeidenEngineTest, RefinedCommunitiesNestAndAreConnected) {
+    for (const unsigned seed : {1u, 2u, 3u}) {
+        const WeightedGraph graph = RandomSNN(80, seed, 6);
+        const LeidenLevel level = make_base_level(graph);
+        const LeidenParams params = Params(LeidenObjective::Modularity, 1.0);
+        std::vector<uint32_t> community = Iota(80);
+        LeidenRng rng(seed);
+        leiden_local_move(level, community, params, rng);
+        const std::vector<uint32_t> refined = leiden_refine(level, community, params, rng);
+        for (size_t v = 0; v < 80; ++v) {
+            EXPECT_EQ(community[refined[v]], community[v]);
+            EXPECT_TRUE(InducesConnected(graph, refined, refined[v]));
+        }
     }
 }

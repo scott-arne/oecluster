@@ -316,4 +316,114 @@ void leiden_local_move(const LeidenLevel& level, std::vector<uint32_t>& communit
     }
 }
 
+std::vector<uint32_t> leiden_refine(const LeidenLevel& level,
+                                    const std::vector<uint32_t>& community,
+                                    const LeidenParams& params, LeidenRng& rng) {
+    const size_t n = level.num_nodes;
+    std::vector<uint32_t> refined(n);
+    std::iota(refined.begin(), refined.end(), uint32_t{0});
+    if (n == 0 || level.m == 0.0) {
+        return refined;
+    }
+
+    // Members of each community in ascending node order.
+    std::vector<size_t> start(n + 1, 0);
+    for (size_t v = 0; v < n; ++v) {
+        ++start[community[v] + 1];
+    }
+    for (size_t c = 0; c < n; ++c) {
+        start[c + 1] += start[c];
+    }
+    std::vector<uint32_t> members(n);
+    {
+        std::vector<size_t> cursor(start.begin(), start.end() - 1);
+        for (size_t v = 0; v < n; ++v) {
+            members[cursor[community[v]]++] = static_cast<uint32_t>(v);
+        }
+    }
+
+    std::vector<double> community_strength(n, 0.0);
+    std::vector<double> community_size(n, 0.0);
+    // Refined-community state, indexed by refined id.
+    std::vector<double> set_strength(n);
+    std::vector<double> set_size(n);
+    std::vector<size_t> set_count(n, 1);
+    std::vector<double> set_external(n, 0.0);
+    for (size_t v = 0; v < n; ++v) {
+        community_strength[community[v]] += level.strength[v];
+        community_size[community[v]] += static_cast<double>(level.size[v]);
+        set_strength[v] = level.strength[v];
+        set_size[v] = static_cast<double>(level.size[v]);
+        for (size_t e = level.offsets[v]; e < level.offsets[v + 1]; ++e) {
+            if (community[level.neighbors[e]] == community[v]) {
+                set_external[v] += level.weights[e];
+            }
+        }
+    }
+
+    WeightAccumulator weight_to(n);
+    std::vector<uint32_t> order;
+    std::vector<uint32_t> candidates;
+    std::vector<double> gains;
+    for (size_t c = 0; c < n; ++c) {
+        if (start[c] == start[c + 1]) {
+            continue;
+        }
+        order.assign(members.begin() + start[c], members.begin() + start[c + 1]);
+        rng.Shuffle(order);
+        const double c_strength = community_strength[c];
+        const double c_size = community_size[c];
+        for (const uint32_t v : order) {
+            const uint32_t own = refined[v];
+            if (set_count[own] != 1) {
+                continue;
+            }
+            if (!leiden_well_connected(set_external[own], set_strength[own],
+                                       set_size[own], c_strength, c_size,
+                                       level.m, params)) {
+                continue;
+            }
+            weight_to.Begin();
+            for (size_t e = level.offsets[v]; e < level.offsets[v + 1]; ++e) {
+                const uint32_t u = level.neighbors[e];
+                if (community[u] == c) {
+                    weight_to.Add(refined[u], level.weights[e]);
+                }
+            }
+            std::vector<uint32_t>& touched = weight_to.Touched();
+            std::sort(touched.begin(), touched.end());
+            candidates.clear();
+            gains.clear();
+            for (const uint32_t t : touched) {
+                if (!leiden_well_connected(set_external[t], set_strength[t],
+                                           set_size[t], c_strength, c_size,
+                                           level.m, params)) {
+                    continue;
+                }
+                candidates.push_back(t);
+                gains.push_back(leiden_gain(weight_to.Get(t), set_strength[own],
+                                            set_size[own], set_strength[t],
+                                            set_size[t], level.m, params));
+            }
+            if (candidates.empty()) {
+                continue;
+            }
+            const size_t chosen =
+                leiden_select_candidate(gains, params.theta, rng.Uniform());
+            if (chosen == candidates.size()) {
+                continue;
+            }
+            const uint32_t t = candidates[chosen];
+            // The pair's mutual weight leaves both external sums.
+            set_external[t] += set_external[own] - 2.0 * weight_to.Get(t);
+            set_strength[t] += set_strength[own];
+            set_size[t] += set_size[own];
+            set_count[t] += 1;
+            set_count[own] = 0;
+            refined[v] = t;
+        }
+    }
+    return refined;
+}
+
 }  // namespace OECluster::detail
