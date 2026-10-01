@@ -36,6 +36,7 @@
 #include "oecluster/clustering/SphereExclusion.h"
 #include "oecluster/clustering/KNNGraph.h"
 #include "oecluster/clustering/JarvisPatrick.h"
+#include "oecluster/clustering/Leiden.h"
 #include "oecluster/clustering/KMedoids.h"
 #include "oecluster/clustering/MurckoScaffold.h"
 #include "oefp/batch.h"
@@ -867,6 +868,10 @@ OECLUSTER_GIL_EXCEPTION(OECluster::sphere_exclusion, sphere_exclusion)
 OECLUSTER_GIL_EXCEPTION(OECluster::knn_graph, knn_graph)
 OECLUSTER_GIL_EXCEPTION(OECluster::jarvis_patrick, jarvis_patrick)
 
+// leiden builds the same graph, weighs it on worker threads and runs a
+// serial optimizer that can take seconds at scale.
+OECLUSTER_GIL_EXCEPTION(OECluster::leiden, leiden)
+
 // ============================================================================
 // Ignore problematic members before %include
 //
@@ -1192,6 +1197,7 @@ public:
 %include "oecluster/clustering/SphereExclusion.h"
 %include "oecluster/clustering/KNNGraph.h"
 %include "oecluster/clustering/JarvisPatrick.h"
+%include "oecluster/clustering/Leiden.h"
 %include "oecluster/clustering/DBSCAN.h"
 %include "oecluster/clustering/HDBSCAN.h"
 %include "oecluster/clustering/Agglomerative.h"

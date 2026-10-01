@@ -77,6 +77,7 @@ __all__ = [  # noqa: RUF022
     "sphere_exclusion",
     "knn_graph",
     "jarvis_patrick",
+    "leiden",
     "ButinaResult",
     "DBSCANResult",
     "HDBSCANResult",
@@ -86,6 +87,7 @@ __all__ = [  # noqa: RUF022
     "SphereExclusionResult",
     "KNNGraph",
     "JarvisPatrickResult",
+    "LeidenResult",
     "MurckoResult",
     "RepresentativeMetrics",
     "ClusterRepresentative",
@@ -2093,6 +2095,61 @@ class JarvisPatrickResult(ClusteringResult):
     @property
     def method(self):
         return "jarvis_patrick"
+
+
+class LeidenResult(ClusteringResult):
+    """Leiden community detection result with the optimization settings.
+
+    Clusters are ordered by their smallest member and list members in
+    ascending position. Positions refer to the caller's items; an item that
+    normalization dropped has the label -1, appears in no cluster, and is
+    listed in ``excluded``.
+    """
+
+    def __init__(self, labels, clusters, *, quality=0.0, iterations=0,
+                 objective="modularity", resolution=0.0, k=0, excluded=(),
+                 native_owner=None):
+        super().__init__(labels, clusters, native_owner=native_owner)
+        self._quality = float(quality)
+        self._iterations = int(iterations)
+        self._objective = str(objective)
+        self._resolution = float(resolution)
+        self._k = int(k)
+        self._excluded = [list(entry) for entry in excluded]
+
+    @property
+    def quality(self):
+        """Objective value of the partition on the SNN graph."""
+        return self._quality
+
+    @property
+    def iterations(self):
+        """Full passes run, including a final pass that changed nothing."""
+        return self._iterations
+
+    @property
+    def objective(self):
+        """``"modularity"`` or ``"cpm"``."""
+        return self._objective
+
+    @property
+    def resolution(self):
+        """Resolution the objective used."""
+        return self._resolution
+
+    @property
+    def k(self):
+        """Neighbors per item in the graph."""
+        return self._k
+
+    @property
+    def excluded(self):
+        """``[position, reason]`` for each item normalization dropped."""
+        return [list(entry) for entry in self._excluded]
+
+    @property
+    def method(self):
+        return "leiden"
 
 
 class MurckoResult(ClusteringResult):
@@ -6498,6 +6555,229 @@ def jarvis_patrick(items, *, kmin, k=None, comparison=None, similarity=False,
     native = _oecluster.jarvis_patrick(source.target, options)
     return _jarvis_patrick_result(native, source.positions,
                                   source.num_positions, source.excluded)
+
+
+# leiden labels clusters with int and indexes nodes with uint32_t; this is
+# the native INT_MAX limit in src/clustering/SNNWeights.h.
+_LEIDEN_MAX_ITEMS = 2147483647
+
+
+def _leiden_check_size(size):
+    """
+    Refuse more items than leiden can label.
+
+    Mirrors validate_leiden_item_count in src/clustering/SNNWeights.h ahead
+    of it, because SWIG turns the native invalid_argument into RuntimeError.
+
+    :param size: Native item count.
+    :raises ValueError: If size exceeds INT_MAX.
+    """
+    if size > _LEIDEN_MAX_ITEMS:
+        raise ValueError(
+            f"leiden() supports at most {_LEIDEN_MAX_ITEMS} items, got {size}")
+
+
+def _leiden_int(value, name, minimum, maximum):
+    """
+    Coerce a bounded integer option of leiden().
+
+    :param value: Caller value.
+    :param name: Option name for the messages.
+    :param minimum: Smallest accepted value.
+    :param maximum: Largest accepted value.
+    :returns: The coerced int.
+    :raises ValueError: If the value is not an integer or is out of range.
+    """
+    # Bounded here rather than by _diversity_int because n_iterations is
+    # signed and seed spans the full uint64_t range; SWIG must never see a
+    # value it cannot convert.
+    if isinstance(value, bool):
+        raise ValueError(f"leiden() {name} must be an integer, got {value!r}")  # noqa: TRY004
+    try:
+        coerced = operator.index(value)
+    except TypeError:
+        raise ValueError(
+            f"leiden() {name} must be an integer, got {value!r}") from None
+    if not minimum <= coerced <= maximum:
+        raise ValueError(
+            f"leiden() {name} must be between {minimum} and {maximum}, "
+            f"got {coerced}")
+    return coerced
+
+
+def _leiden_real(value, name, requirement, accepts):
+    """
+    Coerce a finite real option of leiden().
+
+    :param value: Caller value.
+    :param name: Option name for the messages.
+    :param requirement: Phrase completing "must be" in the message.
+    :param accepts: Predicate a finite value must also satisfy.
+    :returns: The coerced float.
+    :raises ValueError: If the value is NaN, infinite or refused by accepts.
+    """
+    try:
+        coerced = float(value)
+    except OverflowError:
+        # An int beyond double range is the infinity refused below, failing
+        # one step earlier.
+        coerced = math.inf
+    if not (math.isfinite(coerced) and accepts(coerced)):
+        raise ValueError(
+            f"leiden() {name} must be {requirement}, got {value!r}")
+    return coerced
+
+
+def _leiden_objective(objective):
+    """
+    Map an objective name to the native enum, matched exactly.
+
+    :param objective: ``"modularity"`` or ``"cpm"``.
+    :returns: The native LeidenObjective constant.
+    :raises ValueError: For any other value.
+    """
+    objectives = {"modularity": _oecluster.LeidenObjective_Modularity,
+                  "cpm": _oecluster.LeidenObjective_CPM}
+    if not isinstance(objective, str) or objective not in objectives:
+        raise ValueError(
+            "leiden() objective must be 'modularity' or 'cpm', got "
+            f"{objective!r}")
+    return objectives[objective]
+
+
+def _leiden_result(native, positions, num_positions, excluded):
+    """
+    Map a native result's labels and clusters back to caller positions.
+
+    :param native: The native LeidenResult.
+    :param positions: Caller position per native index, or None for identity.
+    :param num_positions: The caller's item count.
+    :param excluded: ``[position, reason]`` entries normalization dropped.
+    :returns: A :class:`LeidenResult`.
+    """
+    def caller(index):
+        return index if positions is None else positions[index]
+
+    labels = [-1] * num_positions
+    for index, label in enumerate(native.Labels()):
+        labels[caller(index)] = int(label)
+    objective = ("cpm" if native.Objective() == _oecluster.LeidenObjective_CPM
+                 else "modularity")
+    return LeidenResult(
+        labels,
+        [[caller(i) for i in cluster] for cluster in native.Members()],
+        quality=native.Quality(), iterations=native.Iterations(),
+        objective=objective, resolution=native.Resolution(), k=native.K(),
+        excluded=excluded)
+
+
+def leiden(items, *, k=None, objective="modularity", resolution=1.0,
+           prune=1 / 15, theta=0.01, n_iterations=-1, seed=0,
+           comparison=None, similarity=False, num_threads=0,
+           chunk_size=4096, **kwargs) -> "LeidenResult":
+    """
+    Partition items by Leiden community detection on a shared-neighbor graph.
+
+    The k-nearest-neighbor graph is reweighted by shared-nearest-neighbor
+    Jaccard: with N+(i) the ``k`` neighbors of i plus i itself, the edge
+    {i, j} weighs s / (2(k + 1) - s) for s = |N+(i) & N+(j)|. Only pairs in
+    which one item names the other get an edge, and edges below ``prune``
+    are dropped. Leiden (Traag, Waltman and van Eck, 2019) then optimizes
+    ``objective`` on that graph; every returned cluster is connected.
+
+    ``items`` is a :class:`KNNGraph` from :func:`knn_graph`, or any input
+    :func:`knn_graph` accepts, in which case ``k`` is required and the graph
+    is built first. With a graph, ``k`` must be omitted or equal
+    ``graph.k``. The same inputs, options and build give the same result,
+    whatever ``num_threads`` is.
+
+    :param items: A KNNGraph, matrix, prebuilt comparison, or sequence of
+        items.
+    :param k: Neighbors per item, 1 to n - 1; required unless items is a
+        KNNGraph. Seurat's ``k.param`` is this ``k + 1``.
+    :param objective: ``"modularity"`` (Reichardt-Bornholdt, with
+        ``resolution``) or ``"cpm"`` (Constant Potts Model).
+    :param resolution: Finite and non-negative. Higher values give smaller
+        clusters. 1.0 is the modularity default; CPM with Jaccard weights
+        typically needs a value well below the median edge weight.
+    :param prune: Jaccard weights below this are dropped; in [0, 1).
+    :param theta: Randomness of the refinement step; finite and positive.
+    :param n_iterations: -1 repeats passes until one changes nothing;
+        otherwise exactly that many passes, up to 2**63 - 1.
+    :param seed: Seed for the random stream, 0 to 2**64 - 1.
+    :param comparison: Comparison name, required with a sequence of items.
+    :param similarity: Refused when True; the graph ranks distances.
+    :param num_threads: Worker threads for the graph and the weights; 0
+        selects the hardware concurrency.
+    :param chunk_size: Pairwise distances per work unit, at least one.
+    :param kwargs: Comparison options for a named comparison.
+    :returns: A :class:`LeidenResult`.
+    :raises TypeError: If the arguments fit no path, comparison arguments
+        accompany a KNNGraph, or ``k`` is missing with raw input.
+    :raises ValueError: On an invalid option; a graph whose ``k`` differs
+        from ``k``; ``similarity=True``; more than 2147483647 items; an
+        empty sequence; or a matrix or comparison whose distances cannot be
+        ranked.
+    :raises RuntimeError: If a sparse item has fewer than ``k`` stored
+        neighbors, or a comparison returns a NaN or infinite distance.
+
+    Example::
+
+        result = oecluster.leiden(mols, k=15, comparison="fingerprint")
+        print(result.clusters, result.quality)
+    """
+    if similarity:
+        raise ValueError(
+            "leiden() clusters on distances; similarity=True is not "
+            "supported")
+    options = _oecluster.LeidenOptions()
+    options.objective = _leiden_objective(objective)
+    options.resolution = _leiden_real(resolution, "resolution",
+                                      "finite and non-negative",
+                                      lambda value: value >= 0.0)
+    options.prune = _leiden_real(prune, "prune", "finite and in [0, 1)",
+                                 lambda value: 0.0 <= value < 1.0)
+    options.theta = _leiden_real(theta, "theta", "finite and positive",
+                                 lambda value: value > 0.0)
+    options.n_iterations = _leiden_int(n_iterations, "n_iterations", -1,
+                                       2**63 - 1)
+    options.seed = _leiden_int(seed, "seed", 0, 2**64 - 1)
+    options.num_threads = _diversity_int(num_threads, "num_threads", 0)
+    options.chunk_size = _diversity_int(chunk_size, "chunk_size", 1)
+
+    if isinstance(items, KNNGraph):
+        if comparison is not None or kwargs:
+            raise TypeError(
+                "leiden() takes no comparison or comparison options with a "
+                "KNNGraph, which already fixes the neighbors")
+        if k is not None:
+            k_value = _diversity_int(k, "k", 0)
+            if k_value != items.k:
+                raise ValueError(
+                    f"leiden() k={k_value} does not match the graph's "
+                    f"k={items.k}")
+        _leiden_check_size(len(items))
+        native = _oecluster.leiden(items._native, options)  # type: ignore[attr-defined]
+        return _leiden_result(native, items._positions,  # type: ignore[attr-defined]
+                              items._num_positions, items._excluded)  # type: ignore[attr-defined]
+
+    if k is None:
+        raise TypeError("leiden() requires k= unless items is a KNNGraph")
+    k_value = _diversity_int(k, "k", 0)
+    source = _diversity_source(items, comparison, kwargs, "leiden",
+                               allow_sparse=True, defer_comparable_check=True)
+    _leiden_check_size(source.size)
+    _knn_check_k(k_value, source.size, "leiden")
+    if source.size > 0:
+        if source.matrix is not None:
+            _gate.require_comparable(source.matrix, "leiden")
+        else:
+            _refuse_comparison_facts(source.target, "leiden")
+
+    options.k = k_value
+    native = _oecluster.leiden(source.target, options)
+    return _leiden_result(native, source.positions, source.num_positions,
+                          source.excluded)
 
 
 def descriptor_statistics(mols, *, sources=None, columns=None, groups=None,

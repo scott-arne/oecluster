@@ -918,6 +918,25 @@ def test_knn_graph_and_jarvis_patrick_release_the_gil():
             "or SWIG applies the exception handler to nothing")
 
 
+def test_leiden_releases_the_gil():
+    """leiden builds the kNN graph (O(N^2) reads or comparisons on worker
+    threads), weighs it in parallel and runs the serial optimizer.
+
+    Asserted against the interface file for the reasons given in
+    test_the_new_entry_points_release_the_gil.
+    """
+    interface = pathlib.Path(__file__).resolve().parents[2] / "swig" / "oecluster.i"
+    text = _SWIG_COMMENT.sub("", interface.read_text(encoding="utf-8"))
+
+    include = '%include "oecluster/clustering/Leiden.h"'
+    assert text.count(include) == 1, "the position check needs an unambiguous anchor"
+    invocation = "OECLUSTER_GIL_EXCEPTION(OECluster::leiden, leiden)"
+    assert invocation in text
+    assert text.index(invocation) < text.index(include), (
+        f"{invocation} must precede the %include that declares leiden, "
+        "or SWIG applies the exception handler to nothing")
+
+
 def test_by_value_returns_convert_inside_an_exception_handler():
     """Every by-value return is heap-allocated into its Python wrapper after
     ``%exception`` has closed, so SWIG's stock ``out`` typemap would let a
