@@ -360,6 +360,8 @@ TEST(LeidenEngineTest, RefinementLeavesAPoorlyConnectedNodeAlone) {
         for (uint32_t v = 1; v < 4; ++v) {
             EXPECT_NE(refined[v], 0u) << "seed " << seed;
         }
+        EXPECT_EQ(refined[1], refined[2]) << "seed " << seed;
+        EXPECT_EQ(refined[2], refined[3]) << "seed " << seed;
     }
 }
 
@@ -397,7 +399,7 @@ TEST(LeidenEngineTest, RefinementNeverJoinsTheDisconnectedPiecesOfACommunity) {
                     EXPECT_NE(refined[a], refined[b]) << "seed " << seed;
                 }
             }
-            EXPECT_EQ(refined[8], 8u);
+            EXPECT_EQ(refined[8], 8u) << "seed " << seed;
         }
     }
 }
@@ -411,6 +413,9 @@ TEST(LeidenEngineTest, RefinedCommunitiesNestAndAreConnected) {
         LeidenRng rng(seed);
         leiden_local_move(level, community, params, rng);
         const std::vector<uint32_t> refined = leiden_refine(level, community, params, rng);
+        const size_t distinct_refined =
+            std::set<uint32_t>(refined.begin(), refined.end()).size();
+        EXPECT_LT(distinct_refined, 80u) << "seed " << seed;
         for (size_t v = 0; v < 80; ++v) {
             EXPECT_EQ(community[refined[v]], community[v]);
             EXPECT_TRUE(InducesConnected(graph, refined, refined[v]));
