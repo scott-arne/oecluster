@@ -30,9 +30,8 @@ namespace {
 // Rows 0 -> {1, 2}, 1 -> {0, 2}, 2 -> {1, 3}, 3 -> {2, 1}. With N+(i) the row
 // plus i: N+(0) = {0,1,2}, N+(1) = {0,1,2}, N+(2) = {1,2,3}, N+(3) = {1,2,3}.
 // Pairs 0-1 and 2-3 share 3 of 6 slots, weight 3 / (6 - 3) = 1; pairs 0-2,
-// 1-2 and 1-3 share 2, weight 2 / (6 - 2) = 0.5. Arcs 0-1 and 2-3 are
-// mutual; 0 -> 2, 2 -> 1 and 3 -> 1 are one-way, and 1 -> 2 pairs with
-// 2 -> 1 as mutual.
+// 1-2 and 1-3 share 2, weight 2 / (6 - 2) = 0.5. Arcs 0-1, 1-2 and 2-3
+// are mutual; 0 -> 2 and 3 -> 1 are one-way.
 KNNGraph HandGraph() {
     return KNNGraph(4, 2, {1, 2, 0, 2, 1, 3, 2, 1},
                     {1.0, 2.0, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0});
