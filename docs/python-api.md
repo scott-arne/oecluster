@@ -1292,7 +1292,7 @@ the graph build. `objective` is matched exactly, without case folding.
 | Condition | Exception |
 | --- | --- |
 | Input fits no path; comparison arguments with a graph; missing `k` with raw input | `TypeError` |
-| Invalid `k`, `objective`, `resolution` (negative or not finite), `prune` (outside [0, 1)), `theta` (not positive and finite), `n_iterations` (outside [-1, 2**63 - 1]), `seed` (outside [0, 2**64 - 1]), `num_threads`, `chunk_size`; a graph whose `k` differs; `similarity=True`; more than 2,147,483,647 items; an empty sequence; a matrix or comparison that cannot be ranked | `ValueError` |
+| Invalid `k`, `objective`, `resolution` (negative or not finite), `prune` (outside [0, 1)), `theta` (not a positive finite number), `n_iterations` (outside [-1, 2**63 - 1]), `seed` (outside [0, 2**64 - 1]), `num_threads`, `chunk_size`; a graph whose `k` differs; `similarity=True`; more than 2,147,483,647 items; an empty sequence; a matrix or comparison that cannot be ranked | `ValueError` |
 | A sparse item with fewer than `k` stored neighbors; a NaN or infinite comparison distance | `RuntimeError` |
 
 ## Metric Requirements
