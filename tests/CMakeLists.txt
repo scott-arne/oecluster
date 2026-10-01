@@ -43,6 +43,7 @@ add_executable(oecluster_tests
     cpp/test_knn_graph.cpp
     cpp/test_jarvis_patrick.cpp
     cpp/test_snn_weights.cpp
+    cpp/test_leiden.cpp
     cpp/test_murcko_scaffold.cpp
     cpp/test_umbrella_header.cpp
 )

@@ -135,6 +135,7 @@ set(OECLUSTER_SOURCES
     src/clustering/KNNGraph.cpp
     src/clustering/JarvisPatrick.cpp
     src/clustering/SNNWeights.cpp
+    src/clustering/LeidenEngine.cpp
     src/clustering/ClusterMetrics.cpp
     src/clustering/Representative.cpp
     src/clustering/ClusterReport.cpp
