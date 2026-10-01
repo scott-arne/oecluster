@@ -201,6 +201,9 @@ size_t leiden_select_candidate(const std::vector<double>& gains, double theta,
 void leiden_local_move(const LeidenLevel& level, std::vector<uint32_t>& community,
                        const LeidenParams& params, LeidenRng& rng) {
     const size_t n = level.num_nodes;
+    // With m == 0 every pass starts from singletons (aggregation preserves
+    // m), and a singleton's only empty candidate is its own id, so no node
+    // can move under either objective.
     if (n == 0 || level.m == 0.0) {
         return;
     }
@@ -212,7 +215,9 @@ void leiden_local_move(const LeidenLevel& level, std::vector<uint32_t>& communit
         total_size[community[v]] += static_cast<double>(level.size[v]);
         ++members[community[v]];
     }
-    // Pushed in descending order so the smallest empty id is on top.
+    // Pushed in descending order so the smallest empty id is on top. Ids
+    // emptied during the phase are then pushed LIFO, as the spec requires,
+    // not re-sorted.
     std::vector<uint32_t> empty;
     for (size_t id = n; id-- > 0;) {
         if (members[id] == 0) {
