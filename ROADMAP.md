@@ -29,7 +29,7 @@ they are not recoveries of the original intent.
 | E2 | Set diversity scores: Vendi score and log-determinant diversity | shipped 5.9.0 |
 | D2a | Sphere exclusion: leader, Butina and DISE as one engine | shipped 5.10.0 |
 | D2b | k-nearest-neighbor graph and Jarvis-Patrick clustering | shipped 5.11.0 |
-| D2c | Leiden community detection over the D2b graph | planned |
+| D2c | Leiden community detection over the D2b graph | shipped 5.12.0 |
 | B | Fingerprint-native O(N) counterparts of the A metrics | planned |
 | D3 | Workflow layer: clustering CLI, parameter selection, consensus, stability | planned |
 | D4 | Out-of-core and streaming clustering | planned |
@@ -118,7 +118,7 @@ the algorithm roster, in three slices:
   and first-claim or nearest assignment. `butina_cluster()` became an adapter
   over it with unchanged outputs.
 - **D2b** (shipped 5.11.0): `knn_graph()` and `KNNGraph`, a public k-nearest-neighbor graph over dense, memory-mapped, sparse and lazy input, and `jarvis_patrick()` with the classic mutual shared-neighbor rule, over a graph or raw input.
-- **D2c**: Leiden community detection over the D2b graph.
+- **D2c** (shipped 5.12.0): `leiden()`, Leiden community detection with modularity and CPM objectives over a shared-nearest-neighbor Jaccard weighting of the D2b graph, seeded and with connected clusters guaranteed.
 
 Bootstrap-Jaccard cluster stability is deferred until after D2: it must re-run
 the clustering algorithm, which inverts the current layering, and it is not

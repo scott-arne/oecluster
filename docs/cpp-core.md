@@ -396,6 +396,64 @@ const auto result = OECluster::jarvis_patrick(graph, 3);
   self-inclusive formulation's `k` is this `k + 1`, and its `kmin` is this
   `kmin + 2`.
 
+### Leiden community detection
+
+`include/oecluster/clustering/Leiden.h` declares `LeidenObjective`
+(`Modularity`, `CPM`), `LeidenOptions{k, objective, resolution, prune,
+theta, n_iterations, seed, num_threads, chunk_size}`, `LeidenResult`
+(`Quality()`, `Iterations()`, `Objective()`, `Resolution()`, `K()`,
+`Method() == "leiden"`), and `leiden` overloads for a `KNNGraph`, for
+storage, and for a comparison.
+
+```cpp
+OECluster::LeidenOptions options;
+options.k = 15;
+options.objective = OECluster::LeidenObjective::CPM;
+options.resolution = 0.05;
+const auto result = OECluster::leiden(storage, options);
+```
+
+- The graph is reweighted internally by shared-nearest-neighbor Jaccard
+  (`src/clustering/SNNWeights.h`): with N+(i) row i plus i, the edge {i, j}
+  weighs s / (2(k + 1) - s) for s = |N+(i) ∩ N+(j)|. Only kNN arcs become
+  edges, each pair once whichever rows name it, and a weight below `prune`
+  is dropped. The weights are computed in parallel with
+  `ThreadPool::ParallelFor` and do not depend on `num_threads`.
+- Seurat's `k.param` is this `k + 1`. Seurat also links pairs that share
+  neighbors without either naming the other; this graph does not.
+- Modularity is Reichardt-Bornholdt, sum_c [e_c / m - resolution *
+  (K_c / 2m)^2]; CPM is sum_c [e_c - resolution * N_c (N_c - 1) / 2]. 1.0
+  is the modularity default; CPM over Jaccard weights typically needs a
+  resolution well below the median weight. `Quality()` is the objective of
+  the returned partition on the weighted graph.
+- The optimizer (`src/clustering/LeidenEngine.h`) is serial: local moving
+  with a queue, refinement that merges singletons only into well-connected
+  subsets, and aggregation, repeated until a level does not shrink. Every
+  returned cluster is connected. `n_iterations == -1` repeats passes until
+  one leaves the canonical labels unchanged and counts that pass;
+  otherwise exactly `n_iterations` passes run.
+- Randomness comes from `std::mt19937_64` seeded with `seed`, with bounded
+  integers, uniform doubles and shuffles written out rather than taken from
+  the standard distributions, so the stream is the same on every platform.
+  The same input, options and build give identical results; across
+  platforms, a one-ulp `std::exp` difference or a different floating-point
+  contraction can change a draw or a tie.
+- Validation order on the storage and comparison overloads: `chunk_size`,
+  then the options (`objective` a known enumerator, `resolution` finite and
+  non-negative, `prune` finite and in [0, 1), `theta` finite and positive,
+  `n_iterations >= -1`), then zero items (empty result), then at most
+  `INT_MAX` items, then `1 <= k <= n - 1`, then everything `knn_graph`
+  checks. The graph overload checks the options, zero items, then the item
+  count. These refusals are `std::invalid_argument`, raised before any
+  comparison runs. The raw overloads also raise what `knn_graph` raises:
+  `ComparisonError` when the comparison's facts rule out ranking, and
+  `std::runtime_error` when a distance is NaN or infinite.
+- Memory at 1e6 items with k = 50: the kNN graph is 800 MB, the weighted
+  CSR at most 1.2 GB, and building it needs another 0.6 GB that is freed
+  before optimization. The raw overloads free the kNN graph before
+  optimizing, which then holds the CSR, O(N) work arrays and the next
+  level's CSR while aggregating.
+
 ## Partition Agreement
 
 `PartitionAgreement.h` scores two labelings of the same samples against each

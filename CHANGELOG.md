@@ -2,6 +2,24 @@
 
 This file starts at 5.0.0; earlier releases are not recorded here.
 
+## [5.12.0] - 2026-09-30
+
+### Added
+
+- `leiden`, Leiden community detection (Traag, Waltman and van Eck, 2019)
+  on a shared-nearest-neighbor graph, in C++ and Python. It takes a
+  `KNNGraph` or any input `knn_graph` accepts.
+  - Each kNN edge {i, j} is weighted by the Jaccard overlap of the two
+    neighborhoods (each item's `k` neighbors plus itself), and edges below
+    `prune` (default 1/15) are dropped. Seurat's `k.param` is this `k + 1`.
+  - `objective` is `"modularity"` (with `resolution`, default 1.0) or
+    `"cpm"` (Constant Potts Model). `n_iterations=-1` iterates until a pass
+    changes nothing.
+  - Every returned cluster is connected. The same `seed`, inputs and build
+    give the same result, whatever `num_threads` is.
+  - `LeidenResult` reports `quality`, `iterations`, `objective`,
+    `resolution` and `k`; `.method` is `"leiden"`.
+
 ## [5.11.1] - 2026-09-30
 
 ### Fixed

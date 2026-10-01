@@ -1219,22 +1219,99 @@ an empty item sequence still raises `ValueError`.
 | Invalid `k`, `kmin`, `num_threads`, `chunk_size` (including one item, `k > n - 1`, `kmin >= k`); a graph whose `k` differs; `similarity=True`; an empty sequence; a matrix or comparison that cannot be ranked | `ValueError` |
 | A sparse item with fewer than `k` stored neighbors; a NaN or infinite comparison distance | `RuntimeError` |
 
+## Leiden Community Detection
+
+`leiden(items, *, k=None, objective="modularity", resolution=1.0, ...)`
+partitions items by Leiden community detection (Traag, Waltman and van Eck,
+2019) on a shared-nearest-neighbor weighting of the k-nearest-neighbor
+graph. It takes a `KNNGraph` or any input `knn_graph` accepts, routed as in
+`jarvis_patrick`.
+
+```python
+result = oecluster.leiden(mols, k=15, comparison="fingerprint")
+graph = oecluster.knn_graph(mols, 15, comparison="fingerprint")
+same = oecluster.leiden(graph, seed=0)
+print(result.clusters, result.quality, result.iterations)
+```
+
+**Weights.** N+(i) is the row of i plus i itself, k + 1 items. The edge
+{i, j} weighs s / (2(k + 1) - s), where s = |N+(i) & N+(j)|, a Jaccard index
+between 1/(2k + 1) and 1. Only pairs in which one item names the other get
+an edge. Edges whose weight is below `prune` (default 1/15) are dropped; an
+edge exactly at `prune` is kept.
+
+**Converting from Seurat.** Seurat's `k.param` counts the item itself, so it
+is this `k + 1`; `prune.SNN` is `prune`. Seurat also links pairs that share
+neighbors without either naming the other. This graph does not, so the same
+settings can give a sparser graph and somewhat different clusters.
+
+**Objectives.** `"modularity"` (Reichardt-Bornholdt, the default) maximizes
+the sum over clusters of e_c / m - resolution * (K_c / 2m)^2, where e_c is a
+cluster's internal weight, K_c its total strength and m the graph's total
+weight. Resolution 1.0 is classic modularity; higher values give more,
+smaller clusters. `"cpm"` (Constant Potts Model) maximizes the sum of
+e_c - resolution * N_c (N_c - 1) / 2, so a cluster is worth keeping while its
+internal edge density exceeds `resolution`. With Jaccard weights,
+`resolution` for CPM typically needs to be well below the median edge
+weight; 1.0 gives singletons whenever every weight is below 1. `quality` is
+the objective's value for the returned partition.
+
+**Iterations and randomness.** `n_iterations=-1` (the default) repeats full
+passes until one leaves the partition unchanged; `iterations` counts every
+pass, including that last one. A non-negative value runs exactly that many
+passes, and 0 returns singletons. `theta` (default 0.01) sets how random the
+refinement step is. Every returned cluster is connected in the weighted
+graph.
+
+**Determinism.** The same inputs, options and build give identical labels,
+`quality` and `iterations`, whatever `num_threads` is. The random stream is
+the same on every platform, but results across platforms or compilers are
+not promised to match: an ulp of difference in `exp`, or a different
+floating-point contraction, can change a refinement draw or a tie.
+
+**Memory.** At 1,000,000 items with k = 50, the kNN graph holds 800 MB
+(an 8-byte index and an 8-byte distance per entry) and the weighted graph at
+most 1.2 GB (each pair stored in both directions as a 4-byte index and an
+8-byte weight; pruned and mutual pairs make it smaller). Building the
+weights also needs 0.4 GB of per-arc weights and 0.2 GB of sorted
+neighborhoods, freed before optimization. From raw input the kNN graph is
+freed before optimization, which then needs the weighted graph, O(N) work
+arrays and, while aggregating, the next level's smaller graph. The kNN
+graph's own build costs are as described above.
+
+`LeidenResult` adds `quality`, `iterations`, `objective` (the string),
+`resolution`, `k` and `excluded` to the common result members. Excluded
+items have label -1 and appear in no cluster.
+
+The `k`, graph, empty-input and comparison rules are those of
+`jarvis_patrick`: with a `KNNGraph`, `k` must be omitted or equal
+`graph.k`, comparison arguments raise `TypeError`, and `num_threads` and
+`chunk_size` are validated but unused by the graph build. `objective` is
+matched exactly, without case folding.
+
+| Condition | Exception |
+| --- | --- |
+| Input fits no path; comparison arguments with a graph; missing `k` with raw input | `TypeError` |
+| Invalid `k`, `objective`, `resolution` (negative or not finite), `prune` (outside [0, 1)), `theta` (not finite and positive), `n_iterations` (outside [-1, 2**63 - 1]), `seed` (outside [0, 2**64 - 1]), `num_threads`, `chunk_size`; a graph whose `k` differs; `similarity=True`; more than 2,147,483,647 items; an empty sequence; a matrix or comparison that cannot be ranked | `ValueError` |
+| A sparse item with fewer than `k` stored neighbors; a NaN or infinite comparison distance | `RuntimeError` |
+
 ## Metric Requirements
 
 `butina()`, `dbscan()`, `hdbscan()`, `agglomerative()`, and `cluster_report()`
 assume their input is a metric: an item's distance to itself is zero, and the
 triangle inequality holds. Those five are the entry points that check.
-`k_medoids()`, `knn_graph()`, `jarvis_patrick()`, `sphere_exclusion()`,
-`activity_landscape()` and `modelability()` check a weaker standard described
-below -- they rank, threshold and add distances but never assume the triangle
-inequality. `k_medoids()`, `knn_graph()`, `jarvis_patrick()` and
-`sphere_exclusion()` are the *clustering* algorithms in that weaker group,
-which is not an oversight. PAM's objective is a sum of distances and its swap
-step compares two such sums. Sphere exclusion only compares each distance with
-the threshold and, under nearest assignment, with other distances. The k-NN
-graph and Jarvis-Patrick rank distances to select neighbors and count shared
-neighbors. None of these appeals to the triangle inequality, so none takes an
-`allow_nonmetric` parameter: there is no assumption for a flag to override.
+`k_medoids()`, `knn_graph()`, `jarvis_patrick()`, `leiden()`,
+`sphere_exclusion()`, `activity_landscape()` and `modelability()` check a
+weaker standard described below -- they rank, threshold and add distances but
+never assume the triangle inequality. `k_medoids()`, `knn_graph()`,
+`jarvis_patrick()`, `leiden()` and `sphere_exclusion()` are the *clustering*
+algorithms in that weaker group, which is not an oversight. PAM's objective is
+a sum of distances and its swap step compares two such sums. Sphere exclusion
+only compares each distance with the threshold and, under nearest assignment,
+with other distances. The k-NN graph, Jarvis-Patrick and Leiden rank distances
+to select neighbors and count shared neighbors; Leiden then works only with
+those counts. None of these appeals to the triangle inequality, so none takes
+an `allow_nonmetric` parameter: there is no assumption for a flag to override.
 
 That produces one asymmetry worth expecting. A Dice matrix that `k_medoids()`
 clusters without complaint will be refused by `cluster_report()` unless you pass

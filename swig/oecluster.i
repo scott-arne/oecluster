@@ -1221,12 +1221,12 @@ public:
 // Version macros
 // ============================================================================
 #define OECLUSTER_VERSION_MAJOR 5
-#define OECLUSTER_VERSION_MINOR 11
-#define OECLUSTER_VERSION_PATCH 1
+#define OECLUSTER_VERSION_MINOR 12
+#define OECLUSTER_VERSION_PATCH 0
 
 // ============================================================================
 // Module-level Python convenience code
 // ============================================================================
 %pythoncode %{
-__version__ = "5.11.1"
+__version__ = "5.12.0"
 %}
