@@ -2,6 +2,41 @@
 
 This file starts at 5.0.0; earlier releases are not recorded here.
 
+## [5.13.0] - 2026-10-01
+
+### Added
+
+- `cluster_report`, `activity_landscape` and `modelability` score a
+  comparison directly, holding no distance matrix, in C++ and Python.
+  - The first argument (after `result` for `cluster_report`) is now `items`:
+    a `SymmetricDistanceMatrix`, a prebuilt comparison such as
+    `FingerprintComparison`, or a sequence of items with `comparison=` and
+    its options as keyword arguments. `distance_matrix=` is a keyword alias
+    accepting only a matrix; passing both is a `TypeError`.
+  - Results are exact: identical to the matrix form over a matrix filled
+    through `Compare`, and within about 1e-12 of `pdist()`. Memory is O(N)
+    per worker; time stays O(N^2).
+  - New `chunk_size` option (default 4096 distances per work unit) on all
+    three, validated on every path and used only on the comparison paths.
+  - Comparisons are gated on their declared facts as the matrix gate gates
+    a matrix; `cluster_report` honours `allow_nonmetric`. Pair-rank indices
+    are matrix-only, and items that normalizing drops or expands are refused.
+  - `modelability` makes `N * (N - 1)` comparisons, twice
+    `activity_landscape`'s, because its nearest-neighbour search covers each
+    sample's whole row; with a single scored class it only validates each
+    pair once.
+  - The C++ overloads take `PairwiseComparison&` and follow the
+    `maxmin_select` / `knn_graph` comparison contract; SWIG dispatches on the
+    argument type, so Python reaches them through the existing functions.
+
+### Changed
+
+- A zero median in `cluster_report` is always `+0.0`, on the matrix path as
+  well. An input holding `-0.0` could previously report `-0.0`.
+- The comparison paths check only the pairs they score. A non-finite value
+  on a pair no metric reads is refused by the matrix gate but never seen on
+  a comparison path; no result depends on it.
+
 ## [5.12.0] - 2026-09-30
 
 ### Added

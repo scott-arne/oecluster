@@ -199,10 +199,9 @@ report = oecluster.cluster_report(
 `baker_hubert_gamma` (higher is better). Both are read off two sorted arrays
 holding every pairwise distance among the `Nc` clustered points,
 `Nc * (Nc - 1) / 2` doubles between them -- roughly 400 MB at `Nc = 10,000` and
-10 GB at `Nc = 50,000`. Only the between-cluster array is the flag's own cost,
-since the within-cluster one is built on every call, so the flag adds nothing to
-a single-cluster result and nearly the whole figure to one with small clusters.
-It is off by default for the second case. `compute_per_cluster_records` fills `report.records` with one
+10 GB at `Nc = 50,000`. Both are built only under the flag; without it the
+report holds no pair-sized array, which is why it is off by default.
+`compute_per_cluster_records` fills `report.records` with one
 `ClusterRecord` per cluster, a `NamedTuple` that feeds
 `pandas.DataFrame(report.records)` directly. `report.noise_coverage_at` is the
 coverage curve restricted to the noise points, parallel to `coverage_at`.

@@ -27,8 +27,8 @@ from typing import Any, ClassVar, NamedTuple
 
 import numpy as np
 
-__version__ = "5.12.0"
-__version_info__ = (5, 12, 0)
+__version__ = "5.13.0"
+__version_info__ = (5, 13, 0)
 
 
 _OPENEYE_COMPAT_PRELOAD_PATHS: list[str] = []
@@ -5050,7 +5050,8 @@ def activity_landscape(items=_MISSING, activity=_MISSING, *,
         read off a partial matrix is not one); a prebuilt comparison such as
         :class:`FingerprintComparison`; or a sequence of items with
         ``comparison=``. The comparison forms hold no matrix and call
-        ``Compare`` once for each of the ``N * (N - 1) / 2`` pairs. Their
+        ``Compare`` once for each of the ``N * (N - 1) / 2`` pairs, where
+        ``N`` is the number of scored samples. Their
         result is identical to the matrix path over a matrix filled through
         the same ``Compare``.
     :param distance_matrix: Keyword alias for ``items`` that accepts only a

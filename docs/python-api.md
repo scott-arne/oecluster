@@ -346,6 +346,79 @@ separately; `treat_noise_as_singletons=True` (the default) folds noise into the
 singleton interpretation. The report requires complete pairwise distances
 (dense or memory-mapped storage); a sparse (`cutoff`) matrix raises.
 
+### Scoring without a matrix
+
+`cluster_report()` also scores a comparison directly, holding no N x N
+matrix. Its second argument, `items`, takes three forms:
+
+- a complete `SymmetricDistanceMatrix`, as before;
+- a prebuilt comparison such as `FingerprintComparison(mols)`;
+- a sequence of items with `comparison=` naming a comparison, whose options
+  go in the remaining keyword arguments.
+
+```python
+report = oecluster.cluster_report(result, mols, comparison="fingerprint")
+
+comparison = oecluster.FingerprintComparison(mols)
+report = oecluster.cluster_report(result, comparison, num_threads=8)
+```
+
+`distance_matrix=` is a keyword alias for `items` that accepts only a
+`SymmetricDistanceMatrix`; passing both raises `TypeError`. A matrix or a
+prebuilt comparison already fixes the distances, so `comparison=` or any
+keyword `cluster_report()` does not take beside one is a `TypeError` too,
+which is how a misspelled keyword is caught.
+
+The comparison forms are exact. Each pair is read as `Compare(min(i, j),
+max(i, j))`, never as a self-pair, and the report is identical, field for
+field, to the matrix form over a matrix filled through that same
+`Compare`. Medians are exact: a distribution small enough to hold is
+stored and sorted, a larger one is found by radix selection that rereads
+its pairs, so memory stays O(N) per worker while a large cluster's pairs
+are compared more than once. Cross-cluster pairs are never reread. One
+exception holds on every path: a zero median is reported as `+0.0` even
+where the input held `-0.0`.
+
+Against `pdist()` of the same items the agreement is approximate rather
+than exact: `pdist` computes its fingerprint distances by a different
+route and may differ from `Compare` in the last bits, about 1e-12. A
+count can therefore differ only where a distance sits within that margin
+of a threshold.
+
+`chunk_size` (default 4096) is the number of pairwise distances in one
+unit of work. It must be an integer of at least 1 and is checked on every
+path, but only the comparison forms use it, and no result depends on it.
+
+The comparison forms refuse what the matrix form refuses, judged on the
+comparison's declared facts before any pair is scored:
+
+- a similarity, a measure whose self-distance is not zero, or one that
+  declares it can produce NaN, with the same messages as
+  [`maxmin_select()`](#diversity-selection);
+- a measure that violates the triangle inequality, or one scored on a
+  per-pair feature subset (`missing='ignore'`), unless
+  `allow_nonmetric=True`, worded as the matrix gate's messages but naming
+  the comparison;
+- `compute_pair_rank_indices=True`, or a preset that enables it, with
+  `ValueError` "cluster_report cannot compute pair-rank indices from a
+  comparison; pass a SymmetricDistanceMatrix or set
+  compute_pair_rank_indices=False". Those two indices rank all pairs at
+  once, which no O(N) path can do;
+- items that normalizing drops or expands, for example a molecule with no
+  descriptors. Labels are positional, so a dropped item would shift every
+  label after it; the `ValueError` names the item and the reason;
+- a result and a comparison of different sizes.
+
+A non-finite value the comparison did not declare is caught as the pair
+is scored, with the engine's `RuntimeError`, not the matrix gate's
+"non-finite entries" message. Only scored pairs are checked: the matrix
+gate scans every stored pair, so a non-finite value on a pair no metric
+reads (a pair between two noise points, say) is
+refused on the matrix path and never seen on the comparison path. No
+field depends on such a pair, so the comparison result is still the
+right one. When several pairs are bad, the report names the earliest in
+row order whatever `num_threads` is.
+
 One shipped combination is refused. `bitbirch_refine()` can return an emptied
 leaf subcluster as an empty member list -- reference-parity behaviour for its
 prune pass -- and `cluster_report()` refuses any result carrying an empty
@@ -399,12 +472,10 @@ report = oecluster.cluster_report(
 stage whose pair-scaled cost grows with all `Nc` clustered points rather than
 with the largest single cluster. The two sorted arrays it reads hold every
 pairwise distance among those points, `Nc * (Nc - 1) / 2` doubles in total,
-which is roughly 400 MB at `Nc = 10,000` and 10 GB at `Nc = 50,000` -- but the
-flag pays for only the between-cluster array. The within-cluster one is built on
-every call, with or without the flag, because `median_intra_distance` is taken
-over it, and taking that median copies the array transiently. So the flag adds
-nothing to a single-cluster result and nearly the whole figure to one with small
-clusters, which is the case it is off by default for. A failed allocation raises
+which is roughly 400 MB at `Nc = 10,000` and 10 GB at `Nc = 50,000` -- and
+both are built only under the flag. Without it no path holds a pair-sized
+array: `median_intra_distance` is taken by an exact selector whose state is
+fixed size. A failed allocation raises
 `MemoryError`. One option covers both indices rather than two because they come
 off the same sorted arrays; once those are paid for, the second index is nearly
 free.
@@ -418,11 +489,11 @@ per cluster in member-list order. Each record carries the cluster's `label`,
 column gives twice the scorecard's `boundary_violations`, which counts each
 pair once. `ClusterRecord` is a `typing.NamedTuple`, so
 `pandas.DataFrame(report.records)` works without a conversion step; pandas is
-not a dependency. This stage is pair-scaled too, but bounded by the largest
-cluster rather than by the whole clustering: it buffers that cluster's
-`n * (n - 1) / 2` distances to take their median, and the median is taken over a
-copy of the buffer, so roughly 400 MB for the buffer and 400 MB again for the
-copy, transiently, at `n = 10,000`.
+not a dependency. A cluster with at most 2**20 pairs has its median taken from
+a buffer of its distances; a larger cluster's median is selected by
+re-walking its pairs, so the stage buffers at most 2**20 doubles (8 MB) on
+every path. Under `compute_pair_rank_indices`, which already holds every
+pair, each cluster is buffered whole.
 
 `report.noise_coverage_at` restricts the coverage curve to the noise points,
 parallel to `coverage_thresholds` in the same way `coverage_at` is. Its length
@@ -738,10 +809,47 @@ missing data rather than a category -- the same reading `scaffold_agreement()`
 gives it. A bare `str` is rejected rather than iterated, so `"AAB"` raises
 `TypeError` instead of quietly becoming three annotations.
 
+### Scoring a comparison
+
+`activity_landscape()` and `modelability()` take the same three forms of
+first argument as [`cluster_report()`](#scoring-without-a-matrix): a
+complete matrix, a prebuilt comparison, or items with `comparison=`, plus
+the `distance_matrix=` alias, `chunk_size` and the keyword rules that come
+with them.
+
+```python
+landscape = oecluster.activity_landscape(mols, activity,
+                                         comparison="fingerprint")
+modi = oecluster.modelability(oecluster.FingerprintComparison(mols),
+                              classes).modi
+```
+
+The results are identical to the matrix form over a matrix filled through
+`Compare`, and agree with `pdist()` to about 1e-12 on the same terms.
+`activity_landscape()` compares each pair once, `N * (N - 1) / 2` calls.
+`modelability()` makes `N * (N - 1)`, twice as many, when at least two
+classes are scored: its nearest-neighbour search runs over each sample's
+whole row, so every pair is compared from both ends. With a single scored
+class there is nothing to score, and each pair is only validated, once.
+Both counts are over scored samples only.
+
+A comparison is refused on the facts the matrix gate refuses, read before
+any pair is scored: a similarity, a non-zero self-distance, a declared
+NaN, and a per-pair feature subset, the last with no override, as below.
+Items that normalizing drops or expands are refused, and so is an activity
+or class annotation whose length differs from the comparison's, with the
+message naming "the comparison" rather than "the matrix".
+
+Only the pairs the sweep reads are checked for a non-finite value. A pair
+involving a sample with no activity is never read, so a NaN there is
+refused on the matrix path and never seen on the comparison path, where
+it cannot change the result.
+
 ### What the matrix functions require
 
-`activity_landscape()` and `modelability()` check their distance matrix, but
-against a weaker standard than the clustering entry points use. They rank
+`activity_landscape()` and `modelability()` check their distance matrix, or
+their comparison's declared facts, against a weaker standard than the
+clustering entry points use. They rank
 distances against one another and compare them to a threshold; neither
 operation needs the triangle inequality, so a matrix a clustering algorithm
 would refuse is usually fine here and there is no `allow_nonmetric` parameter
@@ -772,8 +880,8 @@ operation here, so this one is not overridable; recompute with
 Four exception types are in play, not two. The order they are described in
 below is the order of this prose and not a precedence rule, and the three
 functions do not share one order between them either. `activity_landscape` and
-`modelability` check their first argument's type, then whether its storage is
-sparse, then everything else, so `activity_landscape(sparse_dm, "abc")` reports
+`modelability` check how their first argument was passed, then whether its
+storage is sparse, then everything else, so `activity_landscape(sparse_dm, "abc")` reports
 the sparse `ValueError` and never looks at the activity. The `subset_scored`
 refusal is not in that early position: the activity and the options are read
 first, so against a `missing='ignore'` matrix a bad one of those is what you
@@ -786,8 +894,13 @@ the activity rather than the result and `sar_coherence(3.5, [])` raises
 the other way about, after `result` rather than before it. Catch on the
 exception type rather than on the check you expect to run first.
 
+On the comparison forms the length check moves later, after the
+comparison is built and its facts are read, because its size is not known
+before that.
+
 `TypeError` is for an argument of the wrong kind rather than the wrong value:
-a first argument that is not a `SymmetricDistanceMatrix`, a `result` that is
+a first argument that is none of a `SymmetricDistanceMatrix`, a comparison, or
+items with `comparison=`, a `result` that is
 neither a clustering result nor an iterable of ints, an activity element that
 is not a number, and a class element that is not a string. A bare `str` and a
 mapping are both refused rather than iterated in any of the three iterable
@@ -1398,6 +1511,13 @@ which is why they have no `allow_nonmetric` parameter -- and promote
 `missing='ignore'` from a warning to a refusal they will not waive. See
 [SAR Coherence](#sar-coherence) for why ranking incomparable distances has no
 correct reading.
+
+A comparison passed to any of these three functions is held to the same
+rules, read from its declared facts rather than from a matrix stamp:
+`cluster_report()` refuses a triangle-violating or subset-scored
+comparison unless `allow_nonmetric=True`, and the other two waive the
+first and refuse the second outright. A comparison has no `metric_probe`
+stamp, so that check applies to matrices only.
 
 ```python
 oecluster.butina(dm, 0.4, allow_nonmetric=True)

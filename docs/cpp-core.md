@@ -140,8 +140,11 @@ the structure-activity coherence metrics exposed as
 `sar_coherence()`/`activity_landscape()`/`modelability()`. `SARCoherence.h`
 is the one of the four that reads activity data as well as structure:
 `sar_coherence` decomposes an activity vector across a labeling, while
-`activity_landscape` and `modelability` sweep a distance matrix directly and
-need no clustering at all.
+`activity_landscape` and `modelability` sweep a distance matrix, or a
+comparison, directly and need no clustering at all. `cluster_report`,
+`activity_landscape` and `modelability` each have a `PairwiseComparison&`
+overload beside the `StorageBackend` one; see
+[Comparison overloads](#comparison-overloads-for-the-reports).
 
 ### Internal validity indices
 
@@ -174,24 +177,20 @@ is better), are computed only under `ClusterReportOptions::compute_pair_rank_ind
 - `compute_pair_rank_indices` fills `c_index` and `baker_hubert_gamma`. Both are
   read off two sorted arrays that between them hold every pairwise distance
   among the `Nc` clustered points, `Nc * (Nc - 1) / 2` doubles -- roughly 400 MB
-  at `Nc = 10,000` and 10 GB at `Nc = 50,000` -- but only one of the two arrays
-  is this flag's own cost. The within-cluster array, `sum_k n_k(n_k-1)/2`
-  doubles, is built whether or not the flag is set, because
-  `median_intra_distance` is taken over it; `detail::median_distance` takes its
-  argument by value, so the default path also holds a transient second copy of
-  that array while it sorts. The flag adds the between-cluster array,
-  `Nc(Nc-1)/2 - sum_k n_k(n_k-1)/2` doubles: nothing at all when the clustering
-  is a single cluster, and nearly the whole figure when the clusters are small.
-  It is opt-in for the second case. One flag covers both indices because both
-  are read off the same sorted arrays.
+  at `Nc = 10,000` and 10 GB at `Nc = 50,000` -- and both are built only under
+  this flag. Without it no overload holds a
+  pair-sized array: `median_intra_distance` is taken by an exact selector
+  whose state is fixed size. One flag covers both indices because both are
+  read off the same sorted arrays.
 - `compute_per_cluster_records` fills `ClusterReport::records`, a
   `std::vector<ClusterRecord>` holding one row per cluster in member-list order:
   label, size, representative, intra-distance mean and median, radius, diameter,
   mean representative distance, nearest cluster and its distance, silhouette,
-  and boundary-violation count. It buffers the largest cluster's `n(n-1)/2`
-  pairwise distances to take their median, and `detail::median_distance` copies
-  that buffer to sort it, so roughly 400 MB for the buffer and 400 MB again for
-  the copy, transiently, at `n = 10,000`. A record's `boundary_violations`
+  and boundary-violation count. A cluster with at most 2^20 pairs has its
+  median taken from a buffer of its distances; a larger cluster's median is
+  selected by re-walking its pairs, so the stage buffers at most 2^20 doubles
+  (8 MB). Under `compute_pair_rank_indices`, which already holds every pair,
+  each cluster is buffered whole. A record's `boundary_violations`
   counts pairs involving that cluster, so the sum over records is twice the
   report's own count, which counts each pair once.
 
@@ -247,6 +246,51 @@ when every scored sample is its own cluster, `cliff_density` when
 nonzero distance, `rmodi`, `activity_stddev` and a row's `stddev_activity` when
 the `num_scored` each reads is below 2, `modi` when `num_classes < 2`, and a
 row's `fraction_same_class` when its class is the only one scored.
+
+### Comparison overloads for the reports
+
+`cluster_report(const ClusteringResult&, PairwiseComparison&, const
+ClusterReportOptions&)`, `activity_landscape(PairwiseComparison&, const
+std::vector<double>&, const ActivityLandscapeOptions&)` and
+`modelability(PairwiseComparison&, const std::vector<std::string>&, const
+ModelabilityOptions&)` score a comparison without materializing a matrix,
+with one `Clone()` per concurrently running chunk. Each options struct
+gains `chunk_size`, default 4096 pairwise distances per unit. The
+comparison overloads refuse a zero `chunk_size`; the storage overloads
+ignore the field, and Python validates it on every path. A unit is whole
+rows; `activity_landscape` never makes one smaller than 64 rows, the floor
+its storage path already applies. Memory is O(N + K) plus O(N + C) per
+worker, for K clusters, where C is one comparison clone's size: O(N) for an
+`MCSComparison`, which deep-copies its molecules, and O(1) for clones that
+share their data. Workers are `num_threads`, or the hardware concurrency
+when it is 0, capped at N. No term grows with the pair count. A `cluster_report` fill block
+holds at most 2^20 distances, or one row if a row is longer.
+
+The comparison contract is the one `maxmin_select`, `knn_graph` and
+`leiden` already document: the engines call `Compare(min(i, j), max(i,
+j))`, never a self-pair, and `Compare` must return the same value, or
+throw the same exception, for the same pair on every call and on every
+clone. `cluster_report`'s exact median rereads pairs above its 2^20-value
+budget, so a comparison that breaks this voids the exactness. It is a
+documented precondition, not a checked one. Given it, each result is
+bit-identical to the storage overload over a matrix holding the values
+`Compare` returns, except that a zero median is always `+0.0` on both
+overloads.
+
+All three comparison overloads refuse a zero `chunk_size` with
+`std::invalid_argument`, then
+check the comparison's `Facts()` before any `Compare` call.
+`activity_landscape` and `modelability` call `validate_comparison_facts`,
+refusing a similarity, a nonzero self-distance, `NaNPresent` and
+`SubsetScored` with `ComparisonError`. `cluster_report` refuses the first
+three only, as its storage overload has no metric gate, and then refuses
+`compute_pair_rank_indices` with `std::invalid_argument`. Length
+mismatches name "the comparison". Undeclared non-finite or negative
+distances are caught per pair as they are scored, with the storage
+overloads' messages; only scored pairs are checked. `cluster_report`
+reports the earliest bad pair in row order for every thread count;
+`activity_landscape` and `modelability` keep their storage overloads'
+selection.
 
 ### Diversity selection
 

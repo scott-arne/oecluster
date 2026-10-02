@@ -30,7 +30,8 @@ they are not recoveries of the original intent.
 | D2a | Sphere exclusion: leader, Butina and DISE as one engine | shipped 5.10.0 |
 | D2b | k-nearest-neighbor graph and Jarvis-Patrick clustering | shipped 5.11.0 |
 | D2c | Leiden community detection over the D2b graph | shipped 5.12.0 |
-| B | Fingerprint-native O(N) counterparts of the A metrics | planned |
+| B1 | Exact O(N)-memory paths for the A metrics over a comparison | shipped 5.13.0 |
+| B2 | Approximate fingerprint-native (iSIM) A metrics | planned |
 | D3 | Workflow layer: clustering CLI, parameter selection, consensus, stability | planned |
 | D4 | Out-of-core and streaming clustering | planned |
 
@@ -126,9 +127,16 @@ worth defining against a roster that is still growing.
 
 ## B - Fingerprint-native metrics
 
-*Pinned by the A1 and A3 specs.* Adds O(N) fingerprint-direct counterparts of
-the metrics defined in A, avoiding the materialized O(N^2) distance matrix that
-the current forms require. A owns the definitions; B owns the scale path.
+*Pinned by the A1 and A3 specs.* Adds counterparts of the metrics defined in A
+that avoid the materialized O(N^2) distance matrix the current forms require.
+A owns the definitions; B owns the scale path.
+
+- **B1 (shipped 5.13.0).** `cluster_report`, `activity_landscape` and
+  `modelability` score a comparison directly. Results are exact -- identical
+  to the matrix forms over a matrix filled through `Compare` -- with O(N)
+  memory and O(N^2) time.
+- **B2 (planned).** Approximate iSIM / centroid forms, for O(N) time at the
+  cost of exactness.
 
 ## D3 - Workflow layer
 

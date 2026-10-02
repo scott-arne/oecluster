@@ -421,6 +421,14 @@ print(butina_report)               # ClusterReport(method='butina', num_clusters
 print(oecluster.compare_reports(butina_report, dbscan_report))
 ```
 
+`cluster_report` can also score a comparison directly, without building a
+distance matrix: pass the molecules with `comparison=` (or a prebuilt
+comparison). The report is exact and memory stays O(N).
+
+```python
+report = oecluster.cluster_report(butina_result, mols, comparison="fingerprint")
+```
+
 Every clustering result and its report expose a read-only `.method` name
 (`"butina"`, `"dbscan"`, `"hdbscan"`, `"agglomerative"`, `"k_medoids"`,
 `"bitbirch"`, `"murcko"`, `"sphere_exclusion"`, `"jarvis_patrick"`, or
@@ -535,11 +543,8 @@ always use the true medoid and ignore `representative_method`.
 `baker_hubert_gamma` (higher is better). Both are read off two sorted arrays
 holding every pairwise distance among the `Nc` clustered points,
 `Nc * (Nc - 1) / 2` doubles between them, or roughly 400 MB at 10,000 clustered
-points and 10 GB at 50,000 — but only the between-cluster array is the flag's
-own cost, because the within-cluster one is built on every call for
-`median_intra_distance`. The flag therefore adds nothing to a single-cluster
-result and nearly the whole figure to one with small clusters, and it is off by
-default for the second case.
+points and 10 GB at 50,000. Both are built only under the flag; without it the
+report holds no pair-sized array, which is why it is off by default.
 
 `compute_per_cluster_records=True` fills `report.records` with one
 `ClusterRecord` per cluster — size, representative, spread, nearest cluster,
@@ -582,7 +587,9 @@ readings and the divergences from scikit-learn.
 
 `sar_coherence` decomposes an activity vector across a labeling.
 `activity_landscape` and `modelability` score the structure-activity
-relationship straight from a distance matrix, with no clustering in between.
+relationship straight from a distance matrix or a comparison
+(`activity_landscape(mols, activity, comparison="fingerprint")`), with no
+clustering in between.
 
 ```python
 coherence = oecluster.sar_coherence(butina_result, activity)
