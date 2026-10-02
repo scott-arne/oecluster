@@ -106,17 +106,15 @@ struct ClusterReportOptions {
     /// Enables c_index and baker_hubert_gamma. The two sorted arrays the
     /// indices are read off hold every pairwise distance among clustered
     /// points, Nc(Nc-1)/2 doubles in total -- roughly 400 MB at Nc = 10,000
-    /// and 10 GB at Nc = 50,000 -- but only the between-cluster array is this
-    /// flag's own cost. The within-cluster array, sum_k n_k(n_k-1)/2 doubles,
-    /// is built on every call because median_intra_distance is taken over it.
-    /// So the flag adds nothing to a single-cluster result and nearly the
-    /// whole figure to one with small clusters, and it is off by default for
-    /// the second case.
+    /// and 10 GB at Nc = 50,000. Both are built only under this flag; without
+    /// it the report holds no pair-sized array.
     bool compute_pair_rank_indices = false;
-    /// Enables ClusterReport::records. Off by default: the stage buffers the
-    /// largest cluster's pairwise distances for the median, n(n-1)/2 doubles,
-    /// and detail::median_distance copies it -- roughly 400 MB for the buffer
-    /// and 400 MB again for the copy, transiently, at n = 10,000.
+    /// Enables ClusterReport::records. Off by default. A cluster with at most
+    /// 2^20 pairs has its median taken from a buffer of its distances; a
+    /// larger cluster's median is selected by re-walking its pairs, so the
+    /// stage buffers at most 2^20 doubles (8 MB). Under
+    /// compute_pair_rank_indices, which already holds every pair, each
+    /// cluster is buffered whole.
     bool compute_per_cluster_records = false;
 
     /** @brief Seed coverage_thresholds and boundary_threshold from a preset. */

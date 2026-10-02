@@ -14,8 +14,11 @@
 #include <utility>
 
 #include "ClusterMetrics.h"
+#include "ClusterReportTuned.h"
 #include "DistanceAccess.h"
+#include "ExactMedian.h"
 #include "InternalIndices.h"
+#include "ReportDistanceSource.h"
 
 namespace OECluster {
 
@@ -159,13 +162,33 @@ double size_entropy(const std::vector<double>& sizes) {
     return entropy;
 }
 
-}  // namespace
+// Walks a plan once, handing every distance to visit in plan order. The plan
+// is copied so the walk can enumerate the rows the reader is filling.
+template <class Source, class Plan, class Visit>
+void for_each_distance(Source& source, Plan plan, Visit&& visit) {
+    Plan walk = plan;
+    auto reader = source.Open(std::move(plan));
+    detail::ReportRow row{};
+    while (walk.Next(row)) {
+        for (size_t t = 0; t < row.count; ++t) {
+            visit(reader.Next(row.anchor, row.targets[t]));
+        }
+    }
+    reader.Finish();
+}
 
-ClusterReport cluster_report(
+// One body for both distance sources. Every read goes through a reader opened
+// on a row plan whose order is the order the loops below consume, so the
+// matrix and comparison paths see the same distances in the same sequence and
+// raise the same first error.
+template <class Source>
+ClusterReport report_engine(
     const ClusteringResult& result,
-    const StorageBackend& storage,
-    const ClusterReportOptions& options) {
-    detail::validate_complete_distance_storage(storage, "cluster_report");
+    const char* noun,
+    Source& source,
+    const ClusterReportOptions& options,
+    const detail::ReportTuning& tuning) {
+    const size_t num_items = source.NumItems();
 
     ClusterReport report;
     report.coverage_thresholds = options.coverage_thresholds;
@@ -234,11 +257,11 @@ ClusterReport cluster_report(
     // caller to fix a cluster list when the real error is that they paired a
     // result with the wrong storage. The members-non-empty conjunct preserves
     // the documented acceptance of a long all-noise label vector.
-    if (!members.empty() && labels.size() > storage.NumSamples()) {
+    if (!members.empty() && labels.size() > num_items) {
         throw std::out_of_range(
             "cluster_report: label count " + std::to_string(labels.size()) +
-            " exceeds the storage sample count " +
-            std::to_string(storage.NumSamples()));
+            " exceeds the " + std::string(noun) + " sample count " +
+            std::to_string(num_items));
     }
 
     // Hoisted above the first storage read. cluster_representative validates
@@ -278,7 +301,7 @@ ClusterReport cluster_report(
     // that belong in DistanceAccess.h. The guarantee is between layers, not
     // inside one.
     for (const Cluster& cluster : members) {
-        detail::validate_cluster_members(cluster, storage.NumSamples());
+        detail::validate_cluster_members(cluster, num_items);
     }
 
     // A member can be inside the storage range and past the end of a shorter
@@ -430,14 +453,26 @@ ClusterReport cluster_report(
         }
 
         // ---- Intra pass: once per cluster. ----
+        const bool pair_rank = options.compute_pair_rank_indices;
+        const bool records = options.compute_per_cluster_records;
+        const bool minimax =
+            options.representative_method == RepresentativeMethod::Minimax;
+        const size_t budget = tuning.median_direct_budget;
+
+        // Kept only under the pair-rank flag, which already costs every pair:
+        // pair_rank_indices consumes it, and its median is then a direct sort.
+        // Without the flag the global median comes from the fixed-state
+        // selector, so the pass holds no pair-sized array.
         std::vector<double> intra_pairs;
+        if (pair_rank) {
+            intra_pairs.reserve(intra_pair_count);
+        }
+        detail::ExactMedian global_median(pair_rank ? 0 : intra_pair_count, budget);
+        double intra_sum = 0.0;
+
         std::vector<double> radii;
         std::vector<double> diameters;
         std::vector<double> medoid_member_means;
-        // Pair-scaled, not cluster-scaled like the three below it: this one
-        // takes every within-cluster distance, sum_k C(n_k, 2) of them, and
-        // takes them unconditionally because median_intra_distance reads it.
-        intra_pairs.reserve(intra_pair_count);
         radii.reserve(cluster_count);
         diameters.reserve(cluster_count);
         medoid_member_means.reserve(cluster_count);
@@ -453,31 +488,46 @@ ClusterReport cluster_report(
         std::vector<double> medoid_square_sums(cluster_count, 0.0);
 
         std::vector<double> cluster_medians(cluster_count, nan_value());
-        // Cleared per cluster rather than grown across them, so its high-water
-        // mark is the largest single cluster's pair count and not the sum.
-        // clear() keeps capacity, so the one reservation here serves every
-        // iteration of the loop below.
+        // Cleared per cluster rather than grown across them, and filled only
+        // for a cluster whose pairs fit the budget; a larger cluster's median
+        // is selected afterwards by re-walking its pairs. clear() keeps
+        // capacity, so the one reservation serves every iteration.
         std::vector<double> cluster_distances;
-        if (options.compute_per_cluster_records) {
-            cluster_distances.reserve(largest_cluster_pair_count);
+        if (records) {
+            cluster_distances.reserve(
+                pair_rank ? largest_cluster_pair_count
+                          : std::min(largest_cluster_pair_count, budget));
         }
+        std::vector<size_t> deferred_medians;
 
         std::vector<double> own_mean(labels.size(), 0.0);
+        std::vector<double> own_max(
+            minimax ? labels.size() : 0, -std::numeric_limits<double>::infinity());
         std::vector<double> point_total(labels.size(), 0.0);
         detail::DistanceMoments within_moments;
 
         double max_diameter = 0.0;
+        auto intra_reader = source.Open(detail::IntraRows(members, 0, cluster_count));
         for (size_t k = 0; k < cluster_count; ++k) {
             const Cluster& cluster = members[k];
+            const bool buffer =
+                records && (pair_rank || pair_count(cluster.size()) <= budget);
+            if (records && !buffer) {
+                deferred_medians.push_back(k);
+            }
             cluster_distances.clear();
 
             double diameter = 0.0;
             for (size_t i = 0; i < cluster.size(); ++i) {
                 for (size_t j = i + 1; j < cluster.size(); ++j) {
-                    const double distance =
-                        detail::checked_distance(storage, cluster[i], cluster[j]);
-                    intra_pairs.push_back(distance);
-                    if (options.compute_per_cluster_records) {
+                    const double distance = intra_reader.Next(cluster[i], cluster[j]);
+                    if (pair_rank) {
+                        intra_pairs.push_back(distance);
+                    } else {
+                        global_median.Visit(distance);
+                    }
+                    intra_sum += distance;
+                    if (buffer) {
                         cluster_distances.push_back(distance);
                     }
                     within_moments.Add(distance);
@@ -489,35 +539,111 @@ ClusterReport cluster_report(
                     // so the silhouette's a term is bit-identical to 5.0.0's.
                     own_mean[cluster[i]] += distance;
                     own_mean[cluster[j]] += distance;
+                    if (minimax) {
+                        own_max[cluster[i]] = std::max(own_max[cluster[i]], distance);
+                        own_max[cluster[j]] = std::max(own_max[cluster[j]], distance);
+                    }
                 }
             }
-            if (options.compute_per_cluster_records && !cluster_distances.empty()) {
-                cluster_medians[k] = detail::median_distance(cluster_distances);
+            if (buffer && !cluster_distances.empty()) {
+                cluster_medians[k] = detail::ExactMedian::OfInPlace(cluster_distances);
             }
             diameters.push_back(diameter);
             max_diameter = std::max(max_diameter, diameter);
 
-            // Selected only after every intra distance of cluster k has been
-            // through checked_distance. cluster_representative sorts each
-            // candidate's distance vector in median_distance and then
-            // stable_sorts the candidate scores; a NaN in either range makes
-            // operator< a non-strict-weak ordering, which is the undefined
-            // behaviour the finiteness precondition exists to replace with a
-            // named error.
-            const size_t representative =
-                cluster_representative(cluster, storage, options.representative_method);
-            representatives.push_back(representative);
+            const double own_denominator = static_cast<double>(cluster.size()) - 1.0;
+            for (const size_t member : cluster) {
+                point_total[member] = own_mean[member];
+                own_mean[member] =
+                    cluster.size() > 1 ? own_mean[member] / own_denominator : 0.0;
+            }
+
+            // Selected here from the sums just accumulated instead of calling
+            // cluster_representative, which would read the cluster's pairs a
+            // second time -- a second full pass of Compare calls on the lazy
+            // path. own_mean equals make_metrics' mean_distance_to_cluster
+            // (same distances, member order, from 0.0, over n - 1) and own_max
+            // its max_distance_to_cluster. WeightedMedoid with default options
+            // scores 1.0 * mean + 1.0 * 0.0 - 1.0 * 0.0, which orders exactly
+            // as the mean. cluster_representative stable_sorts ascending and
+            // takes the front, so a strict < in member order picks the same
+            // point, ties included.
+            size_t medoid = cluster.front();
+            size_t representative = cluster.front();
+            const auto max_score = [&](const size_t member) {
+                return cluster.size() > 1 ? own_max[member] : 0.0;
+            };
+            double best_mean = own_mean[medoid];
+            double best_max = minimax ? max_score(representative) : 0.0;
+            for (size_t m = 1; m < cluster.size(); ++m) {
+                const size_t member = cluster[m];
+                if (own_mean[member] < best_mean) {
+                    best_mean = own_mean[member];
+                    medoid = member;
+                }
+                if (minimax && max_score(member) < best_max) {
+                    best_max = max_score(member);
+                    representative = member;
+                }
+            }
+            // The medoid-named indices always use the true medoid, whatever
+            // representative_method selected, because a field called
+            // calinski_harabasz_medoid must not be a minimax number.
+            representatives.push_back(minimax ? representative : medoid);
+            true_medoids.push_back(medoid);
+        }
+        intra_reader.Finish();
+
+        // A median past the budget needs further passes over the same pairs:
+        // the radix route narrows one 16-bit digit per pass.
+        if (!global_median.Done()) {
+            global_median.EndPass();
+            while (!global_median.Done()) {
+                for_each_distance(
+                    source,
+                    detail::IntraRows(members, 0, cluster_count),
+                    [&](const double distance) { global_median.Visit(distance); });
+                global_median.EndPass();
+            }
+        }
+        for (const size_t k : deferred_medians) {
+            detail::ExactMedian median(pair_count(members[k].size()), budget);
+            while (!median.Done()) {
+                for_each_distance(
+                    source,
+                    detail::IntraRows(members, k, k + 1),
+                    [&](const double distance) { median.Visit(distance); });
+                median.EndPass();
+            }
+            cluster_medians[k] = median.Result();
+        }
+
+        // Representative and medoid reads, after the intra pass rather than
+        // inside it. Every pair read here is an intra pair or a self-pair, so
+        // moving them cannot change which distance raises the first error.
+        // When every representative is its cluster's medoid the two walks
+        // would read the same row twice, so one row serves both.
+        const bool shared = representatives == true_medoids;
+        auto member_reader = source.Open(detail::MemberRows(
+            members, representatives, shared ? nullptr : &true_medoids));
+        for (size_t k = 0; k < cluster_count; ++k) {
+            const Cluster& cluster = members[k];
+            const size_t representative = representatives[k];
 
             double radius = 0.0;
             double representative_total = 0.0;
             size_t representative_count = 0;
+            double scatter_total = 0.0;
             for (const size_t member : cluster) {
-                const double distance =
-                    detail::checked_distance(storage, representative, member);
+                const double distance = member_reader.Next(representative, member);
                 radius = std::max(radius, distance);
                 if (member != representative) {
                     representative_total += distance;
                     ++representative_count;
+                }
+                if (shared) {
+                    scatter_total += distance;
+                    medoid_square_sums[k] += distance * distance;
                 }
             }
             radii.push_back(radius);
@@ -526,43 +652,29 @@ ClusterReport cluster_report(
                     ? 0.0
                     : representative_total / static_cast<double>(representative_count));
 
-            // The medoid-named indices always use the true medoid, whatever
-            // representative_method selected, because a field called
-            // calinski_harabasz_medoid must not be a minimax number. Under the
-            // default method the two coincide and the second selection is
-            // skipped.
-            const size_t medoid =
-                options.representative_method == RepresentativeMethod::Medoid
-                    ? representative
-                    : cluster_representative(cluster, storage, RepresentativeMethod::Medoid);
-            true_medoids.push_back(medoid);
-
-            double scatter_total = 0.0;
-            for (const size_t member : cluster) {
-                const double distance = detail::checked_distance(storage, medoid, member);
-                scatter_total += distance;
-                medoid_square_sums[k] += distance * distance;
+            if (!shared) {
+                for (const size_t member : cluster) {
+                    const double distance = member_reader.Next(true_medoids[k], member);
+                    scatter_total += distance;
+                    medoid_square_sums[k] += distance * distance;
+                }
             }
             // The n_k denominator, counting the medoid's own zero distance. This
             // is deliberately not medoid_member_means, which divides by
             // n_k - 1: reusing that field would inflate both Davies-Bouldin and
             // the medoid Dunn variant by n_k / (n_k - 1), a factor of two at
             // n_k == 2.
-            medoid_scatter[k] =
-                cluster.empty() ? 0.0 : scatter_total / static_cast<double>(cluster.size());
-
-            const double own_denominator = static_cast<double>(cluster.size()) - 1.0;
-            for (const size_t member : cluster) {
-                point_total[member] = own_mean[member];
-                own_mean[member] =
-                    cluster.size() > 1 ? own_mean[member] / own_denominator : 0.0;
-            }
+            medoid_scatter[k] = scatter_total / static_cast<double>(cluster.size());
         }
+        member_reader.Finish();
 
-        report.mean_intra_distance =
-            intra_pairs.empty() ? nan_value() : detail::mean_distance(intra_pairs);
-        report.median_intra_distance =
-            intra_pairs.empty() ? nan_value() : detail::median_distance(intra_pairs);
+        report.mean_intra_distance = intra_pair_count == 0
+            ? nan_value()
+            : intra_sum / static_cast<double>(intra_pair_count);
+        report.median_intra_distance = pair_rank
+            ? (intra_pairs.empty() ? nan_value()
+                                   : detail::ExactMedian::OfInPlace(intra_pairs))
+            : global_median.Result();
         report.median_radius = detail::median_distance(radii);
         report.p95_diameter = percentile(diameters, 0.95);
         report.median_medoid_member_distance = detail::median_distance(medoid_member_means);
@@ -592,11 +704,10 @@ ClusterReport cluster_report(
         double min_mean_separation = std::numeric_limits<double>::infinity();
         detail::DistanceMoments between_moments;
 
-        // Only materialised under the flag. This is the one allocation here
-        // that changes the allocation class: it completes the pair-array
-        // footprint to Nc(Nc-1)/2 doubles, since intra_pairs above already
-        // holds the within-cluster half unconditionally -- together roughly
-        // 400 MB at Nc = 10,000.
+        // Only materialised under the flag, alongside intra_pairs above: the
+        // two together are the Nc(Nc-1)/2-double pair-array footprint --
+        // roughly 400 MB at Nc = 10,000. Without the flag the report keeps no
+        // pair-sized array at all.
         //
         // Its own share is only the between-cluster half, which is what it is
         // reserved to. That share is not a fixed fraction of the total: it is
@@ -608,6 +719,7 @@ ClusterReport cluster_report(
             between_distances.reserve(pair_count(clustered_count) - intra_pair_count);
         }
 
+        auto cross_reader = source.Open(detail::CrossRows(members));
         size_t violations = 0;
         double min_inter = std::numeric_limits<double>::infinity();
         for (size_t a = 0; a < cluster_count; ++a) {
@@ -624,7 +736,7 @@ ClusterReport cluster_report(
                 size_t pair_violations = 0;
                 for (const size_t i : members[a]) {
                     for (const size_t j : members[b]) {
-                        const double distance = detail::checked_distance(storage, i, j);
+                        const double distance = cross_reader.Next(i, j);
                         between_moments.Add(distance);
                         if (options.compute_pair_rank_indices) {
                             between_distances.push_back(distance);
@@ -675,6 +787,7 @@ ClusterReport cluster_report(
                 }
             }
         }
+        cross_reader.Finish();
         report.boundary_violations = violations;
 
         if (cluster_count >= 2) {
@@ -711,18 +824,21 @@ ClusterReport cluster_report(
         } else if (options.representative_method != RepresentativeMethod::Medoid) {
             std::vector<double> nearest_representative_distance;
             nearest_representative_distance.reserve(representatives.size());
+            auto reader = source.Open(detail::PeerRows(representatives));
             for (size_t i = 0; i < representatives.size(); ++i) {
                 double smallest = std::numeric_limits<double>::infinity();
                 for (size_t j = 0; j < representatives.size(); ++j) {
+                    // The self entry is read to keep the reader in step with
+                    // its row and then skipped, as the matrix loop skipped it.
+                    const double distance =
+                        reader.Next(representatives[i], representatives[j]);
                     if (i != j) {
-                        smallest = std::min(
-                            smallest,
-                            detail::checked_distance(
-                                storage, representatives[i], representatives[j]));
+                        smallest = std::min(smallest, distance);
                     }
                 }
                 nearest_representative_distance.push_back(smallest);
             }
+            reader.Finish();
             report.representative_redundancy =
                 detail::median_distance(nearest_representative_distance);
         }
@@ -740,13 +856,16 @@ ClusterReport cluster_report(
             report.num_samples, std::numeric_limits<double>::infinity());
         if (report.num_samples > 0 && !representatives.empty() &&
             !options.coverage_thresholds.empty()) {
+            auto reader = source.Open(
+                detail::AllPointsRows(report.num_samples, representatives));
             for (size_t point = 0; point < report.num_samples; ++point) {
                 for (const size_t representative : representatives) {
                     nearest_representative[point] = std::min(
                         nearest_representative[point],
-                        detail::checked_distance(storage, point, representative));
+                        reader.Next(point, representative));
                 }
             }
+            reader.Finish();
 
             report.coverage_at.assign(options.coverage_thresholds.size(), 0.0);
             report.noise_coverage_at.assign(
@@ -822,13 +941,15 @@ ClusterReport cluster_report(
 
             double between_scatter = 0.0;
             double within_scatter = 0.0;
+            auto to_global_reader =
+                source.Open(detail::FixedTargetRows(true_medoids, &global_medoid));
             for (size_t k = 0; k < cluster_count; ++k) {
-                const double to_global =
-                    detail::checked_distance(storage, true_medoids[k], global_medoid);
+                const double to_global = to_global_reader.Next(true_medoids[k], global_medoid);
                 between_scatter +=
                     static_cast<double>(members[k].size()) * to_global * to_global;
                 within_scatter += medoid_square_sums[k];
             }
+            to_global_reader.Finish();
             if (clustered_count > cluster_count) {
                 const double numerator =
                     between_scatter / static_cast<double>(cluster_count - 1);
@@ -851,15 +972,16 @@ ClusterReport cluster_report(
             double davies_bouldin_total = 0.0;
             std::vector<double> nearest_medoid_distance;
             nearest_medoid_distance.reserve(cluster_count);
+            auto medoid_reader = source.Open(detail::PeerRows(true_medoids));
             for (size_t a = 0; a < cluster_count; ++a) {
                 double worst_ratio = 0.0;
                 double nearest = std::numeric_limits<double>::infinity();
                 for (size_t b = 0; b < cluster_count; ++b) {
+                    const double separation =
+                        medoid_reader.Next(true_medoids[a], true_medoids[b]);
                     if (a == b) {
                         continue;
                     }
-                    const double separation =
-                        detail::checked_distance(storage, true_medoids[a], true_medoids[b]);
                     nearest = std::min(nearest, separation);
                     // Coincident medoids are reported as inf, and the zero
                     // separation is branched on rather than divided by. IEEE
@@ -876,6 +998,7 @@ ClusterReport cluster_report(
                 nearest_medoid_distance.push_back(nearest);
                 davies_bouldin_total += worst_ratio;
             }
+            medoid_reader.Finish();
             report.davies_bouldin_medoid =
                 davies_bouldin_total / static_cast<double>(cluster_count);
 
@@ -1040,6 +1163,29 @@ ClusterReport cluster_report(
     }
 
     return report;
+}
+
+}  // namespace
+
+namespace detail {
+
+ClusterReport cluster_report_tuned(
+    const ClusteringResult& result,
+    const StorageBackend& storage,
+    const ClusterReportOptions& options,
+    const ReportTuning& tuning) {
+    validate_complete_distance_storage(storage, "cluster_report");
+    MatrixSource source(storage);
+    return report_engine(result, "storage", source, options, tuning);
+}
+
+}  // namespace detail
+
+ClusterReport cluster_report(
+    const ClusteringResult& result,
+    const StorageBackend& storage,
+    const ClusterReportOptions& options) {
+    return detail::cluster_report_tuned(result, storage, options, detail::ReportTuning());
 }
 
 ClusterReportComparison compare_reports(const ClusterReport& a, const ClusterReport& b) {
