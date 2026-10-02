@@ -544,3 +544,122 @@ def test_package_exports_the_four_names():
                  "SweepRow"):
         assert name in oecluster.__all__
         assert getattr(oecluster, name) is not None
+
+
+# --- fingerprints -----------------------------------------------------------
+
+def test_fingerprints_score_through_isim_report():
+    selection = oecluster.select_parameter("bitbirch", _fps(), "threshold",
+                                           (0.2, 0.6, 0.95))
+    assert selection.criterion == "isim_silhouette"
+    assert all(isinstance(row.report, oecluster.ISimReport)
+               for row in selection.rows)
+    assert all(row.report.requested.centroid_indices for row in selection.rows)
+    assert [row.report.num_clusters for row in selection.rows] == [1, 2, 10]
+    assert math.isnan(selection.rows[0].score)
+    assert selection.rows[1].score == pytest.approx(0.8)
+    assert selection.rows[2].score == 0.0
+    assert selection.winner.value == 0.6
+
+
+def test_fingerprint_options_mapping_is_left_unchanged():
+    options = {}
+    oecluster.select_parameter("bitbirch", _fps(), "threshold", (0.6,),
+                               report_options=options)
+    assert options == {}
+
+
+def test_a_linear_criterion_leaves_the_centroid_stage_off():
+    selection = oecluster.select_parameter(
+        "bitbirch", _fps(), "threshold", (0.6,),
+        criterion="calinski_harabasz_medoid")
+    assert selection.rows[0].report.requested.centroid_indices is False
+    assert selection.rows[0].score == pytest.approx(125.0)
+
+
+@pytest.mark.parametrize("criterion, expected", [
+    ("isim_silhouette", 0.8),
+    ("davies_bouldin_medoid", 0.32),
+    ("dunn_medoid_separation_medoid_spread", 3.125),
+])
+def test_a_centroid_stage_criterion_switches_the_stage_on(criterion, expected):
+    options = {}
+    selection = oecluster.select_parameter(
+        "bitbirch", _fps(), "threshold", (0.6,), criterion=criterion,
+        report_options=options)
+    assert selection.rows[0].report.requested.centroid_indices is True
+    assert selection.rows[0].score == pytest.approx(expected)
+    assert options == {}
+
+
+def test_davies_bouldin_on_fingerprints_under_a_cluster_cap():
+    selection = oecluster.select_parameter(
+        "bitbirch", _fps(), "threshold", (0.6, 0.95),
+        criterion="davies_bouldin_medoid", max_clusters=5)
+    assert selection.rows[1].rejection == "num_clusters 10 > max_clusters 5"
+    assert selection.winner.value == 0.6
+
+
+def test_a_criterion_the_scorer_does_not_produce_is_refused():
+    calls = []
+    with pytest.raises(ValueError, match="isim_report"):
+        oecluster.select_parameter(_recording(calls), _fps(), "threshold",
+                                   (0.6,), criterion="dunn_index")
+    assert calls == []
+
+
+# --- prebuilt comparisons ---------------------------------------------------
+
+def _same_rows(a, b):
+    """to_table() equality that treats NaN as equal to NaN."""
+    if len(a) != len(b):
+        return False
+    for row_a, row_b in zip(a, b):
+        for cell_a, cell_b in zip(row_a, row_b):
+            both_nan = (isinstance(cell_a, float) and isinstance(cell_b, float)
+                        and math.isnan(cell_a) and math.isnan(cell_b))
+            if not both_nan and cell_a != cell_b:
+                return False
+    return True
+
+
+def test_a_prebuilt_comparison_matches_the_matrix_path():
+    mols = _mols(FP_SMILES)
+    grid = (0.6, 0.8, 0.9)
+    by_matrix = oecluster.select_parameter(
+        "sphere_exclusion", oecluster.pdist(mols, "fingerprint"), "threshold",
+        grid)
+    prebuilt = oecluster.select_parameter(
+        "sphere_exclusion", oecluster.FingerprintComparison(mols), "threshold",
+        grid)
+    assert [row.report.num_clusters for row in by_matrix.rows] == [8, 4, 3]
+    assert _same_rows(prebuilt.to_table(), by_matrix.to_table())
+    assert prebuilt.winner_index == by_matrix.winner_index == 1
+    assert ([row.result.labels.tolist() for row in prebuilt.rows]
+            == [row.result.labels.tolist() for row in by_matrix.rows])
+    assert all(isinstance(row.report, oecluster.ClusterReport)
+               for row in prebuilt.rows)
+
+
+@pytest.mark.parametrize("criterion", ["c_index", "baker_hubert_gamma"])
+def test_pair_rank_criteria_need_a_matrix(criterion):
+    calls = []
+    prebuilt = oecluster.FingerprintComparison(_mols(FP_SMILES))
+    with pytest.raises(ValueError, match="SymmetricDistanceMatrix"):
+        oecluster.select_parameter(_recording(calls), prebuilt, "threshold",
+                                   (0.5,), criterion=criterion)
+    assert calls == []
+
+
+# --- a partition the scorer refuses ----------------------------------------
+
+def test_a_partition_the_scorer_refuses_propagates_its_error():
+    # bitbirch_refine can hand back an emptied leaf subcluster as an empty
+    # member list; both scorecards refuse an empty cluster.
+    bits = [[1, 1, 1], [0, 1, 1], [1, 0, 0], [1, 1, 0]]
+    spec = oecluster.ClusteringSpec(
+        "bitbirch_refine", branching_factor=2, merge_criterion="diameter",
+        singly=False, redistribute_largest_cluster=True)
+    with pytest.raises(RuntimeError, match="at least one member"):
+        oecluster.select_parameter(spec, _batch_from_bits(bits), "threshold",
+                                   (0.8,))
