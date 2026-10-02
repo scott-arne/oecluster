@@ -256,3 +256,202 @@ def test_report_agrees_with_pdist_to_rounding():
         lazy = oecluster.cluster_report(result, mols,
                                         comparison="fingerprint", **options)
         _assert_close(_report_fields(lazy), _report_fields(expected))
+
+
+def _activity(n):
+    # Irregular values with one missing measurement, so cliffs, the RMODI band
+    # and a dropped sample all reach the comparison.
+    return [math.nan if i == 5 else 4.0 + 0.37 * ((7 * i) % 11)
+            for i in range(n)]
+
+
+def _classes(n):
+    names = ("active", "inactive", "unknown")
+    return ["" if i % 9 == 4 else names[(i * 7 + i // 5) % 3]
+            for i in range(n)]
+
+
+def _fields(scorecard):
+    return tuple(getattr(scorecard, name)
+                 for name in type(scorecard).__slots__)
+
+
+def _landscape(items, **options):
+    return oecluster.activity_landscape(
+        items, _activity(len(FP_SMILES)), distance_threshold=0.45, **options)
+
+
+def _modelability(items, **options):
+    return oecluster.modelability(items, _classes(len(FP_SMILES)), **options)
+
+
+@pytest.mark.parametrize("score", [_landscape, _modelability])
+@pytest.mark.parametrize("chunk_size", [1, 7, 4096])
+@pytest.mark.parametrize("num_threads", [1, 4])
+def test_sar_three_paths_match_a_compare_filled_matrix(score, chunk_size,
+                                                       num_threads):
+    mols = _mols(FP_SMILES)
+    prebuilt = oecluster.FingerprintComparison(mols)
+    expected = _fields(score(_compare_matrix(prebuilt)))
+    for items, extra in ((prebuilt, {}),
+                         (mols, {"comparison": "fingerprint"})):
+        result = score(items, num_threads=num_threads,
+                       chunk_size=chunk_size, **extra)
+        assert _same(_fields(result), expected)
+
+
+@pytest.mark.parametrize("name, second", [
+    ("activity_landscape", "activity"),
+    ("modelability", "activity_classes"),
+])
+def test_sar_alias_rules_are_type_errors(name, second):
+    function = getattr(oecluster, name)
+    mols = _mols(FP_SMILES)
+    matrix = oecluster.pdist(mols, "fingerprint")
+    prebuilt = oecluster.FingerprintComparison(mols)
+    values = (_activity(len(mols)) if second == "activity"
+              else _classes(len(mols)))
+    assert _same(
+        _fields(function(distance_matrix=matrix, **{second: values})),
+        _fields(function(matrix, values)))
+    cases = [
+        (lambda: function(matrix, values, distance_matrix=matrix),
+         f"{name}() got both items and distance_matrix; pass one"),
+        (lambda: function(**{second: values}),
+         f"{name}() missing required argument: 'items'"),
+        (lambda: function(distance_matrix=matrix),
+         f"{name}() missing required argument: '{second}'"),
+        (lambda: function(distance_matrix=prebuilt, **{second: values}),
+         f"{name}() expects a SymmetricDistanceMatrix"),
+        (lambda: function(prebuilt, values, comparison="fingerprint"),
+         f"{name}() takes no comparison"),
+        (lambda: function(prebuilt, values, num_theads=2),
+         "num_theads"),
+        (lambda: function(mols, values),
+         "a sequence of items with comparison="),
+    ]
+    for call, message in cases:
+        with pytest.raises(TypeError, match=re.escape(message)):
+            call()
+
+
+@pytest.mark.parametrize("score", [_landscape, _modelability])
+def test_sar_refuses_similarity_and_subset_scored_comparisons(score):
+    with pytest.raises(ValueError, match="requires distances"):
+        score(oecluster.FingerprintComparison(_mols(FP_SMILES),
+                                              similarity=True))
+    mols = _mols(DESCRIPTOR_SMILES * 2)
+    with pytest.raises(ValueError, match="per-pair feature subsets"):
+        score(mols, comparison="descriptor", metric="euclidean",
+              missing="ignore")
+
+
+@pytest.mark.parametrize("score", [_landscape, _modelability])
+def test_sar_accepts_a_nonmetric_comparison(score):
+    prebuilt = oecluster.FingerprintComparison(_mols(FP_SMILES),
+                                               metric="dice")
+    assert _same(_fields(score(prebuilt)),
+                 _fields(score(_compare_matrix(prebuilt))))
+
+
+@pytest.mark.parametrize("score", [_landscape, _modelability])
+@pytest.mark.parametrize("chunk_size, message", [
+    (0, "chunk_size must be at least 1"),
+    (2.5, "chunk_size must be an integer"),
+])
+def test_sar_chunk_size_is_validated_on_every_path(score, chunk_size,
+                                                   message):
+    mols = _mols(FP_SMILES)
+    for items, extra in ((oecluster.pdist(mols, "fingerprint"), {}),
+                         (oecluster.FingerprintComparison(mols), {}),
+                         (mols, {"comparison": "fingerprint"})):
+        with pytest.raises(ValueError, match=message):
+            score(items, chunk_size=chunk_size, **extra)
+
+
+def test_sar_refuses_an_item_normalization_dropped():
+    # Nine descriptor items -- "O" and the eight that score -- against
+    # sixteen activities: the drop is refused before the length check.
+    mols = _mols(["O", *DESCRIPTOR_SMILES])
+    for score in (_landscape, _modelability):
+        with pytest.raises(ValueError,
+                           match=r"dropped item 0 \(missing-descriptor\)"):
+            score(mols, comparison="descriptor", metric="euclidean")
+
+
+def _multiconformer(smiles, shifts, title):
+    """Build one OEMol carrying a conformer per shift."""
+    mol = oechem.OEMol()
+    oechem.OESmilesToMol(mol, smiles)
+    oechem.OEGenerate2DCoordinates(mol)
+    base = oechem.OEFloatArray(3 * mol.NumAtoms())
+    mol.GetCoords(base)
+    for shift in shifts[1:]:
+        moved = oechem.OEFloatArray(list(base))
+        for idx in range(0, len(moved), 3):
+            moved[idx] += shift
+        mol.NewConf(moved)
+    mol.SetTitle(title)
+    return mol
+
+
+def test_every_lazy_path_refuses_conformer_expansion():
+    # _diversity_source refuses the expansion itself; this pins that all three
+    # functions route through it before any length or size check.
+    mols = [_multiconformer("CCCO", [0.0, 1.0], "a"),
+            _multiconformer("CCCO", [0.0, 2.0], "b")]
+    result = oecluster.butina(_compare_matrix(
+        oecluster.FingerprintComparison(_mols(FP_SMILES))), 0.5)
+    calls = [
+        lambda: oecluster.cluster_report(result, mols, comparison="rmsd"),
+        lambda: oecluster.activity_landscape(mols, [1.0, 2.0],
+                                             comparison="rmsd"),
+        lambda: oecluster.modelability(mols, ["a", "b"], comparison="rmsd"),
+    ]
+    for call in calls:
+        with pytest.raises(ValueError, match="expand_conformers=False"):
+            call()
+
+
+def test_sar_length_refusals_name_the_comparison():
+    prebuilt = oecluster.FingerprintComparison(_mols(FP_SMILES[:12]))
+    with pytest.raises(ValueError, match=re.escape(
+            "activity has 16 entries but the comparison covers 12 samples")):
+        _landscape(prebuilt)
+    with pytest.raises(ValueError, match=re.escape(
+            "activity_classes has 16 entries but the comparison covers 12 "
+            "samples")):
+        _modelability(prebuilt)
+
+
+def test_sar_agrees_with_pdist_to_rounding():
+    mols = _mols(FP_SMILES)
+    matrix = oecluster.pdist(mols, "fingerprint")
+    activity = _activity(len(mols))
+    _assert_close(
+        _fields(oecluster.activity_landscape(
+            mols, activity, comparison="fingerprint",
+            distance_threshold=_BOUNDARY)),
+        _fields(oecluster.activity_landscape(
+            matrix, activity, distance_threshold=_BOUNDARY)))
+    classes = _classes(len(mols))
+    _assert_close(
+        _fields(oecluster.modelability(mols, classes,
+                                       comparison="fingerprint")),
+        _fields(oecluster.modelability(matrix, classes)))
+
+
+def test_the_matrix_gate_refuses_a_non_finite_pair_no_metric_reads():
+    """The matrix half of the unread-pair difference.
+
+    Sample 5 has no activity, so no landscape metric reads pair (5, 9), yet
+    the matrix gate scans every stored pair and refuses. The lazy half -- a
+    comparison whose only non-finite value sits on such a pair succeeds --
+    cannot be staged from Python with a real comparison, and is pinned in C++
+    by SARComparisonTest.ANonFiniteValueOnAnUnreadPairIsNeverSeen.
+    """
+    matrix = _compare_matrix(
+        oecluster.FingerprintComparison(_mols(FP_SMILES)))
+    matrix.storage.Set(5, 9, math.nan)
+    with pytest.raises(ValueError, match="non-finite entries"):
+        _landscape(matrix)

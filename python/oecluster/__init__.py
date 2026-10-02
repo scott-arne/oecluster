@@ -5031,11 +5031,13 @@ def sar_coherence(result, activity, *, noise="excluded"):
     return SARCoherence(native)
 
 
-def activity_landscape(distance_matrix, activity, *, distance_threshold=0.30,
-                       activity_threshold=1.0, rmodi_delta=0.625,
-                       num_threads=0):
+def activity_landscape(items=_MISSING, activity=_MISSING, *,
+                       distance_matrix=_MISSING, comparison=None,
+                       distance_threshold=0.30, activity_threshold=1.0,
+                       rmodi_delta=0.625, num_threads=0, chunk_size=4096,
+                       **kwargs):
     """
-    Measure the activity cliffs in a precomputed distance matrix.
+    Measure the activity cliffs in a distance matrix or a comparison.
 
     Answers a different question from :func:`sar_coherence`: not whether a
     clustering groups molecules that behave alike, but whether the descriptor
@@ -5043,8 +5045,18 @@ def activity_landscape(distance_matrix, activity, *, distance_threshold=0.30,
     small structural changes swing the activity, which is what makes a series
     hard to model and interesting to a chemist.
 
-    :param distance_matrix: Complete SymmetricDistanceMatrix. SparseStorage is
-        refused: a nearest neighbour read off a partial matrix is not one.
+    :param items: What the distances come from: a complete
+        SymmetricDistanceMatrix (SparseStorage is refused: a nearest neighbour
+        read off a partial matrix is not one); a prebuilt comparison such as
+        :class:`FingerprintComparison`; or a sequence of items with
+        ``comparison=``. The comparison forms hold no matrix and call
+        ``Compare`` once for each of the ``N * (N - 1) / 2`` pairs. Their
+        result is identical to the matrix path over a matrix filled through
+        the same ``Compare``.
+    :param distance_matrix: Keyword alias for ``items`` that accepts only a
+        SymmetricDistanceMatrix. Passing both is a TypeError.
+    :param comparison: Comparison name, such as ``"fingerprint"``, when
+        ``items`` is a sequence of items. Its options go in ``**kwargs``.
     :param activity: One measurement per sample; NaN marks a missing one.
     :param distance_threshold: Pairs at or below this are structurally near.
         Shares :func:`cluster_report`'s boundary default of 0.30, because it
@@ -5062,8 +5074,17 @@ def activity_landscape(distance_matrix, activity, *, distance_threshold=0.30,
         inside ``int()``, before the non-negative check runs at all, while a
         finite but oversized value coerces cleanly there and fails later, in the
         binding layer's ``size_t`` assignment.
+    :param chunk_size: Pairwise distances per work unit on the comparison
+        paths, at least 1; validated on every path. A unit is never smaller
+        than 64 rows, so a small value does not fragment the sweep. The result
+        does not depend on it.
+    :param kwargs: Comparison options, with ``comparison=`` only.
     :returns: An :class:`ActivityLandscape`.
-    :raises TypeError: If ``distance_matrix`` is not a SymmetricDistanceMatrix,
+    :raises TypeError: If both or neither of ``items`` and
+        ``distance_matrix`` are given, or ``activity`` is missing;
+        ``distance_matrix`` is not a SymmetricDistanceMatrix; ``items`` fits
+        none of the three forms, or ``comparison`` or a keyword this function
+        does not take accompanies a matrix or a prebuilt comparison;
         ``activity`` is not a sequence of floats, or ``num_threads`` is a value
         ``int()`` cannot accept at all, such as None or a complex. That
         coercion runs before the non-negative check below.
@@ -5074,14 +5095,21 @@ def activity_landscape(distance_matrix, activity, *, distance_threshold=0.30,
         ``num_threads`` is a str ``int()`` cannot parse or a NaN, which the
         same coercion refuses,
         ``num_threads`` truncates toward zero to a negative integer,
+        ``chunk_size`` is not an integer of at least 1,
         or the gate refuses the matrix --
         similarity-valued, a non-zero self-distance, a non-finite entry, or
-        scored on a per-pair feature subset.
-    :raises RuntimeError: If an activity value is infinite, or a stored distance
-        is negative; or if the activity magnitudes are large enough that
-        ``activity_stddev`` or a SALI accumulator overflows to infinity, in
-        which case the message names the quantity that overflowed rather than an
-        index. These are refusals raised in C++, and SWIG maps every native
+        scored on a per-pair feature subset. A comparison is refused on the
+        same declared facts, less the non-finite entry, which it cannot know
+        before scoring; normalizing its items may not drop or expand one. A
+        comparison is checked only on the pairs the sweep reads, so a
+        non-finite value on a pair no metric reads is never seen.
+    :raises RuntimeError: If an activity value is infinite; a comparison
+        returns a non-finite distance for a pair the sweep reads; or a stored
+        or compared distance is negative; or if the activity magnitudes are
+        large enough that ``activity_stddev`` or a SALI accumulator overflows
+        to infinity, in which case the message names the quantity that
+        overflowed rather than an index. These are refusals raised in C++, and
+        SWIG maps every native
         exception to ``RuntimeError``. A negative distance reaches C++ because
         the gate measures finiteness, not sign.
     :raises OverflowError: If ``num_threads`` is an infinity or coerces to an
@@ -5094,14 +5122,17 @@ def activity_landscape(distance_matrix, activity, *, distance_threshold=0.30,
         print(landscape.num_cliffs, landscape.cliff_density)
         print(landscape.max_sali, landscape.rmodi)
     """
-    if not isinstance(distance_matrix, SymmetricDistanceMatrix):
+    items = _metric_input(items, distance_matrix, comparison, kwargs,
+                          "activity_landscape")
+    if activity is _MISSING:
         raise TypeError(
-            "activity_landscape() expects a SymmetricDistanceMatrix")
+            "activity_landscape() missing required argument: 'activity'")
+    is_matrix = isinstance(items, SymmetricDistanceMatrix)
 
     # ValueError, not TypeError: the argument's type is right, its storage is
     # not. Ahead of the gate, whose remedies cannot rescue a sparse matrix.
-    if isinstance(distance_matrix.storage, SparseStorage):
-        raise ValueError(  # noqa: TRY004
+    if is_matrix and isinstance(items.storage, SparseStorage):
+        raise ValueError(
             "activity_landscape requires complete pairwise distances; "
             "SparseStorage is not supported")
 
@@ -5112,10 +5143,10 @@ def activity_landscape(distance_matrix, activity, *, distance_threshold=0.30,
     if len(values) == 0:
         raise ValueError("activity_landscape() requires a non-empty activity")
 
-    if len(values) != distance_matrix.num_samples:
+    if is_matrix and len(values) != items.num_samples:
         raise ValueError(
             f"activity has {len(values)} entries but the matrix covers "
-            f"{distance_matrix.num_samples} samples")
+            f"{items.num_samples} samples")
 
     # Mirrors validate_landscape_options() in src/clustering/SARCoherence.cpp:
     # the same three thresholds in the same order, each tested for finiteness
@@ -5147,23 +5178,40 @@ def activity_landscape(distance_matrix, activity, *, distance_threshold=0.30,
     if num_threads_int < 0:
         raise ValueError("num_threads must be non-negative")
 
-    _gate.require_comparable(distance_matrix, "activity_landscape")
+    chunk_size_int = _diversity_int(chunk_size, "chunk_size", 1)
+
+    if is_matrix:
+        _gate.require_comparable(items, "activity_landscape")
+        target = items.storage
+    else:
+        source = _diversity_source(items, comparison, kwargs,
+                                   "activity_landscape")
+        _refuse_dropped_items(source, "activity_landscape")
+        # A comparison's size is known only once it is built, so this check
+        # follows its facts check, where a matrix's precedes its gate.
+        if len(values) != source.size:
+            raise ValueError(
+                f"activity has {len(values)} entries but the comparison "
+                f"covers {source.size} samples")
+        target = source.target
 
     options = _oecluster.ActivityLandscapeOptions()
     options.distance_threshold = distance_value
     options.activity_threshold = activity_value
     options.rmodi_delta = rmodi_value
     options.num_threads = num_threads_int
+    options.chunk_size = chunk_size_int
     # Bound rather than scored inline, on the same terms as sar_coherence().
     # This result carries no member vector today; keeping the three entry
     # points identical means adding one later cannot quietly reintroduce a read
     # off a freed parent.
-    native = _oecluster.activity_landscape(
-        distance_matrix.storage, values, options)
+    native = _oecluster.activity_landscape(target, values, options)
     return ActivityLandscape(native)
 
 
-def modelability(distance_matrix, activity_classes, *, num_threads=0):
+def modelability(items=_MISSING, activity_classes=_MISSING, *,
+                 distance_matrix=_MISSING, comparison=None, num_threads=0,
+                 chunk_size=4096, **kwargs):
     """
     Score how well a descriptor separates activity classes.
 
@@ -5172,8 +5220,18 @@ def modelability(distance_matrix, activity_classes, *, num_threads=0):
     the class. Run it before fitting a classifier, to find out whether the
     descriptor carries the signal at all.
 
-    :param distance_matrix: Complete SymmetricDistanceMatrix. SparseStorage is
-        refused, on the same grounds as :func:`activity_landscape`.
+    :param items: What the distances come from, in the three forms
+        :func:`activity_landscape` takes; SparseStorage is refused on the same
+        grounds. The comparison forms call ``Compare`` for every ordered pair,
+        ``N * (N - 1)`` times over ``N`` scored samples, because each
+        sample's nearest neighbour is sought over its whole row; that is
+        twice the calls of :func:`activity_landscape`. With a single scored
+        class nothing is scored and each pair is only validated,
+        ``N * (N - 1) / 2`` calls.
+    :param distance_matrix: Keyword alias for ``items`` that accepts only a
+        SymmetricDistanceMatrix. Passing both is a TypeError.
+    :param comparison: Comparison name, such as ``"fingerprint"``, when
+        ``items`` is a sequence of items. Its options go in ``**kwargs``.
     :param activity_classes: One class string per sample. An empty string is a
         missing annotation rather than a category, and its sample is dropped.
     :param num_threads: 0 selects the hardware concurrency. Nearest-neighbour
@@ -5183,8 +5241,13 @@ def modelability(distance_matrix, activity_classes, *, num_threads=0):
         selects the hardware concurrency, and ``OverflowError`` arrives from
         the same two places -- an infinite value out of ``int()``, a finite but
         oversized one out of the binding layer's ``size_t`` assignment.
+    :param chunk_size: Pairwise distances per work unit on the comparison
+        paths, at least 1; validated on every path. The result does not
+        depend on it.
+    :param kwargs: Comparison options, with ``comparison=`` only.
     :returns: A :class:`Modelability`.
-    :raises TypeError: If ``distance_matrix`` is not a SymmetricDistanceMatrix,
+    :raises TypeError: On :func:`activity_landscape`'s argument-routing
+        conditions, reading ``activity_classes`` for ``activity``;
         ``activity_classes`` is not a sequence of strings, or ``num_threads``
         is a value ``int()`` cannot accept at all, on
         :func:`activity_landscape`'s terms.
@@ -5196,8 +5259,9 @@ def modelability(distance_matrix, activity_classes, *, num_threads=0):
         the coercion raises: a str ``int()`` cannot parse and a NaN as the
         ValueError this clause describes, an infinite value as the
         ``OverflowError`` the parameter above sets out.
-    :raises RuntimeError: If a stored distance is negative, on the same terms
-        as :func:`activity_landscape`.
+    :raises RuntimeError: If a stored or compared distance is negative, or a
+        comparison returns a non-finite distance for a pair the sweep reads,
+        on the same terms as :func:`activity_landscape`.
     :raises OverflowError: If ``num_threads`` is an infinity or coerces to an
         integer too large for a ``size_t``.
 
@@ -5211,11 +5275,15 @@ def modelability(distance_matrix, activity_classes, *, num_threads=0):
         print(report.modi, report.num_classes)
         print(report.classes[0].label, report.classes[0].fraction_same_class)
     """
-    if not isinstance(distance_matrix, SymmetricDistanceMatrix):
-        raise TypeError("modelability() expects a SymmetricDistanceMatrix")
+    items = _metric_input(items, distance_matrix, comparison, kwargs,
+                          "modelability")
+    if activity_classes is _MISSING:
+        raise TypeError(
+            "modelability() missing required argument: 'activity_classes'")
+    is_matrix = isinstance(items, SymmetricDistanceMatrix)
 
-    if isinstance(distance_matrix.storage, SparseStorage):
-        raise ValueError(  # noqa: TRY004
+    if is_matrix and isinstance(items.storage, SparseStorage):
+        raise ValueError(
             "modelability requires complete pairwise distances; "
             "SparseStorage is not supported")
 
@@ -5226,23 +5294,37 @@ def modelability(distance_matrix, activity_classes, *, num_threads=0):
         raise ValueError(
             "modelability() requires a non-empty activity_classes")
 
-    if len(classes) != distance_matrix.num_samples:
+    if is_matrix and len(classes) != items.num_samples:
         raise ValueError(
             f"activity_classes has {len(classes)} entries but the matrix "
-            f"covers {distance_matrix.num_samples} samples")
+            f"covers {items.num_samples} samples")
 
     num_threads_int = int(num_threads)
     if num_threads_int < 0:
         raise ValueError("num_threads must be non-negative")
 
-    _gate.require_comparable(distance_matrix, "modelability")
+    chunk_size_int = _diversity_int(chunk_size, "chunk_size", 1)
+
+    if is_matrix:
+        _gate.require_comparable(items, "modelability")
+        target = items.storage
+    else:
+        source = _diversity_source(items, comparison, kwargs, "modelability")
+        _refuse_dropped_items(source, "modelability")
+        # See activity_landscape(): a comparison's size is known only once it
+        # is built.
+        if len(classes) != source.size:
+            raise ValueError(
+                f"activity_classes has {len(classes)} entries but the "
+                f"comparison covers {source.size} samples")
+        target = source.target
 
     options = _oecluster.ModelabilityOptions()
     options.num_threads = num_threads_int
+    options.chunk_size = chunk_size_int
     # Bound rather than scored inline: the scorecard copies this result's
     # per-class rows, which the result owns and frees with itself.
-    native = _oecluster.modelability(
-        distance_matrix.storage, classes, options)
+    native = _oecluster.modelability(target, classes, options)
     return Modelability(native)
 
 
