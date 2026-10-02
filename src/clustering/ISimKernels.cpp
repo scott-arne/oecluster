@@ -98,6 +98,25 @@ void for_each_set_bit(const uint64_t* words, const size_t size_bits, Visit&& vis
     }
 }
 
+// Adds value * 2^(64 * at) into result. The callers' products are below
+// 2^256, so no carry leaves limb 3.
+void add_shifted(UInt256& result, const size_t at, const UInt128& value) {
+    const uint64_t parts[2] = {value.low, value.high};
+    uint64_t carry = 0;
+    for (size_t i = 0; at + i < 4u; ++i) {
+        const uint64_t part = i < 2u ? parts[i] : 0u;
+        if (i >= 2u && carry == 0u) {
+            break;
+        }
+        const uint64_t partial = result.limb[at + i] + part;
+        const uint64_t carry_part = partial < part ? 1u : 0u;
+        const uint64_t total = partial + carry;
+        const uint64_t carry_total = total < carry ? 1u : 0u;
+        result.limb[at + i] = total;
+        carry = carry_part + carry_total;
+    }
+}
+
 }  // namespace
 
 UInt128 UInt128::FromU64(const uint64_t value) {
@@ -171,6 +190,33 @@ UInt128 multiply_u64(const uint64_t lhs, const uint64_t rhs) {
     return UInt128{hi_hi + (hi_lo >> 32) + (cross >> 32), (cross << 32) | (lo_lo & MASK32)};
 }
 
+bool operator==(const UInt256& lhs, const UInt256& rhs) {
+    for (size_t i = 0; i < 4u; ++i) {
+        if (lhs.limb[i] != rhs.limb[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool operator<(const UInt256& lhs, const UInt256& rhs) {
+    for (size_t i = 4u; i-- > 0u;) {
+        if (lhs.limb[i] != rhs.limb[i]) {
+            return lhs.limb[i] < rhs.limb[i];
+        }
+    }
+    return false;
+}
+
+UInt256 multiply_u128(const UInt128& lhs, const UInt128& rhs) {
+    UInt256 result;
+    add_shifted(result, 0u, multiply_u64(lhs.low, rhs.low));
+    add_shifted(result, 1u, multiply_u64(lhs.high, rhs.low));
+    add_shifted(result, 1u, multiply_u64(lhs.low, rhs.high));
+    add_shifted(result, 2u, multiply_u64(lhs.high, rhs.high));
+    return result;
+}
+
 CountMoments count_moments(const BitCounts& counts) {
     CountMoments moments;
     for (const uint32_t count : counts) {
@@ -193,6 +239,18 @@ double isim_ratio(const UInt128& intersections, const UInt128& unions) {
         return 1.0;
     }
     return intersections.ToDouble() / unions.ToDouble();
+}
+
+bool isim_ratio_greater(const UInt128& lhs_intersections, const UInt128& lhs_unions,
+                        const UInt128& rhs_intersections, const UInt128& rhs_unions) {
+    const UInt128 one = UInt128::FromU64(1u);
+    const bool lhs_empty = lhs_unions == UInt128{};
+    const bool rhs_empty = rhs_unions == UInt128{};
+    const UInt128& a_num = lhs_empty ? one : lhs_intersections;
+    const UInt128& a_den = lhs_empty ? one : lhs_unions;
+    const UInt128& b_num = rhs_empty ? one : rhs_intersections;
+    const UInt128& b_den = rhs_empty ? one : rhs_unions;
+    return multiply_u128(b_num, a_den) < multiply_u128(a_num, b_den);
 }
 
 void check_isim_batch_size(const size_t num_fingerprints) {
@@ -219,6 +277,18 @@ uint64_t row_dot_counts(const uint64_t* words, const size_t size_bits, const Bit
     uint64_t dot = 0;
     for_each_set_bit(words, size_bits, [&](const size_t bit) { dot += counts[bit]; });
     return dot;
+}
+
+void row_dot_columns(const uint64_t* words, const size_t size_bits,
+                     const std::vector<uint32_t>& columns, const size_t cluster_count,
+                     std::vector<uint64_t>& dots) {
+    dots.assign(cluster_count, 0u);
+    for_each_set_bit(words, size_bits, [&](const size_t bit) {
+        const uint32_t* run = columns.data() + bit * cluster_count;
+        for (size_t l = 0; l < cluster_count; ++l) {
+            dots[l] += run[l];
+        }
+    });
 }
 
 uint32_t row_intersection(const uint64_t* lhs, const uint64_t* rhs, const size_t size_bits) {

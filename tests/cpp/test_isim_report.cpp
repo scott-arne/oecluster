@@ -330,3 +330,117 @@ TEST(ISimReportValidationTest, NegativeThresholdIsAcceptedNatively) {
     options.coverage_thresholds = {-0.1};
     EXPECT_NO_THROW(isim_report(make_result({0, 0, 1, 1}), batch, options));
 }
+
+TEST(ISimReportTest, CentroidStageMatchesTheOracleWithNoise) {
+    const auto labels = mixed_labels();
+    const std::vector<double> thresholds{0.6, 0.75, 0.9};
+    for (const uint64_t seed : {2024u, 8u}) {
+        const auto batch = isim_test::make_random_batch(40, 70, seed);
+        const auto oracle = isim_test::oracle_report(batch, labels, thresholds);
+        ISimReportOptions options = records_options(true);
+        options.coverage_thresholds = thresholds;
+        const auto report = isim_report(make_result(labels), batch, options);
+
+        isim_test::expect_rel(report.isim_silhouette, oracle.isim_silhouette, "silhouette");
+        isim_test::expect_rel(report.davies_bouldin_medoid, oracle.davies_bouldin_medoid, "db");
+        isim_test::expect_rel(report.dunn_medoid_separation_medoid_spread,
+                              oracle.dunn_medoid_separation_medoid_spread, "dunn");
+        ASSERT_EQ(report.coverage_at.size(), thresholds.size());
+        for (size_t t = 0; t < thresholds.size(); ++t) {
+            EXPECT_EQ(report.coverage_at[t], oracle.coverage_at[t]) << "t=" << t;
+            EXPECT_EQ(report.noise_coverage_at[t], oracle.noise_coverage_at[t]) << "t=" << t;
+        }
+        for (size_t k = 0; k < report.records.size(); ++k) {
+            const std::string at = " k=" + std::to_string(k);
+            isim_test::expect_rel(report.records[k].isim_silhouette, oracle.record_silhouette[k],
+                                  "record silhouette" + at);
+            EXPECT_EQ(report.records[k].nearest_cluster, oracle.nearest_cluster[k]) << at;
+            isim_test::expect_rel(report.records[k].nearest_cluster_similarity,
+                                  oracle.nearest_similarity[k], "nearest similarity" + at);
+        }
+    }
+}
+
+TEST(ISimReportTest, ThreadCountDoesNotChangeTheStage) {
+    const auto labels = mixed_labels();
+    const auto batch = isim_test::make_random_batch(40, 70, 31u);
+    ISimReportOptions options = records_options(true);
+    options.num_threads = 1;
+    const auto one = isim_report(make_result(labels), batch, options);
+    for (const size_t threads : {2u, 8u}) {
+        options.num_threads = threads;
+        expect_same_report(one, isim_report(make_result(labels), batch, options));
+    }
+}
+
+TEST(ISimReportTest, WellSeparatedHasTheHigherSilhouette) {
+    std::vector<OEFP::OEFP> fps;
+    std::vector<int> labels;
+    for (int block = 0; block < 3; ++block)
+        for (int i = 0; i < 6; ++i) {
+            const size_t base = static_cast<size_t>(block) * 40u;
+            fps.push_back(isim_test::make_fp(128, {base, base + 1, base + 2, base + 3,
+                                                   base + 4 + static_cast<size_t>(i)}));
+            labels.push_back(block);
+        }
+    const auto batch = isim_test::make_batch(fps);
+    std::vector<int> shuffled;
+    for (size_t i = 0; i < labels.size(); ++i) shuffled.push_back(static_cast<int>(i % 3));
+    ISimReportOptions options;
+    options.compute_centroid_indices = true;
+    EXPECT_GT(isim_report(make_result(labels), batch, options).isim_silhouette,
+              isim_report(make_result(shuffled), batch, options).isim_silhouette);
+}
+
+TEST(ISimReportTest, OneClusterStageDegenerates) {
+    const auto batch = isim_test::make_random_batch(5, 32, 9u);
+    const auto report = isim_report(make_result({0, 0, 0, 0, -1}), batch, records_options(true));
+    EXPECT_TRUE(std::isnan(report.isim_silhouette));
+    EXPECT_TRUE(std::isnan(report.davies_bouldin_medoid));
+    EXPECT_TRUE(std::isnan(report.dunn_medoid_separation_medoid_spread));
+    EXPECT_EQ(report.coverage_at.size(), 3u);
+    EXPECT_FALSE(std::isnan(report.noise_coverage_at[0]));
+    ASSERT_EQ(report.records.size(), 1u);
+    EXPECT_TRUE(std::isnan(report.records[0].isim_silhouette));
+    EXPECT_EQ(report.records[0].nearest_cluster, NO_NEAREST_CLUSTER);
+    EXPECT_TRUE(std::isnan(report.records[0].nearest_cluster_similarity));
+}
+
+TEST(ISimReportTest, AllSingletonsStageDegenerates) {
+    const auto batch = isim_test::make_batch({
+        isim_test::make_fp(16, {1}), isim_test::make_fp(16, {2}), isim_test::make_fp(16, {3})});
+    const auto report = isim_report(make_result({0, 1, 2}), batch, records_options(true));
+    EXPECT_EQ(report.isim_silhouette, 0.0);
+    EXPECT_EQ(report.davies_bouldin_medoid, 0.0);
+    EXPECT_TRUE(std::isnan(report.dunn_medoid_separation_medoid_spread));
+    for (const auto& record : report.records) EXPECT_EQ(record.isim_silhouette, 0.0);
+
+    const auto coincident = isim_test::make_batch({
+        isim_test::make_fp(16, {1}), isim_test::make_fp(16, {1}), isim_test::make_fp(16, {3})});
+    EXPECT_TRUE(std::isinf(isim_report(make_result({0, 1, 2}), coincident, records_options(true))
+                               .davies_bouldin_medoid));
+}
+
+TEST(ISimReportTest, NoNoiseLeavesNoiseCoverageNaN) {
+    const auto batch = isim_test::make_random_batch(6, 32, 4u);
+    const auto report = isim_report(make_result({0, 0, 0, 1, 1, 1}), batch, records_options(true));
+    ASSERT_EQ(report.noise_coverage_at.size(), report.coverage_at.size());
+    for (const double value : report.noise_coverage_at) EXPECT_TRUE(std::isnan(value));
+}
+
+TEST(ISimReportTest, NegativeThresholdCoversNothing) {
+    const auto batch = isim_test::make_random_batch(4, 16, 1u);
+    ISimReportOptions options = records_options(true);
+    options.coverage_thresholds = {-0.1};
+    const auto report = isim_report(make_result({0, 0, 1, 1}), batch, options);
+    EXPECT_EQ(report.coverage_at, (std::vector<double>{0.0}));
+}
+
+TEST(ISimReportTest, EmptyThresholdsLeaveCoverageEmpty) {
+    const auto batch = isim_test::make_random_batch(4, 16, 1u);
+    ISimReportOptions options = records_options(true);
+    options.coverage_thresholds.clear();
+    const auto report = isim_report(make_result({0, 0, 1, 1}), batch, options);
+    EXPECT_TRUE(report.coverage_at.empty());
+    EXPECT_TRUE(report.noise_coverage_at.empty());
+}

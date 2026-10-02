@@ -49,6 +49,18 @@ bool operator<(const UInt128& lhs, const UInt128& rhs);
 
 UInt128 multiply_u64(uint64_t lhs, uint64_t rhs);
 
+/// Unsigned 256-bit product holder, least significant limb first. Exists only
+/// to compare cluster-to-cluster iSIM ratios exactly: their numerators and
+/// unions reach about 2^94, so a cross product needs up to 2^188.
+struct UInt256 {
+    uint64_t limb[4] = {0u, 0u, 0u, 0u};
+};
+
+bool operator==(const UInt256& lhs, const UInt256& rhs);
+bool operator<(const UInt256& lhs, const UInt256& rhs);
+
+UInt256 multiply_u128(const UInt128& lhs, const UInt128& rhs);
+
 /// Per-bit on-counts over a set of fingerprints, one entry per declared bit.
 using BitCounts = std::vector<uint32_t>;
 
@@ -75,6 +87,12 @@ ISimSums isim_sums(uint64_t set_size, const CountMoments& moments);
 /// library defines as 0.
 double isim_ratio(const UInt128& intersections, const UInt128& unions);
 
+/// lhs_intersections / lhs_unions > rhs_intersections / rhs_unions, decided by
+/// exact cross-multiplication; a zero union reads as 1, as in isim_ratio.
+/// Converting each side to double first can round two equal ratios apart.
+bool isim_ratio_greater(const UInt128& lhs_intersections, const UInt128& lhs_unions,
+                        const UInt128& rhs_intersections, const UInt128& rhs_unions);
+
 /// Refuses 2^32 or more fingerprints, where a uint32_t per-bit count could
 /// wrap. A count rather than a batch so the boundary is testable without
 /// materialising billions of rows.
@@ -90,6 +108,13 @@ void add_row_to_counts(BitCounts& counts, const uint64_t* words, size_t size_bit
 
 /// x . c for one row against a count vector.
 uint64_t row_dot_counts(const uint64_t* words, size_t size_bits, const BitCounts& counts);
+
+/// x . c_l for every cluster l at once. columns holds the K count vectors
+/// column-major (columns[bit * cluster_count + l] = c_l[bit]), so each set bit
+/// reads one contiguous K-run. dots is resized to cluster_count.
+void row_dot_columns(const uint64_t* words, size_t size_bits,
+                     const std::vector<uint32_t>& columns, size_t cluster_count,
+                     std::vector<uint64_t>& dots);
 
 /// |x AND y| over the declared width.
 uint32_t row_intersection(const uint64_t* lhs, const uint64_t* rhs, size_t size_bits);

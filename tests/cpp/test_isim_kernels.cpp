@@ -188,3 +188,51 @@ TEST(ISimTest, RefusesAnyMetricButTanimoto) {
     options.metric = "dice";
     EXPECT_THROW(isim(batch, options), std::invalid_argument);
 }
+
+TEST(ISimKernelsTest, RowDotColumnsSumsEveryClusterColumn) {
+    // Two clusters' counts over 70 bits, stored column-major.
+    std::vector<uint32_t> columns(70 * 2, 0u);
+    columns[0 * 2 + 0] = 3u;
+    columns[0 * 2 + 1] = 1u;
+    columns[69 * 2 + 1] = 4u;
+    const auto batch = isim_test::make_batch({isim_test::make_fp(70, {0, 69})});
+    std::vector<uint64_t> dots;
+    row_dot_columns(batch.RowWords(0), 70, columns, 2, dots);
+    EXPECT_EQ(dots, (std::vector<uint64_t>{3u, 5u}));
+}
+
+TEST(ISimKernelsTest, MultiplyU128CarriesAcrossEveryLimb) {
+    constexpr uint64_t MAX = std::numeric_limits<uint64_t>::max();
+    // (2^128 - 1)^2 = 2^256 - 2^129 + 1.
+    const UInt256 square = multiply_u128(UInt128{MAX, MAX}, UInt128{MAX, MAX});
+    EXPECT_EQ(square.limb[0], 1u);
+    EXPECT_EQ(square.limb[1], 0u);
+    EXPECT_EQ(square.limb[2], MAX - 1u);
+    EXPECT_EQ(square.limb[3], MAX);
+    // 2^64 * 2^64 = 2^128 lands exactly in limb 2.
+    const UInt256 power = multiply_u128(UInt128{1u, 0u}, UInt128{1u, 0u});
+    EXPECT_EQ(power.limb[2], 1u);
+    EXPECT_EQ(power.limb[0] | power.limb[1] | power.limb[3], 0u);
+    EXPECT_TRUE(power < square);
+    EXPECT_FALSE(square < power);
+}
+
+TEST(ISimKernelsTest, RatioComparisonIsExactWhereDoublesDisagree) {
+    // Both ratios are exactly 1/3, but converting each side to double first
+    // gives adjacent doubles, which would let the later ordinal win a tie.
+    const UInt128 a_num = UInt128::FromU64(8100000180000000ull);
+    const UInt128 a_den = UInt128::FromU64(3ull * 8100000180000000ull);
+    const UInt128 b_num = UInt128::FromU64(8100000450000006ull);
+    const UInt128 b_den = UInt128::FromU64(3ull * 8100000450000006ull);
+    ASSERT_NE(a_num.ToDouble() / a_den.ToDouble(), b_num.ToDouble() / b_den.ToDouble());
+    EXPECT_FALSE(isim_ratio_greater(a_num, a_den, b_num, b_den));
+    EXPECT_FALSE(isim_ratio_greater(b_num, b_den, a_num, a_den));
+    // Strict order, and operands past 2^64 on both sides.
+    const UInt128 big{1u, 0u};
+    EXPECT_TRUE(isim_ratio_greater(big, big + big, big, big + big + big));
+    EXPECT_FALSE(isim_ratio_greater(big, big + big + big, big, big + big));
+    // A zero union reads as similarity 1.
+    EXPECT_TRUE(isim_ratio_greater(UInt128{}, UInt128{}, big, big + big));
+    EXPECT_FALSE(isim_ratio_greater(big, big, UInt128{}, UInt128{}));
+    EXPECT_FALSE(isim_ratio_greater(UInt128{}, UInt128{}, big, big));
+}
