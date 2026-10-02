@@ -740,8 +740,8 @@ returned something else (`knn_graph` returns a graph, for instance).
 what a later serialization needs. Specs compare equal on the same
 algorithm object and equal options, and are not hashable.
 
-Nothing is validated at construction; the algorithm validates its options
-when it runs, exactly as a direct call would.
+The options are not validated at construction; the algorithm validates
+them when it runs, exactly as a direct call would.
 
 ### `select_parameter()`
 
