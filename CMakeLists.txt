@@ -149,6 +149,8 @@ set(OECLUSTER_SOURCES
     src/clustering/BitBirchKernels.cpp
     src/clustering/BitBirchTree.cpp
     src/clustering/BitBirch.cpp
+    src/clustering/ISimKernels.cpp
+    src/clustering/ISimReport.cpp
     src/clustering/PartitionAgreement.cpp
     src/clustering/SARCoherence.cpp
     src/clustering/DiversitySelection.cpp
