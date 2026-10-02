@@ -455,3 +455,68 @@ def test_the_matrix_gate_refuses_a_non_finite_pair_no_metric_reads():
     matrix.storage.Set(5, 9, math.nan)
     with pytest.raises(ValueError, match="non-finite entries"):
         _landscape(matrix)
+
+
+def _lazy_entry_points(n):
+    """Call each lazy entry point on n named-path items, sized consistently."""
+    result = oecluster.butina(
+        oecluster.pdist(_mols(FP_SMILES[:n]), "fingerprint"), 0.5)
+    return [
+        lambda mols, **kw: oecluster.cluster_report(result, mols, **kw),
+        lambda mols, **kw: oecluster.activity_landscape(
+            mols, [4.0 + i for i in range(n)], **kw),
+        lambda mols, **kw: oecluster.modelability(
+            mols, ["active", "inactive"] * (n // 2) + ["active"] * (n % 2),
+            **kw),
+    ]
+
+
+@pytest.mark.parametrize("entry", range(3))
+def test_a_drop_is_refused_before_the_comparison_is_built(entry):
+    # One survivor cannot fit seuclidean's variances, so the constructor would
+    # raise ComparisonError (a RuntimeError) if the drop were not refused
+    # first.
+    call = _lazy_entry_points(2)[entry]
+    with pytest.raises(ValueError,
+                       match=r"dropped item 0 \(missing-descriptor\)"):
+        call(_mols(["O", "CCO"]), comparison="descriptor",
+             metric="seuclidean")
+
+
+@pytest.mark.parametrize("entry", range(3))
+def test_dropping_every_item_names_the_first_dropped(entry):
+    call = _lazy_entry_points(2)[entry]
+    with pytest.raises(ValueError,
+                       match=r"dropped item 0 \(missing-descriptor\)"):
+        call(_mols(["O", "O"]), comparison="descriptor", metric="euclidean")
+
+
+@pytest.mark.parametrize("entry", range(3))
+def test_a_declared_non_finite_comparison_is_refused(entry):
+    call = _lazy_entry_points(len(DESCRIPTOR_SMILES))[entry]
+    with pytest.raises(ValueError, match=re.escape(
+            "cannot rank distances the comparison declares may be non-finite "
+            "(missing='propagate'); use missing='complete_case'")):
+        call(_mols(DESCRIPTOR_SMILES), comparison="descriptor",
+             metric="euclidean", missing="propagate")
+
+
+def _linear(smiles, title, rise):
+    """A linear molecule in 3D, whose ROCS self-distance is not zero."""
+    mol = oechem.OEMol()
+    oechem.OESmilesToMol(mol, smiles)
+    coords = []
+    for idx in range(mol.NumAtoms()):
+        coords += [1.16 * idx, 0.1 * idx, rise * idx]
+    mol.SetCoords(oechem.OEFloatArray(coords))
+    mol.SetDimension(3)
+    mol.SetTitle(title)
+    return mol
+
+
+@pytest.mark.parametrize("entry", range(3))
+def test_a_nonzero_self_distance_is_refused(entry):
+    call = _lazy_entry_points(2)[entry]
+    mols = [_linear("O=C=O", "a", 0.3), _linear("N#N", "b", 0.2)]
+    with pytest.raises(ValueError, match="requires a zero self-distance"):
+        call(mols, comparison="rocs")

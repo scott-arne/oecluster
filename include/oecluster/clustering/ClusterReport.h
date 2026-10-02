@@ -272,9 +272,9 @@ ClusterReport cluster_report(
  *     and before any comparison runs.
  * :raises std::invalid_argument: If chunk_size is zero (checked first) or
  *     compute_pair_rank_indices is set (checked after the facts), both before
- *     any comparison runs; otherwise on the storage overload's refusals, with a non-finite
- *     distance reported at the earliest pair in reading order whatever the
- *     thread count.
+ *     any comparison runs; otherwise on the storage overload's refusals, with
+ *     a non-finite distance reported at the earliest pair in reading order
+ *     whatever the thread count.
  * :raises std::out_of_range: As the storage overload, against
  *     comparison.Size().
  */

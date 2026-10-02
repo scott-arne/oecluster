@@ -265,14 +265,12 @@ ClusterReport report_engine(
             std::to_string(num_items));
     }
 
-    // Hoisted above the first storage read. cluster_representative validates
-    // the cluster it is handed, but only when the intra pass reaches that
-    // cluster -- so a malformed cluster k would be named only after some
-    // cluster j < k had already asked the backend for a pair it cannot answer,
-    // and the caller was told about a storage class instead of the bad cluster
-    // member that is the error they have to fix. Checking every cluster before
-    // any of them is processed makes that ordering hold whichever one is
-    // malformed.
+    // Every cluster is validated before the first distance read. Otherwise a
+    // malformed cluster k would be named only after some cluster j < k had
+    // already asked the backend for a pair it cannot answer, and the caller
+    // would be told about a storage class instead of the bad cluster member
+    // that is the error they have to fix. Checking up front makes that
+    // ordering hold whichever cluster is malformed.
     //
     // This runs unconditionally rather than under the members-non-empty guard
     // it used to sit behind: labels = {0} with members = {} is exactly the
@@ -1084,10 +1082,10 @@ ClusterReport report_engine(
                     // At K >= 2 the cross loop visits every cluster in at least
                     // one pair, every cluster is non-empty (the validator
                     // rejects empty clusters before this point), and every
-                    // cross distance is finite (detail::checked_distance
-                    // rejects a non-finite read at the cross pass -- the
-                    // storage precondition checks only the backend type, not
-                    // the values). So nearest_cluster_distance[k] is finite for
+                    // cross distance is finite (finite_report_distance rejects
+                    // a non-finite read at the cross pass, from either
+                    // distance source -- the storage precondition checks only
+                    // the backend type, not the values). So nearest_cluster_distance[k] is finite for
                     // every k, and the count guard coincides with the
                     // producer's finiteness guard. nearest_cluster[k] is
                     // assigned in the same if bodies as the distance, so a

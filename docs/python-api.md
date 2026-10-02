@@ -375,15 +375,21 @@ field, to the matrix form over a matrix filled through that same
 `Compare`. Medians are exact: a distribution small enough to hold is
 stored and sorted, a larger one is found by radix selection that rereads
 its pairs, so memory stays O(N) per worker while a large cluster's pairs
-are compared more than once. Cross-cluster pairs are never reread. One
+are compared more than once: with `compute_per_cluster_records=True`, each
+pair of a cluster above 2^20 pairs is compared about eight times. Median
+selection rereads only within-cluster pairs, and the cross-cluster pass is
+made once; the later stages that measure to representatives or medoids,
+coverage among them, read some pairs again. One
 exception holds on every path: a zero median is reported as `+0.0` even
 where the input held `-0.0`.
 
 Against `pdist()` of the same items the agreement is approximate rather
 than exact: `pdist` computes its fingerprint distances by a different
-route and may differ from `Compare` in the last bits, about 1e-12. A
-count can therefore differ only where a distance sits within that margin
-of a threshold.
+route, so individual distances agree with `Compare` only to about 1e-12.
+That is a per-distance agreement, not a guarantee on the report: any
+thresholded count, and any field derived from an argmin (medoids,
+representatives, nearest cluster, the CH and DB indices), can differ when
+inputs sit within that margin of a threshold or a tie.
 
 `chunk_size` (default 4096) is the number of pairwise distances in one
 unit of work. It must be an integer of at least 1 and is checked on every
@@ -399,15 +405,21 @@ comparison's declared facts before any pair is scored:
   per-pair feature subset (`missing='ignore'`), unless
   `allow_nonmetric=True`, worded as the matrix gate's messages but naming
   the comparison;
-- `compute_pair_rank_indices=True`, or a preset that enables it, with
-  `ValueError` "cluster_report cannot compute pair-rank indices from a
+- `compute_pair_rank_indices=True`, with `ValueError` "cluster_report cannot compute pair-rank indices from a
   comparison; pass a SymmetricDistanceMatrix or set
   compute_pair_rank_indices=False". Those two indices rank all pairs at
   once, which no O(N) path can do;
 - items that normalizing drops or expands, for example a molecule with no
   descriptors. Labels are positional, so a dropped item would shift every
-  label after it; the `ValueError` names the item and the reason;
+  label after it. For a dropped item the `ValueError` names the item and
+  the reason, and is raised before the comparison is built; an expansion
+  is refused with the item counts;
 - a result and a comparison of different sizes.
+
+Python refuses pair-rank indices before it builds the comparison, so that
+a costly comparison is never built just to be refused; the C++ overload
+checks the comparison's facts first. Both raise before any distance is
+read.
 
 A non-finite value the comparison did not declare is caught as the pair
 is scored, with the engine's `RuntimeError`, not the matrix gate's
@@ -825,7 +837,10 @@ modi = oecluster.modelability(oecluster.FingerprintComparison(mols),
 ```
 
 The results are identical to the matrix form over a matrix filled through
-`Compare`, and agree with `pdist()` to about 1e-12 on the same terms.
+`Compare`. Against `pdist()`, individual fingerprint distances agree to
+about 1e-12 on the same terms, and any thresholded count or
+argmin-derived field (RMODI, MODI) can differ when inputs sit within that
+margin of a threshold or a tie.
 `activity_landscape()` compares each pair once, `N * (N - 1) / 2` calls.
 `modelability()` makes `N * (N - 1)`, twice as many, when at least two
 classes are scored: its nearest-neighbour search runs over each sample's

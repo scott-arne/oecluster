@@ -4422,9 +4422,9 @@ def cluster_report(result, items=_MISSING, *, distance_matrix=_MISSING,
         _gate.check_allow_nonmetric(allow_nonmetric)
         source = _diversity_source(
             items, comparison, kwargs, "cluster_report",
+            refuse_dropped=True,
             refuse_facts=lambda obj, caller: _refuse_report_comparison(
                 obj, caller, allow_nonmetric=allow_nonmetric))
-        _refuse_dropped_items(source, "cluster_report")
         if result.num_samples != source.size:
             raise ValueError(
                 f"cluster_report requires a result and a comparison over the "
@@ -5186,8 +5186,7 @@ def activity_landscape(items=_MISSING, activity=_MISSING, *,
         target = items.storage
     else:
         source = _diversity_source(items, comparison, kwargs,
-                                   "activity_landscape")
-        _refuse_dropped_items(source, "activity_landscape")
+                                   "activity_landscape", refuse_dropped=True)
         # A comparison's size is known only once it is built, so this check
         # follows its facts check, where a matrix's precedes its gate.
         if len(values) != source.size:
@@ -5310,8 +5309,8 @@ def modelability(items=_MISSING, activity_classes=_MISSING, *,
         _gate.require_comparable(items, "modelability")
         target = items.storage
     else:
-        source = _diversity_source(items, comparison, kwargs, "modelability")
-        _refuse_dropped_items(source, "modelability")
+        source = _diversity_source(items, comparison, kwargs, "modelability",
+                                   refuse_dropped=True)
         # See activity_landscape(): a comparison's size is known only once it
         # is built.
         if len(classes) != source.size:
@@ -5614,6 +5613,7 @@ def _refuse_comparison_facts(comparison_obj, caller):
 
 def _diversity_source(items, comparison, kwargs, caller, *,
                       allow_sparse=False, defer_comparable_check=False,
+                      refuse_dropped=False,
                       refuse_facts=_refuse_comparison_facts):
     """
     Dispatch a diversity entry point's input onto one of its three paths.
@@ -5627,6 +5627,8 @@ def _diversity_source(items, comparison, kwargs, caller, *,
         points read sparse entries directly.
     :param defer_comparable_check: Skip the up-front comparison fact check;
         for callers that need to inspect source.size before gating.
+    :param refuse_dropped: Refuse any item normalization dropped, before the
+        comparison is built; for callers that score every item by position.
     :param refuse_facts: Fact check run on the comparison, called as
         ``refuse_facts(comparison_obj, caller)``; for callers whose gate
         differs from the default ranking gate.
@@ -5634,8 +5636,9 @@ def _diversity_source(items, comparison, kwargs, caller, *,
     :raises TypeError: If the input and the comparison arguments do not fit
         one path.
     :raises ValueError: If the storage is sparse and allow_sparse is False,
-        normalization expanded or emptied the item list, or the comparison's
-        facts refuse it (unless defer_comparable_check defers the check).
+        normalization expanded or emptied the item list or, with
+        refuse_dropped, dropped an item, or the comparison's facts refuse it
+        (unless defer_comparable_check defers the check).
     """
     if isinstance(items, CrossDistanceMatrix):
         raise TypeError(
@@ -5680,6 +5683,11 @@ def _diversity_source(items, comparison, kwargs, caller, *,
             f"{len(items)} items into {len(kept)}; {caller} reports caller "
             "positions and cannot map expanded items back to them. Expand "
             "conformers up front, or pass expand_conformers=False")
+    # Ahead of the build: a comparison over the survivors can refuse them
+    # with a native error that does not name the dropped item, and an empty
+    # survivor list would otherwise be reported without it.
+    if refuse_dropped:
+        _refuse_dropped_items(excluded, caller)
     if not kept:
         raise ValueError(f"{caller}() requires at least one item")
     dropped = {index for index, _ in excluded}
@@ -5768,21 +5776,21 @@ def _refuse_report_comparison(comparison_obj, caller, *, allow_nonmetric):
             f"Pass allow_nonmetric=True to proceed anyway.")
 
 
-def _refuse_dropped_items(source, caller):
+def _refuse_dropped_items(excluded, caller):
     """
-    Refuse a source whose normalization dropped an item.
+    Refuse an item list whose normalization dropped an item.
 
     Labels and activities are positional, one per caller item, so a dropped
     item would shift every later one onto another item's distances.
     maxmin_select can report caller positions around a gap; these callers
     cannot.
 
-    :param source: The dispatched :class:`_DiversitySource`.
+    :param excluded: ``(position, reason)`` pairs from normalization.
     :param caller: Entry point name for the message.
     :raises ValueError: If any item was dropped.
     """
-    if source.excluded:
-        position, reason = source.excluded[0]
+    if excluded:
+        position, reason = excluded[0]
         raise ValueError(
             f"{caller} scores every item by position, but normalizing the "
             f"inputs dropped item {position} ({reason}); remove it, with its "

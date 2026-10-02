@@ -14,10 +14,14 @@ This file starts at 5.0.0; earlier releases are not recorded here.
     its options as keyword arguments. `distance_matrix=` is a keyword alias
     accepting only a matrix; passing both is a `TypeError`.
   - Results are exact: identical to the matrix form over a matrix filled
-    through `Compare`, and within about 1e-12 of `pdist()`. Memory is O(N)
-    per worker; time stays O(N^2).
+    through `Compare`. Individual fingerprint distances agree with `pdist()`
+    to about 1e-12, so a thresholded count or an argmin-derived field
+    (medoids, representatives, nearest cluster, CH/DB, RMODI, MODI) can
+    differ when inputs sit within that margin of a tie or threshold. Memory
+    is O(N) per worker; time stays O(N^2).
   - New `chunk_size` option (default 4096 distances per work unit) on all
-    three, validated on every path and used only on the comparison paths.
+    three, validated on every Python path (the C++ storage overloads ignore
+    it) and used only on the comparison paths.
   - Comparisons are gated on their declared facts as the matrix gate gates
     a matrix; `cluster_report` honours `allow_nonmetric`. Pair-rank indices
     are matrix-only, and items that normalizing drops or expands are refused.

@@ -285,9 +285,10 @@ refusing a similarity, a nonzero self-distance, `NaNPresent` and
 `SubsetScored` with `ComparisonError`. `cluster_report` refuses the first
 three only, as its storage overload has no metric gate, and then refuses
 `compute_pair_rank_indices` with `std::invalid_argument`. Length
-mismatches name "the comparison". Undeclared non-finite or negative
-distances are caught per pair as they are scored, with the storage
-overloads' messages; only scored pairs are checked. `cluster_report`
+mismatches name "the comparison". Undeclared non-finite distances (and,
+for `activity_landscape` and `modelability`, negative ones) are caught per
+pair as they are scored, with the storage overloads' messages; only scored
+pairs are checked. `cluster_report`
 reports the earliest bad pair in row order for every thread count;
 `activity_landscape` and `modelability` keep their storage overloads'
 selection.
