@@ -19,67 +19,28 @@
 #include "DiversityValidation.h"
 #include "ExactMedian.h"
 #include "InternalIndices.h"
+#include "ReportCommon.h"
 #include "ReportDistanceSource.h"
 
 namespace OECluster {
 
-ClusterReportOptions::ClusterReportOptions(ClusterThreshold preset) {
+ClusterReportOptions::ClusterReportOptions(ClusterThreshold preset)
+    : coverage_thresholds(detail::preset_coverage_thresholds(preset)) {
     switch (preset) {
         case ClusterThreshold::Tight:
-            coverage_thresholds = {0.20, 0.30, 0.40};
             boundary_threshold = 0.25;
             break;
         case ClusterThreshold::Diversity:
-            coverage_thresholds = {0.40, 0.50, 0.60};
             boundary_threshold = 0.40;
             break;
         case ClusterThreshold::Default:
         default:
-            coverage_thresholds = {0.25, 0.35, 0.45};
             boundary_threshold = 0.30;
             break;
     }
 }
 
 namespace {
-
-// Fractional-rank percentile matches NumPy/Pandas default interpolation (not nearest-rank).
-double percentile(std::vector<double> values, const double q) {
-    if (values.empty()) {
-        return std::numeric_limits<double>::quiet_NaN();
-    }
-    std::sort(values.begin(), values.end());
-    if (values.size() == 1) {
-        return values.front();
-    }
-    const double rank = q * static_cast<double>(values.size() - 1);
-    const size_t lo = static_cast<size_t>(std::floor(rank));
-    const size_t hi = static_cast<size_t>(std::ceil(rank));
-    const double frac = rank - static_cast<double>(lo);
-    return values[lo] + frac * (values[hi] - values[lo]);
-}
-
-// Gini coefficient via weighted sum (Lorenz curve area) not pairwise differences
-// for O(n log n) not O(n²).
-double size_gini(const std::vector<double>& sizes) {
-    const size_t n = sizes.size();
-    if (n <= 1) {
-        return 0.0;
-    }
-    std::vector<double> sorted = sizes;
-    std::sort(sorted.begin(), sorted.end());
-    double total = 0.0;
-    double weighted = 0.0;
-    for (size_t i = 0; i < n; ++i) {
-        total += sorted[i];
-        weighted += static_cast<double>(i + 1) * sorted[i];
-    }
-    if (total == 0.0) {
-        return 0.0;
-    }
-    return (2.0 * weighted) / (static_cast<double>(n) * total) -
-           (static_cast<double>(n) + 1.0) / static_cast<double>(n);
-}
 
 double nan_value() {
     return std::numeric_limits<double>::quiet_NaN();
@@ -122,47 +83,6 @@ void add_pair_count(size_t& total, const size_t increment) {
     total += increment;
 }
 
-// One definition, called from the scorecard's mean over all points and from the
-// per-cluster records. The two reductions differ -- the scalar averages over
-// every clustered point, a record over its own members -- but the term they
-// average must not.
-//
-// Rousseeuw defines s(i) = 0 for a point that is the only member of its
-// cluster, and the size test is what implements that. A singleton has no own
-// pair to average, so its a term arrives here as 0.0 for want of a distance
-// rather than because its neighbours are coincident, and the general formula
-// would read that as the perfect score 1.0. Awarding the maximum to a cluster
-// of one inflates the mean on exactly the fragmented clusterings this
-// scorecard exists to discriminate.
-double silhouette_term(const double a_term, const double b_term, const size_t cluster_size) {
-    if (cluster_size < 2) {
-        return 0.0;
-    }
-    const double denominator = std::max(a_term, b_term);
-    return denominator == 0.0 ? 0.0 : (b_term - a_term) / denominator;
-}
-
-double size_entropy(const std::vector<double>& sizes) {
-    if (sizes.size() <= 1) {
-        return 0.0;
-    }
-    double total = 0.0;
-    for (const double s : sizes) {
-        total += s;
-    }
-    if (total == 0.0) {
-        return 0.0;
-    }
-    double entropy = 0.0;
-    for (const double s : sizes) {
-        if (s > 0.0) {
-            const double p = s / total;
-            entropy -= p * std::log2(p);
-        }
-    }
-    return entropy;
-}
-
 // Walks a plan once, handing every distance to visit in plan order. The plan
 // is copied so the walk can enumerate the rows the reader is filling.
 template <class Source, class Plan, class Visit>
@@ -202,155 +122,11 @@ ClusterReport report_engine(
     const std::vector<ClusterLabel>& labels = result.Labels();
     const Clusters& members = result.Members();
 
-    report.num_samples = labels.size();
-    report.num_clusters = members.size();
+    detail::assign_profile(report, detail::report_profile(result, options.treat_noise_as_singletons));
+    const size_t num_noise = report.num_noise;
 
-    size_t num_noise = 0;
-    for (const ClusterLabel label : labels) {
-        if (label < 0) {
-            ++num_noise;
-        }
-    }
-    report.num_noise = num_noise;
-
-    std::vector<double> sizes;
-    sizes.reserve(members.size());
-    size_t largest = 0;
-    size_t num_singletons = 0;
-    for (const Cluster& cluster : members) {
-        sizes.push_back(static_cast<double>(cluster.size()));
-        largest = std::max(largest, cluster.size());
-        if (cluster.size() == 1) {
-            ++num_singletons;
-        }
-    }
-    report.num_singletons = num_singletons;
-
-    const double n = static_cast<double>(report.num_samples);
-    report.noise_fraction = n > 0.0 ? static_cast<double>(num_noise) / n : 0.0;
-    report.largest_cluster_fraction = n > 0.0 ? static_cast<double>(largest) / n : 0.0;
-
-    // Under the flag, each noise point counts as its own singleton cluster, so
-    // it is folded into both the numerator and the denominator.
-    if (options.treat_noise_as_singletons) {
-        const double denom = static_cast<double>(report.num_clusters + num_noise);
-        report.singleton_fraction =
-            denom > 0.0 ? static_cast<double>(num_singletons + num_noise) / denom : 0.0;
-    } else {
-        const double denom = static_cast<double>(report.num_clusters);
-        report.singleton_fraction =
-            denom > 0.0 ? static_cast<double>(num_singletons) / denom : 0.0;
-    }
-
-    if (sizes.empty()) {
-        report.cluster_size_median = std::numeric_limits<double>::quiet_NaN();
-        report.cluster_size_p90 = std::numeric_limits<double>::quiet_NaN();
-    } else {
-        report.cluster_size_median = percentile(sizes, 0.5);
-        report.cluster_size_p90 = percentile(sizes, 0.9);
-    }
-    report.size_gini = size_gini(sizes);
-    report.size_entropy = size_entropy(sizes);
-
-    // The label vector and the storage must describe the same sample set before
-    // any per-sample check runs. Left to the pre-pass below, a surplus
-    // *clustered* sample is reported as "appears in no cluster", which sends the
-    // caller to fix a cluster list when the real error is that they paired a
-    // result with the wrong storage. The members-non-empty conjunct preserves
-    // the documented acceptance of a long all-noise label vector.
-    if (!members.empty() && labels.size() > num_items) {
-        throw std::out_of_range(
-            "cluster_report: label count " + std::to_string(labels.size()) +
-            " exceeds the " + std::string(noun) + " sample count " +
-            std::to_string(num_items));
-    }
-
-    // Every cluster is validated before the first distance read. Otherwise a
-    // malformed cluster k would be named only after some cluster j < k had
-    // already asked the backend for a pair it cannot answer, and the caller
-    // would be told about a storage class instead of the bad cluster member
-    // that is the error they have to fix. Checking up front makes that
-    // ordering hold whichever cluster is malformed.
-    //
-    // This runs unconditionally rather than under the members-non-empty guard
-    // it used to sit behind: labels = {0} with members = {} is exactly the
-    // disagreement being checked for, and the guard would skip it.
-    //
-    // Checking members against labels alone is not enough. Labels() and
-    // Members() must be two spellings of one partition; a one-directional check
-    // leaves a clustered sample that no cluster lists -- counted in num_samples
-    // and coverage_at, absent from every pair statistic. The owner array is
-    // also the sample-to-ordinal lookup the silhouette and the record table
-    // need later, so the check pays for itself.
-    constexpr size_t NO_OWNER = std::numeric_limits<size_t>::max();
-    std::vector<size_t> owner(labels.size(), NO_OWNER);
-
-    // Three staged passes rather than one interleaved loop, so that the layer a
-    // refusal comes from does not depend on which cluster holds which error: a
-    // malformed cluster is always reported ahead of a partition that
-    // double-counts a sample, whatever order the two arrive in.
-    //
-    // Inside this first pass nothing is canonicalised. The shared validator
-    // short-circuits on the first fault it meets, so which of "empty", "outside
-    // the storage range" and "not unique" is named depends both on the order of
-    // the clusters and on the order of the members within one, and the two
-    // answers can differ in exception type as well as in message. That is
-    // deliberate: all three tell the caller the same thing -- this cluster list
-    // is malformed -- and ordering them here would mean reimplementing checks
-    // that belong in DistanceAccess.h. The guarantee is between layers, not
-    // inside one.
-    for (const Cluster& cluster : members) {
-        detail::validate_cluster_members(cluster, num_items);
-    }
-
-    // A member can be inside the storage range and past the end of a shorter
-    // label vector; without this, reading Labels()[member] below is undefined.
-    // It runs to completion before ownership so that a bad index -- another
-    // symptom of a result paired with the wrong labels -- is never masked by a
-    // duplicate found in an earlier cluster.
-    for (const Cluster& cluster : members) {
-        for (const size_t member : cluster) {
-            if (member >= labels.size()) {
-                throw std::out_of_range(
-                    "cluster_report: cluster member " + std::to_string(member) +
-                    " is at or beyond the label count " +
-                    std::to_string(labels.size()));
-            }
-        }
-    }
-
-    for (size_t k = 0; k < members.size(); ++k) {
-        for (const size_t member : members[k]) {
-            if (owner[member] != NO_OWNER) {
-                throw std::invalid_argument(
-                    "cluster_report: sample " + std::to_string(member) +
-                    " appears in clusters " + std::to_string(owner[member]) +
-                    " and " + std::to_string(k));
-            }
-            owner[member] = k;
-        }
-    }
-
-    for (size_t i = 0; i < labels.size(); ++i) {
-        if (labels[i] >= 0) {
-            if (owner[i] != static_cast<size_t>(labels[i])) {
-                throw std::invalid_argument(
-                    owner[i] == NO_OWNER
-                        ? "cluster_report: sample " + std::to_string(i) +
-                              " has label " + std::to_string(labels[i]) +
-                              " but appears in no cluster"
-                        : "cluster_report: sample " + std::to_string(i) +
-                              " has label " + std::to_string(labels[i]) +
-                              " but appears in cluster " +
-                              std::to_string(owner[i]));
-            }
-        } else if (owner[i] != NO_OWNER) {
-            throw std::invalid_argument(
-                "cluster_report: sample " + std::to_string(i) +
-                " is labelled noise but appears in cluster " +
-                std::to_string(owner[i]));
-        }
-    }
+    const std::vector<size_t> owner =
+        detail::validate_report_partition(result, num_items, "cluster_report", noun);
 
     if (!members.empty()) {
         const size_t cluster_count = members.size();
@@ -675,7 +451,7 @@ ClusterReport report_engine(
                                    : detail::ExactMedian::OfInPlace(intra_pairs))
             : global_median.Result();
         report.median_radius = detail::median_distance(radii);
-        report.p95_diameter = percentile(diameters, 0.95);
+        report.p95_diameter = detail::percentile(diameters, 0.95);
         report.median_medoid_member_distance = detail::median_distance(medoid_member_means);
 
         // ---- Cross pass: once per unordered cluster pair. ----
@@ -796,7 +572,7 @@ ClusterReport report_engine(
                 for (const size_t point : cluster) {
                     const double a_term = own_mean[point];
                     const double b_term = best_other_mean[point];
-                    silhouette_sum += silhouette_term(a_term, b_term, cluster.size());
+                    silhouette_sum += detail::silhouette_term(a_term, b_term, cluster.size());
                     ++silhouette_count;
                 }
             }
@@ -876,7 +652,7 @@ ClusterReport report_engine(
                 for (size_t point = 0; point < report.num_samples; ++point) {
                     if (nearest_representative[point] <= threshold) {
                         ++covered;
-                        if (owner[point] == NO_OWNER) {
+                        if (owner[point] == detail::NO_OWNER) {
                             ++covered_noise;
                         }
                     }
@@ -932,7 +708,7 @@ ClusterReport report_engine(
             size_t global_medoid = 0;
             double smallest_total = std::numeric_limits<double>::infinity();
             for (size_t i = 0; i < labels.size(); ++i) {
-                if (owner[i] != NO_OWNER && point_total[i] < smallest_total) {
+                if (owner[i] != detail::NO_OWNER && point_total[i] < smallest_total) {
                     smallest_total = point_total[i];
                     global_medoid = i;
                 }
@@ -1099,7 +875,7 @@ ClusterReport report_engine(
                     for (const size_t point : members[k]) {
                         const double a_term = own_mean[point];
                         const double b_term = best_other_mean[point];
-                        silhouette_total += silhouette_term(a_term, b_term, members[k].size());
+                        silhouette_total += detail::silhouette_term(a_term, b_term, members[k].size());
                     }
                     record.silhouette = members[k].empty()
                         ? nan_value()

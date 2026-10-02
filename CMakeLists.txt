@@ -139,6 +139,7 @@ set(OECLUSTER_SOURCES
     src/clustering/Leiden.cpp
     src/clustering/ClusterMetrics.cpp
     src/clustering/Representative.cpp
+    src/clustering/ReportCommon.cpp
     src/clustering/ClusterReport.cpp
     src/clustering/DBSCAN.cpp
     src/clustering/HDBSCANLinkage.cpp

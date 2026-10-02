@@ -22,6 +22,7 @@ add_executable(oecluster_tests
     cpp/test_bitbirch_clustering.cpp
     cpp/test_isim_kernels.cpp
     cpp/test_cluster_report.cpp
+    cpp/test_report_common.cpp
     cpp/test_partition_agreement.cpp
     cpp/test_condensed_index.cpp
     cpp/test_metric_table.cpp
