@@ -760,8 +760,8 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, _oecluster_is_oereceptor, "
 // in the fallback message; spelling that out by hand for each one invited the
 // ladders to drift apart, and one of them already had. `NAME` is SWIG
 // preprocessor stringification, which is what keeps each message naming its
-// own function. cluster_report needs an extra pair of catch clauses and so is
-// written out below rather than expanded.
+// own function. The entry points that can plausibly exhaust memory use
+// OECLUSTER_GIL_MEMORY_EXCEPTION instead, which adds a pair of catch clauses.
 // ============================================================================
 %define OECLUSTER_GIL_EXCEPTION(QUALIFIED, NAME)
 %exception QUALIFIED {
@@ -782,22 +782,12 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, _oecluster_is_oereceptor, "
 }
 %enddef
 
-OECLUSTER_GIL_EXCEPTION(OECluster::pdist, pdist)
-OECLUSTER_GIL_EXCEPTION(OECluster::cdist, cdist)
-OECLUSTER_GIL_EXCEPTION(OECluster::cdist_into_address, cdist_into_address)
-OECLUSTER_GIL_EXCEPTION(OECluster::butina_cluster, butina_cluster)
-OECLUSTER_GIL_EXCEPTION(OECluster::cluster_representative, cluster_representative)
-OECLUSTER_GIL_EXCEPTION(OECluster::rank_representatives, rank_representatives)
-OECLUSTER_GIL_EXCEPTION(OECluster::select_representatives, select_representatives)
-
-// cluster_report is the one entry point that allocates proportionally to the
-// square of the input (its storage overload under compute_pair_rank_indices),
-// so it is the one that can plausibly exhaust memory or exceed a container's
-// max_size(). Those two get SWIG_MemoryError rather than the macro's blanket
-// SWIG_RuntimeError, which is why it is spelled out here instead of expanded.
-// The block covers both overloads; the comparison overload runs clones on
-// worker threads with no Python object in reach, so the GIL stays released.
-%exception OECluster::cluster_report {
+// The same ladder, except that std::bad_alloc and std::length_error (a
+// container asked to exceed its max_size()) surface as SWIG_MemoryError rather
+// than the blanket SWIG_RuntimeError, so a caller can tell an exhausted
+// machine from a refused input.
+%define OECLUSTER_GIL_MEMORY_EXCEPTION(QUALIFIED, NAME)
+%exception QUALIFIED {
     Py_BEGIN_ALLOW_THREADS
     try {
         $action
@@ -806,7 +796,7 @@ OECLUSTER_GIL_EXCEPTION(OECluster::select_representatives, select_representative
         SWIG_exception(SWIG_RuntimeError, e.what());
     } catch (const std::bad_alloc&) {
         Py_BLOCK_THREADS
-        SWIG_exception(SWIG_MemoryError, "cluster_report: out of memory");
+        SWIG_exception(SWIG_MemoryError, `NAME` ": out of memory");
     } catch (const std::length_error& e) {
         Py_BLOCK_THREADS
         SWIG_exception(SWIG_MemoryError, e.what());
@@ -815,17 +805,36 @@ OECLUSTER_GIL_EXCEPTION(OECluster::select_representatives, select_representative
         SWIG_exception(SWIG_RuntimeError, e.what());
     } catch (...) {
         Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, "Unknown C++ exception in cluster_report");
+        SWIG_exception(SWIG_RuntimeError, "Unknown C++ exception in " `NAME`);
     }
     Py_END_ALLOW_THREADS
 }
+%enddef
+
+OECLUSTER_GIL_EXCEPTION(OECluster::pdist, pdist)
+OECLUSTER_GIL_EXCEPTION(OECluster::cdist, cdist)
+OECLUSTER_GIL_EXCEPTION(OECluster::cdist_into_address, cdist_into_address)
+OECLUSTER_GIL_EXCEPTION(OECluster::butina_cluster, butina_cluster)
+OECLUSTER_GIL_EXCEPTION(OECluster::cluster_representative, cluster_representative)
+OECLUSTER_GIL_EXCEPTION(OECluster::rank_representatives, rank_representatives)
+OECLUSTER_GIL_EXCEPTION(OECluster::select_representatives, select_representatives)
+
+// cluster_report allocates proportionally to the square of the input (its
+// storage overload under compute_pair_rank_indices), so it can plausibly
+// exhaust memory or exceed a container's max_size(). The handler covers both
+// overloads; the comparison overload runs clones on worker threads with no
+// Python object in reach, so the GIL stays released.
+OECLUSTER_GIL_MEMORY_EXCEPTION(OECluster::cluster_report, cluster_report)
 
 OECLUSTER_GIL_EXCEPTION(OECluster::dbscan_cluster, dbscan_cluster)
 OECLUSTER_GIL_EXCEPTION(OECluster::hdbscan_cluster, hdbscan_cluster)
 OECLUSTER_GIL_EXCEPTION(OECluster::agglomerative_cluster, agglomerative_cluster)
 OECLUSTER_GIL_EXCEPTION(OECluster::bitbirch_cluster, bitbirch_cluster)
-OECLUSTER_GIL_EXCEPTION(OECluster::isim, isim)
-OECLUSTER_GIL_EXCEPTION(OECluster::isim_report, isim_report)
+// isim_report's centroid stage holds a K * bits * 4 byte column store, about
+// 0.8 GB for 10^5 clusters of 2048 bits, which is within reach of a BitBirch
+// clustering. isim shares the handler so the pair refuses alike.
+OECLUSTER_GIL_MEMORY_EXCEPTION(OECluster::isim, isim)
+OECLUSTER_GIL_MEMORY_EXCEPTION(OECluster::isim_report, isim_report)
 OECLUSTER_GIL_EXCEPTION(OECluster::bitbirch_recluster, bitbirch_recluster)
 OECLUSTER_GIL_EXCEPTION(OECluster::bitbirch_refine, bitbirch_refine)
 

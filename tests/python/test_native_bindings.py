@@ -950,11 +950,45 @@ def test_isim_and_isim_report_release_the_gil():
     include = '%include "oecluster/clustering/ISimReport.h"'
     assert text.count(include) == 1, "the position check needs an unambiguous anchor"
     for name in ("isim", "isim_report"):
-        invocation = f"OECLUSTER_GIL_EXCEPTION(OECluster::{name}, {name})"
+        invocation = f"OECLUSTER_GIL_MEMORY_EXCEPTION(OECluster::{name}, {name})"
         assert invocation in text
         assert text.index(invocation) < text.index(include), (
             f"{invocation} must precede the %include that declares {name}, "
             "or SWIG applies the exception handler to nothing")
+
+
+def test_memory_exception_macro_raises_memory_error():
+    """cluster_report, isim and isim_report can exhaust memory on inputs a
+    caller could plausibly pass, so their handler maps ``std::bad_alloc`` and
+    ``std::length_error`` to MemoryError rather than RuntimeError.
+
+    Asserted against the interface file for the reasons given in
+    test_the_new_entry_points_release_the_gil; no test can exhaust memory on
+    demand. The two clauses must precede the ``std::exception`` clause, since
+    both types derive from it and C++ takes the first matching handler.
+    """
+    interface = pathlib.Path(__file__).resolve().parents[2] / "swig" / "oecluster.i"
+    text = _SWIG_COMMENT.sub("", interface.read_text(encoding="utf-8"))
+
+    define = "%define OECLUSTER_GIL_MEMORY_EXCEPTION(QUALIFIED, NAME)"
+    assert text.count(define) == 1
+    start = text.index(define)
+    body = text[start:text.index("%enddef", start)]
+    assert "Py_BEGIN_ALLOW_THREADS" in body
+    assert "Py_END_ALLOW_THREADS" in body
+    generic = body.index("catch (const std::exception& e)")
+    for clause in ("catch (const std::bad_alloc&)",
+                   "catch (const std::length_error& e)"):
+        assert clause in body
+        position = body.index(clause)
+        assert position < generic, f"{clause} is unreachable after std::exception"
+        handler = body[position:body.index("}", position)]
+        assert "Py_BLOCK_THREADS" in handler
+        assert "SWIG_MemoryError" in handler
+
+    for name in ("cluster_report", "isim", "isim_report"):
+        assert f"OECLUSTER_GIL_MEMORY_EXCEPTION(OECluster::{name}, {name})" in text
+        assert f"OECLUSTER_GIL_EXCEPTION(OECluster::{name}, {name})" not in text
 
 
 def test_by_value_returns_convert_inside_an_exception_handler():

@@ -17,6 +17,9 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   iSIM silhouette, iSIM nearest cluster, medoid Davies-Bouldin and Dunn, and
   coverage at O(N K) cost. Integer accumulation makes results independent of
   the thread count. Tanimoto only; `metric=` is reserved.
+- `isim()` and `isim_report()` raise `MemoryError` in Python when the native
+  call fails with `std::bad_alloc` or `std::length_error`, matching
+  `cluster_report()`. Other native refusals raise `RuntimeError`.
 
 ## [5.13.0] - 2026-10-01
 

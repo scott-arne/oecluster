@@ -691,10 +691,11 @@ accepted, same as `cluster_report()`) and reuses `cluster_report()`'s native
 rules and exception types for a label count or cluster membership that does
 not match the batch. Every native refusal surfaces in Python as
 `RuntimeError`, regardless of which `std::invalid_argument` or
-`std::out_of_range` it started as. That includes an allocation failure: a
-`std::bad_alloc` out of `isim()` or `isim_report()` surfaces as `RuntimeError`,
-unlike `cluster_report()`, whose matching failure is mapped to `MemoryError`
-(see [Optional report stages](#optional-report-stages)).
+`std::out_of_range` it started as. An allocation failure is the exception: a
+`std::bad_alloc` or `std::length_error` out of `isim()` or `isim_report()`
+surfaces as `MemoryError`, the same mapping `cluster_report()` uses (see
+[Optional report stages](#optional-report-stages)). The centroid stage's
+K * bits * 4-byte column store is the allocation most likely to fail.
 
 ## Partition Agreement
 
