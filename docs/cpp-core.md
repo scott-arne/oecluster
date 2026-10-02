@@ -367,11 +367,12 @@ partition rules and exception types, run before any fingerprint is read:
 batch has fingerprints or a member indexes past the labels, and
 `std::invalid_argument` for any other malformed partition.
 
-The core stage is O(N words + sum of popcounts). The centroid stage
-(`compute_centroid_indices = true`) adds O(sum of popcounts x K + K^2 words +
-N K words) time, for K clusters, plus a `K * bits * 4` byte column store for
-the per-cluster bit counts -- about 8 MB at K = 1000 clusters and 2048-bit
-fingerprints. `num_threads` is capped at the cluster count.
+The core stage is O(N words + sum of popcounts + K bits) -- still linear in N
+since K <= N. The centroid stage (`compute_centroid_indices = true`) adds
+O(sum of popcounts x K + K^2 words + N K words) time, for K clusters, plus a
+`K * bits * 4` byte column store for the per-cluster bit counts -- about 8 MB
+at K = 1000 clusters and 2048-bit fingerprints. `num_threads` is capped at the
+cluster count.
 
 ### Diversity selection
 

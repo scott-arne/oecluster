@@ -104,6 +104,14 @@ TEST(ISimKernelsTest, ScoreComparisonIsExact) {
     const ISimScore close{333333333333u, 1000000000000u};
     EXPECT_TRUE(score_greater(third, close));
     EXPECT_FALSE(score_greater(close, third));
+    // Both exactly 1/3, but converting numerator and denominator to double
+    // separately (as score_ratio does) lands on adjacent doubles; a
+    // double-based comparison would see a difference where none exists.
+    const ISimScore equal_a{8100000180000000u, 24300000540000000u};
+    const ISimScore equal_b{8100000450000006u, 24300001350000018u};
+    ASSERT_NE(score_ratio(equal_a), score_ratio(equal_b));
+    EXPECT_FALSE(score_greater(equal_a, equal_b));
+    EXPECT_FALSE(score_greater(equal_b, equal_a));
     // A zero denominator scores 1.
     EXPECT_FALSE(score_greater(ISimScore{1u, 1u}, ISimScore{0u, 0u}));
     EXPECT_FALSE(score_greater(ISimScore{0u, 0u}, ISimScore{1u, 1u}));

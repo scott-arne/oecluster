@@ -644,8 +644,10 @@ in the field map below.
 
 ### Cost
 
-The core stage is O(N words + sum of popcounts): one linear pass over the
-fingerprint batch. The centroid stage (`compute_centroid_indices=True`) adds
+The core stage is O(N words + sum of popcounts + K bits) -- still linear in N
+since K <= N: one linear pass over the fingerprint batch, plus a per-cluster
+bit-count scan and buffer reset. The centroid stage
+(`compute_centroid_indices=True`) adds
 O(sum of popcounts x K + K^2 words + N K words) time, for K clusters, plus a
 `K * bits * 4` byte column store for the per-cluster bit counts -- about 8 MB
 at K = 1000 clusters and 2048-bit fingerprints. `num_threads` (0 means

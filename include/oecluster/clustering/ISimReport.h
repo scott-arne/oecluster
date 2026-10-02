@@ -137,8 +137,9 @@ struct ISimReport {
 /**
  * @brief Approximate clustering-quality report over binary fingerprints.
  *
- * Core cost O(N words + sum of popcounts); the centroid stage adds
- * O(sum of popcounts * K + K^2 words + N K words) time and K * bits * 4 bytes.
+ * Core cost O(N words + sum of popcounts + K bits), still linear in N since
+ * K <= N; the centroid stage adds O(sum of popcounts * K + K^2 words + N K
+ * words) time and K * bits * 4 bytes.
  *
  * @throws std::invalid_argument for a metric other than "tanimoto", a
  *         non-empty zero-width batch, 2^31 or more bits, 2^32 or more fingerprints, a NaN
