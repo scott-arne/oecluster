@@ -11,6 +11,7 @@
 
 #include "ExactMedian.h"
 #include "ReportDistanceSource.h"
+#include "oecluster/PairwiseComparison.h"
 #include "oecluster/StorageBackend.h"
 #include "oecluster/clustering/ClusterReport.h"
 
@@ -32,6 +33,12 @@ struct ReportTuning {
 ClusterReport cluster_report_tuned(
     const ClusteringResult& result,
     const StorageBackend& storage,
+    const ClusterReportOptions& options,
+    const ReportTuning& tuning);
+
+ClusterReport cluster_report_tuned(
+    const ClusteringResult& result,
+    PairwiseComparison& comparison,
     const ClusterReportOptions& options,
     const ReportTuning& tuning);
 

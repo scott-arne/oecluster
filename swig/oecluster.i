@@ -790,10 +790,12 @@ OECLUSTER_GIL_EXCEPTION(OECluster::rank_representatives, rank_representatives)
 OECLUSTER_GIL_EXCEPTION(OECluster::select_representatives, select_representatives)
 
 // cluster_report is the one entry point that allocates proportionally to the
-// square of the input, so it is the one that can plausibly exhaust memory or
-// exceed a container's max_size(). Those two get SWIG_MemoryError rather than
-// the macro's blanket SWIG_RuntimeError, which is why it is spelled out here
-// instead of expanded.
+// square of the input (its storage overload under compute_pair_rank_indices),
+// so it is the one that can plausibly exhaust memory or exceed a container's
+// max_size(). Those two get SWIG_MemoryError rather than the macro's blanket
+// SWIG_RuntimeError, which is why it is spelled out here instead of expanded.
+// The block covers both overloads; the comparison overload runs clones on
+// worker threads with no Python object in reach, so the GIL stays released.
 %exception OECluster::cluster_report {
     Py_BEGIN_ALLOW_THREADS
     try {

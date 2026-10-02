@@ -10,6 +10,7 @@
 #include <limits>
 #include <vector>
 
+#include "oecluster/PairwiseComparison.h"
 #include "oecluster/StorageBackend.h"
 #include "oecluster/clustering/ClusterTypes.h"
 #include "oecluster/clustering/Representative.h"
@@ -103,11 +104,16 @@ struct ClusterReportOptions {
     RepresentativeMethod representative_method = RepresentativeMethod::Medoid;
     bool treat_noise_as_singletons = true;
     size_t num_threads = 0;
+    /// Pairwise distances per work unit on the comparison overload, at least
+    /// one; ignored by the storage overload. A unit is whole rows, and a fill
+    /// block never holds more than 2^20 distances (or one row, if longer).
+    size_t chunk_size = 4096;
     /// Enables c_index and baker_hubert_gamma. The two sorted arrays the
     /// indices are read off hold every pairwise distance among clustered
     /// points, Nc(Nc-1)/2 doubles in total -- roughly 400 MB at Nc = 10,000
     /// and 10 GB at Nc = 50,000. Both are built only under this flag; without
     /// it the report holds no pair-sized array.
+    /// Storage overload only: the comparison overload refuses it.
     bool compute_pair_rank_indices = false;
     /// Enables ClusterReport::records. Off by default. A cluster with at most
     /// 2^20 pairs has its median taken from a buffer of its distances; a
@@ -241,6 +247,40 @@ struct ClusterReportComparison {
 ClusterReport cluster_report(
     const ClusteringResult& result,
     const StorageBackend& storage,
+    const ClusterReportOptions& options = ClusterReportOptions());
+
+/**
+ * @brief Compute a clustering-quality report over a comparison, evaluated lazily.
+ *
+ * The result is bit-identical to the storage overload over a matrix holding
+ * Compare(min(i, j), max(i, j)) for every pair, except that a zero median is
+ * always +0.0. Memory does not grow with the number of pairs: distances are
+ * computed in bounded blocks on worker threads and consumed in a fixed order,
+ * and medians are selected without storing every pair. Only the pairs a
+ * reported value reads are compared; a non-finite value elsewhere is never
+ * seen.
+ *
+ * Precondition: Compare(i, j) returns the same value on every call and every
+ * clone, and is called only with i < j.
+ *
+ * :param result: Any algorithm's clustering result (base ClusteringResult).
+ * :param comparison: Distance comparison; cloned once per running unit.
+ * :param options: Report options; num_threads and chunk_size drive the fill.
+ * :returns: A ClusterReport scorecard.
+ * :raises ComparisonError: If the comparison reports similarities, a nonzero
+ *     self-distance, or possibly non-finite values; checked after chunk_size
+ *     and before any comparison runs.
+ * :raises std::invalid_argument: If chunk_size is zero (checked first) or
+ *     compute_pair_rank_indices is set (checked after the facts), both before
+ *     any comparison runs; otherwise on the storage overload's refusals, with a non-finite
+ *     distance reported at the earliest pair in reading order whatever the
+ *     thread count.
+ * :raises std::out_of_range: As the storage overload, against
+ *     comparison.Size().
+ */
+ClusterReport cluster_report(
+    const ClusteringResult& result,
+    PairwiseComparison& comparison,
     const ClusterReportOptions& options = ClusterReportOptions());
 
 /**

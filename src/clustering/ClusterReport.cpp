@@ -16,6 +16,7 @@
 #include "ClusterMetrics.h"
 #include "ClusterReportTuned.h"
 #include "DistanceAccess.h"
+#include "DiversityValidation.h"
 #include "ExactMedian.h"
 #include "InternalIndices.h"
 #include "ReportDistanceSource.h"
@@ -1179,6 +1180,30 @@ ClusterReport cluster_report_tuned(
     return report_engine(result, "storage", source, options, tuning);
 }
 
+ClusterReport cluster_report_tuned(
+    const ClusteringResult& result,
+    PairwiseComparison& comparison,
+    const ClusterReportOptions& options,
+    const ReportTuning& tuning) {
+    validate_chunk_size(options.chunk_size, "cluster_report");
+    validate_distance_facts(comparison, "cluster_report");
+    // The two pair-rank arrays hold every clustered pair, which is the memory
+    // the lazy path exists to avoid; a caller who wants them has to accept a
+    // matrix's footprint anyway.
+    if (options.compute_pair_rank_indices) {
+        throw std::invalid_argument(
+            "cluster_report cannot compute pair-rank indices from a comparison; "
+            "pass a SymmetricDistanceMatrix or set compute_pair_rank_indices=False");
+    }
+    ComparisonSource source(
+        comparison,
+        options.num_threads,
+        options.chunk_size,
+        tuning.fill_block_distances,
+        tuning.on_block);
+    return report_engine(result, "comparison", source, options, tuning);
+}
+
 }  // namespace detail
 
 ClusterReport cluster_report(
@@ -1186,6 +1211,13 @@ ClusterReport cluster_report(
     const StorageBackend& storage,
     const ClusterReportOptions& options) {
     return detail::cluster_report_tuned(result, storage, options, detail::ReportTuning());
+}
+
+ClusterReport cluster_report(
+    const ClusteringResult& result,
+    PairwiseComparison& comparison,
+    const ClusterReportOptions& options) {
+    return detail::cluster_report_tuned(result, comparison, options, detail::ReportTuning());
 }
 
 ClusterReportComparison compare_reports(const ClusterReport& a, const ClusterReport& b) {

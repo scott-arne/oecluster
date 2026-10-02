@@ -21,12 +21,12 @@
 
 namespace OECluster::detail {
 
-// The pre-scoring half of the Python gate's require_comparable: every refusal
-// here is decided by the comparison's declared facts, before any pair is
-// scored, so a count-limited call cannot succeed merely because it stopped
-// short of a pair the comparison already said was bad. Unknown is accepted.
-inline void validate_comparison_facts(const PairwiseComparison& comparison,
-                                      const std::string& caller) {
+// The facts every lazy distance path needs, decided before any pair is
+// scored. cluster_report stops here: like its matrix overload, it accepts
+// subset-scored and non-metric comparisons in C++ and leaves those refusals
+// to the Python gate, where allow_nonmetric can lift them.
+inline void validate_distance_facts(const PairwiseComparison& comparison,
+                                    const std::string& caller) {
     const GateFacts facts = comparison.Facts();
     if (facts.is_distance == Capability::No) {
         throw ComparisonError(
@@ -43,7 +43,16 @@ inline void validate_comparison_facts(const PairwiseComparison& comparison,
             caller + " cannot rank distances the comparison declares may be "
             "non-finite (missing='propagate')");
     }
-    if (facts.data_integrity == DataIntegrity::SubsetScored) {
+}
+
+// The pre-scoring half of the Python gate's require_comparable: every refusal
+// here is decided by the comparison's declared facts, before any pair is
+// scored, so a count-limited call cannot succeed merely because it stopped
+// short of a pair the comparison already said was bad. Unknown is accepted.
+inline void validate_comparison_facts(const PairwiseComparison& comparison,
+                                      const std::string& caller) {
+    validate_distance_facts(comparison, caller);
+    if (comparison.Facts().data_integrity == DataIntegrity::SubsetScored) {
         throw ComparisonError(
             caller + " cannot rank distances scored on per-pair feature "
             "subsets (missing='ignore'); they are not mutually comparable");
