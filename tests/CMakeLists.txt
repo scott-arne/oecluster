@@ -45,6 +45,7 @@ add_executable(oecluster_tests
     cpp/test_snn_weights.cpp
     cpp/test_leiden.cpp
     cpp/test_exact_median.cpp
+    cpp/test_report_distance_source.cpp
     cpp/test_murcko_scaffold.cpp
     cpp/test_umbrella_header.cpp
 )

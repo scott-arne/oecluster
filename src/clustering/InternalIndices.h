@@ -260,6 +260,24 @@ inline PairRankIndices pair_rank_indices(
 }
 
 /**
+ * @brief Refuses a non-finite distance with cluster_report's message.
+ *
+ * Shared by the storage read below and the comparison source, so both paths
+ * name a bad pair identically.
+ *
+ * :raises std::invalid_argument: if the distance is NaN or infinite.
+ */
+inline double finite_report_distance(const double distance, const size_t i,
+                                     const size_t j) {
+    if (!std::isfinite(distance)) {
+        throw std::invalid_argument(
+            "cluster_report: distance between samples " + std::to_string(i) +
+            " and " + std::to_string(j) + " is not finite");
+    }
+    return distance;
+}
+
+/**
  * @brief Reads one distance, refusing a non-finite value.
  *
  * A NaN distance is not merely an undefined metric: std::sort over a range
@@ -274,13 +292,7 @@ inline double checked_distance(
     const StorageBackend& storage,
     const size_t i,
     const size_t j) {
-    const double distance = storage.Get(i, j);
-    if (!std::isfinite(distance)) {
-        throw std::invalid_argument(
-            "cluster_report: distance between samples " + std::to_string(i) +
-            " and " + std::to_string(j) + " is not finite");
-    }
-    return distance;
+    return finite_report_distance(storage.Get(i, j), i, j);
 }
 
 }  // namespace OECluster::detail
