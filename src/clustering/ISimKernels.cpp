@@ -35,6 +35,25 @@ uint32_t popcount64(const uint64_t word) {
 #endif
 }
 
+// Undefined for word == 0; the only caller (ToDouble) excludes that case.
+uint32_t bit_length64(const uint64_t word) {
+#if defined(_MSC_VER)
+    unsigned long index = 0;
+    _BitScanReverse64(&index, word);
+    return static_cast<uint32_t>(index) + 1u;
+#elif defined(__clang__) || defined(__GNUC__)
+    return 64u - static_cast<uint32_t>(__builtin_clzll(static_cast<unsigned long long>(word)));
+#else
+    uint32_t count = 0;
+    uint64_t remaining = word;
+    while (remaining != 0u) {
+        remaining >>= 1;
+        ++count;
+    }
+    return count;
+#endif
+}
+
 // Undefined for word == 0; every caller tests the word first.
 uint32_t count_trailing_zeros64(const uint64_t word) {
 #if defined(_MSC_VER)
@@ -104,9 +123,27 @@ UInt128 UInt128::Half() const {
 }
 
 double UInt128::ToDouble() const {
-    // high < 2^53 converts exactly and ldexp is exact, so the sum is the one
-    // rounding.
-    return std::ldexp(static_cast<double>(high), 64) + static_cast<double>(low);
+    if (high == 0u) {
+        // A plain 64-bit-to-double conversion is already one correctly
+        // rounded operation.
+        return static_cast<double>(low);
+    }
+    // high has s = bit_length64(high) significant bits (s <= 53 by this
+    // type's contract), so the value occupies 64 + s bits in total. Shifting
+    // it right by s packs the top 64 of those bits into m, folding the s bits
+    // that fall off the bottom into m's own bit 0 as a sticky flag. Every bit
+    // that could affect rounding is then inside m, so the one remaining
+    // int64 -> double conversion -- itself a single correctly rounded step --
+    // is correct for the full value too. Rounding low to a double first and
+    // then adding high*2^64, as the previous implementation did, rounds
+    // twice and can be a ULP off: see ToDoubleAvoidsDoubleRounding.
+    const uint32_t s = bit_length64(high);
+    uint64_t m = (high << (64u - s)) | (low >> s);
+    const uint64_t dropped_mask = (uint64_t{1} << s) - 1u;
+    if ((low & dropped_mask) != 0u) {
+        m |= 1u;
+    }
+    return std::ldexp(static_cast<double>(m), static_cast<int>(s));
 }
 
 UInt128 operator+(UInt128 lhs, const UInt128& rhs) { return lhs += rhs; }

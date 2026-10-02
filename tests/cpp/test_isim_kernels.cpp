@@ -63,6 +63,24 @@ TEST(ISimKernelsTest, ConvertsAbove2To64) {
     EXPECT_EQ((UInt128{1u, 4096u}).ToDouble(), 18446744073709551616.0 + 4096.0);
 }
 
+TEST(ISimKernelsTest, ToDoubleAvoidsDoubleRounding) {
+    // high*2^64 is exact and ldexp is exact, but casting low to double on its
+    // own would round low first whenever low >= 2^53; adding the (already
+    // rounded) high contribution afterwards is a second rounding. The
+    // correctly-rounded value of 2^64 + 18446744073709545473 is
+    // 0x1.fffffffffffffp+64; the naive high*2^64 + (double)low formula
+    // instead lands one ULP low, at 0x1.ffffffffffffep+64.
+    EXPECT_EQ((UInt128{1u, 18446744073709545473ull}).ToDouble(), 0x1.fffffffffffffp+64);
+    // An exact tie between 2^64 and the next double up, with every bit below
+    // the rounding boundary clear: ties-to-even must land on 2^64, whose
+    // trailing mantissa bit is 0.
+    EXPECT_EQ((UInt128{1u, 2048ull}).ToDouble(), 0x1.0000000000000p+64);
+    // The same tie, but with one more low bit set below the boundary: that
+    // bit is a sticky bit the rounding must see, breaking the tie upward
+    // instead of to even.
+    EXPECT_EQ((UInt128{1u, 2049ull}).ToDouble(), 0x1.0000000000001p+64);
+}
+
 TEST(ISimKernelsTest, BatchSizeLimitIsTwoToThe32) {
     EXPECT_NO_THROW(check_isim_batch_size(static_cast<size_t>(4294967295ull)));
     EXPECT_THROW(check_isim_batch_size(static_cast<size_t>(4294967296ull)),
