@@ -52,6 +52,7 @@ class DistanceMatrix;
 #include "oecluster/clustering/BitBirch.h"
 #include "oecluster/clustering/KMedoids.h"
 #include "oecluster/clustering/ClusterReport.h"
+#include "oecluster/clustering/ISimReport.h"
 #include "oecluster/clustering/PartitionAgreement.h"
 #include "oecluster/clustering/SARCoherence.h"
 #include "oecluster/clustering/DiversitySelection.h"

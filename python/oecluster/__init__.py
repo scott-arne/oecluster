@@ -52,6 +52,9 @@ __all__ = [  # noqa: RUF022
     "ClusterReport",
     "ClusterReportComparison",
     "ClusterReportRequested",
+    "ISimClusterRecord",
+    "ISimReport",
+    "ISimReportRequested",
     "PartitionAgreement",
     "PartitionAgreementRequested",
     "SARCoherence",
@@ -103,6 +106,8 @@ __all__ = [  # noqa: RUF022
     "bitbirch",
     "bitbirch_recluster",
     "bitbirch_refine",
+    "isim",
+    "isim_report",
     "k_medoids",
     "murcko",
     "murcko_scaffolds",
@@ -662,6 +667,8 @@ try:
         bitbirch_cluster as _bitbirch_cluster,
         bitbirch_recluster as _bitbirch_recluster,
         bitbirch_refine as _bitbirch_refine,
+        isim as _isim,
+        isim_report as _isim_report,
         k_medoids_cluster as _k_medoids_cluster,
         murcko_scaffolds as _murcko_scaffolds,
         murcko_cluster as _murcko_cluster,
@@ -3820,6 +3827,153 @@ class ClusterReport:
                 f"silhouette={self.silhouette:.4f})")
 
 
+class ISimClusterRecord(NamedTuple):
+    """One row of an :class:`ISimReport`'s per-cluster table.
+
+    ``label`` and ``nearest_cluster`` are ordinals into the clustering's member
+    lists. Defaults mirror the C++ struct, so undefined values are NaN and an
+    absent neighbour is ``-1``. ``nearest_cluster`` is the cluster with the
+    highest iSIM cluster-to-cluster similarity, not ``cluster_report``'s
+    single-linkage nearest.
+    """
+
+    label: int = 0
+    size: int = 0
+    medoid: int = 0
+    isim_intra_distance: float = float("nan")
+    isim_separation: float = float("nan")
+    radius: float = float("nan")
+    mean_medoid_distance: float = float("nan")
+    isim_silhouette: float = float("nan")
+    nearest_cluster: int = -1
+    nearest_cluster_similarity: float = float("nan")
+
+
+class ISimReportRequested(NamedTuple):
+    """Which optional stages an :class:`ISimReport`'s caller asked for.
+
+    ``False`` means nobody asked; ``True`` with NaN means asked and undefined.
+    """
+
+    centroid_indices: bool = False
+    per_cluster_records: bool = False
+
+
+class ISimReport:
+    """Read-only approximate clustering-quality report from binary fingerprints.
+
+    Built by :func:`isim_report`. Profile fields are exact, ``isim_*`` fields
+    are iSIM ratios (summed pairwise intersections over summed unions), and the
+    medoid fields are exact relative to the iSIM medoids. Undefined values are
+    NaN. Vector fields are tuples.
+    """
+
+    _SCALAR_FIELDS = (
+        "num_samples", "num_clusters", "num_noise", "num_singletons",
+        "noise_fraction", "singleton_fraction", "largest_cluster_fraction",
+        "cluster_size_median", "cluster_size_p90", "size_gini", "size_entropy",
+        "isim_intra_distance", "isim_inter_distance",
+        "median_radius", "median_medoid_member_distance",
+        "calinski_harabasz_medoid",
+        "isim_silhouette", "davies_bouldin_medoid",
+        "dunn_medoid_separation_medoid_spread",
+    )
+
+    def __init__(self, native_report, method=""):
+        """Capture every field from the native report into Python values.
+
+        Internal constructor; users should call :func:`isim_report` instead.
+
+        :param native_report: Native C++ ISimReport object.
+        :param method: Clustering method name.
+        """
+        for name in self._SCALAR_FIELDS:
+            object.__setattr__(self, f"_{name}", getattr(native_report, name))
+        object.__setattr__(
+            self, "_coverage_thresholds",
+            tuple(float(v) for v in native_report.coverage_thresholds))
+        object.__setattr__(
+            self, "_coverage_at",
+            tuple(float(v) for v in native_report.coverage_at))
+        object.__setattr__(
+            self, "_noise_coverage_at",
+            tuple(float(v) for v in native_report.noise_coverage_at))
+        object.__setattr__(
+            self, "_records",
+            tuple(
+                ISimClusterRecord(
+                    label=record.label,
+                    size=record.size,
+                    medoid=record.medoid,
+                    isim_intra_distance=record.isim_intra_distance,
+                    isim_separation=record.isim_separation,
+                    radius=record.radius,
+                    mean_medoid_distance=record.mean_medoid_distance,
+                    isim_silhouette=record.isim_silhouette,
+                    nearest_cluster=record.nearest_cluster,
+                    nearest_cluster_similarity=record.nearest_cluster_similarity,
+                )
+                for record in native_report.records
+            ))
+        object.__setattr__(
+            self, "_requested",
+            ISimReportRequested(
+                centroid_indices=bool(native_report.requested.centroid_indices),
+                per_cluster_records=bool(
+                    native_report.requested.per_cluster_records),
+            ))
+        object.__setattr__(self, "_method", str(method))
+
+    def __setattr__(self, name, value):
+        """ISimReport is read-only; reject external attribute assignment."""
+        raise AttributeError(f"ISimReport is read-only; cannot set {name!r}")
+
+    def __getattr__(self, name):
+        if name in ISimReport._SCALAR_FIELDS:
+            return object.__getattribute__(self, f"_{name}")
+        raise AttributeError(name)
+
+    @property
+    def method(self):
+        """Clustering method that produced the result this report describes."""
+        return self._method
+
+    @property
+    def coverage_thresholds(self) -> tuple[float, ...]:
+        """Coverage thresholds, echoed whether or not the centroid stage ran."""
+        return self._coverage_thresholds
+
+    @property
+    def coverage_at(self) -> tuple[float, ...]:
+        """Fraction of all samples within each threshold of their nearest medoid.
+
+        Empty unless ``compute_centroid_indices`` was set and there is at least
+        one cluster.
+        """
+        return self._coverage_at
+
+    @property
+    def noise_coverage_at(self) -> tuple[float, ...]:
+        """The same over noise samples; NaN entries when there is no noise."""
+        return self._noise_coverage_at
+
+    @property
+    def records(self) -> tuple["ISimClusterRecord", ...]:
+        """The per-cluster table in member-list order; empty unless requested."""
+        return self._records
+
+    @property
+    def requested(self) -> "ISimReportRequested":
+        """What the caller asked for, independent of what was computable."""
+        return self._requested
+
+    def __repr__(self):
+        return (f"ISimReport(method={self.method!r}, "
+                f"num_clusters={self.num_clusters}, "
+                f"num_samples={self.num_samples}, "
+                f"isim_intra_distance={self.isim_intra_distance:.4f})")
+
+
 class ClusterReportComparison:
     """Two or more ClusterReports aligned for side-by-side reading."""
 
@@ -4450,6 +4604,118 @@ def cluster_report(result, items=_MISSING, *, distance_matrix=_MISSING,
     native = _cluster_report(
         _native_clustering_result(result), target, options)
     return ClusterReport(native, method=result.method)
+
+
+def _require_isim_metric(metric, function_name):
+    # Reserved for metrics whose iSIM is the exact mean pair similarity.
+    if metric != "tanimoto":
+        raise ValueError(
+            f"{function_name}() supports only metric='tanimoto', not {metric!r}")
+
+
+def isim(fingerprints, *, metric="tanimoto"):
+    """
+    iSIM Tanimoto similarity of a set of binary fingerprints.
+
+    Summed pairwise intersections over summed pairwise unions, in time linear
+    in the number of fingerprints. This is not the mean of per-pair Tanimoto
+    similarities.
+
+    :param fingerprints: `oefp.OEFPBatch` of binary fingerprints.
+    :param metric: Only ``"tanimoto"``.
+    :returns: The similarity; NaN for fewer than two fingerprints and 1.0 when
+        every fingerprint is all-zero.
+    :raises TypeError: When ``fingerprints`` is not an ``oefp.OEFPBatch``.
+    :raises ValueError: For any metric other than ``"tanimoto"``.
+    """
+    _require_oefp_batch(fingerprints, "isim")
+    _require_isim_metric(metric, "isim")
+    options = _oecluster.ISimOptions()
+    options.metric = "tanimoto"
+    return float(_isim(fingerprints, options))
+
+
+def isim_report(result, fingerprints, *, metric="tanimoto", preset="default",
+                coverage_thresholds=None, treat_noise_as_singletons=True,
+                compute_centroid_indices=False,
+                compute_per_cluster_records=False, num_threads=0):
+    """
+    Approximate clustering-quality report from binary fingerprints.
+
+    The core runs in time linear in the number of fingerprints; the opt-in
+    centroid stage adds silhouette, nearest cluster, medoid Davies-Bouldin and
+    Dunn and coverage at O(N K) cost and ``K * bits * 4`` bytes.
+
+    :param result: A clustering result over the same items as ``fingerprints``.
+    :param fingerprints: `oefp.OEFPBatch` of binary fingerprints.
+    :param metric: Only ``"tanimoto"``.
+    :param preset: "default", "tight" or "diversity"; seeds the coverage
+        thresholds.
+    :param coverage_thresholds: Explicit coverage thresholds; overrides the
+        preset.
+    :param treat_noise_as_singletons: Counts noise as singletons in
+        ``singleton_fraction`` only.
+    :param compute_centroid_indices: Runs the centroid stage.
+    :param compute_per_cluster_records: Fills ``records``.
+    :param num_threads: Worker threads; 0 means hardware concurrency, capped at
+        the cluster count.
+    :returns: An :class:`ISimReport`.
+    :raises TypeError: For a non-ClusteringResult, a non-OEFPBatch, or a
+        non-bool flag.
+    :raises ValueError: For an unsupported metric or preset, a NaN or negative
+        threshold, a negative ``num_threads``, or a result and batch of
+        different sizes.
+    """
+    if not isinstance(result, ClusteringResult):
+        raise TypeError("isim_report() expects a ClusteringResult")
+    _require_oefp_batch(fingerprints, "isim_report")
+    _require_isim_metric(metric, "isim_report")
+    threshold = _cluster_threshold(preset)
+
+    coverage_vector = None
+    if coverage_thresholds is not None:
+        coverage_vector = _oecluster.DoubleVector()
+        for value in coverage_thresholds:
+            v = float(value)
+            if math.isnan(v):
+                raise ValueError("coverage thresholds must not be NaN")
+            if v < 0.0:
+                raise ValueError("coverage thresholds must be non-negative")
+            coverage_vector.push_back(v)
+
+    # Signature order, so a call wrong in two ways names the keyword written
+    # first. Truthiness is refused: "no" would switch the O(N K) stage on.
+    for name, value in (
+            ("treat_noise_as_singletons", treat_noise_as_singletons),
+            ("compute_centroid_indices", compute_centroid_indices),
+            ("compute_per_cluster_records", compute_per_cluster_records)):
+        if not isinstance(value, (bool, np.bool_)):
+            raise TypeError(
+                f"{name} must be True or False, "
+                f"not {type(value).__name__} ({value!r}).")
+
+    num_threads_int = int(num_threads)
+    if num_threads_int < 0:
+        raise ValueError("num_threads must be non-negative")
+
+    if result.num_samples != len(fingerprints):
+        raise ValueError(
+            f"isim_report requires a result and a fingerprint batch over the "
+            f"same items, but the result covers {result.num_samples} samples "
+            f"and the batch {len(fingerprints)}")
+
+    options = _oecluster.ISimReportOptions(threshold)
+    options.metric = "tanimoto"
+    if coverage_vector is not None:
+        options.coverage_thresholds = coverage_vector
+    # bool() because the SWIG bool setters refuse numpy.bool_.
+    options.treat_noise_as_singletons = bool(treat_noise_as_singletons)
+    options.compute_centroid_indices = bool(compute_centroid_indices)
+    options.compute_per_cluster_records = bool(compute_per_cluster_records)
+    options.num_threads = num_threads_int
+
+    native = _isim_report(_native_clustering_result(result), fingerprints, options)
+    return ISimReport(native, method=result.method)
 
 
 def compare_reports(*reports):

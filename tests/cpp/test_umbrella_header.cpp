@@ -197,3 +197,13 @@ TEST(UmbrellaHeaderTest, ReachesTheLeidenHeader) {
     EXPECT_EQ(options.chunk_size, 4096u);
     EXPECT_EQ(OECluster::LeidenResult().Method(), "leiden");
 }
+
+// ISimReport.h joined the umbrella in 5.14.0; naming its options structs keeps
+// it from silently dropping out, as ClusterReport.h once did.
+TEST(UmbrellaHeaderTest, ReachesTheISimReportHeader) {
+    const OECluster::ISimOptions isim_options;
+    EXPECT_EQ(isim_options.metric, "tanimoto");
+    const OECluster::ISimReportOptions report_options;
+    EXPECT_FALSE(report_options.compute_centroid_indices);
+    EXPECT_NE(definition_size<OECluster::ISimReport>(), 0u);
+}

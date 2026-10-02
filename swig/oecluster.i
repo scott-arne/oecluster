@@ -27,6 +27,7 @@
 #include "oecluster/clustering/HDBSCAN.h"
 #include "oecluster/clustering/Agglomerative.h"
 #include "oecluster/clustering/BitBirch.h"
+#include "oecluster/clustering/ISimReport.h"
 #include "oecluster/clustering/Representative.h"
 #include "oecluster/clustering/ClusterReport.h"
 #include "oecluster/clustering/PartitionAgreement.h"
@@ -823,6 +824,8 @@ OECLUSTER_GIL_EXCEPTION(OECluster::dbscan_cluster, dbscan_cluster)
 OECLUSTER_GIL_EXCEPTION(OECluster::hdbscan_cluster, hdbscan_cluster)
 OECLUSTER_GIL_EXCEPTION(OECluster::agglomerative_cluster, agglomerative_cluster)
 OECLUSTER_GIL_EXCEPTION(OECluster::bitbirch_cluster, bitbirch_cluster)
+OECLUSTER_GIL_EXCEPTION(OECluster::isim, isim)
+OECLUSTER_GIL_EXCEPTION(OECluster::isim_report, isim_report)
 OECLUSTER_GIL_EXCEPTION(OECluster::bitbirch_recluster, bitbirch_recluster)
 OECLUSTER_GIL_EXCEPTION(OECluster::bitbirch_refine, bitbirch_refine)
 
@@ -1205,6 +1208,10 @@ public:
 %include "oecluster/clustering/HDBSCAN.h"
 %include "oecluster/clustering/Agglomerative.h"
 %include "oecluster/clustering/BitBirch.h"
+// Declared ahead of its header, as ClusterRecordVector is: the vector is a
+// member of a result struct the header defines.
+%template(ISimClusterRecordVector) std::vector<OECluster::ISimClusterRecord>;
+%include "oecluster/clustering/ISimReport.h"
 %include "oecluster/clustering/KMedoids.h"
 // Both Murcko entry points default their options argument, and SWIG's usual
 // expansion of a default argument into two overloads puts an overload
