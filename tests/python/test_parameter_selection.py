@@ -284,6 +284,12 @@ def test_min_clusters_rejects_rows_with_the_exact_text():
     assert selection.winner.score == 0.0
 
 
+def test_min_clusters_normalizes_a_numpy_integer_bound():
+    selection = oecluster.select_parameter("butina", _blobs(), "threshold",
+                                           GRID, min_clusters=np.int64(3))
+    assert selection.rows[1].rejection == "num_clusters 2 < min_clusters 3"
+
+
 def test_a_bound_leaving_only_nan_rows_gives_no_winner():
     selection = oecluster.select_parameter("butina", _blobs(), "threshold",
                                            GRID, max_clusters=1)
@@ -537,6 +543,17 @@ def test_repr_marks_the_winner_and_rejections():
     assert lines[4].startswith("   0.95")
     assert lines[4].endswith("rejected: num_clusters 1 < min_clusters 2")
     assert "nan" in lines[4]
+
+
+def test_repr_formats_a_numpy_grid_value_without_the_np_wrapper():
+    grid = np.linspace(0.05, 0.95, 3)
+    selection = oecluster.select_parameter(
+        "butina", _blobs(), "threshold", grid, min_clusters=2)
+    text = repr(selection)
+    assert "np.float64" not in text
+    for value in grid:
+        assert repr(value.item()) in text
+    assert "rejected: num_clusters 1 < min_clusters 2" in text
 
 
 def test_package_exports_the_four_names():

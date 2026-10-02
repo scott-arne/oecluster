@@ -732,13 +732,16 @@ the keyword options it is run with. `algorithm` is one of the roster names
 corresponding function object, or any callable that returns a
 `ClusteringResult`. A roster function maps back to its name, so
 `ClusteringSpec(oecluster.butina).name == "butina"`; a foreign callable
-keeps its `__name__`. The spec is unbound from the input:
-`spec.run(items, **overrides)` calls `algorithm(items, **{**options,
-**overrides})` and returns the result, raising `TypeError` if the callable
-returned something else (`knn_graph` returns a graph, for instance).
-`spec.name`, `spec.algorithm` and `spec.options` (a read-only mapping) are
-what a later serialization needs. Specs compare equal on the same
-algorithm object and equal options, and are not hashable.
+keeps its `__name__` (or its type's name when it has none). The spec is
+unbound from the input: `spec.run(items, **overrides)` calls
+`algorithm(items, **{**options, **overrides})` and returns the result,
+raising `TypeError` if the callable returned something else (`knn_graph`
+returns a graph, for instance). `spec.name`, `spec.algorithm` and
+`spec.options` (a read-only mapping) are what a later serialization needs.
+Specs compare equal on the same algorithm object and equal options, and
+are not hashable. Construction raises `ValueError` for a string that is
+not a roster name, and `TypeError` for an `algorithm` that is neither a
+string nor callable.
 
 The options are not validated at construction; the algorithm validates
 them when it runs, exactly as a direct call would.
@@ -780,8 +783,10 @@ needs complete distances; so are a `CrossDistanceMatrix` and a `KNNGraph`.
 Grid points run one after another in the caller's order; each native call
 still uses its own thread pool, so `num_threads` in the spec and in
 `report_options` is where the parallelism lives. Every result and report
-is kept on its row, which for a million items and twenty grid values is
-about 160 MB of labels.
+is kept on its row. A `ClusteringResult` holds its labels and its member
+tuples, roughly 50 to 100 bytes per item, so a million items over twenty
+grid values retain about 1 to 2 GB; BitBirch rows also keep their centroid
+batch.
 
 ### Criteria
 
@@ -868,8 +873,9 @@ those reports already carry without rerunning anything.
 
 Argument validation runs before the first clustering: `TypeError` for a
 non-string `parameter`, a string or non-iterable `values`, a non-mapping
-`report_options`, a `bool` or non-numeric bound, or an unsupported `items`
-kind; `ValueError` for an empty `parameter` or grid, a bound out of range
+`report_options`, a non-string `criterion`, a `bool`, a non-numeric noise
+cap, a non-integer cluster bound, or an unsupported `items` kind;
+`ValueError` for an empty `parameter` or grid, a bound out of range
 (`max_noise_fraction` outside [0, 1] or NaN, a cluster bound below 1,
 `min_clusters > max_clusters`), a sparse matrix, or a criterion that is not
 in the table, not produced by the scorer, or unavailable for the input.

@@ -323,13 +323,18 @@ def _resolve_criterion(criterion, scorer, report_options):
 
 
 def _validate_bounds(max_noise_fraction, min_clusters, max_clusters):
-    """Check the three bounds; returns ``max_noise_fraction`` as a float.
+    """Check the three bounds; returns them normalized to plain Python types.
 
     ``bool`` is refused for every bound, as the scorecards refuse truthiness
     for their flags: ``True`` as a noise cap is a mistake, not a value of 1.
+    Normalizing a NumPy scalar bound to plain ``float``/``int`` here, rather
+    than leaving it as ``np.float64``/``np.int64``, keeps the rejection text
+    :func:`_first_violation` builds free of the ``np.float64(...)`` repr.
 
     :raises TypeError: For a bound of the wrong type.
     :raises ValueError: For a bound out of range or an inverted pair.
+    :returns: ``(max_noise_fraction, min_clusters, max_clusters)``, each
+        None or its normalized type.
     """
     if max_noise_fraction is not None:
         if (isinstance(max_noise_fraction, bool)
@@ -338,18 +343,20 @@ def _validate_bounds(max_noise_fraction, min_clusters, max_clusters):
         max_noise_fraction = float(max_noise_fraction)
         if math.isnan(max_noise_fraction) or not 0.0 <= max_noise_fraction <= 1.0:
             raise ValueError("max_noise_fraction must be between 0 and 1")
-    for name, bound in (("min_clusters", min_clusters),
-                        ("max_clusters", max_clusters)):
+    bounds = {"min_clusters": min_clusters, "max_clusters": max_clusters}
+    for name, bound in bounds.items():
         if bound is None:
             continue
         if isinstance(bound, bool) or not isinstance(bound, numbers.Integral):
             raise TypeError(f"{name} must be an int or None")
         if bound < 1:
             raise ValueError(f"{name} must be at least 1")
+        bounds[name] = int(bound)
+    min_clusters, max_clusters = bounds["min_clusters"], bounds["max_clusters"]
     if (min_clusters is not None and max_clusters is not None
             and min_clusters > max_clusters):
         raise ValueError("min_clusters must not exceed max_clusters")
-    return max_noise_fraction
+    return max_noise_fraction, min_clusters, max_clusters
 
 
 def _first_violation(report, max_noise_fraction, min_clusters, max_clusters):
@@ -463,9 +470,13 @@ class ParameterSelection:
                   f"parameter={self._parameter!r}, "
                   f"criterion={self._criterion!r})")
         labels = self.columns[:4]
-        cells = [(repr(row.value), f"{row.score:.4f}",
-                  str(row.report.num_clusters),
-                  f"{row.report.noise_fraction:.4g}")
+        # A grid built with np.linspace holds np.float64 values, whose own
+        # repr is "np.float64(0.05)"; .item() unwraps the plain Python
+        # scalar for display without changing SweepRow.value itself.
+        cells = [(repr(row.value.item() if isinstance(row.value, np.generic)
+                      else row.value),
+                 f"{row.score:.4f}", str(row.report.num_clusters),
+                 f"{row.report.noise_fraction:.4g}")
                  for row in self._rows]
         widths = [max(len(label), *(len(cell[i]) for cell in cells))
                   for i, label in enumerate(labels)]
@@ -530,11 +541,14 @@ def select_parameter(algorithm, items, parameter, values, *, criterion=None,
         the opt-in stage flag the criterion needs added to a copy.
     :returns: A :class:`ParameterSelection`.
     :raises TypeError: For a non-string ``parameter``, a string or
-        non-iterable ``values``, a non-mapping ``report_options``, a bound
-        of the wrong type, or an unsupported ``items`` kind.
+        non-iterable ``values``, a non-mapping ``report_options``, a
+        non-string ``criterion``, a bound of the wrong type, or an
+        unsupported ``items`` kind.
     :raises ValueError: For an empty ``parameter`` or grid, a bound out of
-        range, sparse storage, or a criterion that is not a validity index
-        or that the scorer does not produce.
+        range, sparse storage, a criterion that is not a validity index or
+        that the scorer does not produce, a pair-rank criterion with a
+        prebuilt comparison, or a criterion whose stage flag the caller set
+        to False.
     """
     spec = (algorithm if isinstance(algorithm, ClusteringSpec)
             else ClusteringSpec(algorithm))
@@ -560,8 +574,8 @@ def select_parameter(algorithm, items, parameter, values, *, criterion=None,
         raise TypeError(
             "report_options must be a mapping or None, not "
             f"{type(report_options).__name__}")
-    max_noise_fraction = _validate_bounds(max_noise_fraction, min_clusters,
-                                          max_clusters)
+    max_noise_fraction, min_clusters, max_clusters = _validate_bounds(
+        max_noise_fraction, min_clusters, max_clusters)
     scorer = _scorer_for(items)
     criterion = _resolve_criterion(criterion, scorer, options)
     direction = _CRITERIA[criterion]
