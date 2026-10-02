@@ -4,10 +4,10 @@
  *
  * Three entry points, split by the shape of their input rather than by the
  * metric they report. ``sar_coherence`` takes cluster labels and a continuous
- * activity. ``activity_landscape`` and ``modelability`` take a precomputed
- * distance matrix -- the first with a continuous activity, the second with
- * class annotations -- because a neighbourhood question cannot be answered
- * from labels alone.
+ * activity. ``activity_landscape`` and ``modelability`` take pairwise
+ * distances, from a precomputed matrix or from a comparison evaluated lazily
+ * -- the first with a continuous activity, the second with class annotations
+ * -- because a neighbourhood question cannot be answered from labels alone.
  */
 
 #ifndef OECLUSTER_CLUSTERING_SARCOHERENCE_H
@@ -18,6 +18,7 @@
 #include <string>
 #include <vector>
 
+#include "oecluster/PairwiseComparison.h"
 #include "oecluster/StorageBackend.h"
 #include "oecluster/clustering/ClusterTypes.h"
 #include "oecluster/clustering/PartitionAgreement.h"
@@ -142,6 +143,12 @@ struct ActivityLandscapeOptions {
     double rmodi_delta = 0.625;
     /// 0 selects the hardware concurrency. Results do not depend on this value.
     std::size_t num_threads = 0;
+    /// Pairwise distances per work unit on the comparison overload, at least
+    /// one; ignored by the storage overload. A unit is whole rows and never
+    /// fewer than 64, the floor the storage overload also applies, because
+    /// each unit merges two length-n buffers. Results do not depend on this
+    /// value.
+    std::size_t chunk_size = 4096;
 };
 
 /**
@@ -158,7 +165,7 @@ struct ActivityLandscapeOptions {
  * summation and may move the last digit.
  */
 struct ActivityLandscape {
-    /// Rows in the distance matrix.
+    /// Rows in the distance matrix, or the comparison's Size().
     std::size_t num_samples = 0;
     /// Samples with a finite activity value.
     std::size_t num_scored = 0;
@@ -213,6 +220,36 @@ ActivityLandscape activity_landscape(const StorageBackend& storage,
                                      const ActivityLandscapeOptions& options =
                                          ActivityLandscapeOptions());
 
+/**
+ * @brief Cliff density, SALI and RMODI over a comparison, evaluated lazily.
+ *
+ * Bit-identical to the storage overload over a matrix holding
+ * Compare(min(i, j), max(i, j)) for every pair. Each pair of scored samples is
+ * compared once, on worker threads, and memory does not grow with the number
+ * of pairs. Only pairs of scored samples are compared; a non-finite value on
+ * a pair with a missing activity is never seen.
+ *
+ * Precondition: Compare(i, j) returns the same value on every call and every
+ * clone, and is called only with i < j.
+ *
+ * :param comparison: Distance comparison; cloned once per running unit.
+ * :param activity: One value per sample, NaN for a missing measurement.
+ * :param options: See ActivityLandscapeOptions; chunk_size sizes the units.
+ * :returns: The landscape summary.
+ * :raises ComparisonError: If the comparison reports similarities, a nonzero
+ *     self-distance, possibly non-finite values, or per-pair feature subsets;
+ *     checked after chunk_size and before any comparison runs.
+ * :raises std::invalid_argument: If chunk_size is zero (checked first), on
+ *     the storage overload's activity and option refusals (checked after the
+ *     facts, against comparison.Size()), or on its distance and overflow
+ *     refusals during the sweep. With more than one bad distance, which one is
+ *     reported depends on the thread schedule, as on the storage overload.
+ */
+ActivityLandscape activity_landscape(PairwiseComparison& comparison,
+                                     const std::vector<double>& activity,
+                                     const ActivityLandscapeOptions& options =
+                                         ActivityLandscapeOptions());
+
 /** @brief Per-class nearest-neighbour concordance. */
 struct ClassConcordance {
     /// The class string, as it appears in the input.
@@ -229,6 +266,10 @@ struct ClassConcordance {
 struct ModelabilityOptions {
     /// 0 selects the hardware concurrency. Results do not depend on this value.
     std::size_t num_threads = 0;
+    /// Pairwise distances per work unit on the comparison overload, at least
+    /// one; ignored by the storage overload. A unit is whole rows, at least
+    /// one. Results do not depend on this value.
+    std::size_t chunk_size = 4096;
 };
 
 /**
@@ -277,6 +318,39 @@ struct Modelability {
  *     is still checked.
  */
 Modelability modelability(const StorageBackend& storage,
+                          const std::vector<std::string>& activity_classes,
+                          const ModelabilityOptions& options =
+                              ModelabilityOptions());
+
+/**
+ * @brief Nearest-neighbour class concordance over a comparison, evaluated lazily.
+ *
+ * Bit-identical to the storage overload over a matrix holding
+ * Compare(min(i, j), max(i, j)) for every pair. Each scored row is scanned in
+ * full, as on the storage overload, so a run with n scored samples and at
+ * least two scored classes makes n * (n - 1) comparisons: every pair twice,
+ * both times as Compare(min, max). With one scored class nothing is scored
+ * and each pair is only validated, n * (n - 1) / 2 comparisons.
+ * Memory does not grow with the number of pairs. Only pairs of scored samples
+ * are compared; a non-finite value on a pair with an empty class is never
+ * seen.
+ *
+ * Precondition: Compare(i, j) returns the same value on every call and every
+ * clone, and is called only with i < j.
+ *
+ * :param comparison: Distance comparison; cloned once per running unit.
+ * :param activity_classes: One class string per sample; empty means missing.
+ * :param options: See ModelabilityOptions; chunk_size sizes the units.
+ * :returns: MODI and the per-class table.
+ * :raises ComparisonError: If the comparison reports similarities, a nonzero
+ *     self-distance, possibly non-finite values, or per-pair feature subsets;
+ *     checked after chunk_size and before any comparison runs.
+ * :raises std::invalid_argument: If chunk_size is zero (checked first), on
+ *     the storage overload's class refusals (checked after the facts, against
+ *     comparison.Size()), or on a negative or non-finite distance during the
+ *     sweep.
+ */
+Modelability modelability(PairwiseComparison& comparison,
                           const std::vector<std::string>& activity_classes,
                           const ModelabilityOptions& options =
                               ModelabilityOptions());

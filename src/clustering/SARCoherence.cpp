@@ -5,15 +5,19 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
 #include "ActivityMetrics.h"
+#include "ChunkedComparisons.h"
 #include "ContingencyTable.h"
 #include "DistanceAccess.h"
+#include "DiversityValidation.h"
 #include "oecluster/ThreadPool.h"
 
 namespace OECluster {
@@ -132,7 +136,7 @@ void validate_landscape_options(const ActivityLandscapeOptions& options) {
 }
 
 void validate_class_annotation(const std::vector<std::string>& activity_classes,
-                               std::size_t expected) {
+                               std::size_t expected, const std::string& owner) {
     if (activity_classes.empty()) {
         throw std::invalid_argument(
             "modelability requires a non-empty class annotation");
@@ -140,9 +144,8 @@ void validate_class_annotation(const std::vector<std::string>& activity_classes,
     if (activity_classes.size() != expected) {
         throw std::invalid_argument(
             "modelability: activity_classes has " +
-            std::to_string(activity_classes.size()) +
-            " entries but the storage has " + std::to_string(expected) +
-            " samples");
+            std::to_string(activity_classes.size()) + " entries but " + owner +
+            " has " + std::to_string(expected) + " samples");
     }
 }
 
@@ -159,28 +162,121 @@ std::invalid_argument bad_distance(std::size_t left, std::size_t right) {
         " must be finite and non-negative");
 }
 
-}  // namespace
+// Each activity_landscape chunk allocates and merges two length-n buffers, so
+// a small chunk makes that O(n) bookkeeping dominate the O(n) row it was meant
+// to serve. Both of its sweeps apply this floor.
+constexpr std::size_t LANDSCAPE_MIN_ROWS = 64;
 
-SARCoherence sar_coherence(const ClusteringResult& result,
-                           const std::vector<double>& activity,
-                           const SARCoherenceOptions& options) {
-    return sar_coherence_impl(result.Labels(), activity, options);
-}
+// The storage overloads' traversal, as it always was: rows split across a
+// pool, each read straight from Data().
+class MatrixSweep {
+public:
+    MatrixSweep(const StorageBackend& storage, std::size_t num_threads,
+                std::size_t min_rows)
+        : data_(storage.Data()),
+          num_samples_(storage.NumSamples()),
+          num_threads_(num_threads),
+          min_rows_(min_rows) {}
 
-SARCoherence sar_coherence(const std::vector<ClusterLabel>& labels,
-                           const std::vector<double>& activity,
-                           const SARCoherenceOptions& options) {
-    return sar_coherence_impl(labels, activity, options);
-}
+    // body(read, begin, end) over rows [0, n), where read(a, b) is the
+    // distance between samples a and b. Callers guarantee n >= 2.
+    template <typename Body>
+    void Run(std::size_t n, Body&& body) const {
+        // Capped at the row count before the pool is built. num_threads is a
+        // size_t on a public options struct, so this cap is the only thing
+        // standing between a caller and ThreadPool trying to spawn 2^61 OS
+        // threads. It is not what makes 8 * threads below safe to form: the
+        // next statement bounds threads by n whatever the pool reports, so the
+        // product is at most 8n. A num_threads of 0 bypasses the cap by
+        // design, because it means "use the hardware concurrency" -- so a
+        // small n still spawns that many workers for what is a single chunk,
+        // matching how HDBSCAN and Agglomerative already size their pools.
+        // Because n >= 2, no value other than that deliberate 0 can reach zero
+        // here.
+        ThreadPool pool(std::min<std::size_t>(num_threads_, n));
+        const std::size_t threads =
+            std::max<std::size_t>(1, std::min<std::size_t>(pool.NumThreads(), n));
+        const std::size_t chunk_size =
+            std::max<std::size_t>(min_rows_, n / (8 * threads));
+        const auto read = [this](std::size_t a, std::size_t b) {
+            return detail::dense_distance(data_, num_samples_, a, b);
+        };
+        pool.ParallelFor(0, n, chunk_size, [&](std::size_t begin, std::size_t end) {
+            body(read, begin, end);
+        });
+    }
 
-ActivityLandscape activity_landscape(const StorageBackend& storage,
-                                     const std::vector<double>& activity,
-                                     const ActivityLandscapeOptions& options) {
-    detail::validate_complete_distance_storage(storage, "activity_landscape");
-    validate_double_activity(activity, storage.NumSamples(),
-                             "activity_landscape", "the storage");
-    validate_landscape_options(options);
+    // body(read, 0, n) on the calling thread.
+    template <typename Body>
+    void Serial(std::size_t n, Body&& body) const {
+        const auto read = [this](std::size_t a, std::size_t b) {
+            return detail::dense_distance(data_, num_samples_, a, b);
+        };
+        body(read, 0, n);
+    }
 
+private:
+    const double* data_;
+    std::size_t num_samples_;
+    std::size_t num_threads_;
+    std::size_t min_rows_;
+};
+
+// The comparison overloads' traversal: units of whole rows, about chunk_size
+// distances each, each unit on its own clone. Every pair is read as
+// Compare(min, max), so modelability's two visits of a pair see one value.
+class ComparisonSweep {
+public:
+    ComparisonSweep(const PairwiseComparison& comparison, std::size_t num_threads,
+                    std::size_t chunk_size, std::size_t min_rows)
+        : comparison_(comparison),
+          num_threads_(num_threads),
+          chunk_size_(chunk_size),
+          min_rows_(min_rows) {}
+
+    // As MatrixSweep::Run. A row holds at most n - 1 distances.
+    template <typename Body>
+    void Run(std::size_t n, Body&& body) const {
+        const std::size_t rows_per_unit =
+            std::max<std::size_t>(min_rows_, chunk_size_ / (n - 1));
+        // Zero is resolved here rather than in the pool so the item cap
+        // applies to it too: an unresolved zero would let the hardware
+        // concurrency, not n, bound the workers and clones.
+        const std::size_t workers =
+            num_threads_ > 0
+                ? num_threads_
+                : std::max<std::size_t>(1, std::thread::hardware_concurrency());
+        detail::ChunkedComparisons units(comparison_, n, workers, rows_per_unit);
+        units.Run(n, [&](PairwiseComparison& clone, std::size_t begin, std::size_t end) {
+            const auto read = [&clone](std::size_t a, std::size_t b) {
+                return clone.Compare(std::min(a, b), std::max(a, b));
+            };
+            body(read, begin, end);
+        });
+    }
+
+    // body(read, 0, n) on the calling thread, over one clone: the caller's
+    // comparison is a prototype and is never compared on directly.
+    template <typename Body>
+    void Serial(std::size_t n, Body&& body) const {
+        const std::unique_ptr<PairwiseComparison> clone = comparison_.Clone();
+        const auto read = [&clone](std::size_t a, std::size_t b) {
+            return clone->Compare(std::min(a, b), std::max(a, b));
+        };
+        body(read, 0, n);
+    }
+
+private:
+    const PairwiseComparison& comparison_;
+    std::size_t num_threads_;
+    std::size_t chunk_size_;
+    std::size_t min_rows_;
+};
+
+template <typename Sweep>
+ActivityLandscape landscape_engine(const Sweep& sweep,
+                                   const std::vector<double>& activity,
+                                   const ActivityLandscapeOptions& options) {
     ActivityLandscape landscape;
     landscape.num_samples = activity.size();
 
@@ -205,8 +301,6 @@ ActivityLandscape activity_landscape(const StorageBackend& storage,
         return landscape;
     }
 
-    const std::size_t num_samples = storage.NumSamples();
-    const double* data = storage.Data();
     const double band = options.rmodi_delta * landscape.activity_stddev;
     constexpr double INFTY = std::numeric_limits<double>::infinity();
 
@@ -219,32 +313,12 @@ ActivityLandscape activity_landscape(const StorageBackend& storage,
     std::vector<double> diff_min(n, INFTY);
     std::mutex merge_mutex;
 
-    // Capped at the row count before the pool is built. The cap defends
-    // against an explicitly oversized num_threads: it is a size_t on a public
-    // options struct, so the only thing standing between a caller and
-    // ThreadPool trying to spawn 2^61 OS threads is this line. It is not what
-    // makes 8 * threads below safe to form: the next statement bounds threads
-    // by n whatever the pool reports, and a matrix with n rows needs n^2/2
-    // doubles, so n is nowhere near the value at which that multiplication
-    // could wrap. A num_threads of 0 bypasses the cap by design, because it
-    // means "use the hardware concurrency" -- so a small n still spawns that
-    // many workers for what is a single chunk, matching how HDBSCAN and
-    // Agglomerative already size their pools. The early return above guarantees
-    // n >= 2, so no value other than that deliberate 0 can reach zero here.
-    ThreadPool pool(std::min<std::size_t>(options.num_threads, n));
-    const std::size_t threads =
-        std::max<std::size_t>(1, std::min<std::size_t>(pool.NumThreads(), n));
-    // Each chunk allocates and merges two length-n buffers, so a small chunk
-    // makes that O(n) bookkeeping dominate the O(n) row it was meant to serve.
-    const std::size_t chunk_size = std::max<std::size_t>(64, n / (8 * threads));
-
-    pool.ParallelFor(0, n, chunk_size, [&](std::size_t begin, std::size_t end) {
+    sweep.Run(n, [&](const auto& read, std::size_t begin, std::size_t end) {
         std::vector<double> local_same(n, INFTY);
         std::vector<double> local_diff(n, INFTY);
         for (std::size_t p = begin; p < end; ++p) {
             for (std::size_t q = p + 1; q < n; ++q) {
-                const double distance = detail::dense_distance(
-                    data, num_samples, scored.indices[p], scored.indices[q]);
+                const double distance = read(scored.indices[p], scored.indices[q]);
                 if (!std::isfinite(distance) || distance < 0.0) {
                     throw std::invalid_argument(
                         "activity_landscape: the distance between samples " +
@@ -363,12 +437,9 @@ ActivityLandscape activity_landscape(const StorageBackend& storage,
     return landscape;
 }
 
-Modelability modelability(const StorageBackend& storage,
-                          const std::vector<std::string>& activity_classes,
-                          const ModelabilityOptions& options) {
-    detail::validate_complete_distance_storage(storage, "modelability");
-    validate_class_annotation(activity_classes, storage.NumSamples());
-
+template <typename Sweep>
+Modelability modelability_engine(const Sweep& sweep,
+                                 const std::vector<std::string>& activity_classes) {
     Modelability model;
     model.num_samples = activity_classes.size();
 
@@ -399,9 +470,6 @@ Modelability modelability(const StorageBackend& storage,
         ++id_count[id];
     }
 
-    const std::size_t num_samples = storage.NumSamples();
-    const double* data = storage.Data();
-
     model.classes.reserve(num_ids);
     if (num_ids < 2) {
         // Nothing to compute: with one class no neighbour can differ, so the
@@ -411,15 +479,16 @@ Modelability modelability(const StorageBackend& storage,
         // gets a refusal. This scan is the only O(n^2) work on a path that
         // would otherwise read no distance at all, and it is serial, so its
         // diagnostic needs no canonicalisation.
-        for (std::size_t p = 0; p < n; ++p) {
-            for (std::size_t q = p + 1; q < n; ++q) {
-                const double distance = detail::dense_distance(
-                    data, num_samples, indices[p], indices[q]);
-                if (!std::isfinite(distance) || distance < 0.0) {
-                    throw bad_distance(indices[p], indices[q]);
+        sweep.Serial(n, [&](const auto& read, std::size_t begin, std::size_t end) {
+            for (std::size_t p = begin; p < end; ++p) {
+                for (std::size_t q = p + 1; q < n; ++q) {
+                    const double distance = read(indices[p], indices[q]);
+                    if (!std::isfinite(distance) || distance < 0.0) {
+                        throw bad_distance(indices[p], indices[q]);
+                    }
                 }
             }
-        }
+        });
         for (std::uint32_t id = 0; id < num_ids; ++id) {
             ClassConcordance row;
             row.label = id_label[id];
@@ -434,21 +503,7 @@ Modelability modelability(const StorageBackend& storage,
     // writing different indices from different threads is a data race.
     std::vector<char> concordant(n, 0);
 
-    // Capped at the row count for the same reason as in `activity_landscape`:
-    // `num_threads` is a size_t on a public options struct, so without this an
-    // absurd value has ThreadPool try to create that many OS threads. The cap
-    // has no part in keeping `8 * threads` below from wrapping: the next
-    // statement bounds threads by n whatever the pool reports, so the product
-    // is at most 8n. Reaching here means num_ids >= 2 and so n >= 2, which is
-    // what keeps the cap from turning an explicit request into the zero the
-    // pool reads as "use the hardware concurrency"; a num_threads of 0 is the
-    // caller asking for exactly that, and passes through unchanged.
-    ThreadPool pool(std::min<std::size_t>(options.num_threads, n));
-    const std::size_t threads =
-        std::max<std::size_t>(1, std::min<std::size_t>(pool.NumThreads(), n));
-    const std::size_t chunk_size = std::max<std::size_t>(1, n / (8 * threads));
-
-    pool.ParallelFor(0, n, chunk_size, [&](std::size_t begin, std::size_t end) {
+    sweep.Run(n, [&](const auto& read, std::size_t begin, std::size_t end) {
         for (std::size_t p = begin; p < end; ++p) {
             double best_distance = std::numeric_limits<double>::infinity();
             std::size_t best_q = no_neighbour;
@@ -456,8 +511,7 @@ Modelability modelability(const StorageBackend& storage,
                 if (q == p) {
                     continue;
                 }
-                const double distance = detail::dense_distance(
-                    data, num_samples, indices[p], indices[q]);
+                const double distance = read(indices[p], indices[q]);
                 if (!std::isfinite(distance) || distance < 0.0) {
                     throw bad_distance(indices[p], indices[q]);
                 }
@@ -496,6 +550,66 @@ Modelability modelability(const StorageBackend& storage,
     model.modi = fraction_sum / static_cast<double>(num_ids);
 
     return model;
+}
+
+}  // namespace
+
+SARCoherence sar_coherence(const ClusteringResult& result,
+                           const std::vector<double>& activity,
+                           const SARCoherenceOptions& options) {
+    return sar_coherence_impl(result.Labels(), activity, options);
+}
+
+SARCoherence sar_coherence(const std::vector<ClusterLabel>& labels,
+                           const std::vector<double>& activity,
+                           const SARCoherenceOptions& options) {
+    return sar_coherence_impl(labels, activity, options);
+}
+
+ActivityLandscape activity_landscape(const StorageBackend& storage,
+                                     const std::vector<double>& activity,
+                                     const ActivityLandscapeOptions& options) {
+    detail::validate_complete_distance_storage(storage, "activity_landscape");
+    validate_double_activity(activity, storage.NumSamples(),
+                             "activity_landscape", "the storage");
+    validate_landscape_options(options);
+    const MatrixSweep sweep(storage, options.num_threads, LANDSCAPE_MIN_ROWS);
+    return landscape_engine(sweep, activity, options);
+}
+
+ActivityLandscape activity_landscape(PairwiseComparison& comparison,
+                                     const std::vector<double>& activity,
+                                     const ActivityLandscapeOptions& options) {
+    detail::validate_chunk_size(options.chunk_size, "activity_landscape");
+    detail::validate_comparison_facts(comparison, "activity_landscape");
+    validate_double_activity(activity, comparison.Size(),
+                             "activity_landscape", "the comparison");
+    validate_landscape_options(options);
+    const ComparisonSweep sweep(comparison, options.num_threads,
+                                options.chunk_size, LANDSCAPE_MIN_ROWS);
+    return landscape_engine(sweep, activity, options);
+}
+
+Modelability modelability(const StorageBackend& storage,
+                          const std::vector<std::string>& activity_classes,
+                          const ModelabilityOptions& options) {
+    detail::validate_complete_distance_storage(storage, "modelability");
+    validate_class_annotation(activity_classes, storage.NumSamples(),
+                              "the storage");
+    const MatrixSweep sweep(storage, options.num_threads, 1);
+    return modelability_engine(sweep, activity_classes);
+}
+
+Modelability modelability(PairwiseComparison& comparison,
+                          const std::vector<std::string>& activity_classes,
+                          const ModelabilityOptions& options) {
+    detail::validate_chunk_size(options.chunk_size, "modelability");
+    detail::validate_comparison_facts(comparison, "modelability");
+    validate_class_annotation(activity_classes, comparison.Size(),
+                              "the comparison");
+    const ComparisonSweep sweep(comparison, options.num_threads,
+                                options.chunk_size, 1);
+    return modelability_engine(sweep, activity_classes);
 }
 
 }  // namespace OECluster

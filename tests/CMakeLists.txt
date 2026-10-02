@@ -48,6 +48,7 @@ add_executable(oecluster_tests
     cpp/test_report_distance_source.cpp
     cpp/test_cluster_report_engine.cpp
     cpp/test_cluster_report_comparison.cpp
+    cpp/test_sar_comparison.cpp
     cpp/test_murcko_scaffold.cpp
     cpp/test_umbrella_header.cpp
 )

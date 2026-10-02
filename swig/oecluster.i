@@ -843,9 +843,10 @@ OECLUSTER_GIL_EXCEPTION(OECluster::murcko_cluster, murcko_cluster)
 OECLUSTER_GIL_EXCEPTION(OECluster::partition_agreement, partition_agreement)
 OECLUSTER_GIL_EXCEPTION(OECluster::scaffold_agreement, scaffold_agreement)
 
-// activity_landscape and modelability sweep every pair of a precomputed
-// matrix; sar_coherence is linear but still runs over native data with no
-// Python object in reach.
+// activity_landscape and modelability sweep every pair, of a precomputed
+// matrix or of a comparison whose clones run on worker threads; sar_coherence
+// is linear. None of them has a Python object in reach, so the GIL stays
+// released across every overload.
 OECLUSTER_GIL_EXCEPTION(OECluster::sar_coherence, sar_coherence)
 OECLUSTER_GIL_EXCEPTION(OECluster::activity_landscape, activity_landscape)
 OECLUSTER_GIL_EXCEPTION(OECluster::modelability, modelability)
