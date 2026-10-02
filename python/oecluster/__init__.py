@@ -4205,18 +4205,38 @@ def _agreement_scaffolds(value, argument_name):
     return _string_vector(value, argument_name, "scaffold strings")
 
 
-def cluster_report(result, distance_matrix, *, preset="default",
+# Stands for "not given" in the A-metric signatures, where the leading
+# arguments need defaults only so that an alias-only call such as
+# cluster_report(result, distance_matrix=dm) can bind. None cannot serve: it
+# would hide a caller's explicit None behind a "missing argument" error.
+_MISSING = object()
+
+
+def cluster_report(result, items=_MISSING, *, distance_matrix=_MISSING,
+                   comparison=None, preset="default",
                    coverage_thresholds=None, boundary_threshold=None,
                    representative_method="medoid",
                    treat_noise_as_singletons=True, num_threads=0,
-                   compute_pair_rank_indices=False,
+                   chunk_size=4096, compute_pair_rank_indices=False,
                    compute_per_cluster_records=False,
-                   allow_nonmetric=False):
+                   allow_nonmetric=False, **kwargs):
     """
     Compute a method-agnostic clustering-quality report.
 
     :param result: A clustering result (e.g. from :func:`butina`/:func:`dbscan`).
-    :param distance_matrix: Complete SymmetricDistanceMatrix for the same items.
+    :param items: What the distances come from: a complete
+        SymmetricDistanceMatrix for the same items; a prebuilt comparison such
+        as :class:`FingerprintComparison`; or a sequence of items with
+        ``comparison=`` naming the comparison to build. The two comparison
+        forms compute the report without a matrix, in memory linear in the
+        number of items, calling ``Compare`` about ``N * (N - 1) / 2`` times
+        per pass over the pairs. Their results are identical to the matrix
+        path over a matrix filled through the same ``Compare``, except that a
+        zero median is always +0.0.
+    :param distance_matrix: Keyword alias for ``items`` that accepts only a
+        SymmetricDistanceMatrix. Passing both is a TypeError.
+    :param comparison: Comparison name, such as ``"fingerprint"``, when
+        ``items`` is a sequence of items. Its options go in ``**kwargs``.
     :param preset: Threshold preset: "default", "tight", or "diversity".
     :param coverage_thresholds: Optional override for coverage distances; NaN
         is refused, because no reported value can be matched back to it.
@@ -4226,45 +4246,60 @@ def cluster_report(result, distance_matrix, *, preset="default",
         "medoid" (default), "minimax", or "weighted_medoid". The
         "highest_neighborhood" method is not supported.
     :param treat_noise_as_singletons: Fold noise into singleton accounting.
-    :param num_threads: Reserved for parallel-safe computation.
+    :param num_threads: Worker threads for a comparison's distance
+        evaluations; 0 selects the hardware concurrency. The matrix path
+        ignores it. The result does not depend on it.
+    :param chunk_size: Pairwise distances per work unit on the comparison
+        paths, at least 1; validated on every path. The result does not
+        depend on it.
     :param compute_pair_rank_indices: Compute ``c_index`` and
         ``baker_hubert_gamma``. Both are read off two sorted arrays holding
         every pairwise distance among clustered points,
         ``Nc * (Nc - 1) / 2`` doubles between them -- roughly 400 MB at
-        ``Nc = 10,000`` and 10 GB at ``Nc = 50,000``. Only the between-cluster
-        array is this flag's own cost; the within-cluster one is built on every
-        call, because ``median_intra_distance`` is taken over it. So the flag
-        adds nothing to a single-cluster result and nearly the whole figure to
-        one with small clusters, and it is off by default for the second case.
-        Raises ``MemoryError`` if the allocation fails.
+        ``Nc = 10,000`` and 10 GB at ``Nc = 50,000``. Both are built only
+        under this flag; without it no path holds a pair-sized array, and
+        ``median_intra_distance`` is taken by selection. Raises
+        ``MemoryError`` if the allocation fails. Refused on the comparison
+        paths, whose point is to never hold every pair.
     :param compute_per_cluster_records: Populate :attr:`ClusterReport.records`.
-        Off by default: the stage buffers the largest cluster's pairwise
-        distances to take their median, ``n * (n - 1) / 2`` doubles, and the
-        median is taken over a copy of that buffer -- roughly 400 MB for the
-        buffer and 400 MB again for the copy, transiently, at ``n = 10,000``.
+        Off by default. A cluster with at most 2**20 pairs has its median
+        taken from a buffer of its distances; a larger cluster's median is
+        selected by re-walking its pairs, so the stage buffers at most 2**20
+        doubles (8 MB) on every path. Under ``compute_pair_rank_indices``,
+        which already holds every pair, each cluster is buffered whole.
     :param allow_nonmetric: Score anyway when the distances are known not to
-        satisfy the triangle inequality. Does not override the refusals for
-        similarity-valued or non-finite matrices.
+        satisfy the triangle inequality, or were scored on a per-pair feature
+        subset. Does not override the refusals for similarity-valued or
+        non-finite distances.
+    :param kwargs: Comparison options, with ``comparison=`` only.
     :returns: A ClusterReport.
-    :raises TypeError: If result/distance_matrix have the wrong type, or
-        treat_noise_as_singletons, compute_pair_rank_indices,
-        compute_per_cluster_records or allow_nonmetric is not a bool or
-        ``numpy.bool_``.
-    :raises ValueError: If a preset/method/threshold is invalid, the result and
-        the matrix cover different numbers of samples, the matrix uses sparse
-        storage, or the matrix is not a metric -- and additionally: any
-        non-finite entry anywhere in the matrix is refused before the report is
-        computed, whether or not that pair reaches a reported value.
+    :raises TypeError: If result has the wrong type; both or neither of
+        ``items`` and ``distance_matrix`` are given; ``distance_matrix`` is not
+        a SymmetricDistanceMatrix; ``items`` fits none of the three forms;
+        ``comparison`` or a keyword this function does not take accompanies a
+        matrix or a prebuilt comparison; or treat_noise_as_singletons,
+        compute_pair_rank_indices, compute_per_cluster_records or
+        allow_nonmetric is not a bool or ``numpy.bool_``.
+    :raises ValueError: If a preset/method/threshold is invalid, ``chunk_size``
+        is not an integer of at least 1, the result and the distances cover
+        different numbers of samples, the matrix uses sparse storage, or the
+        distances are not a metric -- and additionally: any non-finite entry
+        anywhere in a matrix is refused before the report is computed, whether
+        or not that pair reaches a reported value. On the comparison paths:
+        pair-rank indices are requested, the comparison's declared facts
+        refuse it, or normalizing the items drops or expands one. A comparison
+        is checked only on the pairs the report reads.
     :raises RuntimeError: If the distance matrix cannot provide complete
-        distances, or if the result's labels and members describe different
-        partitions.
+        distances; if the result's labels and members describe different
+        partitions; or if a comparison returns a non-finite distance for a
+        pair the report reads.
     :raises MemoryError: If the pair-rank stage cannot allocate its distance
         arrays, or would exceed its couple counter.
     """
     if not isinstance(result, ClusteringResult):
         raise TypeError("cluster_report() expects a ClusteringResult")
-    if not isinstance(distance_matrix, SymmetricDistanceMatrix):
-        raise TypeError("cluster_report() expects a SymmetricDistanceMatrix")
+    items = _metric_input(items, distance_matrix, comparison, kwargs,
+                          "cluster_report")
 
     # Every caller argument is resolved into a local before the gate runs, so
     # that an invalid preset, threshold, or representative method is reported
@@ -4322,6 +4357,8 @@ def cluster_report(result, distance_matrix, *, preset="default",
     if num_threads_int < 0:
         raise ValueError("num_threads must be non-negative")
 
+    chunk_size_int = _diversity_int(chunk_size, "chunk_size", 1)
+
     # numpy.bool_ is admitted on the same terms as allow_nonmetric, which the
     # gate below has always taken: one call must not apply two admissibility
     # rules to its bool keywords, and np.bool_ is what arr.any() and every
@@ -4343,30 +4380,57 @@ def cluster_report(result, distance_matrix, *, preset="default",
             f"({compute_per_cluster_records!r})."
         )
 
-    # Nothing else ties the result to the matrix: the native reporter reads
-    # cluster members as storage indices, so a result scored against a larger
-    # unrelated matrix stays in range and returns a confident, wrong scorecard.
-    # This outranks the storage and metric refusals below -- which matrix it is,
-    # sparse or dense, metric or not, cannot be the caller's first problem when
-    # it is the wrong matrix. ValueError, not TypeError: both argument types are
-    # right, their pairing is not.
-    if result.num_samples != distance_matrix.num_samples:
-        raise ValueError(
-            f"cluster_report requires a result and a distance matrix over the "
-            f"same items, but the result covers {result.num_samples} samples "
-            f"and the matrix {distance_matrix.num_samples}")
+    if isinstance(items, SymmetricDistanceMatrix):
+        distance_matrix = items
+        # Nothing else ties the result to the matrix: the native reporter
+        # reads cluster members as storage indices, so a result scored against
+        # a larger unrelated matrix stays in range and returns a confident,
+        # wrong scorecard. This outranks the storage and metric refusals below
+        # -- which matrix it is, sparse or dense, metric or not, cannot be the
+        # caller's first problem when it is the wrong matrix. ValueError, not
+        # TypeError: both argument types are right, their pairing is not.
+        if result.num_samples != distance_matrix.num_samples:
+            raise ValueError(
+                f"cluster_report requires a result and a distance matrix over "
+                f"the same items, but the result covers {result.num_samples} "
+                f"samples and the matrix {distance_matrix.num_samples}")
 
-    # ValueError, not TypeError: the argument's type is right, its storage is not.
-    if isinstance(distance_matrix.storage, SparseStorage):
-        raise ValueError(  # noqa: TRY004
-            "cluster_report requires complete pairwise "
-            "distances; SparseStorage is not supported")
+        # ValueError, not TypeError: the argument's type is right, its storage
+        # is not.
+        if isinstance(distance_matrix.storage, SparseStorage):
+            raise ValueError(  # noqa: TRY004
+                "cluster_report requires complete pairwise "
+                "distances; SparseStorage is not supported")
 
-    # Local argument validation first: allow_nonmetric cannot rescue a bad
-    # preset, representative method, or sparse storage, so the gate must not
-    # pre-empt those messages.
-    _gate.require_metric(distance_matrix, "cluster_report",
-                         allow_nonmetric=allow_nonmetric)
+        # Local argument validation first: allow_nonmetric cannot rescue a bad
+        # preset, representative method, or sparse storage, so the gate must
+        # not pre-empt those messages.
+        _gate.require_metric(distance_matrix, "cluster_report",
+                             allow_nonmetric=allow_nonmetric)
+        target = distance_matrix.storage
+    else:
+        # Before the comparison is built: pair-rank indices sort every pair,
+        # which no comparison path holds.
+        if compute_pair_rank_indices:
+            raise ValueError(
+                "cluster_report cannot compute pair-rank indices from a "
+                "comparison; pass a SymmetricDistanceMatrix or set "
+                "compute_pair_rank_indices=False")
+        # Also before the build, as require_metric checks it before reading
+        # any fact: a malformed override is the caller's to fix whatever the
+        # comparison turns out to be.
+        _gate.check_allow_nonmetric(allow_nonmetric)
+        source = _diversity_source(
+            items, comparison, kwargs, "cluster_report",
+            refuse_facts=lambda obj, caller: _refuse_report_comparison(
+                obj, caller, allow_nonmetric=allow_nonmetric))
+        _refuse_dropped_items(source, "cluster_report")
+        if result.num_samples != source.size:
+            raise ValueError(
+                f"cluster_report requires a result and a comparison over the "
+                f"same items, but the result covers {result.num_samples} "
+                f"samples and the comparison {source.size}")
+        target = source.target
 
     options = _oecluster.ClusterReportOptions(threshold)
     if coverage_vector is not None:
@@ -4376,6 +4440,7 @@ def cluster_report(result, distance_matrix, *, preset="default",
     options.representative_method = native_method
     options.treat_noise_as_singletons = bool(treat_noise_as_singletons)
     options.num_threads = num_threads_int
+    options.chunk_size = chunk_size_int
     # Coerced like treat_noise_as_singletons above, and for a harder reason:
     # the SWIG bool setter takes only a Python bool, so an admitted numpy.bool_
     # would otherwise fail here with a message naming a generated setter.
@@ -4383,7 +4448,7 @@ def cluster_report(result, distance_matrix, *, preset="default",
     options.compute_per_cluster_records = bool(compute_per_cluster_records)
 
     native = _cluster_report(
-        _native_clustering_result(result), distance_matrix.storage, options)
+        _native_clustering_result(result), target, options)
     return ClusterReport(native, method=result.method)
 
 
@@ -5418,6 +5483,29 @@ class _DiversitySource:
             f"({reason})")
 
 
+def _refuse_distance_facts(facts, caller):
+    """
+    Refuse the declared facts that no caller may waive.
+
+    :param facts: Facts dictionary from :func:`_gate.facts_from_comparison`.
+    :param caller: Entry point name for the messages.
+    :raises ValueError: If a fact refuses.
+    """
+    if facts['is_distance'] is False:
+        raise ValueError(
+            f"{caller} requires distances, but the comparison reports "
+            "similarities; build it with similarity=False")
+    if facts['zero_self'] is False:
+        raise ValueError(
+            f"{caller} requires a zero self-distance, but the comparison "
+            "reports that d(x, x) is not zero")
+    if facts['data_integrity'] == "nan_present":
+        raise ValueError(
+            f"{caller} cannot rank distances the comparison declares may be "
+            "non-finite (missing='propagate'); use "
+            "missing='complete_case'")
+
+
 def _refuse_comparison_facts(comparison_obj, caller):
     """
     Refuse a comparison whose declared facts rule out ranking its distances.
@@ -5433,19 +5521,7 @@ def _refuse_comparison_facts(comparison_obj, caller):
     :raises ValueError: If a fact refuses.
     """
     facts = _gate.facts_from_comparison(comparison_obj)
-    if facts['is_distance'] is False:
-        raise ValueError(
-            f"{caller} requires distances, but the comparison reports "
-            "similarities; build it with similarity=False")
-    if facts['zero_self'] is False:
-        raise ValueError(
-            f"{caller} requires a zero self-distance, but the comparison "
-            "reports that d(x, x) is not zero")
-    if facts['data_integrity'] == "nan_present":
-        raise ValueError(
-            f"{caller} cannot rank distances the comparison declares may be "
-            "non-finite (missing='propagate'); use "
-            "missing='complete_case'")
+    _refuse_distance_facts(facts, caller)
     if facts['data_integrity'] == "subset_scored":
         raise ValueError(
             f"{caller} cannot rank distances scored on per-pair feature "
@@ -5454,7 +5530,8 @@ def _refuse_comparison_facts(comparison_obj, caller):
 
 
 def _diversity_source(items, comparison, kwargs, caller, *,
-                      allow_sparse=False, defer_comparable_check=False):
+                      allow_sparse=False, defer_comparable_check=False,
+                      refuse_facts=_refuse_comparison_facts):
     """
     Dispatch a diversity entry point's input onto one of its three paths.
 
@@ -5467,6 +5544,9 @@ def _diversity_source(items, comparison, kwargs, caller, *,
         points read sparse entries directly.
     :param defer_comparable_check: Skip the up-front comparison fact check;
         for callers that need to inspect source.size before gating.
+    :param refuse_facts: Fact check run on the comparison, called as
+        ``refuse_facts(comparison_obj, caller)``; for callers whose gate
+        differs from the default ranking gate.
     :returns: A :class:`_DiversitySource`.
     :raises TypeError: If the input and the comparison arguments do not fit
         one path.
@@ -5496,7 +5576,7 @@ def _diversity_source(items, comparison, kwargs, caller, *,
             size = items.num_samples
             return _DiversitySource(items.storage, size, size, None, [], items)
         if not defer_comparable_check:
-            _refuse_comparison_facts(items, caller)
+            refuse_facts(items, caller)
         size = items.Size()
         return _DiversitySource(items, size, size, None, [], None)
 
@@ -5523,10 +5603,107 @@ def _diversity_source(items, comparison, kwargs, caller, *,
     positions = [p for p in range(len(items)) if p not in dropped]
     comparison_obj, _, _ = _comparisons.build_comparison(
         kept, comparison, False, kwargs, symmetric=True)
-    _refuse_comparison_facts(comparison_obj, caller)
+    refuse_facts(comparison_obj, caller)
     return _DiversitySource(comparison_obj, comparison_obj.Size(), len(items),
                             positions, [list(entry) for entry in excluded],
                             None)
+
+
+def _metric_input(items, distance_matrix, comparison, kwargs, caller):
+    """
+    Resolve an A-metric entry point's ``items``/``distance_matrix`` pair.
+
+    :param items: The positional input, or ``_MISSING``.
+    :param distance_matrix: The keyword alias, or ``_MISSING``.
+    :param comparison: Comparison name, for the named path.
+    :param kwargs: Comparison options collected by ``**kwargs``.
+    :param caller: Entry point name for the messages.
+    :returns: The input to dispatch.
+    :raises TypeError: If both or neither are given, the alias is not a
+        SymmetricDistanceMatrix, or the arguments fit no path.
+    """
+    if items is not _MISSING and distance_matrix is not _MISSING:
+        raise TypeError(
+            f"{caller}() got both items and distance_matrix; pass one")
+    if items is _MISSING and distance_matrix is _MISSING:
+        raise TypeError(f"{caller}() missing required argument: 'items'")
+    if distance_matrix is not _MISSING:
+        # The alias keeps the old parameter's meaning exactly -- a matrix and
+        # nothing else -- so it never routes a call onto a lazy path.
+        if not isinstance(distance_matrix, SymmetricDistanceMatrix):
+            raise TypeError(f"{caller}() expects a SymmetricDistanceMatrix")
+        items = distance_matrix
+    if isinstance(items, (SymmetricDistanceMatrix,
+                          _oecluster.PairwiseComparison)):
+        # **kwargs exists only for comparison options. Beside a matrix or a
+        # prebuilt comparison, every extra keyword is therefore a misspelling
+        # of one of the function's own, and is named as Python would name it.
+        if kwargs:
+            raise TypeError(
+                f"{caller}() got unexpected keyword arguments "
+                f"{sorted(kwargs)}")
+        if comparison is not None:
+            raise TypeError(
+                f"{caller}() takes no comparison with a distance matrix or a "
+                "prebuilt comparison, which already fix the distances")
+    elif comparison is None:
+        raise TypeError(
+            f"{caller}() expects a SymmetricDistanceMatrix, a prebuilt "
+            "comparison, or a sequence of items with comparison=")
+    return items
+
+
+def _refuse_report_comparison(comparison_obj, caller, *, allow_nonmetric):
+    """
+    Refuse a comparison cluster_report cannot score, honoring allow_nonmetric.
+
+    The comparison counterpart of :func:`_gate.require_metric`: the refusals
+    no flag waives, then require_metric's overridable tier, read from the
+    declared facts. ``metric_probe`` is a matrix stamp with no comparison
+    counterpart.
+
+    :param comparison_obj: Native comparison about to be run.
+    :param caller: Entry point name for the messages.
+    :param allow_nonmetric: Proceed despite a triangle or subset fact.
+    :raises ValueError: If a fact refuses.
+    """
+    facts = _gate.facts_from_comparison(comparison_obj)
+    _refuse_distance_facts(facts, caller)
+    if allow_nonmetric:
+        return
+    if facts['triangle'] is False:
+        raise ValueError(
+            f"the measure behind this comparison "
+            f"({comparison_obj.ComparisonName()}) violates the triangle "
+            f"inequality; {caller} assumes a metric. "
+            f"Pass allow_nonmetric=True to proceed anyway.")
+    if facts['data_integrity'] == "subset_scored":
+        raise ValueError(
+            f"this comparison scores on a per-pair subset of features "
+            f"(missing='ignore'), so its distances are not mutually "
+            f"comparable; {caller} assumes a metric. "
+            f"Pass allow_nonmetric=True to proceed anyway.")
+
+
+def _refuse_dropped_items(source, caller):
+    """
+    Refuse a source whose normalization dropped an item.
+
+    Labels and activities are positional, one per caller item, so a dropped
+    item would shift every later one onto another item's distances.
+    maxmin_select can report caller positions around a gap; these callers
+    cannot.
+
+    :param source: The dispatched :class:`_DiversitySource`.
+    :param caller: Entry point name for the message.
+    :raises ValueError: If any item was dropped.
+    """
+    if source.excluded:
+        position, reason = source.excluded[0]
+        raise ValueError(
+            f"{caller} scores every item by position, but normalizing the "
+            f"inputs dropped item {position} ({reason}); remove it, with its "
+            "label or activity, before the call")
 
 
 def _diversity_int(value, name, minimum):

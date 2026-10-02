@@ -116,6 +116,26 @@ def _has_nonfinite(distance_matrix):
     return not np.isfinite(distance_matrix.condensed).all()
 
 
+def check_allow_nonmetric(allow_nonmetric):
+    """
+    Refuse an ``allow_nonmetric`` that is not a bool or numpy.bool_.
+
+    :param allow_nonmetric: Caller value.
+    :raises TypeError: If the value is not a bool or numpy.bool_.
+    """
+    # A malformed override is a call the caller must fix whatever the matrix
+    # looks like, so it is rejected before any fact is read. Truthiness would
+    # be the wrong rule here: allow_nonmetric="False" reads to a caller as
+    # "off" while switching the tier-2 checks off. numpy.bool_ is permitted
+    # because it coerces faithfully and is never silently reinterpreted.
+    if not isinstance(allow_nonmetric, (bool, np.bool_)):
+        raise TypeError(
+            "allow_nonmetric must be True or False, "
+            f"not {type(allow_nonmetric).__name__} "
+            f"({allow_nonmetric!r}). A truthy value would "
+            "silently disable a safety check.")
+
+
 def require_metric(distance_matrix, caller, *, allow_nonmetric=False):
     """
     Refuse to run a metric-assuming algorithm on a non-metric matrix.
@@ -151,17 +171,7 @@ def require_metric(distance_matrix, caller, *, allow_nonmetric=False):
     :raises TypeError: If allow_nonmetric is not a bool or numpy.bool_.
     :raises ValueError: If a check refuses.
     """
-    # A malformed override is a call the caller must fix whatever the matrix
-    # looks like, so it is rejected before any fact is read. Truthiness would
-    # be the wrong rule here: allow_nonmetric="False" reads to a caller as
-    # "off" while switching the tier-2 checks off. numpy.bool_ is permitted
-    # because it coerces faithfully and is never silently reinterpreted.
-    if not isinstance(allow_nonmetric, (bool, np.bool_)):
-        raise TypeError(
-            "allow_nonmetric must be True or False, "
-            f"not {type(allow_nonmetric).__name__} "
-            f"({allow_nonmetric!r}). A truthy value would "
-            "silently disable a safety check.")
+    check_allow_nonmetric(allow_nonmetric)
 
     facts = distance_matrix.facts
     name = distance_matrix.comparison_name
