@@ -821,7 +821,9 @@ before anything runs. The three `isim_report` fields set
 `K * bits * 4` byte column store, so the fingerprint default is not
 linear; `calinski_harabasz_medoid` is the linear-time choice there. If
 `report_options` names the flag and sets it false, the call raises
-`ValueError` rather than returning a table of NaN.
+`ValueError` rather than returning a table of NaN; a flag that is not a
+`bool` is a `TypeError` before anything runs, as the scorers themselves
+refuse truthiness.
 
 **Degenerate partitions.** A validity index can still be flattered by a
 degenerate partition. With every clustered point its own cluster, each
@@ -873,7 +875,8 @@ those reports already carry without rerunning anything.
 
 Argument validation runs before the first clustering: `TypeError` for a
 non-string `parameter`, a string or non-iterable `values`, a non-mapping
-`report_options`, a non-string `criterion`, a `bool`, a non-numeric noise
+`report_options`, a non-string `criterion`, a stage flag in
+`report_options` that is not a `bool`, a `bool`, a non-numeric noise
 cap, a non-integer cluster bound, or an unsupported `items` kind;
 `ValueError` for an empty `parameter` or grid, a bound out of range
 (`max_noise_fraction` outside [0, 1] or NaN, a cluster bound below 1,

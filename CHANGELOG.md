@@ -2,6 +2,20 @@
 
 This file starts at 5.0.0; earlier releases are not recorded here.
 
+## [5.15.1] - 2026-10-02
+
+### Fixed
+
+- `select_parameter()` refuses a stage flag in `report_options`
+  (`compute_pair_rank_indices`, `compute_centroid_indices`) that is not a
+  `bool` with `TypeError` before the first clustering, instead of letting
+  the scorer refuse it after a run.
+- `ClusteringSpec` equality short-circuits on identity like Python's
+  container equality, so a spec whose option is NaN (a float or an array)
+  is equal to itself.
+- The `ClusteringSpec` docstring scopes "not validated at construction" to
+  the options, as the documentation already did.
+
 ## [5.15.0] - 2026-10-02
 
 ### Added

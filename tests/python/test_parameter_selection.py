@@ -172,6 +172,18 @@ def test_spec_equality_handles_array_valued_options():
     assert left != oecluster.ClusteringSpec("k_medoids", initial_medoids=5)
 
 
+def test_spec_equality_is_reflexive_with_nan_options():
+    # Python's container equality short-circuits on identity, so a NaN option
+    # must not make a spec unequal to itself; distinct NaNs stay unequal.
+    nan_scalar = oecluster.ClusteringSpec("butina", threshold=float("nan"))
+    nan_array = oecluster.ClusteringSpec(
+        "k_medoids", initial_medoids=np.array([0.0, np.nan]))
+    # Reflexivity is the property under test, so the self-comparison is intended.
+    assert nan_scalar == nan_scalar  # noqa: PLR0124
+    assert nan_array == nan_array  # noqa: PLR0124
+    assert nan_scalar != oecluster.ClusteringSpec("butina", threshold=float("nan"))
+
+
 def test_spec_repr():
     assert (repr(oecluster.ClusteringSpec("butina", num_threads=4))
             == "ClusteringSpec('butina', num_threads=4)")
@@ -378,6 +390,34 @@ def test_a_stage_the_caller_switched_on_is_kept():
         "butina", _blobs(), "threshold", (0.2,),
         report_options={"compute_pair_rank_indices": True})
     assert selection.criterion == "silhouette"
+    assert selection.rows[0].report.requested.pair_rank_indices is True
+
+
+@pytest.mark.parametrize("value", [1, 0, "False", np.array([True, True])])
+def test_a_stage_flag_that_is_not_a_bool_is_refused_before_clustering(value):
+    # The scorer would refuse the flag too, but only after the first
+    # clustering had run.
+    calls = []
+    with pytest.raises(TypeError, match="compute_pair_rank_indices"):
+        oecluster.select_parameter(
+            _recording(calls), _blobs(), "threshold", GRID,
+            report_options={"compute_pair_rank_indices": value})
+    assert calls == []
+
+
+def test_a_fingerprint_stage_flag_that_is_not_a_bool_is_refused_before_clustering():
+    calls = []
+    with pytest.raises(TypeError, match="compute_centroid_indices"):
+        oecluster.select_parameter(
+            _recording(calls), _fps(), "threshold", (0.6,),
+            report_options={"compute_centroid_indices": 1})
+    assert calls == []
+
+
+def test_a_numpy_bool_stage_flag_is_accepted():
+    selection = oecluster.select_parameter(
+        "butina", _blobs(), "threshold", (0.2,),
+        report_options={"compute_pair_rank_indices": np.True_})
     assert selection.rows[0].report.requested.pair_rank_indices is True
 
 

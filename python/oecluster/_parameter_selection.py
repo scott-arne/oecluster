@@ -71,6 +71,10 @@ def _options_equal(left, right):
     for key in left:
         left_val = left[key]
         right_val = right[key]
+        # Identity first, as Python's own container equality does; a NaN
+        # option would otherwise make a spec unequal to itself.
+        if left_val is right_val:
+            continue
         # Use np.array_equal for NumPy arrays to avoid the ambiguous truth value error.
         if isinstance(left_val, np.ndarray) or isinstance(right_val, np.ndarray):
             if not np.array_equal(left_val, right_val):
@@ -98,8 +102,8 @@ class ClusteringSpec:
     serialization needs; any other callable that returns a
     :class:`ClusteringResult` is accepted under its own ``__name__``.
 
-    Nothing is validated at construction. The algorithm validates its
-    options when it runs, exactly as a direct call would.
+    The options are not validated at construction; the algorithm validates
+    them when it runs, exactly as a direct call would.
 
     Specs compare equal on the same algorithm object and equal options.
     Defining ``__eq__`` without ``__hash__`` makes them unhashable, which is
@@ -284,7 +288,8 @@ def _resolve_criterion(criterion, scorer, report_options):
     Merges the opt-in stage flag the criterion needs into ``report_options``
     (the sweep's own copy, never the caller's mapping).
 
-    :raises TypeError: If ``criterion`` is not a string.
+    :raises TypeError: If ``criterion`` is not a string, or a stage flag the
+        caller put in ``report_options`` is not a bool.
     :raises ValueError: If it is not a validity index, the scorer does not
         produce it, it needs a matrix and the input is a comparison, or the
         caller switched its stage off.
@@ -310,6 +315,14 @@ def _resolve_criterion(criterion, scorer, report_options):
             f"criterion {criterion!r} needs every pairwise distance, which "
             "cluster_report does not build from a comparison; pass a "
             "SymmetricDistanceMatrix")
+    # The scorers refuse truthiness for their flags; checking here keeps a
+    # non-bool from surfacing only after the first clustering has run.
+    for known_flag in set(_STAGE_FLAGS[scorer.name].values()):
+        if known_flag in report_options and not isinstance(
+                report_options[known_flag], (bool, np.bool_)):
+            raise TypeError(
+                f"report_options[{known_flag!r}] must be True or False, not "
+                f"{type(report_options[known_flag]).__name__}")
     flag = _STAGE_FLAGS[scorer.name].get(criterion)
     if flag is not None:
         if flag in report_options:
@@ -542,8 +555,9 @@ def select_parameter(algorithm, items, parameter, values, *, criterion=None,
     :returns: A :class:`ParameterSelection`.
     :raises TypeError: For a non-string ``parameter``, a string or
         non-iterable ``values``, a non-mapping ``report_options``, a
-        non-string ``criterion``, a bound of the wrong type, or an
-        unsupported ``items`` kind.
+        non-string ``criterion``, a stage flag in ``report_options`` that
+        is not a bool, a bound of the wrong type, or an unsupported
+        ``items`` kind.
     :raises ValueError: For an empty ``parameter`` or grid, a bound out of
         range, sparse storage, a criterion that is not a validity index or
         that the scorer does not produce, a pair-rank criterion with a
