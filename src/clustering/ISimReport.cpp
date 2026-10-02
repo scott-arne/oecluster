@@ -11,10 +11,10 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "ClusterMetrics.h"
-#include "DiversityValidation.h"
 #include "ISimKernels.h"
 #include "ReportCommon.h"
 #include "oecluster/ThreadPool.h"
@@ -153,7 +153,13 @@ ISimReport isim_report(const ClusteringResult& result, const OEFP::OEFPBatch& fi
     }
 
     std::vector<ClusterCore> core(cluster_count);
-    ThreadPool pool(detail::capped_threads(options.num_threads, cluster_count));
+    // 0 is resolved to hardware concurrency before the cap, not left for
+    // ThreadPool to expand: capping 0 first would leave it uncapped, and the
+    // coverage scan's chunk count tracks N rather than K.
+    const size_t requested_threads =
+        options.num_threads > 0 ? options.num_threads
+                                : std::max<size_t>(1, std::thread::hardware_concurrency());
+    ThreadPool pool(std::min(requested_threads, cluster_count));
     pool.ParallelFor(0, cluster_count, 1, [&](const size_t begin, const size_t end) {
         detail::BitCounts counts(size_bits, 0u);
         for (size_t k = begin; k < end; ++k) {

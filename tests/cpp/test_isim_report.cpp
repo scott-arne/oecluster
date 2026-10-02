@@ -414,6 +414,14 @@ TEST(ISimReportTest, AllSingletonsStageDegenerates) {
     EXPECT_EQ(report.davies_bouldin_medoid, 0.0);
     EXPECT_TRUE(std::isnan(report.dunn_medoid_separation_medoid_spread));
     for (const auto& record : report.records) EXPECT_EQ(record.isim_silhouette, 0.0);
+    // Disjoint singletons: every c_k . c_l is 0 over a union of 2, so all
+    // three cluster pairs tie at similarity 0 and the lowest other ordinal wins.
+    ASSERT_EQ(report.records.size(), 3u);
+    const std::vector<ClusterLabel> expected_nearest{1, 0, 0};
+    for (size_t k = 0; k < report.records.size(); ++k) {
+        EXPECT_EQ(report.records[k].nearest_cluster, expected_nearest[k]) << "k=" << k;
+        EXPECT_EQ(report.records[k].nearest_cluster_similarity, 0.0) << "k=" << k;
+    }
 
     const auto coincident = isim_test::make_batch({
         isim_test::make_fp(16, {1}), isim_test::make_fp(16, {1}), isim_test::make_fp(16, {3})});
@@ -443,4 +451,40 @@ TEST(ISimReportTest, EmptyThresholdsLeaveCoverageEmpty) {
     const auto report = isim_report(make_result({0, 0, 1, 1}), batch, options);
     EXPECT_TRUE(report.coverage_at.empty());
     EXPECT_TRUE(report.noise_coverage_at.empty());
+}
+
+TEST(ISimReportTest, AllZeroClustersFollowTheZeroUnionRuleInTheStage) {
+    // Two all-zero clusters: every own-cluster score, r(i, l) and the
+    // cluster-to-cluster ratio has a zero union, so each reads as similarity
+    // 1. Then a = b = 0, max(a, b) == 0 gives silhouette 0, and each cluster's
+    // only neighbour is the other at similarity 1.
+    const auto zeros = isim_test::make_batch({
+        isim_test::make_fp(16, {}), isim_test::make_fp(16, {}), isim_test::make_fp(16, {}),
+        isim_test::make_fp(16, {})});
+    const auto all_zero = isim_report(make_result({0, 0, 1, 1}), zeros, records_options(true));
+    EXPECT_EQ(all_zero.isim_silhouette, 0.0);
+    ASSERT_EQ(all_zero.records.size(), 2u);
+    for (size_t k = 0; k < 2u; ++k) {
+        EXPECT_EQ(all_zero.records[k].isim_silhouette, 0.0) << "k=" << k;
+        EXPECT_EQ(all_zero.records[k].nearest_cluster, static_cast<ClusterLabel>(1u - k)) << "k=" << k;
+        EXPECT_EQ(all_zero.records[k].nearest_cluster_similarity, 1.0) << "k=" << k;
+    }
+
+    // One all-zero cluster beside {1,2},{1,3}. Zero-cluster members: a = 0 by
+    // the zero-union rule, r(i, 1) = 0 / (2*0 + 4 - 0) = 0 so b = 1, s = 1.
+    // Other members: r_own = 1 / (1*2 + 2 - 1) = 1/3 so a = 2/3, and
+    // r(i, 0) = 0 / (2*2 + 0 - 0) = 0 so b = 1, s = 1/3. Cluster-to-cluster:
+    // c_0 . c_1 = 0 over 2*4 + 2*0 - 0 = 8, similarity 0.
+    const auto mixed = isim_test::make_batch({
+        isim_test::make_fp(16, {}), isim_test::make_fp(16, {}),
+        isim_test::make_fp(16, {1, 2}), isim_test::make_fp(16, {1, 3})});
+    const auto report = isim_report(make_result({0, 0, 1, 1}), mixed, records_options(true));
+    EXPECT_NEAR(report.isim_silhouette, 2.0 / 3.0, 1e-12);
+    ASSERT_EQ(report.records.size(), 2u);
+    EXPECT_EQ(report.records[0].isim_silhouette, 1.0);
+    EXPECT_NEAR(report.records[1].isim_silhouette, 1.0 / 3.0, 1e-12);
+    EXPECT_EQ(report.records[0].nearest_cluster, 1);
+    EXPECT_EQ(report.records[1].nearest_cluster, 0);
+    EXPECT_EQ(report.records[0].nearest_cluster_similarity, 0.0);
+    EXPECT_EQ(report.records[1].nearest_cluster_similarity, 0.0);
 }
