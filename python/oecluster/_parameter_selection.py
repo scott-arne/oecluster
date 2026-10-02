@@ -20,6 +20,8 @@ import types
 from collections.abc import Callable
 from typing import Any
 
+import numpy as np
+
 # Every public entry point that returns a ClusteringResult, by its public
 # name. knn_graph returns a graph and is left out on purpose.
 _ROSTER_NAMES = (
@@ -46,6 +48,33 @@ def _roster():
         roster = {name: getattr(package, name) for name in _ROSTER_NAMES}
         _ROSTER = roster
     return roster
+
+
+def _options_equal(left, right):
+    """Compare option mappings, handling NumPy arrays safely.
+
+    NumPy's == operator is elementwise and returns a boolean array for
+    multi-element arrays, which cannot be converted to a single truth value.
+    This helper compares values element-wise for arrays and by equality
+    for other types.
+
+    :param left: First options mapping.
+    :param right: Second options mapping.
+    :returns: True if both mappings have the same keys and equal values.
+    """
+    if set(left) != set(right):
+        return False
+    for key in left:
+        left_val = left[key]
+        right_val = right[key]
+        # Use np.array_equal for NumPy arrays to avoid the ambiguous truth value error.
+        if isinstance(left_val, np.ndarray) or isinstance(right_val, np.ndarray):
+            if not np.array_equal(left_val, right_val):
+                return False
+        else:
+            if left_val != right_val:
+                return False
+    return True
 
 
 def _roster_name(function):
@@ -135,7 +164,7 @@ class ClusteringSpec:
         if not isinstance(other, ClusteringSpec):
             return NotImplemented
         return (self._algorithm is other._algorithm
-                and dict(self._options) == dict(other._options))
+                and _options_equal(self._options, other._options))
 
     def __repr__(self):
         parts = [repr(self._name)]

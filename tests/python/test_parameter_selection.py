@@ -160,6 +160,16 @@ def test_spec_equality_and_unhashability():
         hash(spec)
 
 
+def test_spec_equality_handles_array_valued_options():
+    # numpy's == is elementwise, so plain dict equality would raise here.
+    left = oecluster.ClusteringSpec("k_medoids", initial_medoids=np.array([0, 5]))
+    right = oecluster.ClusteringSpec("k_medoids", initial_medoids=np.array([0, 5]))
+    assert left == right
+    assert left != oecluster.ClusteringSpec("k_medoids", initial_medoids=np.array([0, 6]))
+    assert left != oecluster.ClusteringSpec("k_medoids", initial_medoids=np.array([0, 5, 9]))
+    assert left != oecluster.ClusteringSpec("k_medoids", initial_medoids=5)
+
+
 def test_spec_repr():
     assert (repr(oecluster.ClusteringSpec("butina", num_threads=4))
             == "ClusteringSpec('butina', num_threads=4)")
