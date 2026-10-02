@@ -69,6 +69,9 @@ __all__ = [  # noqa: RUF022
     "cluster_report",
     "compare_reports",
     "ClusteringSpec",
+    "select_parameter",
+    "ParameterSelection",
+    "SweepRow",
     "partition_agreement",
     "scaffold_agreement",
     "sar_coherence",
@@ -735,7 +738,12 @@ from .oecluster import SuperposeOptions
 
 from . import _comparisons
 from . import _gate
-from ._parameter_selection import ClusteringSpec
+from ._parameter_selection import (
+    ClusteringSpec,
+    ParameterSelection,
+    SweepRow,
+    select_parameter,
+)
 
 
 class _StorageView:
