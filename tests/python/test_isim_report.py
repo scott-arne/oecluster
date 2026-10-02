@@ -291,3 +291,70 @@ def test_report_validation_order():
         oecluster.isim_report(_result([0, 0, 0]), batch, num_threads=-1)
     with pytest.raises(ValueError, match="3 samples and the batch 2"):
         oecluster.isim_report(_result([0, 0, 0]), batch)
+
+
+def _same(left, right):
+    if isinstance(left, float) and math.isnan(left):
+        return isinstance(right, float) and math.isnan(right)
+    return left == right
+
+
+def _assert_reports_match(left, right, *, skip=()):
+    for name in oecluster.ISimReport._SCALAR_FIELDS:
+        if name not in skip:
+            assert _same(getattr(left, name), getattr(right, name)), name
+    for name in ("coverage_thresholds", "coverage_at", "noise_coverage_at"):
+        a, b = getattr(left, name), getattr(right, name)
+        assert len(a) == len(b), name
+        assert all(_same(x, y) for x, y in zip(a, b)), name
+    assert len(left.records) == len(right.records)
+    for a, b in zip(left.records, right.records):
+        assert all(_same(x, y) for x, y in zip(a, b))
+    assert left.requested == right.requested
+
+
+def _full_report(labels, rows, bits, **kwargs):
+    return oecluster.isim_report(
+        _result(labels), _batch(bits, rows), compute_centroid_indices=True,
+        compute_per_cluster_records=True, **kwargs)
+
+
+def test_treat_noise_as_singletons_changes_only_singleton_fraction():
+    # Spec Section 4 "Noise": the flag affects only singleton_fraction.
+    labels = _mixed_labels()
+    rows = _random_rows(40, 70, 7)
+    counted = _full_report(labels, rows, 70)
+    excluded = _full_report(labels, rows, 70, treat_noise_as_singletons=False)
+    # A fraction of clusters: under the flag each noise point joins both the
+    # singleton count and the cluster count.
+    num_noise = labels.count(-1)
+    k_count = max(labels) + 1
+    singletons = sum(1 for k in range(k_count) if labels.count(k) == 1)
+    assert singletons == 1
+    assert excluded.singleton_fraction == singletons / k_count
+    assert counted.singleton_fraction == (
+        (singletons + num_noise) / (k_count + num_noise))
+    _assert_reports_match(counted, excluded, skip=("singleton_fraction",))
+
+
+@pytest.mark.parametrize("num_threads", [1, 4])
+def test_positive_num_threads_is_forwarded_without_changing_results(num_threads):
+    labels = _mixed_labels()
+    rows = _random_rows(40, 70, 11)
+    _assert_reports_match(_full_report(labels, rows, 70),
+                          _full_report(labels, rows, 70, num_threads=num_threads))
+
+
+def test_noise_coverage_is_nan_without_noise():
+    report = _full_report([0, 0, 1, 1], [[1], [1, 2], [5], [5, 6]], 16)
+    assert len(report.noise_coverage_at) == len(report.coverage_thresholds) == 3
+    assert all(math.isnan(v) for v in report.noise_coverage_at)
+
+
+def test_infinite_coverage_threshold_is_accepted():
+    # Spec Section 5 step 5: infinity is accepted, and covers every sample.
+    report = _full_report([0, 0, -1], [[1], [2], [3]], 8,
+                          coverage_thresholds=[math.inf])
+    assert report.coverage_thresholds == (math.inf,)
+    assert report.coverage_at == (1.0,)
+    assert report.noise_coverage_at == (1.0,)

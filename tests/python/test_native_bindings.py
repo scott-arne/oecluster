@@ -937,6 +937,26 @@ def test_leiden_releases_the_gil():
         "or SWIG applies the exception handler to nothing")
 
 
+def test_isim_and_isim_report_release_the_gil():
+    """isim is a linear pass over the batch, and isim_report adds an O(N K)
+    centroid stage on worker threads.
+
+    Asserted against the interface file for the reasons given in
+    test_the_new_entry_points_release_the_gil.
+    """
+    interface = pathlib.Path(__file__).resolve().parents[2] / "swig" / "oecluster.i"
+    text = _SWIG_COMMENT.sub("", interface.read_text(encoding="utf-8"))
+
+    include = '%include "oecluster/clustering/ISimReport.h"'
+    assert text.count(include) == 1, "the position check needs an unambiguous anchor"
+    for name in ("isim", "isim_report"):
+        invocation = f"OECLUSTER_GIL_EXCEPTION(OECluster::{name}, {name})"
+        assert invocation in text
+        assert text.index(invocation) < text.index(include), (
+            f"{invocation} must precede the %include that declares {name}, "
+            "or SWIG applies the exception handler to nothing")
+
+
 def test_by_value_returns_convert_inside_an_exception_handler():
     """Every by-value return is heap-allocated into its Python wrapper after
     ``%exception`` has closed, so SWIG's stock ``out`` typemap would let a
