@@ -293,6 +293,82 @@ reports the earliest bad pair in row order for every thread count;
 `activity_landscape` and `modelability` keep their storage overloads'
 selection.
 
+### Approximate iSIM report
+
+```cpp
+#include <oecluster/clustering/ISimReport.h>
+```
+
+also reached through the umbrella `oecluster/oecluster.h`. `isim()` and
+`isim_report()` score binary fingerprint batches directly -- no materialized
+pairwise distance matrix, time linear in the number of fingerprints rather
+than `cluster_report`'s O(N^2).
+
+```cpp
+double isim(const OEFP::OEFPBatch& fingerprints, const ISimOptions& options = ISimOptions());
+
+ISimReport isim_report(const ClusteringResult& result, const OEFP::OEFPBatch& fingerprints,
+                       const ISimReportOptions& options = ISimReportOptions());
+```
+
+`ISimOptions` carries one field, `metric`, defaulted to `"tanimoto"` and
+reserved for a future metric whose iSIM is the exact mean pairwise
+similarity. The four structs isim_report() adds:
+
+- `ISimReportOptions`: `metric`; `coverage_thresholds` (seeded from the same
+  preset table `cluster_report` uses, via the `ClusterThreshold` constructor
+  argument); `treat_noise_as_singletons` (default `true`);
+  `compute_centroid_indices` (default `false`, gates the O(N K) centroid
+  stage below); `compute_per_cluster_records` (default `false`); `num_threads`
+  (default 0, meaning hardware concurrency, capped at the cluster count).
+- `ISimReportRequested`: `centroid_indices`, `per_cluster_records` -- what the
+  caller asked for, set even when the answer is undefined, the same
+  asked-versus-undefined convention `ClusterReportRequested` uses.
+- `ISimClusterRecord`: `label`, `size`, `medoid` (exact profile group);
+  `isim_intra_distance`, `isim_separation` (iSIM ratio group, NaN for a
+  singleton or when K < 2); `radius`, `mean_medoid_distance` (exact given the
+  medoid, 0.0 for a singleton); `isim_silhouette`, `nearest_cluster`,
+  `nearest_cluster_similarity` (centroid stage only, NaN/`NO_NEAREST_CLUSTER`
+  until it runs).
+- `ISimReport`: `num_samples`, `num_clusters`, `num_noise`, `num_singletons`,
+  `noise_fraction`, `singleton_fraction`, `largest_cluster_fraction`,
+  `cluster_size_median`, `cluster_size_p90`, `size_gini`, `size_entropy`
+  (exact profile group); `isim_intra_distance`, `isim_inter_distance` (iSIM
+  ratio group); `median_radius`, `median_medoid_member_distance`,
+  `calinski_harabasz_medoid` (exact given the iSIM medoids); `isim_silhouette`,
+  `davies_bouldin_medoid`, `dunn_medoid_separation_medoid_spread`,
+  `coverage_thresholds`, `coverage_at`, `noise_coverage_at` (centroid stage
+  only, except `coverage_thresholds` which is echoed either way); `records`
+  (one `ISimClusterRecord` per cluster, member-list order, empty unless
+  requested); `requested`.
+
+Noise is handled exactly as `cluster_report` handles it: excluded from `K`,
+every medoid, every iSIM and medoid-relative field, and `records`.
+`treat_noise_as_singletons` affects only `singleton_fraction` -- the fraction
+of *clusters*, not samples, that are singletons -- by folding each noise
+point into both the singleton and the cluster count. `coverage_at` and
+`noise_coverage_at` are the exception: they score every sample, noise
+included, against the cluster medoids.
+
+Both entry points refuse the same inputs in the same order, as a single
+shared validator: `metric` other than `"tanimoto"` (`std::invalid_argument`);
+a non-empty batch of zero-width fingerprints, as `bitbirch` refuses
+(`std::invalid_argument`); fingerprints of 2^31 or more bits
+(`std::invalid_argument`); and a batch of 2^32 or more fingerprints
+(`std::invalid_argument`). `isim_report()` then checks a NaN coverage threshold
+(`std::invalid_argument`; a negative threshold is accepted and covers no
+sample, as in `cluster_report`), and finally reuses `cluster_report`'s native
+partition rules and exception types, run before any fingerprint is read:
+`std::out_of_range` when the result has clusters and more labels than the
+batch has fingerprints or a member indexes past the labels, and
+`std::invalid_argument` for any other malformed partition.
+
+The core stage is O(N words + sum of popcounts). The centroid stage
+(`compute_centroid_indices = true`) adds O(sum of popcounts x K + K^2 words +
+N K words) time, for K clusters, plus a `K * bits * 4` byte column store for
+the per-cluster bit counts -- about 8 MB at K = 1000 clusters and 2048-bit
+fingerprints. `num_threads` is capped at the cluster count.
+
 ### Diversity selection
 
 `maxmin_select` and `circles` are each overloaded on where distances come

@@ -618,6 +618,22 @@ it as well, so under its `"excluded"` default
 per-class tables, the `noise=` readings, and the one distance-matrix refusal
 these two entry points will not waive.
 
+`isim_report()` is a linear-time approximate scorecard for a fingerprint
+clustering, built directly from the fingerprint batch rather than an N x N
+distance matrix. It is built on `isim()`, the set-similarity primitive
+underneath it: the union-weighted Tanimoto similarity of a set of binary
+fingerprints.
+
+```python
+result = oecluster.bitbirch(fps, threshold=0.65)
+report = oecluster.isim_report(result, fps, compute_centroid_indices=True)
+print(report.isim_intra_distance, report.isim_silhouette)
+```
+
+See [docs/python-api.md](docs/python-api.md#approximate-reports-from-fingerprints)
+for which fields are exact, which are iSIM ratios, and when to reach for
+`cluster_report()` instead.
+
 ---
 
 ## Scaling Guidance

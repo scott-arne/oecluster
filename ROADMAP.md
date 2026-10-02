@@ -31,7 +31,7 @@ they are not recoveries of the original intent.
 | D2b | k-nearest-neighbor graph and Jarvis-Patrick clustering | shipped 5.11.0 |
 | D2c | Leiden community detection over the D2b graph | shipped 5.12.0 |
 | B1 | Exact O(N)-memory paths for the A metrics over a comparison | shipped 5.13.0 |
-| B2 | Approximate fingerprint-native (iSIM) A metrics | planned |
+| B2 | Approximate fingerprint-native (iSIM) A metrics | shipped 5.14.0 |
 | D3 | Workflow layer: clustering CLI, parameter selection, consensus, stability | planned |
 | D4 | Out-of-core and streaming clustering | planned |
 
@@ -135,8 +135,14 @@ A owns the definitions; B owns the scale path.
   `modelability` score a comparison directly. Results are exact -- identical
   to the matrix forms over a matrix filled through `Compare` -- with O(N)
   memory and O(N^2) time.
-- **B2 (planned).** Approximate iSIM / centroid forms, for O(N) time at the
-  cost of exactness.
+- **B2 (shipped 5.14.0).** `isim()` and `isim_report()` score binary
+  fingerprint batches directly in O(N) time, trading exactness for scale:
+  `isim()` is the union-weighted Tanimoto similarity of a fingerprint set,
+  and `isim_report()` is a `cluster_report`-shaped scorecard built from it,
+  with an opt-in O(N K) centroid stage for silhouette, nearest cluster,
+  medoid Davies-Bouldin/Dunn and coverage. `activity_landscape` and
+  `modelability` stay exact-only; B2 does not add approximate forms of
+  either.
 
 ## D3 - Workflow layer
 

@@ -137,6 +137,15 @@ result = oecluster.bitbirch(fingerprints, threshold=0.65, branching_factor=50)
 print(result.centroids, result.cluster_sizes)
 ```
 
+`isim()` and `isim_report()` score that same fingerprint batch directly, in
+linear time, without a distance matrix:
+
+```python
+similarity = oecluster.isim(fingerprints)
+report = oecluster.isim_report(result, fingerprints)
+print(similarity, report.isim_intra_distance)
+```
+
 Murcko clusters molecules by scaffold identity, with no distance matrix at all:
 
 ```python

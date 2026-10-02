@@ -530,6 +530,167 @@ curves come back empty -- while `nan` keeps its single meaning of asked and
 undefined. `__repr__` renders `None` as `--`. A caller reading cells as floats
 must test for `None` before doing arithmetic on them.
 
+## Approximate Reports From Fingerprints
+
+`isim()` and `isim_report()` score binary fingerprints directly, without a
+materialized pairwise distance matrix, in time linear in the number of
+fingerprints rather than `cluster_report()`'s O(N^2).
+
+### isim()
+
+```python
+oecluster.isim(fingerprints, *, metric="tanimoto")
+```
+
+iSIM is the union-weighted Tanimoto similarity of a batch of binary
+fingerprints: every pair's intersection popcount is summed, every pair's union
+popcount is summed, and the similarity is the first sum over the second. That
+is exact for the quantity it computes, but it is **not** the mean of the
+`N * (N - 1) / 2` individual pairwise Tanimoto similarities -- summing
+intersections and unions before dividing weighs each pair by the size of its
+union, so it is not interchangeable with an average over per-pair values. It
+is `NaN` for fewer than two fingerprints and `1.0` when every fingerprint in
+the batch is all-zero (the zero-union rule), and both the popcounts and the
+accumulation run in a single linear pass over the batch, so the whole call is
+O(N words + sum of popcounts).
+
+### isim_report()
+
+```python
+def isim_report(result, fingerprints, *, metric="tanimoto", preset="default",
+                coverage_thresholds=None, treat_noise_as_singletons=True,
+                compute_centroid_indices=False,
+                compute_per_cluster_records=False, num_threads=0):
+```
+
+`isim_report()` is `cluster_report()`'s fingerprint-native counterpart: a
+clustering-quality scorecard built from an `oefp.OEFPBatch` instead of a
+`SymmetricDistanceMatrix`, so it never materializes an O(N^2) matrix.
+
+```python
+import oecluster
+
+result = oecluster.bitbirch(fps, threshold=0.65)
+report = oecluster.isim_report(result, fps, compute_centroid_indices=True)
+print(report.isim_intra_distance, report.isim_silhouette)
+```
+
+`preset` and `coverage_thresholds` seed `report.coverage_thresholds` exactly
+as they do for `cluster_report()`. `compute_per_cluster_records=True` fills
+`report.records`, one `ISimClusterRecord` per cluster in member-list order
+(`label`, `size`, `medoid`, `isim_intra_distance`, `isim_separation`,
+`radius`, `mean_medoid_distance`, `isim_silhouette`, `nearest_cluster`,
+`nearest_cluster_similarity`). `num_threads` (0 means hardware concurrency) is
+capped at the cluster count.
+
+### What each field means
+
+`ISimReport`'s fields fall into three provenance groups:
+
+- **Exact profile fields** -- `num_samples`, `num_clusters`, `num_noise`,
+  `num_singletons`, `noise_fraction`, `singleton_fraction`,
+  `largest_cluster_fraction`, `cluster_size_median`, `cluster_size_p90`,
+  `size_gini`, `size_entropy` -- are computed from cluster sizes alone, the
+  same way and with the same meanings as `cluster_report()`'s identically
+  named fields.
+- **`isim_*` ratios** -- `isim_intra_distance`, `isim_inter_distance`, and the
+  per-record `isim_intra_distance` and `isim_separation` -- are `1 -` an iSIM
+  ratio (summed intersections over summed unions), not a mean of per-pair
+  Tanimoto distances. The centroid stage adds `isim_silhouette` (scalar and
+  per-record) and the per-record `nearest_cluster`/`nearest_cluster_similarity`
+  to this group.
+- **Exact given the iSIM medoids** -- `median_radius`,
+  `median_medoid_member_distance`, `calinski_harabasz_medoid`, and the
+  per-record `medoid`, `radius`, `mean_medoid_distance` -- are computed exactly
+  once each cluster's iSIM medoid is chosen. The centroid stage adds
+  `davies_bouldin_medoid`, `dunn_medoid_separation_medoid_spread`,
+  `coverage_at` and `noise_coverage_at` to this group.
+
+`compute_centroid_indices=True` runs the O(N K) centroid stage described under
+Cost below; it is what fills `isim_silhouette`, the per-record
+`nearest_cluster`/`nearest_cluster_similarity`, `davies_bouldin_medoid`,
+`dunn_medoid_separation_medoid_spread`, `coverage_at` and `noise_coverage_at`.
+Without it those scalars read `NaN`, the two coverage tuples are empty, and
+`report.requested.centroid_indices` is `False` -- the same asked-versus-undefined
+convention `cluster_report()` uses, carried by `ISimReportRequested`.
+
+Noise (label `-1`) is excluded from `K`, every medoid, every `isim_*` and
+medoid-relative field, and `records`, exactly as `cluster_report()` excludes
+it. `treat_noise_as_singletons` (default `True`) affects only
+`singleton_fraction`: as in `cluster_report()`, `singleton_fraction` is the
+fraction of *clusters* that are singletons, not of samples, and under the flag
+each noise point is folded into both the singleton count and the cluster
+count. `coverage_at` and `noise_coverage_at` are the exception to the
+noise-exclusion rule: they score every sample, noise included, against the
+cluster medoids.
+
+### Accuracy
+
+iSIM values are union-weighted, exact for that quantity, and have no tight
+bound to the mean pairwise Tanimoto similarity -- use `cluster_report()` when
+an exact mean-pairwise value is what is needed. The iSIM medoid can differ
+from the true (mean-distance-minimizing) medoid, so each cluster's
+`mean_medoid_distance` is at least `cluster_report()`'s exact
+`mean_representative_distance` for the same cluster, up to the roughly 1e-12
+last-bit agreement between a popcount Tanimoto and `Compare()`.
+`nearest_cluster` is the cluster with the highest iSIM cluster-to-cluster
+similarity, not `cluster_report()`'s single-linkage nearest cluster. Reach for
+`cluster_report()` instead of `isim_report()` whenever an exact value is
+required, or when the field needed is one of those listed as "not provided"
+in the field map below.
+
+### Cost
+
+The core stage is O(N words + sum of popcounts): one linear pass over the
+fingerprint batch. The centroid stage (`compute_centroid_indices=True`) adds
+O(sum of popcounts x K + K^2 words + N K words) time, for K clusters, plus a
+`K * bits * 4` byte column store for the per-cluster bit counts -- about 8 MB
+at K = 1000 clusters and 2048-bit fingerprints. `num_threads` (0 means
+hardware concurrency) is capped at the cluster count, so a report over a
+handful of clusters does not oversubscribe.
+
+### Field map
+
+| `cluster_report` field | `isim_report` counterpart |
+|---|---|
+| `num_samples`, `num_clusters`, `num_noise`, `num_singletons`, `noise_fraction`, `singleton_fraction`, `largest_cluster_fraction`, `cluster_size_median`, `cluster_size_p90`, `size_gini`, `size_entropy` | Same name |
+| `mean_intra_distance` | `isim_intra_distance` (iSIM) |
+| `median_radius`, `median_medoid_member_distance`, `calinski_harabasz_medoid`, `davies_bouldin_medoid`, `dunn_medoid_separation_medoid_spread`, `coverage_at`, `noise_coverage_at` | Same name, relative to the iSIM medoid |
+| `silhouette` | `isim_silhouette` |
+| `median_intra_distance`, `p95_diameter`, `boundary_violations`, `dunn_index`, `dunn_mean_separation_mean_diameter`, `point_biserial`, `c_index`, `baker_hubert_gamma`, `representative_redundancy` | Not provided |
+
+### Which exception you get
+
+`isim()` checks, in order: `fingerprints` must be an `oefp.OEFPBatch`
+(`TypeError`), then `metric` must be `"tanimoto"` (`ValueError`).
+
+`isim_report()` checks, in order: `result` must be a `ClusteringResult`
+(`TypeError`); `fingerprints` must be an `oefp.OEFPBatch` (`TypeError`);
+`metric` must be `"tanimoto"` (`ValueError`); `preset` must resolve
+(`ValueError`, same as `cluster_report()`); each `coverage_thresholds` entry
+must be non-NaN and non-negative (`ValueError`); `treat_noise_as_singletons`,
+`compute_centroid_indices` and `compute_per_cluster_records`, checked in that
+order, must each be `bool` or `numpy.bool_` (`TypeError` -- truthiness is
+refused because a string such as `"no"` would silently switch the O(N K)
+stage on); `num_threads` must be non-negative after `int()` conversion
+(`ValueError`); and `result` and `fingerprints` must cover the same number of
+samples (`ValueError` naming both counts).
+
+Those Python checks are a convenience layer in front of the native ones,
+which run as a backstop: `metric` other than `"tanimoto"`, a non-empty batch
+of zero-width fingerprints, fingerprints of 2^31 or more bits, and a batch of
+2^32 or more fingerprints all raise `std::invalid_argument`; `isim_report()`
+additionally raises
+`std::invalid_argument` for a NaN coverage threshold (a negative one is
+accepted, same as `cluster_report()`) and reuses `cluster_report()`'s native
+rules and exception types for a label count or cluster membership that does
+not match the batch. Every native refusal surfaces in Python as
+`RuntimeError`, regardless of which `std::invalid_argument` or
+`std::out_of_range` it started as. That includes an allocation failure: a
+`std::bad_alloc` out of `isim()` or `isim_report()` surfaces as `RuntimeError`,
+unlike `cluster_report()`, whose matching failure is mapped to `MemoryError`
+(see [Optional report stages](#optional-report-stages)).
+
 ## Partition Agreement
 
 `partition_agreement()` scores two labelings of the same samples against each

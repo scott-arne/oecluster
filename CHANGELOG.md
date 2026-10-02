@@ -2,6 +2,22 @@
 
 This file starts at 5.0.0; earlier releases are not recorded here.
 
+## [5.14.0] - 2026-10-02
+
+### Added
+
+- `isim()` returns the iSIM Tanimoto similarity of an `oefp.OEFPBatch`
+  (summed pairwise intersections over summed unions) in linear time, in C++
+  and Python.
+- `isim_report()` scores a clustering from binary fingerprints without a
+  distance matrix. The core is linear in the number of fingerprints: the
+  exact size profile, iSIM intra- and inter-cluster distances, per-cluster
+  iSIM separation, and radius, mean medoid distance and Calinski-Harabasz
+  exact relative to iSIM medoids. `compute_centroid_indices=True` adds an
+  iSIM silhouette, iSIM nearest cluster, medoid Davies-Bouldin and Dunn, and
+  coverage at O(N K) cost. Integer accumulation makes results independent of
+  the thread count. Tanimoto only; `metric=` is reserved.
+
 ## [5.13.0] - 2026-10-01
 
 ### Added
