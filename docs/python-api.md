@@ -697,6 +697,209 @@ surfaces as `MemoryError`, the same mapping `cluster_report()` uses (see
 [Optional report stages](#optional-report-stages)). The centroid stage's
 K * bits * 4-byte column store is the allocation most likely to fail.
 
+## Parameter Selection
+
+`select_parameter()` chooses a clustering parameter from data. It runs one
+algorithm over an explicit grid of one keyword, scores every partition with
+the scorecards above, and returns the scored table plus the winner under a
+named validity index. `ClusteringSpec` is the reusable description of
+"which algorithm, with which fixed options" that it runs; later workflow
+features (stability resampling, consensus) build on the same object.
+
+```python
+import oecluster
+
+matrix = oecluster.load_distance_matrix("distances.npz")
+spec = oecluster.ClusteringSpec("butina", num_threads=4)
+selection = oecluster.select_parameter(
+    spec, matrix, "threshold", [0.2, 0.3, 0.4, 0.5, 0.6],
+    criterion="silhouette", min_clusters=2,
+    max_clusters=matrix.num_samples // 2)
+print(selection)                   # the scored table, winner marked
+best = selection.winner            # a SweepRow, or None if no row qualified
+if best is None:
+    raise SystemExit("no threshold satisfied the bounds")
+best.value, best.result, best.report
+```
+
+### `ClusteringSpec`
+
+`ClusteringSpec(algorithm, **options)` names a clustering entry point and
+the keyword options it is run with. `algorithm` is one of the roster names
+`butina`, `dbscan`, `hdbscan`, `agglomerative`, `k_medoids`, `bitbirch`,
+`bitbirch_recluster`, `bitbirch_refine`, `sphere_exclusion`,
+`jarvis_patrick`, `leiden`, `murcko` (matched case-insensitively), the
+corresponding function object, or any callable that returns a
+`ClusteringResult`. A roster function maps back to its name, so
+`ClusteringSpec(oecluster.butina).name == "butina"`; a foreign callable
+keeps its `__name__`. The spec is unbound from the input:
+`spec.run(items, **overrides)` calls `algorithm(items, **{**options,
+**overrides})` and returns the result, raising `TypeError` if the callable
+returned something else (`knn_graph` returns a graph, for instance).
+`spec.name`, `spec.algorithm` and `spec.options` (a read-only mapping) are
+what a later serialization needs. Specs compare equal on the same
+algorithm object and equal options, and are not hashable.
+
+Nothing is validated at construction; the algorithm validates its options
+when it runs, exactly as a direct call would.
+
+### `select_parameter()`
+
+```python
+oecluster.select_parameter(algorithm, items, parameter, values, *,
+                           criterion=None, max_noise_fraction=None,
+                           min_clusters=None, max_clusters=None,
+                           report_options=None)
+```
+
+- `algorithm`: a `ClusteringSpec`, a roster name, or a callable (the last
+  two mean a spec with no fixed options).
+- `items`: a `SymmetricDistanceMatrix` with dense or memory-mapped storage,
+  a prebuilt comparison such as `FingerprintComparison(mols)`, or an
+  `oefp.OEFPBatch`. Passed to the algorithm and to the scorer untouched.
+- `parameter`: the keyword to sweep. Every roster parameter can be passed
+  as a keyword, including `butina`'s `threshold` and `dbscan`'s `eps`.
+- `values`: the grid, any non-empty iterable (not a string), run in order.
+  Duplicates are allowed; the earlier one wins a tie.
+- `criterion`: a validity index from the table below; `None` means
+  `silhouette`, or `isim_silhouette` for fingerprints.
+- `max_noise_fraction`, `min_clusters`, `max_clusters`: bounds a partition
+  must satisfy to be eligible; `None` means unconstrained.
+- `report_options`: a mapping forwarded verbatim to `cluster_report()` or
+  `isim_report()` (`preset`, `coverage_thresholds`, `num_threads`, and so
+  on). The caller's mapping is never mutated.
+
+The scorer follows the input: a matrix or a prebuilt comparison scores
+through `cluster_report()`, a fingerprint batch through `isim_report()`. A
+raw item sequence is refused: it would name the comparison twice, once for
+the algorithm and once for the scorer, with nothing keeping the two the
+same, so wrap it in a prebuilt comparison, which both calls then read. A
+sparse matrix is refused before anything runs, because `cluster_report()`
+needs complete distances; so are a `CrossDistanceMatrix` and a `KNNGraph`.
+
+Grid points run one after another in the caller's order; each native call
+still uses its own thread pool, so `num_threads` in the spec and in
+`report_options` is where the parallelism lives. Every result and report
+is kept on its row, which for a million items and twenty grid values is
+about 160 MB of labels.
+
+### Criteria
+
+| Criterion | Direction | Produced by |
+| --- | --- | --- |
+| `silhouette` | higher is better | `cluster_report` |
+| `isim_silhouette` | higher | `isim_report` (centroid stage) |
+| `dunn_index` | higher | `cluster_report` |
+| `dunn_mean_separation_mean_diameter` | higher | `cluster_report` |
+| `dunn_medoid_separation_medoid_spread` | higher | both (centroid stage on `isim_report`) |
+| `calinski_harabasz_medoid` | higher | both |
+| `point_biserial` | higher | `cluster_report` |
+| `baker_hubert_gamma` | higher | `cluster_report` (pair-rank stage) |
+| `davies_bouldin_medoid` | lower is better | both (centroid stage on `isim_report`) |
+| `c_index` | lower | `cluster_report` (pair-rank stage) |
+
+Only these fields can be a criterion. The profile metrics (counts,
+fractions, size statistics, intra distances, radius, diameter) have no
+direction of their own and are refused with a `ValueError` listing the
+table; they shape the search through the bounds instead. A criterion the
+scorer does not produce (`dunn_index` over fingerprints) is refused the
+same way.
+
+A criterion behind an optional stage switches that stage on. `c_index`
+and `baker_hubert_gamma` set `compute_pair_rank_indices=True`, which
+sorts every pairwise distance and allocates quadratically (see
+[Optional report stages](#optional-report-stages)); because
+`cluster_report()` does not build that array from a comparison, these two
+need a `SymmetricDistanceMatrix` and are refused with a prebuilt comparison
+before anything runs. The three `isim_report` fields set
+`compute_centroid_indices=True`, which adds O(N K) time and a
+`K * bits * 4` byte column store, so the fingerprint default is not
+linear; `calinski_harabasz_medoid` is the linear-time choice there. If
+`report_options` names the flag and sets it false, the call raises
+`ValueError` rather than returning a table of NaN.
+
+**Degenerate partitions.** A validity index can still be flattered by a
+degenerate partition. With every clustered point its own cluster, each
+medoid scatter is zero, so `davies_bouldin_medoid` reads 0.0, its optimum,
+on both scorers; the silhouette term of a singleton is 0.0 by convention;
+`calinski_harabasz_medoid`, `dunn_index` and the pair-rank indices are
+NaN. With one cluster every index is NaN. Set `min_clusters=2` and a
+`max_clusters` below the sample count whenever the grid can reach either
+end; the examples here do.
+
+### Bounds and ranking
+
+Each row is checked, in this order, against
+`noise_fraction <= max_noise_fraction`, `num_clusters >= min_clusters` and
+`num_clusters <= max_clusters` (noise excluded from the count, as the
+scorecards define it). The first violated bound is recorded on the row as
+text, for example `num_clusters 1 < min_clusters 2`, and the row is
+ineligible; its result and report are kept.
+
+Among eligible rows the winner has the best score in the criterion's
+direction. NaN scores never win; infinities are defined values and rank by
+direction (`davies_bouldin_medoid` reports positive infinity for
+coincident medoids, its worst value). Equal scores keep the caller's grid
+order. When no eligible row has a non-NaN score, `winner` and
+`winner_index` are `None` and the table is still returned.
+
+### `ParameterSelection` and `SweepRow`
+
+`select_parameter()` returns a read-only `ParameterSelection`:
+
+- `spec`, `parameter`, `criterion`: what was run.
+- `rows`: a tuple of `SweepRow`, one per grid value in grid order. Each is
+  a `NamedTuple` of `value`, `result` (the `ClusteringResult`), `report`
+  (`ClusterReport` or `ISimReport`), `score` (the criterion as a float,
+  NaN when undefined), `eligible` and `rejection` (the violated bound, or
+  `None`).
+- `winner`, `winner_index`: the winning row and its index, or `None`.
+- `columns` and `to_table()`: the column names
+  `(parameter, criterion, "num_clusters", "noise_fraction", "eligible",
+  "rejection")` and a list of matching tuples, the `compare_reports()`
+  convention.
+
+`repr(selection)` prints the header, the four leading columns, a `*` on
+the winner's line and `rejected: <reason>` on ineligible lines. The rows
+keep every report, so a table can be re-ranked under any other field
+those reports already carry without rerunning anything.
+
+### Errors
+
+Argument validation runs before the first clustering: `TypeError` for a
+non-string `parameter`, a string or non-iterable `values`, a non-mapping
+`report_options`, a `bool` or non-numeric bound, or an unsupported `items`
+kind; `ValueError` for an empty `parameter` or grid, a bound out of range
+(`max_noise_fraction` outside [0, 1] or NaN, a cluster bound below 1,
+`min_clusters > max_clusters`), a sparse matrix, or a criterion that is not
+in the table, not produced by the scorer, or unavailable for the input.
+
+Nothing is wrapped during the sweep. A grid value the algorithm refuses
+raises that function's own exception, and a partition the scorer refuses
+raises the scorer's; the one known case of the latter is `bitbirch_refine`
+with `redistribute_largest_cluster=True` and `singly=False`, which can
+return an emptied leaf subcluster as an empty member list that both
+scorecards reject with `RuntimeError`. A degenerate partition is not an
+error; it becomes a row with a NaN score or a rejected row.
+
+### Fingerprints
+
+```python
+import oecluster
+import oefp
+
+batch = oefp.OEFPBatch.from_fingerprints(fingerprints)
+selection = oecluster.select_parameter(
+    "bitbirch", batch, "threshold", [0.5, 0.6, 0.7, 0.8],
+    min_clusters=2, max_clusters=len(fingerprints) // 2)
+if selection.winner is not None:
+    print(selection.winner.value)
+```
+
+The default criterion here is `isim_silhouette`, which runs the O(N K)
+centroid stage on every grid point; pass
+`criterion="calinski_harabasz_medoid"` to stay linear.
+
 ## Partition Agreement
 
 `partition_agreement()` scores two labelings of the same samples against each

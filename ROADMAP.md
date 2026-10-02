@@ -32,7 +32,10 @@ they are not recoveries of the original intent.
 | D2c | Leiden community detection over the D2b graph | shipped 5.12.0 |
 | B1 | Exact O(N)-memory paths for the A metrics over a comparison | shipped 5.13.0 |
 | B2 | Approximate fingerprint-native (iSIM) A metrics | shipped 5.14.0 |
-| D3 | Workflow layer: clustering CLI, parameter selection, consensus, stability | planned |
+| D3a | Parameter selection: `ClusteringSpec`, `select_parameter` | shipped 5.15.0 |
+| D3b | Stability resampling: bootstrap-Jaccard over a `ClusteringSpec` | planned |
+| D3c | Consensus clustering over an ensemble of partitions | planned |
+| D3d | Clustering CLI over oepdist output | planned |
 | D4 | Out-of-core and streaming clustering | planned |
 
 Sub-project A was originally scoped as one piece covering seven metric families
@@ -146,17 +149,28 @@ A owns the definitions; B owns the scale path.
 
 ## D3 - Workflow layer
 
-*Re-derived.* Four gaps that share a consumer rather than an implementation:
+*Re-derived.* Four gaps that share a consumer rather than an implementation,
+shipped as four slices:
 
-- A clustering CLI. `oepdist` computes distances; nothing drives clustering from
-  the command line.
-- Automatic parameter selection. A1's quality metrics exist, but nothing uses
-  them to choose a Butina threshold or a DBSCAN `eps`.
-- Consensus clustering over A2's agreement machinery.
-- Stability resampling, including the bootstrap-Jaccard work deferred from A.
+- **D3a (shipped 5.15.0).** Parameter selection. `ClusteringSpec` describes
+  an algorithm plus its fixed options and runs it on any input;
+  `select_parameter` sweeps one keyword over an explicit grid, scores every
+  partition with `cluster_report` (a matrix or a prebuilt comparison) or
+  `isim_report` (fingerprints), and picks the winner under a named validity
+  index with optional noise and cluster-count bounds. Pure Python over the
+  existing entry points: the first slice with no native core.
+- **D3b.** Stability resampling: bootstrap-Jaccard over a `ClusteringSpec`,
+  including the work deferred from A. Needs a row-subset operation on
+  `SymmetricDistanceMatrix`, which is where the native core returns.
+- **D3c.** Consensus clustering over an ensemble of partitions, which D3a
+  sweeps and D3b resamples both produce, scored against its inputs with
+  A2's agreement machinery.
+- **D3d.** A clustering CLI over oepdist's `.npz` output exposing the
+  roster and the three features above as subcommands. `oepdist` computes
+  distances; nothing yet drives clustering from the command line.
 
 Sequenced after D2 because consensus and stability are both defined over the
-algorithm roster, and that roster is not final until D2 lands.
+algorithm roster, and that roster was not final until D2 landed.
 
 ## D4 - Out-of-core and streaming clustering
 

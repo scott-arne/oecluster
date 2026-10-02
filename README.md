@@ -39,6 +39,9 @@ cluster summaries as well as lower-level control over distance computation.
 - **Choose representatives** with true medoids, minimax/radius centers,
   highest-neighborhood Butina-style representatives, weighted medoids, ranked
   representative lists, and k-representative selection.
+- **Choose a clustering parameter from data** with `select_parameter`, which
+  sweeps one parameter over a grid, scores every partition, and picks the
+  best validity index under noise and cluster-count bounds.
 - **Compute molecular distances** for fingerprints, ROCS shape/color overlay,
   protein superposition, and binding-site comparison.
 - **Scale distance storage** with dense in-memory arrays, memory-mapped files,
@@ -337,6 +340,29 @@ result = oecluster.bitbirch_refine(
 ```
 
 Both functions return a `BitBirchResult` with `labels`, `clusters`, `centroids`, and `cluster_sizes`. The `mode` parameter accepts `"strict_parity"` (exact reference-implementation parity) or `"fast"` (partition-merge parallelism with deterministic output). Fast mode applies to `bitbirch` and `bitbirch_recluster`; `bitbirch_refine` always runs in strict parity because its prune/reassign passes are order-sensitive (the `mode` argument is accepted for API symmetry but does not change refine's behavior).
+
+### Choosing A Parameter
+
+`select_parameter` sweeps one parameter over a grid you supply, scores
+every partition with `cluster_report` (or `isim_report` for fingerprints),
+and picks the best value under a validity index, with bounds that keep
+degenerate partitions out of the running:
+
+```python
+spec = oecluster.ClusteringSpec("butina", num_threads=4)
+selection = oecluster.select_parameter(
+    spec, dm, "threshold", [0.2, 0.3, 0.4, 0.5, 0.6],
+    criterion="silhouette", min_clusters=2, max_clusters=dm.num_samples // 2)
+print(selection)                  # the scored table, winner marked
+if selection.winner is not None:  # None when no threshold met the bounds
+    result = selection.winner.result
+```
+
+`ClusteringSpec` names any clustering function plus its fixed options and
+runs it on any input, so the same object describes the algorithm to later
+workflow steps. See
+[Parameter Selection](docs/python-api.md#parameter-selection) for the
+criterion table, the bounds and the fingerprint path.
 
 ---
 

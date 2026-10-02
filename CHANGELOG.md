@@ -2,6 +2,24 @@
 
 This file starts at 5.0.0; earlier releases are not recorded here.
 
+## [5.15.0] - 2026-10-02
+
+### Added
+
+- `ClusteringSpec` describes a clustering entry point (a roster name, its
+  function, or any callable returning a `ClusteringResult`) plus the
+  keyword options it is run with, and runs it on any input with
+  `spec.run(items, **overrides)`.
+- `select_parameter()` sweeps one keyword of a spec over an explicit grid,
+  scores every partition with `cluster_report()` (a `SymmetricDistanceMatrix`
+  or a prebuilt comparison) or `isim_report()` (an `oefp.OEFPBatch`), and
+  returns a read-only `ParameterSelection` of `SweepRow` records with the
+  winner under a named validity index. Optional `max_noise_fraction`,
+  `min_clusters` and `max_clusters` bounds exclude rows before ranking; NaN
+  scores never win; ties keep grid order. The opt-in scorer stage a
+  criterion needs is switched on automatically. Pure Python; no native
+  change.
+
 ## [5.14.0] - 2026-10-02
 
 ### Added
