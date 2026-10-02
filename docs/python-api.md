@@ -533,8 +533,11 @@ must test for `None` before doing arithmetic on them.
 ## Approximate Reports From Fingerprints
 
 `isim()` and `isim_report()` score binary fingerprints directly, without a
-materialized pairwise distance matrix, in time linear in the number of
-fingerprints rather than `cluster_report()`'s O(N^2).
+materialized pairwise distance matrix, rather than `cluster_report()`'s
+O(N^2). `isim()` is linear in the number of fingerprints; `isim_report()`'s
+default core is too, and its optional centroid stage
+(`compute_centroid_indices=True`) adds O(N K + K^2) time for K clusters --
+see Cost below.
 
 ### isim()
 

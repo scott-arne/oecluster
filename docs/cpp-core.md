@@ -301,8 +301,11 @@ selection.
 
 also reached through the umbrella `oecluster/oecluster.h`. `isim()` and
 `isim_report()` score binary fingerprint batches directly -- no materialized
-pairwise distance matrix, time linear in the number of fingerprints rather
-than `cluster_report`'s O(N^2).
+pairwise distance matrix, unlike `cluster_report`'s O(N^2). `isim()` is
+linear in the number of fingerprints; `isim_report()`'s default core is too,
+and its optional centroid stage (`compute_centroid_indices = true`) adds
+O(N K + K^2) time for K clusters -- see the cost line at the end of this
+section.
 
 ```cpp
 double isim(const OEFP::OEFPBatch& fingerprints, const ISimOptions& options = ISimOptions());
@@ -324,12 +327,13 @@ similarity. The four structs isim_report() adds:
 - `ISimReportRequested`: `centroid_indices`, `per_cluster_records` -- what the
   caller asked for, set even when the answer is undefined, the same
   asked-versus-undefined convention `ClusterReportRequested` uses.
-- `ISimClusterRecord`: `label`, `size`, `medoid` (exact profile group);
-  `isim_intra_distance`, `isim_separation` (iSIM ratio group, NaN for a
-  singleton or when K < 2); `radius`, `mean_medoid_distance` (exact given the
-  medoid, 0.0 for a singleton); `isim_silhouette`, `nearest_cluster`,
-  `nearest_cluster_similarity` (centroid stage only, NaN/`NO_NEAREST_CLUSTER`
-  until it runs).
+- `ISimClusterRecord`: `label`, `size` (exact profile group); `isim_intra_distance`
+  (iSIM ratio group, NaN for a singleton), `isim_separation` (iSIM ratio group,
+  NaN when K < 2); `medoid`, `radius`, `mean_medoid_distance` (exact given the
+  iSIM medoid -- `medoid` is the iSIM-selected sample index, and `radius`/
+  `mean_medoid_distance` are 0.0 for a singleton); `isim_silhouette`,
+  `nearest_cluster`, `nearest_cluster_similarity` (centroid stage only,
+  NaN/`NO_NEAREST_CLUSTER` until it runs).
 - `ISimReport`: `num_samples`, `num_clusters`, `num_noise`, `num_singletons`,
   `noise_fraction`, `singleton_fraction`, `largest_cluster_fraction`,
   `cluster_size_median`, `cluster_size_p90`, `size_gini`, `size_entropy`
