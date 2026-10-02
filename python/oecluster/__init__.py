@@ -68,6 +68,7 @@ __all__ = [  # noqa: RUF022
     "LogDetResult",
     "cluster_report",
     "compare_reports",
+    "ClusteringSpec",
     "partition_agreement",
     "scaffold_agreement",
     "sar_coherence",
@@ -734,6 +735,7 @@ from .oecluster import SuperposeOptions
 
 from . import _comparisons
 from . import _gate
+from ._parameter_selection import ClusteringSpec
 
 
 class _StorageView:
