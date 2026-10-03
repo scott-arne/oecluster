@@ -2,6 +2,22 @@
 
 This file starts at 5.0.0; earlier releases are not recorded here.
 
+## [5.15.2] - 2026-10-03
+
+### Fixed
+
+- Wheels build and import again. oefp 0.3.0 (since 5.0.0) compiles Arrow into
+  the extension, which no tag since v4.2.2 had exercised: the RHEL 8 build now
+  uses `gcc-toolset-12` for pyarrow's C++20 headers (the wheel stays
+  `manylinux_2_28`), and the Linux and macOS wheels load Arrow and Parquet out
+  of the installed `pyarrow` package instead of trying to vendor it, with the
+  needed sonames validated against that pyarrow at build time.
+- `pyarrow>=25,<26` is declared as a runtime dependency: the extension links
+  libarrow/libparquet by versioned soname, the same ABI coupling `oefp`
+  carries.
+- The `oepdist` command puts pyarrow's library directories on the loader path
+  before starting the binary.
+
 ## [5.15.1] - 2026-10-02
 
 ### Fixed
