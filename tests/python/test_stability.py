@@ -1,5 +1,6 @@
 """Python surface of take and cluster_stability."""
 import math
+import tracemalloc
 
 import numpy as np
 import oecluster
@@ -568,3 +569,222 @@ def test_column_shaped_reference_labels_are_refused():
         oecluster.cluster_stability(_fixed(_thirds, calls), _blobs20(),
                                     resamples=1, reference=reference)
     assert calls == []
+
+
+# --- cluster_stability: semantics -------------------------------------------
+
+def test_a_perfectly_stable_clustering_scores_one_everywhere():
+    spec = oecluster.ClusteringSpec("butina", threshold=0.2)
+    stability = oecluster.cluster_stability(spec, _blobs20(), resamples=30)
+    assert np.nanmin(stability.jaccard) == 1.0
+    for record in stability.records:
+        assert (record.mean_jaccard, record.dissolved, record.recovered) == (
+            1.0, 0.0, 1.0)
+    assert stability.mean_jaccard == 1.0
+    for positions, agreement in zip(stability.indices, stability.agreement):
+        if (positions < 10).any() and (positions >= 10).any():
+            assert agreement == 1.0
+
+
+def test_equal_seeds_reproduce_and_different_seeds_differ():
+    spec = oecluster.ClusteringSpec("butina", threshold=0.2)
+    first = oecluster.cluster_stability(spec, _blobs20(), resamples=5, seed=3)
+    again = oecluster.cluster_stability(spec, _blobs20(), resamples=5, seed=3)
+    other = oecluster.cluster_stability(spec, _blobs20(), resamples=5, seed=4)
+    for a, b in zip(first.indices, again.indices):
+        np.testing.assert_array_equal(a, b)
+    for a, b in zip(first.labels, again.labels):
+        np.testing.assert_array_equal(a, b)
+    np.testing.assert_array_equal(first.jaccard, again.jaccard)
+    assert first.agreement == again.agreement
+    assert any(not np.array_equal(a, b)
+               for a, b in zip(first.indices, other.indices))
+
+
+def test_seed_none_draws_fresh_entropy_and_records_none():
+    spec = oecluster.ClusteringSpec("butina", threshold=0.2)
+    stability = oecluster.cluster_stability(spec, _blobs20(), resamples=4,
+                                            seed=None)
+    assert stability.seed is None
+    assert len(stability.indices) == 4
+    assert stability.jaccard.shape == (2, 4)
+
+
+def test_full_fraction_reproduces_a_deterministic_reference():
+    spec = oecluster.ClusteringSpec("butina", threshold=0.2)
+    stability = oecluster.cluster_stability(spec, _blobs20(), resamples=3,
+                                            fraction=1)
+    assert stability.fraction == 1.0
+    for positions, labels in zip(stability.indices, stability.labels):
+        np.testing.assert_array_equal(positions, np.arange(20))
+        np.testing.assert_array_equal(labels, stability.reference.labels)
+    assert stability.agreement == (1.0, 1.0, 1.0)
+    assert np.all(stability.jaccard == 1.0)
+
+
+def test_full_fraction_measures_the_distance_to_a_supplied_reference():
+    spec = oecluster.ClusteringSpec("butina", threshold=0.2)
+    one_cluster = oecluster.butina(_blobs20(), threshold=0.95)
+    assert one_cluster.num_clusters == 1
+    stability = oecluster.cluster_stability(spec, _blobs20(), resamples=2,
+                                            fraction=1, reference=one_cluster)
+    assert np.all(stability.jaccard == 0.5)
+    assert all(value < 1.0 for value in stability.agreement)
+
+
+def test_subset_size_is_at_least_two():
+    matrix = oecluster.SymmetricDistanceMatrix.from_condensed(
+        np.array([0.1, 0.2, 0.3]))
+    stability = oecluster.cluster_stability(
+        _fixed(lambda size: [0] * size), matrix, resamples=3, fraction=0.5)
+    assert all(positions.size == 2 for positions in stability.indices)
+
+
+def test_noise_mode_changes_agreement_but_never_jaccard():
+    reference = _result([0, 0, 0, 0, 1, 1, -1, -1])
+    matrix = oecluster.SymmetricDistanceMatrix.from_condensed(np.full(28, 0.5))
+    clusterer = _fixed(lambda size: [0, 0, 0, -1, 1, 1, -1, 2])
+    results = {noise: oecluster.cluster_stability(
+                   clusterer, matrix, resamples=2, fraction=1,
+                   reference=reference, noise=noise)
+               for noise in ("singletons", "grouped", "excluded")}
+    for noise, stability in results.items():
+        np.testing.assert_array_equal(stability.jaccard,
+                                      results["singletons"].jaccard)
+        _assert_matches_slow(stability, reference.labels, noise=noise)
+    assert len({stability.agreement for stability in results.values()}) == 3
+
+
+def test_excluded_noise_leaves_agreement_undefined_when_nothing_survives():
+    reference = _result(HAND_REFERENCE)
+    all_noise = _fixed(lambda size: [-1] * size)
+    stability = oecluster.cluster_stability(
+        all_noise, _blobs20(), resamples=4, reference=reference,
+        noise="excluded")
+    assert all(math.isnan(value) for value in stability.agreement)
+    assert math.isnan(stability.mean_agreement)
+    assert np.all(stability.jaccard[~np.isnan(stability.jaccard)] == 0.0)
+
+
+def test_mean_agreement_averages_the_defined_entries_only():
+    calls = []
+    def alternating(items, **options):
+        calls.append(options)
+        size = items.num_samples
+        labels = [-1] * size if len(calls) % 2 else [p % 2 for p in range(size)]
+        return _result(labels)
+    stability = oecluster.cluster_stability(
+        alternating, _blobs20(), resamples=4, reference=_result(HAND_REFERENCE),
+        noise="excluded")
+    defined = [value for value in stability.agreement if not math.isnan(value)]
+    assert len(defined) == 2
+    assert stability.mean_agreement == pytest.approx(sum(defined) / 2)
+
+
+def test_huge_labels_are_encoded_not_allocated():
+    big = 2 ** 40
+    clusterer = _fixed(lambda size: [big + (p % 2) for p in range(size)])
+    stability = oecluster.cluster_stability(
+        clusterer, _blobs20(), resamples=3, reference=_result(HAND_REFERENCE))
+    jaccard, _ = _slow_stability(HAND_REFERENCE, stability.indices,
+                                 stability.labels)
+    np.testing.assert_allclose(stability.jaccard, jaccard, equal_nan=True)
+    small = [np.asarray(labels) - big for labels in stability.labels]
+    assert stability.agreement == pytest.approx(
+        _slow_agreement(HAND_REFERENCE, stability.indices, small, "singletons"))
+
+
+def test_singleton_heavy_partitions_need_no_contingency_table():
+    size = 20000
+    storage = oecluster.SparseStorage(size, 0.5)
+    storage.Finalize()
+    matrix = oecluster.SymmetricDistanceMatrix(storage, "test")
+    reference = _result(np.arange(size))
+    clusterer = _fixed(lambda count: list(range(count)))
+    tracemalloc.start()
+    try:
+        stability = oecluster.cluster_stability(
+            clusterer, matrix, resamples=1, reference=reference)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert peak < 32 * 1024 * 1024
+    assert stability.jaccard.shape == (size, 1)
+    assert np.nansum(stability.jaccard) == size // 2
+
+
+def test_a_resample_of_the_wrong_size_is_refused_by_index():
+    clusterer = _fixed(lambda size: [0, 0, 1])
+    with pytest.raises(ValueError, match="resample 0"):
+        oecluster.cluster_stability(clusterer, _blobs20(), resamples=2,
+                                    reference=_result(HAND_REFERENCE))
+
+
+def test_an_internal_reference_of_the_wrong_size_is_refused_before_resampling():
+    calls = []
+    clusterer = _fixed(lambda size: [0, 0, 1], calls)
+    with pytest.raises(ValueError, match="20 reference items"):
+        oecluster.cluster_stability(clusterer, _blobs20(), resamples=2)
+    assert len(calls) == 1
+
+
+def test_keep_partitions_false_drops_only_the_partitions():
+    spec = oecluster.ClusteringSpec("butina", threshold=0.2)
+    kept = oecluster.cluster_stability(spec, _blobs20(), resamples=4, seed=1)
+    dropped = oecluster.cluster_stability(spec, _blobs20(), resamples=4, seed=1,
+                                          keep_partitions=False)
+    assert dropped.indices is None and dropped.labels is None
+    np.testing.assert_array_equal(dropped.jaccard, kept.jaccard)
+    assert dropped.agreement == kept.agreement
+
+
+def test_an_all_noise_reference_has_no_records():
+    stability = oecluster.cluster_stability(
+        _fixed(lambda size: [p % 2 for p in range(size)]), _blobs20(),
+        resamples=3, reference=_result([-1] * 20))
+    assert stability.records == ()
+    assert stability.jaccard.shape == (0, 3)
+    assert math.isnan(stability.mean_jaccard)
+    assert len(stability.agreement) == 3
+    assert "ClusterStability(" in repr(stability)
+
+
+def test_a_supplied_reference_is_not_rerun():
+    calls = []
+    clusterer = _fixed(_thirds, calls)
+    oecluster.cluster_stability(clusterer, _blobs20(), resamples=5,
+                                reference=_result(HAND_REFERENCE))
+    assert len(calls) == 5
+    calls.clear()
+    oecluster.cluster_stability(clusterer, _blobs20(), resamples=5)
+    assert len(calls) == 6
+
+
+def test_a_raising_resample_propagates():
+    calls = []
+    def flaky(items, **options):
+        calls.append(options)
+        if len(calls) == 3:
+            raise RuntimeError("boom")
+        return _result([0] * items.num_samples)
+    with pytest.raises(RuntimeError, match="boom"):
+        oecluster.cluster_stability(flaky, _blobs20(), resamples=4)
+
+
+def test_retained_labels_are_snapshots_of_each_resample():
+    calls = []
+    shared = _result([0] * 10)
+
+    def reusing(items, **options):
+        # One result object relabelled in place between calls; the retained
+        # partitions must not change after the fact.
+        calls.append(options)
+        shared.labels[:] = len(calls) % 2
+        return shared
+
+    stability = oecluster.cluster_stability(
+        reusing, _blobs20(), resamples=2, reference=_result(HAND_REFERENCE))
+    np.testing.assert_array_equal(stability.labels[0],
+                                  np.ones(10, dtype=np.intp))
+    np.testing.assert_array_equal(stability.labels[1],
+                                  np.zeros(10, dtype=np.intp))
