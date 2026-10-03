@@ -124,9 +124,8 @@ the algorithm roster, in three slices:
 - **D2b** (shipped 5.11.0): `knn_graph()` and `KNNGraph`, a public k-nearest-neighbor graph over dense, memory-mapped, sparse and lazy input, and `jarvis_patrick()` with the classic mutual shared-neighbor rule, over a graph or raw input.
 - **D2c** (shipped 5.12.0): `leiden()`, Leiden community detection with modularity and CPM objectives over a shared-nearest-neighbor Jaccard weighting of the D2b graph, seeded and with connected clusters guaranteed.
 
-Bootstrap-Jaccard cluster stability is deferred until after D2: it must re-run
-the clustering algorithm, which inverts the current layering, and it is not
-worth defining against a roster that is still growing.
+Cluster stability by resampling shipped in 5.16.0 as D3b (subsampling without
+replacement; see the D3 section below), once the D2 roster was final.
 
 ## B - Fingerprint-native metrics
 

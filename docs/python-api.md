@@ -950,10 +950,17 @@ so do the facts that describe the comparison (`is_distance`, `zero_self`,
 every item excluded nothing and inherits every fact (so `fraction=1` cannot
 slip a proven violation past the metric gate); a proper subset of a dense or
 memory-mapped source whose triangle probe had run is probed again on the
-subset with the `from_condensed` defaults, while a sparse subset inherits
-the probe fields unchanged; a source stamped NaN-present is re-measured on
-the subset and becomes complete when every NaN was excluded; complete and
-subset-scored integrity are inherited. For a batch the result is a new
+subset with the `from_condensed` defaults (because the probe draws the same
+100000 triples from a smaller matrix, a subset is sampled more densely than
+its source was: a resample can surface a violation the full-matrix probe
+missed, and the subset then claims exactly what a fresh `from_condensed` of
+the same data would; `allow_nonmetric=True` on the spec's options remains the
+override), while a sparse subset inherits the probe fields unchanged; a source
+stamped NaN-present is re-measured on the subset: it becomes complete when
+every NaN was excluded, except that a descriptor matrix computed with
+`missing="ignore"` (or one that records no policy) becomes subset-scored,
+because its remaining pairs were scored on per-pair feature subsets; complete
+and subset-scored integrity are inherited. For a batch the result is a new
 `oefp.OEFPBatch` with the source's fingerprint spec and the selected rows.
 
 `num_threads` applies to the dense and memory-mapped gather (0 selects the
@@ -1067,7 +1074,9 @@ Peak extra memory during the loop is one `m`-item subset (`4 m (m - 1)`
 bytes for a dense matrix, or the sub-batch) plus the current resample's
 `ClusteringResult` (50 to 100 bytes per sampled item) plus the O(m + K + K')
 scoring workspace, plus an `intp` row map over the full reference (8 bytes per item) held for
-the loop's duration, plus what is retained across resamples: the `K x R`
+the loop's duration, plus, while a gather runs, an 8-byte-per-item position
+map for a sparse source and a temporary copy of the selected fingerprint rows
+for a batch (roughly doubling the sub-batch during its construction), plus what is retained across resamples: the `K x R`
 float64 Jaccard array and the `R` agreements always, and under
 `keep_partitions=True` two `intp` arrays per resample, 16 bytes per sampled
 item per resample (about 800 MB for 100 resamples at half of a million
