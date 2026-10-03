@@ -601,13 +601,25 @@ def test_equal_seeds_reproduce_and_different_seeds_differ():
                for a, b in zip(first.indices, other.indices))
 
 
-def test_seed_none_draws_fresh_entropy_and_records_none():
-    spec = oecluster.ClusteringSpec("butina", threshold=0.2)
-    stability = oecluster.cluster_stability(spec, _blobs20(), resamples=4,
-                                            seed=None)
+def test_seed_none_draws_fresh_entropy_and_records_none(monkeypatch):
+    seeds = []
+    real_default_rng = np.random.default_rng
+
+    def spying_default_rng(seed=None):
+        seeds.append(seed)
+        return real_default_rng(seed)
+
+    monkeypatch.setattr(oecluster._stability.np.random, "default_rng",
+                        spying_default_rng)
+    # The patch is process-wide, so unrelated callers may also record seeds;
+    # exactly one None means the resampling generator got fresh entropy.
+    stability = oecluster.cluster_stability(
+        _fixed(_thirds), _blobs20(), resamples=4, seed=None,
+        reference=_result(HAND_REFERENCE))
+    assert seeds.count(None) == 1
     assert stability.seed is None
     assert len(stability.indices) == 4
-    assert stability.jaccard.shape == (2, 4)
+    assert stability.jaccard.shape == (len(set(HAND_REFERENCE) - {-1}), 4)
 
 
 def test_full_fraction_reproduces_a_deterministic_reference():
@@ -632,11 +644,12 @@ def test_full_fraction_measures_the_distance_to_a_supplied_reference():
     assert all(value < 1.0 for value in stability.agreement)
 
 
-def test_subset_size_is_at_least_two():
+@pytest.mark.parametrize("fraction", (0.5, 0.1))
+def test_subset_size_is_at_least_two(fraction):
     matrix = oecluster.SymmetricDistanceMatrix.from_condensed(
         np.array([0.1, 0.2, 0.3]))
     stability = oecluster.cluster_stability(
-        _fixed(lambda size: [0] * size), matrix, resamples=3, fraction=0.5)
+        _fixed(lambda size: [0] * size), matrix, resamples=3, fraction=fraction)
     assert all(positions.size == 2 for positions in stability.indices)
 
 
@@ -701,14 +714,21 @@ def test_singleton_heavy_partitions_need_no_contingency_table():
     matrix = oecluster.SymmetricDistanceMatrix(storage, "test")
     reference = _result(np.arange(size))
     clusterer = _fixed(lambda count: list(range(count)))
-    tracemalloc.start()
+    # The tracer may belong to the runner, so measure a delta and stop only a
+    # tracer this test started.
+    was_tracing = tracemalloc.is_tracing()
+    if not was_tracing:
+        tracemalloc.start()
     try:
+        tracemalloc.reset_peak()
+        baseline, _ = tracemalloc.get_traced_memory()
         stability = oecluster.cluster_stability(
             clusterer, matrix, resamples=1, reference=reference)
         _, peak = tracemalloc.get_traced_memory()
     finally:
-        tracemalloc.stop()
-    assert peak < 32 * 1024 * 1024
+        if not was_tracing:
+            tracemalloc.stop()
+    assert peak - baseline < 32 * 1024 * 1024
     assert stability.jaccard.shape == (size, 1)
     assert np.nansum(stability.jaccard) == size // 2
 
@@ -736,6 +756,14 @@ def test_keep_partitions_false_drops_only_the_partitions():
     assert dropped.indices is None and dropped.labels is None
     np.testing.assert_array_equal(dropped.jaccard, kept.jaccard)
     assert dropped.agreement == kept.agreement
+    assert dropped.records == kept.records
+    assert dropped.mean_jaccard == kept.mean_jaccard
+    assert dropped.mean_agreement == kept.mean_agreement
+    np.testing.assert_array_equal(dropped.reference.labels,
+                                  kept.reference.labels)
+    assert dropped.spec == kept.spec
+    assert (dropped.resamples, dropped.fraction, dropped.seed) == (
+        kept.resamples, kept.fraction, kept.seed)
 
 
 def test_an_all_noise_reference_has_no_records():
@@ -746,6 +774,11 @@ def test_an_all_noise_reference_has_no_records():
     assert stability.jaccard.shape == (0, 3)
     assert math.isnan(stability.mean_jaccard)
     assert len(stability.agreement) == 3
+    assert stability.agreement == pytest.approx(
+        _slow_agreement([-1] * 20, stability.indices, stability.labels,
+                        "singletons"), nan_ok=True)
+    assert stability.mean_agreement == pytest.approx(
+        float(np.nanmean(stability.agreement)))
     assert "ClusterStability(" in repr(stability)
 
 
