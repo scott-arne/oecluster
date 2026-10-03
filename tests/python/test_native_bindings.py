@@ -957,6 +957,28 @@ def test_isim_and_isim_report_release_the_gil():
             "or SWIG applies the exception handler to nothing")
 
 
+def test_take_pairs_and_take_fingerprints_release_the_gil():
+    """The gathers read O(m^2) native distances or copy m rows and must not
+    hold the interpreter.
+
+    Asserted against the interface file, with comments stripped, for the
+    reasons given in test_the_new_entry_points_release_the_gil.
+    """
+    interface = pathlib.Path(__file__).resolve().parents[2] / "swig" / "oecluster.i"
+    text = _SWIG_COMMENT.sub("", interface.read_text(encoding="utf-8"))
+
+    include = '%include "oecluster/Subset.h"'
+    assert text.count(include) == 1, "the position check needs an unambiguous anchor"
+    include_at = text.index(include)
+
+    for name in ("take_pairs", "take_fingerprints"):
+        invocation = f"OECLUSTER_GIL_EXCEPTION(OECluster::{name}, {name})"
+        assert invocation in text
+        assert text.index(invocation) < include_at, (
+            f"{invocation} must precede the %include that declares {name}, "
+            "or SWIG applies the exception handler to nothing")
+
+
 def test_memory_exception_macro_raises_memory_error():
     """cluster_report, isim and isim_report can exhaust memory on inputs a
     caller could plausibly pass, so their handler maps ``std::bad_alloc`` and
