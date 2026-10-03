@@ -54,6 +54,7 @@ add_executable(oecluster_tests
     cpp/test_sar_comparison.cpp
     cpp/test_murcko_scaffold.cpp
     cpp/test_umbrella_header.cpp
+    cpp/test_subset.cpp
 )
 
 target_link_libraries(oecluster_tests
