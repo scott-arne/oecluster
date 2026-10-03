@@ -47,6 +47,7 @@ set(_OECLUSTER_SWIG_DEPENDS
     ${CMAKE_SOURCE_DIR}/include/oecluster/clustering/KMedoids.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/clustering/MurckoScaffold.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/Subset.h
+    ${CMAKE_SOURCE_DIR}/include/oecluster/Consensus.h
 )
 
 set_source_files_properties(oecluster.i PROPERTIES

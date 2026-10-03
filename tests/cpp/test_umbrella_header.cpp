@@ -220,3 +220,22 @@ TEST(UmbrellaHeaderTest, ReachesTheSubsetHeader) {
     EXPECT_THROW(OECluster::take_fingerprints(OEFP::OEFPBatch(), {}),
                  std::invalid_argument);
 }
+
+// Consensus.h joined the umbrella in 5.17.0; all three kernels are called so
+// the definitions, not only the declarations, must be reachable.
+TEST(UmbrellaHeaderTest, ReachesTheConsensusHeader) {
+    OECluster::DenseStorage destination(2);
+    const OECluster::ConsensusMatrixSummary summary =
+        OECluster::coassociation_distances(2, {0, 2}, {0, 1}, {0, 0},
+                                           destination);
+    EXPECT_EQ(summary.num_partitions, 1u);
+    EXPECT_DOUBLE_EQ(destination.Get(0, 1), 0.0);
+
+    const std::vector<int> labels =
+        OECluster::consensus_components(destination, 0.5);
+    EXPECT_EQ(labels, (std::vector<int>{0, 0}));
+
+    const OECluster::ConsensusStrength strength =
+        OECluster::consensus_strength(destination, labels);
+    EXPECT_DOUBLE_EQ(strength.item_consensus[0], 1.0);
+}

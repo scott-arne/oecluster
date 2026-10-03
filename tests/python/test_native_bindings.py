@@ -1042,3 +1042,28 @@ def test_by_value_returns_convert_inside_an_exception_handler():
     assert "catch (const std::bad_alloc&)" in body
     assert "SWIG_MemoryError" in body
     assert "catch (...)" in body
+
+
+def test_the_consensus_entry_points_release_the_gil():
+    """Each kernel is an O(N^2) pass over native data and must not hold the
+    interpreter while it runs.
+
+    Asserted against the interface file, with comments stripped first, for
+    the reasons ``test_the_new_entry_points_release_the_gil`` sets out: a
+    directive below the ``%include`` that declares the function, or one
+    commented out, is inert and SWIG says nothing about it.
+    """
+    interface = pathlib.Path(__file__).resolve().parents[2] / "swig" / "oecluster.i"
+    text = _SWIG_COMMENT.sub("", interface.read_text(encoding="utf-8"))
+
+    include = '%include "oecluster/Consensus.h"'
+    assert text.count(include) == 1, "the position check needs an unambiguous anchor"
+    include_at = text.index(include)
+
+    for name in ("coassociation_distances", "consensus_components",
+                 "consensus_strength"):
+        invocation = f"OECLUSTER_GIL_EXCEPTION(OECluster::{name}, {name})"
+        assert invocation in text
+        assert text.index(invocation) < include_at, (
+            f"{invocation} must precede the %include that declares {name}, or "
+            "SWIG applies the exception handler to nothing")

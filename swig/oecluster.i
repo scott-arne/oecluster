@@ -18,6 +18,7 @@
 #include "oecluster/CDist.h"
 #include "oecluster/DistanceMatrix.h"
 #include "oecluster/Subset.h"
+#include "oecluster/Consensus.h"
 #include "oecluster/comparisons/FingerprintComparison.h"
 #include "oecluster/comparisons/ROCSComparison.h"
 #include "oecluster/comparisons/SuperposeComparison.h"
@@ -890,6 +891,14 @@ OECLUSTER_GIL_EXCEPTION(OECluster::jarvis_patrick, jarvis_patrick)
 OECLUSTER_GIL_EXCEPTION(OECluster::take_pairs, take_pairs)
 OECLUSTER_GIL_EXCEPTION(OECluster::take_fingerprints, take_fingerprints)
 
+// coassociation_distances accumulates R passes over O(N^2) pairs on worker
+// threads, consensus_components sweeps the whole condensed array, and
+// consensus_strength is another O(N^2) pass; none has a Python object in
+// reach once the typemaps have run.
+OECLUSTER_GIL_EXCEPTION(OECluster::coassociation_distances, coassociation_distances)
+OECLUSTER_GIL_EXCEPTION(OECluster::consensus_components, consensus_components)
+OECLUSTER_GIL_EXCEPTION(OECluster::consensus_strength, consensus_strength)
+
 // leiden builds the same graph, weighs it on worker threads and runs a
 // serial optimizer that can take seconds at scale.
 OECLUSTER_GIL_EXCEPTION(OECluster::leiden, leiden)
@@ -1251,6 +1260,19 @@ public:
 // in front of the caller instead of an overload dispatcher's, as for murcko.
 %feature("compactdefaultargs") OECluster::take_pairs;
 %include "oecluster/Subset.h"
+
+// ============================================================================
+// Consensus clustering
+// ============================================================================
+// All three default their options argument; compacting the defaults into one
+// wrapper each keeps the StorageBackend and vector typemaps' own messages in
+// front of the caller instead of an overload dispatcher's, as for take_pairs.
+// std::vector<int> and std::vector<double> members and returns ride the
+// IntVector and DoubleVector templates declared above.
+%feature("compactdefaultargs") OECluster::coassociation_distances;
+%feature("compactdefaultargs") OECluster::consensus_components;
+%feature("compactdefaultargs") OECluster::consensus_strength;
+%include "oecluster/Consensus.h"
 
 // ============================================================================
 // Version macros
