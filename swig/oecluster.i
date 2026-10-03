@@ -1272,6 +1272,19 @@ public:
 %feature("compactdefaultargs") OECluster::coassociation_distances;
 %feature("compactdefaultargs") OECluster::consensus_components;
 %feature("compactdefaultargs") OECluster::consensus_strength;
+
+// std_vector.i turns a by-value std::vector return into a tuple, but the
+// Python layer is promised an IntVector, so hand back an owned one.
+%typemap(out) std::vector<int> consensus_components {
+    $result = SWIG_NewPointerObj(new std::vector<int>($1),
+                                 $descriptor(std::vector<int>*),
+                                 SWIG_POINTER_OWN);
+}
+// The default getter hands back a pointer into the parent struct, which is
+// freed as soon as a temporary such as consensus_strength(...).item_consensus
+// goes out of scope; %naturalvar copies the vector on read instead.
+%naturalvar OECluster::ConsensusStrength::item_consensus;
+%naturalvar OECluster::ConsensusStrength::cluster_consensus;
 %include "oecluster/Consensus.h"
 
 // ============================================================================

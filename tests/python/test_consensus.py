@@ -48,7 +48,9 @@ def test_native_consensus_components_and_strength_round_trip():
         native.SizeTVector([0, 1, 2, 3]),
         native.IntVector([0, 0, 1, 1]),
         destination)
-    labels = list(native.consensus_components(destination, 0.5))
+    components = native.consensus_components(destination, 0.5)
+    assert isinstance(components, native.IntVector)
+    labels = list(components)
     assert labels == [0, 0, 1, 1]
     strength = native.consensus_strength(
         destination, native.IntVector(labels))
@@ -65,3 +67,19 @@ def test_native_refusal_is_a_runtime_error():
             native.SizeTVector([1, 1]),
             native.IntVector([0, 0]),
             oecluster.DenseStorage(4))
+
+
+def test_native_strength_members_survive_a_temporary():
+    native = oecluster.oecluster
+    destination = oecluster.DenseStorage(4)
+    native.coassociation_distances(
+        4,
+        native.SizeTVector([0, 4]),
+        native.SizeTVector([0, 1, 2, 3]),
+        native.IntVector([0, 0, 1, 1]),
+        destination)
+    labels = native.IntVector([0, 0, 1, 1])
+    assert list(native.consensus_strength(
+        destination, labels).item_consensus) == [1.0, 1.0, 1.0, 1.0]
+    assert list(native.consensus_strength(
+        destination, labels).cluster_consensus) == [1.0, 1.0]
