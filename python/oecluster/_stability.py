@@ -477,7 +477,9 @@ def cluster_stability(algorithm, items, *, resamples=100, fraction=0.5, seed=0,
     :raises TypeError: For an argument of the wrong type, including ``bool``
         where an int or float is expected.
     :raises ValueError: For an argument out of range, a reference of another
-        size, or a callable whose result does not match the item count.
+        size, a callable whose result does not match the item count, or one
+        that returns the reference object again or relabels it during
+        resampling.
     """
     spec = (algorithm if isinstance(algorithm, ClusteringSpec)
             else ClusteringSpec(algorithm))
@@ -509,7 +511,9 @@ def cluster_stability(algorithm, items, *, resamples=100, fraction=0.5, seed=0,
                 f"{num_items} reference items")
 
     subset_size = max(2, round(fraction * num_items))
-    record_labels, row_of_label = _reference_rows(reference.labels)
+    # A copy: the object behind ``reference`` may be mutated by a callable.
+    reference_labels = np.array(reference.labels, dtype=np.intp)
+    record_labels, row_of_label = _reference_rows(reference_labels)
     jaccard = np.full((record_labels.size, resamples), np.nan, dtype=np.float64)
     agreement = []
     kept_indices = []
@@ -519,6 +523,11 @@ def cluster_stability(algorithm, items, *, resamples=100, fraction=0.5, seed=0,
         chosen = np.sort(rng.choice(num_items, subset_size, replace=False))
         chosen = chosen.astype(np.intp, copy=False)
         result = spec.run(take(items, chosen, num_threads=num_threads))
+        if result is reference:
+            raise ValueError(
+                f"resample {index}: {spec!r} returned the reference result "
+                "object itself; a clustering callable must return a new "
+                "ClusteringResult on every call")
         if result.num_samples != subset_size:
             raise ValueError(
                 f"resample {index}: {spec!r} returned {result.num_samples} "
@@ -533,6 +542,16 @@ def cluster_stability(algorithm, items, *, resamples=100, fraction=0.5, seed=0,
             # A copy, not a view: a callable that reuses one result object
             # and relabels it in place must not rewrite earlier partitions.
             kept_labels.append(np.array(result.labels, dtype=np.intp))
+    # Two checks because they catch different aliasing: the identity check
+    # names the offending resample as soon as a callable hands back the
+    # object it already returned, and this comparison catches a callable that
+    # relabels the reference through a retained alias without returning it.
+    # Either would leave ``reference`` describing a partition the statistics
+    # never scored.
+    if not np.array_equal(reference.labels, reference_labels):
+        raise ValueError(
+            f"{spec!r} changed the reference's labels while resampling; the "
+            "scored partition no longer matches stability.reference")
     return ClusterStability(
         spec, reference, _records(record_labels, row_of_label, jaccard),
         jaccard, agreement, resamples, fraction, seed,

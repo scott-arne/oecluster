@@ -517,3 +517,33 @@ def test_package_exports_the_four_names():
                  "ClusterStabilityRecord"):
         assert name in oecluster.__all__
         assert hasattr(oecluster, name)
+
+
+# --- cluster_stability: a callable that aliases the reference ---------------
+
+def test_a_callable_that_returns_its_reference_object_again_is_refused():
+    shared = _result([0] * 20)
+
+    def reusing(items, **options):
+        # One object handed back on every call, relabelled in place: the
+        # reference would silently become the last resample.
+        shared.labels[:] = 1
+        return shared
+
+    with pytest.raises(ValueError, match="reference result object"):
+        oecluster.cluster_stability(reusing, _blobs20(), resamples=2,
+                                    fraction=1)
+
+
+def test_a_reference_relabelled_during_resampling_is_refused():
+    reference = _result([0] * 10 + [1] * 10)
+
+    def relabelling(items, **options):
+        # Mutates the caller's reference through a retained alias without
+        # returning it.
+        reference.labels[:] = 0
+        return _result([p % 2 for p in range(items.num_samples)])
+
+    with pytest.raises(ValueError, match="changed the reference"):
+        oecluster.cluster_stability(relabelling, _blobs20(), resamples=2,
+                                    reference=reference)
