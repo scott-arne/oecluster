@@ -102,6 +102,38 @@ does not depend on the value it carried.
 because every index that loop produces is in range for the oversized storage
 and the distances would simply land in the wrong slots.
 
+## Row Subsets
+
+`Subset.h` gathers selected rows of one input into a smaller one of the same
+kind; Python's `take()` and `cluster_stability()` are built on it.
+
+- `take_pairs(source, indices, destination, num_threads = 0, chunk_size = 4096)`
+  copies the distances among the selected items into a caller-allocated
+  `destination` with `NumSamples() == indices.size()`, placing
+  `source.Get(indices[a], indices[b])` at `(a, b)`, so the subset follows the
+  given order. A dense or memory-mapped source needs a `DenseStorage`
+  destination and is gathered in parallel over destination rows (the row
+  chunk is `max(1, min(chunk_size, ceil(m / (4 * workers))))`); a sparse
+  source needs a `SparseStorage` destination with the same cutoff and is
+  gathered in one single-threaded pass over its merged entries, copying only
+  stored pairs. A memory-mapped destination is refused, because two mappings
+  of one file would alias the source unseen. `Finalize()` is called on the
+  destination in every case. It throws `std::invalid_argument` for empty
+  indices, an index out of range, a repeated index, a destination of another
+  size, a zero chunk, a destination aliasing the source, a memory-mapped
+  destination, a storage-kind mismatch, unequal sparse cutoffs (two NaN cutoffs count as equal), or a sparse
+  destination that already holds entries, finalized or not (its `Finalize()`
+  merges rather than clears, so the gather finalizes it before checking).
+  Index validation uses a set sized by the subset, so a small subset of a
+  huge input stays at subset-scaled cost.
+- `take_fingerprints(batch, indices)` returns a new `OEFP::OEFPBatch` with
+  the source's fingerprint spec and the selected rows in the given order,
+  with the same index refusals.
+
+The dense gather reads `m(m-1)/2` distances and the new dense storage holds
+`4 m (m - 1)` bytes, so a large fraction of a huge memory-mapped matrix needs
+that much RAM for the subset.
+
 ## Clustering
 
 The clustering headers under `oecluster/clustering` provide the algorithms and

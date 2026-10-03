@@ -2,6 +2,33 @@
 
 This file starts at 5.0.0; earlier releases are not recorded here.
 
+## [5.16.0] - 2026-10-03
+
+### Added
+
+- `cluster_stability()` reruns a `ClusteringSpec` on repeated subsamples of a
+  `SymmetricDistanceMatrix` or an `oefp.OEFPBatch` (drawn without
+  replacement, half the items by default) and matches every reference
+  cluster to its best counterpart in each resample by Jaccard overlap. The
+  read-only `ClusterStability` carries one `ClusterStabilityRecord` per
+  cluster (mean best Jaccard, dissolved and recovered fractions at Hennig's
+  0.5 and 0.75 thresholds, resamples evaluated), the `(K, R)` Jaccard
+  matrix, one adjusted Rand index per resample through
+  `partition_agreement()`, and optionally every resample's positions and
+  labels. The Jaccard matching never treats noise as a cluster; `noise`
+  governs the agreement call only. A callable that returns a partition of the
+  wrong size, hands back the reference result object again, relabels the
+  reference while resampling, or returns labels that are not one-dimensional
+  is refused with `ValueError`.
+- `take()` builds the sub-matrix or sub-batch over selected item positions,
+  in the given order, through the new native `take_pairs` (dense,
+  memory-mapped and sparse storage, parallel over rows for the dense kinds)
+  and `take_fingerprints`. The comparison facts carry over; a permutation
+  of every item inherits every fact; a proper subset of a dense or
+  memory-mapped source re-runs the triangle probe when the source's had
+  run (a sparse subset inherits the probe fields), and a source stamped
+  NaN-present is re-measured on the subset.
+
 ## [5.15.2] - 2026-10-03
 
 ### Fixed

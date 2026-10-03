@@ -909,6 +909,183 @@ The default criterion here is `isim_silhouette`, which runs the O(N K)
 centroid stage on every grid point; pass
 `criterion="calinski_harabasz_medoid"` to stay linear.
 
+## Cluster Stability
+
+`cluster_stability()` tells you which clusters survive perturbation of the
+data. It reruns a `ClusteringSpec` on repeated subsamples of the items,
+matches every cluster of a reference partition to its best counterpart in
+each resample by Jaccard overlap, and reports Hennig's clusterboot
+statistics per cluster, plus one adjusted Rand index per resample for the
+partition as a whole.
+
+```python
+import oecluster
+
+matrix = oecluster.load_distance_matrix("distances.npz")
+spec = oecluster.ClusteringSpec("butina", threshold=0.3)
+stability = oecluster.cluster_stability(spec, matrix, resamples=100,
+                                        fraction=0.5, seed=0)
+print(stability)                     # one line per reference cluster
+for record in stability.records:
+    if record.dissolved > 0.5:
+        print(f"cluster {record.label} ({record.size} members) is unstable")
+```
+
+### Subsets with `take`
+
+`take(items, indices, *, num_threads=0)` is the row-subset primitive the
+resampling rests on, and it is public because other workflows need it too.
+`items` is a `SymmetricDistanceMatrix` or an `oefp.OEFPBatch`; `indices` is
+any sequence or array of item positions, in any order, and the result follows
+that order. Positions must be integers after `numpy.asarray` (a float,
+boolean or string array is refused with `TypeError`, never coerced), one
+dimensional, distinct, in range and non-empty (`ValueError`).
+
+For a matrix the result is a new `SymmetricDistanceMatrix` over the selected
+items: dense and memory-mapped sources produce `DenseStorage`, a sparse
+source produces `SparseStorage` with the same cutoff and only its stored
+pairs. `comparison_name`, `params` and the sliced `labels` carry over, and
+so do the facts that describe the comparison (`is_distance`, `zero_self`,
+`triangle`). The data-dependent facts follow the data: a permutation of
+every item excluded nothing and inherits every fact (so `fraction=1` cannot
+slip a proven violation past the metric gate); a proper subset of a dense or
+memory-mapped source whose triangle probe had run is probed again on the
+subset with the `from_condensed` defaults, while a sparse subset inherits
+the probe fields unchanged; a source stamped NaN-present is re-measured on
+the subset and becomes complete when every NaN was excluded; complete and
+subset-scored integrity are inherited. For a batch the result is a new
+`oefp.OEFPBatch` with the source's fingerprint spec and the selected rows.
+
+`num_threads` applies to the dense and memory-mapped gather (0 selects the
+hardware concurrency); the sparse and fingerprint gathers are single passes.
+A dense subset of `m` items allocates `4 m (m - 1)` bytes, so a large
+fraction of a huge memory-mapped matrix needs that much RAM for the subset.
+Like every entry point that releases the GIL, `take` reads its inputs
+without a lock: do not mutate the matrix's storage or the batch from
+another thread while a call runs.
+
+### Resampling
+
+```python
+oecluster.cluster_stability(algorithm, items, *, resamples=100, fraction=0.5,
+                            seed=0, reference=None, noise="singletons",
+                            keep_partitions=True, num_threads=0)
+```
+
+- `algorithm` is a `ClusteringSpec`, a roster name, or a callable; a name or
+  callable is wrapped as `ClusteringSpec(algorithm)` with no fixed options.
+- `items` is a `SymmetricDistanceMatrix` (any storage kind the spec's
+  algorithm accepts) or an `oefp.OEFPBatch`, with at least two items.
+- Each of the `resamples` draws keeps `m = max(2, round(fraction * N))`
+  items without replacement (`fraction` in `(0, 1]`, default half, the
+  clusterboot `subset` scheme): a duplicate item would be a coincident point
+  that biases exactly the distances and neighbour counts these algorithms
+  decide by. The draw is `numpy.random.default_rng(seed)` followed by
+  `numpy.sort(rng.choice(N, m, replace=False))` per resample, so for an
+  integer `seed` the subsets depend only on `(seed, N, fraction, resamples)`;
+  `seed=None` draws fresh entropy and records `None`.
+- `reference` is the `ClusteringResult` over all `items` to score; `None`
+  runs the spec once on the full input. A supplied reference is never rerun.
+- `noise` is forwarded to `partition_agreement()` for the per-resample
+  agreement only (`"singletons"`, `"grouped"` or `"excluded"`); it is
+  validated there on the first resample.
+- `keep_partitions` retains each resample's positions and labels, two
+  `intp` arrays per resample.
+- `num_threads` is passed to `take`; the spec's algorithm threads through
+  its own options.
+
+### Scoring
+
+For every non-noise reference cluster `C` and every resample, the members of
+`C` that were drawn form `C'`. If `C'` is empty the cluster was not evaluated
+in that resample and its entry is NaN. Otherwise the entry is the best
+Jaccard overlap `max |C' ∩ D| / |C' ∪ D|` over the resample's non-noise
+clusters `D`; members of `C'` that the resample labelled noise belong to no
+`D` and count against the overlap through the union, and a resample with no
+cluster at all scores 0.0. Noise is therefore never a cluster in the
+matching, whatever `noise` says; that argument shapes only the agreement
+call. Per cluster, over the resamples it was evaluated in:
+
+| Field | Meaning |
+|---|---|
+| `mean_jaccard` | mean best Jaccard |
+| `dissolved` | fraction of resamples with best Jaccard below 0.5 |
+| `recovered` | fraction of resamples with best Jaccard above 0.75 |
+| `evaluated` | number of resamples the cluster had a member in |
+
+The thresholds are Hennig's and are fixed. All three statistics are NaN for
+a cluster that was never evaluated. `mean_jaccard` on the result is the
+unweighted mean over the evaluated clusters, on purpose: a size-weighted
+figure is dominated by the largest cluster and hides the small clusters
+resampling exists to expose; the records carry the sizes for anyone wanting
+a weighted figure. `agreement` holds one adjusted Rand index per resample
+between the reference restricted to the subset and the resample's partition,
+NaN where `partition_agreement()` leaves it undefined (fewer than two
+samples survive `noise="excluded"`), and `mean_agreement` averages the
+defined entries.
+
+The matching costs O(m log m) per resample with O(m + K + K') workspace: only
+the observed contingency cells are formed, never a K x K' table, so a
+partition of many singletons costs no more than any other. Labels are
+re-encoded densely per resample, so a callable returning labels such as
+`2**40` is scored without allocating by label value.
+
+`fraction=1` selects every item on every resample. With a roster algorithm
+that is deterministic for its options and a reference produced by that same
+spec, every resample reproduces the reference (Jaccard 1.0 everywhere,
+agreement 1.0); with a supplied reference from elsewhere, a stochastic
+algorithm or a foreign callable it measures how far the spec's own
+partitions sit from that reference.
+
+### The result
+
+`ClusterStability` is read-only (assignment raises `AttributeError`):
+
+| Attribute | Content |
+|---|---|
+| `spec`, `reference` | the spec that was resampled and the partition that was scored |
+| `records` | tuple of `ClusterStabilityRecord(label, size, mean_jaccard, dissolved, recovered, evaluated)` in ascending label order |
+| `jaccard` | read-only `(K, R)` float64 array, NaN where a cluster was absent |
+| `mean_jaccard` | unweighted mean over evaluated records, NaN if none |
+| `agreement`, `mean_agreement` | per-resample adjusted Rand indices and their mean over defined entries |
+| `resamples`, `fraction`, `seed` | the arguments as resolved |
+| `indices`, `labels` | tuples of `R` `intp` arrays, or `None` under `keep_partitions=False` |
+| `columns`, `to_table()` | `("label", "size", "mean_jaccard", "dissolved", "recovered", "evaluated")` and a fresh list of matching tuples |
+
+`repr` prints a header with the spec, resample count, fraction, mean Jaccard
+and mean agreement, then one aligned line per record. A reference with no
+non-noise cluster yields no records and a `(0, R)` Jaccard array; the
+agreement is still computed. A resample on which the spec raises propagates
+that exception; a callable returning a partition of the wrong size, returning the reference
+result object itself again, relabelling the reference while resampling, or
+returning labels that are not one-dimensional raises `ValueError` naming the
+resample where one is involved.
+
+### Memory
+
+Peak extra memory during the loop is one `m`-item subset (`4 m (m - 1)`
+bytes for a dense matrix, or the sub-batch) plus the current resample's
+`ClusteringResult` (50 to 100 bytes per sampled item) plus the O(m + K + K')
+scoring workspace, plus an `intp` row map over the full reference (8 bytes per item) held for
+the loop's duration, plus what is retained across resamples: the `K x R`
+float64 Jaccard array and the `R` agreements always, and under
+`keep_partitions=True` two `intp` arrays per resample, 16 bytes per sampled
+item per resample (about 800 MB for 100 resamples at half of a million
+items). `keep_partitions=False` retains only `reference`, `records`,
+`jaccard`, `agreement` and the scalars.
+
+Over fingerprints the same call runs BitBirch on sub-batches:
+
+```python
+import oecluster
+import oefp
+
+batch = oefp.OEFPBatch.from_fingerprints(fingerprints)
+spec = oecluster.ClusteringSpec("bitbirch", threshold=0.65)
+stability = oecluster.cluster_stability(spec, batch, resamples=50, seed=0)
+unstable = [r.label for r in stability.records if r.recovered < 0.5]
+```
+
 ## Partition Agreement
 
 `partition_agreement()` scores two labelings of the same samples against each

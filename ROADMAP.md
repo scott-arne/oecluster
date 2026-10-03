@@ -33,7 +33,7 @@ they are not recoveries of the original intent.
 | B1 | Exact O(N)-memory paths for the A metrics over a comparison | shipped 5.13.0 |
 | B2 | Approximate fingerprint-native (iSIM) A metrics | shipped 5.14.0 |
 | D3a | Parameter selection: `ClusteringSpec`, `select_parameter` | shipped 5.15.0 |
-| D3b | Stability resampling: bootstrap-Jaccard over a `ClusteringSpec` | planned |
+| D3b | Stability resampling: subsample-Jaccard over a `ClusteringSpec` | shipped 5.16.0 |
 | D3c | Consensus clustering over an ensemble of partitions | planned |
 | D3d | Clustering CLI over oepdist output | planned |
 | D4 | Out-of-core and streaming clustering | planned |
@@ -159,9 +159,12 @@ shipped as four slices:
   `isim_report` (fingerprints), and picks the winner under a named validity
   index with optional noise and cluster-count bounds. Pure Python over the
   existing entry points: the first slice with no native core.
-- **D3b.** Stability resampling: bootstrap-Jaccard over a `ClusteringSpec`,
-  including the work deferred from A. Needs a row-subset operation on
-  `SymmetricDistanceMatrix`, which is where the native core returns.
+- **D3b (shipped 5.16.0).** Stability resampling. `cluster_stability` reruns
+  a `ClusteringSpec` on subsamples drawn without replacement and reports
+  Hennig's per-cluster Jaccard statistics (mean, dissolved, recovered) plus
+  one adjusted Rand index per resample; `take` is the row-subset primitive
+  over `SymmetricDistanceMatrix` and `oefp.OEFPBatch`, backed by the native
+  `take_pairs` and `take_fingerprints`, which D3c and D3d reuse.
 - **D3c.** Consensus clustering over an ensemble of partitions, which D3a
   sweeps and D3b resamples both produce, scored against its inputs with
   A2's agreement machinery.

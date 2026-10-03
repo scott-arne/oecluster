@@ -42,6 +42,10 @@ cluster summaries as well as lower-level control over distance computation.
 - **Choose a clustering parameter from data** with `select_parameter`, which
   sweeps one parameter over a grid, scores every partition, and picks the
   best validity index under noise and cluster-count bounds.
+- **Measure cluster stability** with `cluster_stability`, which reruns a
+  spec on resampled subsets and reports per cluster how often it dissolved
+  or was recovered (Hennig's clusterboot statistics), plus one adjusted Rand
+  index per resample.
 - **Compute molecular distances** for fingerprints, ROCS shape/color overlay,
   protein superposition, and binding-site comparison.
 - **Scale distance storage** with dense in-memory arrays, memory-mapped files,
@@ -366,6 +370,24 @@ runs it on any input, so the same object describes the algorithm to later
 workflow steps. See
 [Parameter Selection](docs/python-api.md#parameter-selection) for the
 criterion table, the bounds and the fingerprint path.
+
+### Measuring Cluster Stability
+
+`cluster_stability` reruns a spec on repeated half-size subsamples of the
+items and matches every reference cluster to its best counterpart in each
+resample by Jaccard overlap:
+
+```python
+spec = oecluster.ClusteringSpec("butina", threshold=0.3)
+stability = oecluster.cluster_stability(spec, dm, resamples=100, seed=0)
+print(stability)          # mean Jaccard, dissolved and recovered fractions
+stability.mean_agreement  # adjusted Rand index, reference versus resamples
+```
+
+`take(items, indices)` is the row-subset primitive beneath it, for a
+`SymmetricDistanceMatrix` or an `oefp.OEFPBatch`. See
+[Cluster Stability](docs/python-api.md#cluster-stability) for the scoring
+rules, the noise handling and the memory figures.
 
 ---
 
