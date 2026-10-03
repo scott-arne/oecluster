@@ -5,6 +5,7 @@
 #include "oecluster/Subset.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <stdexcept>
 #include <string>
@@ -56,7 +57,9 @@ void gather_dense(const StorageBackend& source,
         return;  // one item owns no pair
     }
     ThreadPool pool(num_threads);
-    const size_t workers = std::max<size_t>(1, pool.NumThreads());
+    // More workers than rows do nothing; capping before the arithmetic keeps
+    // 4 * workers from wrapping for any count the size_t interface admits.
+    const size_t workers = std::max<size_t>(1, std::min(pool.NumThreads(), m));
     // chunk_size is a ceiling, not the chunk: a subset small enough to fit
     // one chunk still spreads over the pool, and the shrinking
     // upper-triangular rows stay within a bounded imbalance.
@@ -116,24 +119,32 @@ void take_pairs(const StorageBackend& source,
             "take_pairs: destination must not be the source; a gather into "
             "itself would race its own reads");
     }
-    // Two MMapStorage objects can map one file, which the identity check
-    // above cannot see, so a memory-mapped destination is refused outright:
-    // the subset is small enough to own in memory, which is what the Python
+    // A memory-mapped destination is refused with every other backend: two
+    // MMapStorage objects can map one file, which the identity check above
+    // cannot see, and an unknown backend may not honour concurrent Set calls.
+    // The subset is small enough to own in memory, which is what the Python
     // layer always allocates.
-    if (dynamic_cast<const MMapStorage*>(&destination) != nullptr) {
-        throw std::invalid_argument(
-            "take_pairs: destination must be DenseStorage or SparseStorage; a "
-            "memory-mapped destination could share the source's file");
-    }
     const auto* sparse_source = dynamic_cast<const SparseStorage*>(&source);
     auto* sparse_destination = dynamic_cast<SparseStorage*>(&destination);
-    if ((sparse_source == nullptr) != (sparse_destination == nullptr)) {
+    if (sparse_source != nullptr) {
+        if (sparse_destination == nullptr) {
+            throw std::invalid_argument(
+                "take_pairs: a sparse source needs a SparseStorage destination");
+        }
+    } else if (dynamic_cast<DenseStorage*>(&destination) == nullptr) {
         throw std::invalid_argument(
-            "take_pairs: a sparse source needs a SparseStorage destination, "
-            "and a dense or memory-mapped source a DenseStorage one");
+            "take_pairs: a dense or memory-mapped source needs a DenseStorage "
+            "destination; a memory-mapped destination could share the "
+            "source's file and other backends are not supported");
     }
     if (sparse_source != nullptr) {
-        if (sparse_source->Cutoff() != sparse_destination->Cutoff()) {
+        const double source_cutoff = sparse_source->Cutoff();
+        const double destination_cutoff = sparse_destination->Cutoff();
+        // A NaN cutoff is legal (nothing is ever above it) and must match itself.
+        const bool same_cutoff =
+            source_cutoff == destination_cutoff
+            || (std::isnan(source_cutoff) && std::isnan(destination_cutoff));
+        if (!same_cutoff) {
             throw std::invalid_argument(
                 "take_pairs: the sparse destination's cutoff must equal the "
                 "source's; a lower one would drop entries and a higher one "
@@ -162,13 +173,17 @@ OEFP::OEFPBatch take_fingerprints(const OEFP::OEFPBatch& batch,
                                   const std::vector<size_t>& indices) {
     check_indices(indices, batch.Size(), "take_fingerprints");
     const size_t words = batch.WordsPerFingerprint();
-    OEFP::OEFPBatch out(batch.Spec());
+    // Append reserves exactly one more row per call, so m appends reallocate
+    // m times; FromFingerprints reserves once. check_indices guarantees the
+    // vector is non-empty.
+    std::vector<OEFP::OEFP> rows;
+    rows.reserve(indices.size());
     for (size_t index : indices) {
         const std::uint64_t* row = batch.RowWords(index);
-        out.Append(OEFP::OEFP(batch.Spec(),
-                              std::vector<std::uint64_t>(row, row + words)));
+        rows.emplace_back(batch.Spec(),
+                          std::vector<std::uint64_t>(row, row + words));
     }
-    return out;
+    return OEFP::OEFPBatch::FromFingerprints(rows);
 }
 
 }  // namespace OECluster

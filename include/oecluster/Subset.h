@@ -22,10 +22,11 @@ namespace OECluster {
  * ``a < b``, so the subset follows the given order. A dense or memory-mapped
  * source needs a ``DenseStorage`` destination and is gathered in parallel
  * over destination rows; a sparse source needs a ``SparseStorage``
- * destination with the same cutoff and is gathered in one pass over its
- * merged entries (so the source must have been finalized), copying only
- * stored pairs. A memory-mapped destination is refused: two mappings of one
- * file would alias the source unseen by the identity check. ``Finalize()``
+ * destination with the same cutoff (two NaN cutoffs count as equal) and is
+ * gathered in one pass over its merged entries (so the source must have been
+ * finalized), copying only stored pairs. Any other destination is refused,
+ * a memory-mapped one included: two mappings of one file would alias the
+ * source unseen by the identity check. ``Finalize()``
  * is called on the destination in every case.
  *
  * :param source: Storage holding the full matrix.
@@ -37,8 +38,9 @@ namespace OECluster {
  *     chunk used is ``max(1, min(chunk_size, ceil(m / (4 * workers))))``.
  * :raises std::invalid_argument: For empty indices, an index out of range, a
  *     repeated index, a destination of another size, a zero chunk, a
- *     destination aliasing the source, a memory-mapped destination, a
- *     storage-kind mismatch, unequal sparse cutoffs, or a sparse destination
+ *     destination aliasing the source, a destination that is not
+ *     ``DenseStorage`` (dense or memory-mapped source) or ``SparseStorage``
+ *     (sparse source), unequal sparse cutoffs, or a sparse destination
  *     that already holds entries (finalized or not).
  */
 void take_pairs(const StorageBackend& source,

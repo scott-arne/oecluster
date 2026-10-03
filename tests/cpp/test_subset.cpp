@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <initializer_list>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -90,6 +91,21 @@ public:
 private:
     std::filesystem::path path_;
     std::unique_ptr<MMapStorage> storage_;
+};
+
+// A backend the gather does not support: it silently discards every write.
+class DiscardingStorage : public StorageBackend {
+public:
+    explicit DiscardingStorage(size_t n) : n_(n) {}
+    void Set(size_t, size_t, double) override {}
+    double Get(size_t, size_t) const override { return 0.0; }
+    size_t NumSamples() const override { return n_; }
+    size_t NumPairs() const override { return n_ * (n_ - 1) / 2; }
+    double* Data() override { return nullptr; }
+    const double* Data() const override { return nullptr; }
+
+private:
+    size_t n_;
 };
 
 OEFP::OEFP make_fp(size_t size_bits, std::initializer_list<size_t> on_bits) {
@@ -239,6 +255,33 @@ TEST(TakePairsTest, RefusesAMemoryMappedDestination) {
                      std::invalid_argument);
     }
     std::filesystem::remove(path);
+}
+
+TEST(TakePairsTest, HugeThreadCountDoesNotOverflowTheChunkRule) {
+    DenseStorage source = make_dense(6);
+    const std::vector<size_t> indices{4, 2, 0, 3, 1};
+    DenseStorage destination(5);
+    take_pairs(source, indices, destination, static_cast<size_t>(1) << 62);
+    expect_gathered(source, indices, destination);
+}
+
+TEST(TakePairsTest, RefusesAnUnsupportedDestinationBackend) {
+    DenseStorage source = make_dense(5);
+    DiscardingStorage destination(2);
+    EXPECT_THROW(take_pairs(source, {0, 1}, destination), std::invalid_argument);
+}
+
+TEST(TakePairsTest, EqualNaNCutoffsMatch) {
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    SparseStorage source(3, nan);
+    source.Set(0, 1, 0.2);
+    source.Set(1, 2, 0.9);
+    source.Finalize();
+    SparseStorage destination(2, nan);
+    take_pairs(source, {2, 1}, destination);
+    EXPECT_DOUBLE_EQ(destination.Get(0, 1), 0.9);
+    SparseStorage other(2, 0.5);
+    EXPECT_THROW(take_pairs(source, {2, 1}, other), std::invalid_argument);
 }
 
 TEST(TakeFingerprintsTest, CopiesRowsInOrderAndKeepsTheSpec) {
