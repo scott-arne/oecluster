@@ -32,6 +32,7 @@ def test_native_coassociation_distances_fills_a_destination():
         native.SizeTVector([0, 1, 2, 3, 0, 1, 2, 3]),
         native.IntVector([0, 0, 1, 1, 0, 0, 0, 1]),
         destination)
+    assert isinstance(summary, native.ConsensusMatrixSummary)
     assert summary.num_partitions == 2
     assert summary.unobserved_pairs == 0
     assert destination.Get(0, 1) == 0.0
@@ -54,6 +55,8 @@ def test_native_consensus_components_and_strength_round_trip():
     assert labels == [0, 0, 1, 1]
     strength = native.consensus_strength(
         destination, native.IntVector(labels))
+    assert isinstance(strength.item_consensus, native.DoubleVector)
+    assert isinstance(strength.cluster_consensus, native.DoubleVector)
     assert list(strength.item_consensus) == [1.0, 1.0, 1.0, 1.0]
     assert list(strength.cluster_consensus) == [1.0, 1.0]
 
@@ -79,7 +82,9 @@ def test_native_strength_members_survive_a_temporary():
         native.IntVector([0, 0, 1, 1]),
         destination)
     labels = native.IntVector([0, 0, 1, 1])
-    assert list(native.consensus_strength(
-        destination, labels).item_consensus) == [1.0, 1.0, 1.0, 1.0]
-    assert list(native.consensus_strength(
-        destination, labels).cluster_consensus) == [1.0, 1.0]
+    item = native.consensus_strength(destination, labels).item_consensus
+    cluster = native.consensus_strength(destination, labels).cluster_consensus
+    assert isinstance(item, native.DoubleVector)
+    assert isinstance(cluster, native.DoubleVector)
+    assert list(item) == [1.0, 1.0, 1.0, 1.0]
+    assert list(cluster) == [1.0, 1.0]

@@ -1282,9 +1282,13 @@ public:
 }
 // The default getter hands back a pointer into the parent struct, which is
 // freed as soon as a temporary such as consensus_strength(...).item_consensus
-// goes out of scope; %naturalvar copies the vector on read instead.
-%naturalvar OECluster::ConsensusStrength::item_consensus;
-%naturalvar OECluster::ConsensusStrength::cluster_consensus;
+// goes out of scope. %naturalvar would copy but converts to a tuple, so copy
+// into an owned DoubleVector instead, scoped to these two members.
+%typemap(out) std::vector<double>* item_consensus, std::vector<double>* cluster_consensus {
+    $result = SWIG_NewPointerObj(new std::vector<double>(*$1),
+                                 $descriptor(std::vector<double>*),
+                                 SWIG_POINTER_OWN);
+}
 %include "oecluster/Consensus.h"
 
 // ============================================================================
