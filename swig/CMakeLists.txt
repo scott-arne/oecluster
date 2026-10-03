@@ -80,9 +80,10 @@ openeye_add_swig_module(
 # pyarrow bumps its soversion on every major release, so a hand-applied
 # install_name_tool goes stale silently the next time the environment moves.
 #
-# Wheels are excluded deliberately. delocate/auditwheel vendor the Arrow
-# libraries next to the extension, where the existing @loader_path/$ORIGIN
-# entry already finds them, and baking a build machine's absolute
+# Wheels are excluded deliberately. They load Arrow out of the sibling pyarrow
+# package through the relative @loader_path/../pyarrow and $ORIGIN/../pyarrow
+# entries the wheel repair steps add (see .github/workflows/build-wheels.yml
+# and scripts/build_python.py), and baking a build machine's absolute
 # site-packages path into a redistributable artifact would be wrong.
 if(NOT SKBUILD)
     execute_process(
