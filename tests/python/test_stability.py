@@ -69,6 +69,90 @@ def _planted(n, pairs, facts, cutoff=None):
     return oecluster.SymmetricDistanceMatrix(storage, "test", None, {}, facts)
 
 
+def _result(labels):
+    """A ClusteringResult from labels alone; -1 is noise."""
+    labels = np.asarray(labels)
+    clusters = [tuple(int(p) for p in np.flatnonzero(labels == label))
+                for label in sorted(set(labels.tolist())) if label >= 0]
+    return oecluster.ClusteringResult(labels, clusters)
+
+
+def _fixed(labels_for_size, calls=None):
+    """A foreign clusterer whose partition depends only on the item count."""
+    def clusterer(items, **options):
+        if calls is not None:
+            calls.append(options)
+        size = (items.num_samples
+                if isinstance(items, oecluster.SymmetricDistanceMatrix)
+                else items.size)
+        return _result(labels_for_size(size))
+    return clusterer
+
+
+def _thirds(size):
+    """Three interleaved clusters with every seventh item noise."""
+    return [-1 if p % 7 == 0 else p % 3 for p in range(size)]
+
+
+# A hand-built reference over twenty items: two clusters, a singleton, noise.
+HAND_REFERENCE = [0] * 8 + [1] * 7 + [-1] * 3 + [2] + [-1]
+
+
+# --- slow reference implementation ------------------------------------------
+
+def _slow_stability(reference_labels, indices, labels):
+    """Hennig's statistics with Python sets; shares nothing with the module."""
+    reference_labels = [int(label) for label in reference_labels]
+    record_labels = sorted({label for label in reference_labels if label >= 0})
+    jaccard = np.full((len(record_labels), len(indices)), math.nan)
+    for r, (positions, resample) in enumerate(zip(indices, labels)):
+        ref = [reference_labels[int(p)] for p in positions]
+        resample = [int(label) for label in resample]
+        for i, k in enumerate(record_labels):
+            members = {p for p, label in enumerate(ref) if label == k}
+            if not members:
+                continue
+            best = 0.0
+            for d in {label for label in resample if label >= 0}:
+                cluster = {p for p, label in enumerate(resample) if label == d}
+                best = max(best, len(members & cluster) / len(members | cluster))
+            jaccard[i, r] = best
+    records = []
+    for i, k in enumerate(record_labels):
+        present = [value for value in jaccard[i] if not math.isnan(value)]
+        count = len(present)
+        records.append((
+            k, reference_labels.count(k),
+            sum(present) / count if count else math.nan,
+            sum(value < 0.5 for value in present) / count if count else math.nan,
+            sum(value > 0.75 for value in present) / count if count else math.nan,
+            count))
+    return jaccard, records
+
+
+def _slow_agreement(reference_labels, indices, labels, noise):
+    return [oecluster.partition_agreement(
+                [int(reference_labels[int(p)]) for p in positions],
+                [int(label) for label in resample],
+                noise=noise).adjusted_rand_index
+            for positions, resample in zip(indices, labels)]
+
+
+def _assert_matches_slow(stability, reference_labels, noise="singletons"):
+    jaccard, records = _slow_stability(
+        reference_labels, stability.indices, stability.labels)
+    np.testing.assert_allclose(stability.jaccard, jaccard, equal_nan=True)
+    assert len(stability.records) == len(records)
+    for got, want in zip(stability.records, records):
+        assert (got.label, got.size, got.evaluated) == (want[0], want[1], want[5])
+        for value, expected in zip(got[2:5], want[2:5]):
+            assert ((math.isnan(value) and math.isnan(expected))
+                    or value == pytest.approx(expected))
+    assert stability.agreement == pytest.approx(
+        _slow_agreement(reference_labels, stability.indices, stability.labels,
+                        noise), nan_ok=True)
+
+
 # --- native bindings ---------------------------------------------------------
 
 def test_native_take_pairs_gathers_in_index_order():
@@ -289,3 +373,147 @@ def test_take_batch_refuses_bad_indices_before_any_native_call(monkeypatch):
         oecluster.take(_fps(), [0, 10])
     with pytest.raises(TypeError):
         oecluster.take(_fps(), [0.0])
+
+
+# --- cluster_stability: against the slow reference --------------------------
+
+def test_stability_matches_the_slow_reference_for_butina_on_blobs():
+    spec = oecluster.ClusteringSpec("butina", threshold=0.2)
+    stability = oecluster.cluster_stability(spec, _blobs20(), resamples=25)
+    _assert_matches_slow(stability, stability.reference.labels)
+
+
+def test_stability_matches_the_slow_reference_for_bitbirch_on_fingerprints():
+    spec = oecluster.ClusteringSpec("bitbirch", threshold=0.6)
+    stability = oecluster.cluster_stability(spec, _fps(), resamples=25)
+    _assert_matches_slow(stability, stability.reference.labels)
+
+
+def test_stability_matches_the_slow_reference_on_a_hand_built_reference():
+    stability = oecluster.cluster_stability(
+        _fixed(_thirds), _blobs20(), resamples=30,
+        reference=_result(HAND_REFERENCE))
+    assert [record.label for record in stability.records] == [0, 1, 2]
+    assert [record.size for record in stability.records] == [8, 7, 1]
+    _assert_matches_slow(stability, HAND_REFERENCE)
+
+
+def test_stability_keeps_every_score_in_the_row_of_its_own_label():
+    reference = [3, 3, 3, 3, 7, 7, 12, 12, 12, 12, -1, -1]
+    matrix = oecluster.SymmetricDistanceMatrix.from_condensed(
+        np.full(12 * 11 // 2, 0.5))
+    stability = oecluster.cluster_stability(
+        _fixed(lambda size: [p % 2 for p in range(size)]), matrix,
+        resamples=20, seed=0, reference=_result(reference))
+    assert [record.label for record in stability.records] == [3, 7, 12]
+    # Under this seed some resample holds neither item 4 nor 5, so the middle
+    # row is NaN there while the later cluster still scores in its own row.
+    missing = [r for r in range(20)
+               if not ({4, 5} & set(stability.indices[r].tolist()))]
+    assert missing
+    for r in missing:
+        assert math.isnan(stability.jaccard[1, r])
+        assert not math.isnan(stability.jaccard[2, r])
+    _assert_matches_slow(stability, reference)
+
+
+# --- cluster_stability: validation ------------------------------------------
+
+@pytest.mark.parametrize("kwargs, error", [
+    ({"items": [[0.0, 0.1], [0.1, 0.0]]}, TypeError),
+    ({"items": oecluster.SymmetricDistanceMatrix.from_condensed(np.array([]))},
+     ValueError),
+    ({"resamples": True}, TypeError),
+    ({"resamples": 1.5}, TypeError),
+    ({"resamples": 0}, ValueError),
+    ({"fraction": True}, TypeError),
+    ({"fraction": "0.5"}, TypeError),
+    ({"fraction": 0}, ValueError),
+    ({"fraction": 1.5}, ValueError),
+    ({"fraction": math.nan}, ValueError),
+    ({"seed": True}, TypeError),
+    ({"seed": 1.5}, TypeError),
+    ({"seed": -1}, ValueError),
+    ({"keep_partitions": 1}, TypeError),
+    ({"keep_partitions": "yes"}, TypeError),
+    ({"num_threads": 1.5}, TypeError),
+    ({"num_threads": -1}, ValueError),
+    ({"reference": [0] * 20}, TypeError),
+    ({"reference": _result([0] * 19)}, ValueError),
+])
+def test_validation_refuses_before_anything_runs(kwargs, error):
+    calls = []
+    arguments = {"items": _blobs20(), "resamples": 3}
+    arguments.update(kwargs)
+    with pytest.raises(error):
+        oecluster.cluster_stability(_fixed(_thirds, calls), **arguments)
+    assert calls == []
+
+
+def test_items_error_points_a_raw_sequence_at_pdist():
+    with pytest.raises(TypeError, match="pdist"):
+        oecluster.cluster_stability("butina", [[0.0, 0.1], [0.1, 0.0]])
+
+
+def test_a_bad_noise_mode_is_refused_by_partition_agreement():
+    with pytest.raises(ValueError):
+        oecluster.cluster_stability(_fixed(_thirds), _blobs20(), resamples=1,
+                                    reference=_result(HAND_REFERENCE),
+                                    noise="cluster")
+
+
+def test_a_roster_name_and_a_callable_are_wrapped_as_specs():
+    by_name = oecluster.cluster_stability("hdbscan", _blobs20(), resamples=2)
+    assert by_name.spec == oecluster.ClusteringSpec("hdbscan")
+    by_callable = oecluster.cluster_stability(
+        _fixed(_thirds), _blobs20(), resamples=2)
+    assert by_callable.spec.name == "clusterer"
+
+
+# --- the result object -------------------------------------------------------
+
+def test_columns_table_and_repr():
+    stability = oecluster.cluster_stability(
+        _fixed(_thirds), _blobs20(), resamples=4,
+        reference=_result(HAND_REFERENCE))
+    assert stability.columns == ("label", "size", "mean_jaccard", "dissolved",
+                                 "recovered", "evaluated")
+    table = stability.to_table()
+    assert table == [tuple(record) for record in stability.records]
+    assert table is not stability.to_table()
+    text = repr(stability)
+    assert text.startswith("ClusterStability(spec=ClusteringSpec('clusterer'), "
+                           "resamples=4, fraction=0.5, mean_jaccard=")
+    assert "label  size  mean_jaccard  dissolved  recovered  evaluated" in text
+    assert len(text.splitlines()) == 2 + len(stability.records)
+
+
+def test_repr_prints_nan_for_an_unevaluated_record():
+    stability = oecluster.cluster_stability(
+        _fixed(lambda size: [-1] * size), _blobs20(), resamples=1,
+        reference=_result([0] * 19 + [1]), seed=0, fraction=0.5)
+    # Seed 0 leaves item 19 out of the one half-size draw, so the singleton
+    # cluster 1 is never evaluated.
+    assert stability.records[1].evaluated == 0
+    lines = repr(stability).splitlines()
+    assert lines[-1].split()[2:5] == ["nan", "nan", "nan"]
+    assert "mean_agreement=" in lines[0]
+
+
+def test_result_is_read_only():
+    stability = oecluster.cluster_stability(
+        _fixed(_thirds), _blobs20(), resamples=2,
+        reference=_result(HAND_REFERENCE))
+    with pytest.raises(AttributeError):
+        stability.resamples = 3
+    with pytest.raises(AttributeError):
+        stability._jaccard = None
+    with pytest.raises(ValueError):
+        stability.jaccard[0, 0] = 0.0
+
+
+def test_package_exports_the_four_names():
+    for name in ("take", "cluster_stability", "ClusterStability",
+                 "ClusterStabilityRecord"):
+        assert name in oecluster.__all__
+        assert hasattr(oecluster, name)

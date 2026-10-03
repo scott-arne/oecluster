@@ -16,12 +16,13 @@ imports this module before the entry points it needs are defined there.
 
 import math
 import numbers
+from typing import NamedTuple
 
 import numpy as np
 
 from . import _gate
 from . import oecluster as _oecluster
-from ._parameter_selection import _is_fingerprint_batch, _package
+from ._parameter_selection import ClusteringSpec, _is_fingerprint_batch, _package
 
 # Hennig's clusterboot thresholds: a best Jaccard below the first means the
 # cluster dissolved in that resample, above the second that it was recovered.
@@ -159,3 +160,381 @@ def take(items, indices, *, num_threads=0):
     raise TypeError(
         "take() expects a SymmetricDistanceMatrix or an oefp.OEFPBatch, not "
         f"{type(items).__name__}")
+
+
+# --- cluster_stability -------------------------------------------------------
+
+class ClusterStabilityRecord(NamedTuple):
+    """One reference cluster's stability over the resamples it appeared in."""
+
+    label: int
+    size: int
+    mean_jaccard: float
+    dissolved: float
+    recovered: float
+    evaluated: int
+
+
+class ClusterStability:
+    """Read-only outcome of :func:`cluster_stability`.
+
+    ``records`` holds one :class:`ClusterStabilityRecord` per non-noise
+    reference cluster in ascending label order; ``jaccard`` is the ``(K, R)``
+    matrix behind them, NaN where a cluster had no member in a resample;
+    ``agreement`` is one adjusted Rand index per resample, NaN where
+    :func:`partition_agreement` leaves it undefined.
+
+    Assignment to any attribute, public or private, raises
+    ``AttributeError``: the fields are set through ``object.__setattr__`` in
+    the constructor and ``__setattr__`` rejects everything after, the same
+    arrangement :class:`ParameterSelection` uses.
+    """
+
+    def __init__(self, spec, reference, records, jaccard, agreement,
+                 resamples, fraction, seed, indices, labels):
+        jaccard.setflags(write=False)
+        object.__setattr__(self, "_spec", spec)
+        object.__setattr__(self, "_reference", reference)
+        object.__setattr__(self, "_records", tuple(records))
+        object.__setattr__(self, "_jaccard", jaccard)
+        object.__setattr__(self, "_agreement",
+                           tuple(float(value) for value in agreement))
+        object.__setattr__(self, "_resamples", resamples)
+        object.__setattr__(self, "_fraction", fraction)
+        object.__setattr__(self, "_seed", seed)
+        object.__setattr__(self, "_indices", indices)
+        object.__setattr__(self, "_labels", labels)
+
+    def __setattr__(self, name, value):
+        """ClusterStability is read-only; reject attribute assignment."""
+        raise AttributeError(
+            f"ClusterStability is read-only; cannot set {name!r}")
+
+    @property
+    def spec(self):
+        """The :class:`ClusteringSpec` that was resampled."""
+        return self._spec
+
+    @property
+    def reference(self):
+        """The :class:`ClusteringResult` that was scored."""
+        return self._reference
+
+    @property
+    def records(self):
+        """Tuple of :class:`ClusterStabilityRecord` in ascending label order."""
+        return self._records
+
+    @property
+    def jaccard(self):
+        """Read-only ``(K, R)`` float64 array of best Jaccard values."""
+        return self._jaccard
+
+    @property
+    def mean_jaccard(self):
+        """Unweighted mean of the evaluated records' means, NaN if none.
+
+        Unweighted on purpose: a size-weighted figure is dominated by the
+        largest cluster and hides the small clusters resampling exists to
+        expose; the records carry the sizes for a weighted figure.
+        """
+        means = [record.mean_jaccard for record in self._records
+                 if record.evaluated > 0]
+        return float(np.mean(means)) if means else math.nan
+
+    @property
+    def agreement(self):
+        """Tuple of one adjusted Rand index per resample, NaN when undefined."""
+        return self._agreement
+
+    @property
+    def mean_agreement(self):
+        """Mean of the defined agreement entries, NaN when none is defined."""
+        defined = [value for value in self._agreement if not math.isnan(value)]
+        return float(np.mean(defined)) if defined else math.nan
+
+    @property
+    def resamples(self):
+        """Number of resamples drawn."""
+        return self._resamples
+
+    @property
+    def fraction(self):
+        """Fraction of items kept per resample, as a float."""
+        return self._fraction
+
+    @property
+    def seed(self):
+        """The seed as resolved: an int, or None for fresh entropy."""
+        return self._seed
+
+    @property
+    def indices(self):
+        """Tuple of sorted ``intp`` position arrays, or None if not kept."""
+        return self._indices
+
+    @property
+    def labels(self):
+        """Tuple of ``intp`` label arrays matching ``indices``, or None."""
+        return self._labels
+
+    @property
+    def columns(self):
+        """Column names of :meth:`to_table`."""
+        return ("label", "size", "mean_jaccard", "dissolved", "recovered",
+                "evaluated")
+
+    def to_table(self):
+        """Return a fresh list of tuples, one per record, matching
+        :attr:`columns`."""
+        return [tuple(record) for record in self._records]
+
+    def __repr__(self):
+        header = (f"ClusterStability(spec={self._spec!r}, "
+                  f"resamples={self._resamples}, fraction={self._fraction}, "
+                  f"mean_jaccard={self.mean_jaccard:.4f}, "
+                  f"mean_agreement={self.mean_agreement:.4f})")
+        names = self.columns
+        cells = [(str(record.label), str(record.size),
+                  f"{record.mean_jaccard:.4f}", f"{record.dissolved:.4f}",
+                  f"{record.recovered:.4f}", str(record.evaluated))
+                 for record in self._records]
+        widths = [max([len(name)] + [len(cell[i]) for cell in cells])
+                  for i, name in enumerate(names)]
+        lines = [header,
+                 "   " + "  ".join(f"{name:<{width}}"
+                                   for name, width in zip(names, widths))]
+        for cell in cells:
+            line = "   " + "  ".join(f"{text:<{width}}"
+                                     for text, width in zip(cell, widths))
+            lines.append(line.rstrip())
+        return "\n".join(lines)
+
+
+def _item_count(items):
+    package = _package()
+    if isinstance(items, package.SymmetricDistanceMatrix):
+        count = items.num_samples
+    elif _is_fingerprint_batch(items):
+        count = items.size
+    else:
+        raise TypeError(
+            "cluster_stability() expects a SymmetricDistanceMatrix or an "
+            f"oefp.OEFPBatch, not {type(items).__name__}; compute a matrix "
+            "from a raw item sequence with pdist first")
+    if count < 2:
+        raise ValueError(
+            f"cluster_stability() requires at least 2 items, got {count}")
+    return count
+
+
+def _resample_count(resamples):
+    if isinstance(resamples, bool) or not isinstance(resamples, numbers.Integral):
+        raise TypeError("resamples must be an int")
+    if resamples < 1:
+        raise ValueError("resamples must be at least 1")
+    return int(resamples)
+
+
+def _fraction_value(fraction):
+    if isinstance(fraction, bool) or not isinstance(fraction, numbers.Real):
+        raise TypeError("fraction must be a real number")
+    fraction = float(fraction)
+    if math.isnan(fraction) or not 0.0 < fraction <= 1.0:
+        raise ValueError("fraction must be in (0, 1]")
+    return fraction
+
+
+def _seed_value(seed):
+    if seed is None:
+        return None
+    if isinstance(seed, bool) or not isinstance(seed, numbers.Integral):
+        raise TypeError("seed must be a non-negative int or None")
+    if seed < 0:
+        raise ValueError(
+            "seed must be non-negative, as numpy.random.default_rng requires")
+    return int(seed)
+
+
+def _reference_rows(reference_labels):
+    """Record labels in ascending order and every item's global row.
+
+    Built once from the full reference, with noise mapped to -1: a resample
+    that lacks a lower or a middle cluster must not shift the later clusters
+    into other rows, which a per-resample encoding would do.
+    """
+    labels = np.asarray(reference_labels)
+    unique, inverse = np.unique(labels, return_inverse=True)
+    noise_count = int(np.count_nonzero(unique < 0))  # negatives sort first
+    rows = np.asarray(inverse, dtype=np.intp) - noise_count
+    rows[rows < 0] = -1
+    return unique[noise_count:], rows
+
+
+def _dense_codes(labels):
+    """Codes ``0..K'-1`` for one resample's non-negative labels, -1 kept.
+
+    Labels are arbitrary non-negative integers, so ``bincount`` on the raw
+    values would allocate by the largest label rather than by the sample
+    count, and :func:`partition_agreement` accepts only 32-bit labels.
+    """
+    labels = np.asarray(labels)
+    codes = np.full(labels.shape, -1, dtype=np.intp)
+    clustered = labels >= 0
+    if clustered.any():
+        codes[clustered] = np.unique(labels[clustered], return_inverse=True)[1]
+    return codes
+
+
+def _best_jaccard(ref_rows, lab_codes, num_rows):
+    """Best Jaccard of every reference row against one resample's clusters.
+
+    NaN for a row with no member in the resample; 0.0 for one whose members
+    all became noise, or when the resample has no cluster at all. Only the
+    observed contingency cells are formed (at most one per item), so the
+    workspace is O(m + K + K') and no K x K' table ever exists.
+    """
+    column = np.full(num_rows, np.nan, dtype=np.float64)
+    in_reference = ref_rows >= 0
+    if not in_reference.any():
+        return column
+    reference_sizes = np.bincount(ref_rows[in_reference], minlength=num_rows)
+    column[reference_sizes > 0] = 0.0
+    in_both = in_reference & (lab_codes >= 0)
+    if not in_both.any():
+        return column
+    cluster_sizes = np.bincount(lab_codes[lab_codes >= 0])
+    num_codes = cluster_sizes.size
+    cells, counts = np.unique(
+        ref_rows[in_both] * num_codes + lab_codes[in_both], return_counts=True)
+    rows = cells // num_codes
+    codes = cells % num_codes
+    union = reference_sizes[rows] + cluster_sizes[codes] - counts
+    np.maximum.at(column, rows, counts / union)
+    return column
+
+
+def _records(record_labels, row_of_label, jaccard):
+    sizes = np.bincount(row_of_label[row_of_label >= 0],
+                        minlength=record_labels.size)
+    records = []
+    for index, label in enumerate(record_labels):
+        scores = jaccard[index]
+        scores = scores[~np.isnan(scores)]
+        evaluated = int(scores.size)
+        if evaluated:
+            mean = float(scores.mean())
+            dissolved = float(
+                np.count_nonzero(scores < _DISSOLVED_BELOW) / evaluated)
+            recovered = float(
+                np.count_nonzero(scores > _RECOVERED_ABOVE) / evaluated)
+        else:
+            mean = dissolved = recovered = math.nan
+        records.append(ClusterStabilityRecord(
+            int(label), int(sizes[index]), mean, dissolved, recovered,
+            evaluated))
+    return tuple(records)
+
+
+def cluster_stability(algorithm, items, *, resamples=100, fraction=0.5, seed=0,
+                      reference=None, noise="singletons", keep_partitions=True,
+                      num_threads=0):
+    """Score how well each cluster survives resampling of the items.
+
+    Draws ``resamples`` subsets of ``round(fraction * N)`` items (at least
+    two) without replacement, reruns the spec on each, and matches every
+    reference cluster to its best counterpart by Jaccard overlap. Per
+    cluster: the mean best Jaccard over the resamples it appeared in, and
+    the fractions of those in which it dissolved (best Jaccard below 0.5) or
+    was recovered (above 0.75), Hennig's clusterboot statistics. Per
+    resample: the adjusted Rand index between the reference restricted to
+    the subset and the resample's partition.
+
+    Noise enters in two fixed ways. The Jaccard matching never treats noise
+    as a cluster: a reference cluster's members that a resample labels noise
+    count against its overlap through the union. ``noise`` governs only the
+    agreement call, exactly as it does in :func:`partition_agreement`.
+
+    :param algorithm: A :class:`ClusteringSpec`, a roster name, or a callable;
+        a name or callable is wrapped as ``ClusteringSpec(algorithm)``.
+    :param items: A ``SymmetricDistanceMatrix`` or an ``oefp.OEFPBatch`` of
+        at least two items.
+    :param resamples: Number of resamples, at least 1.
+    :param fraction: Fraction of items kept per resample, in ``(0, 1]``;
+        ``1`` selects every item every time.
+    :param seed: A non-negative int for a reproducible draw, or None for
+        fresh entropy.
+    :param reference: The :class:`ClusteringResult` to score, over all
+        ``items``; None runs the spec once on the full input.
+    :param noise: ``"singletons"``, ``"grouped"`` or ``"excluded"``,
+        forwarded to :func:`partition_agreement`; checked there on the first
+        resample.
+    :param keep_partitions: Whether the result retains each resample's
+        positions and labels (two ``intp`` arrays per resample).
+    :param num_threads: Worker threads for the dense and memory-mapped
+        matrix gather; the spec's algorithm threads through its own options.
+    :returns: A :class:`ClusterStability`.
+    :raises TypeError: For an argument of the wrong type, including ``bool``
+        where an int or float is expected.
+    :raises ValueError: For an argument out of range, a reference of another
+        size, or a callable whose result does not match the item count.
+    """
+    spec = (algorithm if isinstance(algorithm, ClusteringSpec)
+            else ClusteringSpec(algorithm))
+    package = _package()
+    num_items = _item_count(items)
+    resamples = _resample_count(resamples)
+    fraction = _fraction_value(fraction)
+    seed = _seed_value(seed)
+    if not isinstance(keep_partitions, (bool, np.bool_)):
+        raise TypeError(
+            "keep_partitions must be True or False, not "
+            f"{type(keep_partitions).__name__}")
+    keep_partitions = bool(keep_partitions)
+    num_threads = _thread_count(num_threads)
+    if reference is not None:
+        if not isinstance(reference, package.ClusteringResult):
+            raise TypeError(
+                "reference must be a ClusteringResult or None, not "
+                f"{type(reference).__name__}")
+        if reference.num_samples != num_items:
+            raise ValueError(
+                f"reference has {reference.num_samples} labels but items has "
+                f"{num_items}")
+    else:
+        reference = spec.run(items)
+        if reference.num_samples != num_items:
+            raise ValueError(
+                f"{spec!r} returned {reference.num_samples} labels for the "
+                f"{num_items} reference items")
+
+    subset_size = max(2, round(fraction * num_items))
+    record_labels, row_of_label = _reference_rows(reference.labels)
+    jaccard = np.full((record_labels.size, resamples), np.nan, dtype=np.float64)
+    agreement = []
+    kept_indices = []
+    kept_labels = []
+    rng = np.random.default_rng(seed)
+    for index in range(resamples):
+        chosen = np.sort(rng.choice(num_items, subset_size, replace=False))
+        chosen = chosen.astype(np.intp, copy=False)
+        result = spec.run(take(items, chosen, num_threads=num_threads))
+        if result.num_samples != subset_size:
+            raise ValueError(
+                f"resample {index}: {spec!r} returned {result.num_samples} "
+                f"labels for {subset_size} items")
+        ref_rows = row_of_label[chosen]
+        codes = _dense_codes(result.labels)
+        jaccard[:, index] = _best_jaccard(ref_rows, codes, record_labels.size)
+        agreement.append(package.partition_agreement(
+            ref_rows, codes, noise=noise).adjusted_rand_index)
+        if keep_partitions:
+            kept_indices.append(chosen)
+            # A copy, not a view: a callable that reuses one result object
+            # and relabels it in place must not rewrite earlier partitions.
+            kept_labels.append(np.array(result.labels, dtype=np.intp))
+    return ClusterStability(
+        spec, reference, _records(record_labels, row_of_label, jaccard),
+        jaccard, agreement, resamples, fraction, seed,
+        tuple(kept_indices) if keep_partitions else None,
+        tuple(kept_labels) if keep_partitions else None)
