@@ -1,10 +1,12 @@
 [build-system]
-# pyarrow is a build-only dependency: the oefp core compiled into this extension
-# calls find_package(ArrowPython REQUIRED), and pyarrow's wheel is where the
-# Arrow headers and libraries come from. The repaired wheel vendors its Arrow,
-# so this constraint decides which Arrow gets bundled and must stay in step with
-# the pyarrow oefp itself links against. Mirrored by PYARROW_REQUIREMENT in
-# .github/workflows/build-wheels.yml.
+# The pyarrow constraint must stay identical to the one in project.dependencies
+# below: the oefp core compiled into this extension calls
+# find_package(ArrowPython REQUIRED), takes its Arrow headers and libraries from
+# the pyarrow wheel, and the built extension then loads libarrow/libparquet out
+# of the installed pyarrow by versioned soname rather than bundling a copy (it
+# exchanges native objects with the oefp wheel, which loads pyarrow's Arrow
+# too). Mirrored by PYARROW_REQUIREMENT in .github/workflows/build-wheels.yml
+# and by oefp's own pin.
 requires = ["scikit-build-core>=0.8", "swig>=4.0", "pyarrow>=25,<26"]
 build-backend = "scikit_build_core.build"
 
@@ -31,7 +33,7 @@ classifiers = [
 # extension links its OpenEye shared libraries by versioned soname, so the
 # runtime toolkit has to be the one the wheel was built against.
 requires-python = ">=3.11"
-dependencies = ["openeye-toolkits>=2026.1", "numpy>=1.20", "oefp==0.3.0"]
+dependencies = ["openeye-toolkits>=2026.1", "numpy>=1.20", "oefp==0.3.0", "pyarrow>=25,<26"]
 
 [project.scripts]
 oepdist = "_oepdist_main:main"

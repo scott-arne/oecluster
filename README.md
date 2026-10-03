@@ -62,6 +62,9 @@ cluster summaries as well as lower-level control over distance computation.
   compares the two the first time such a pointer crosses -- passing an
   `oefp.OEFPBatch` to `bitbirch`, for instance -- and raises `ImportError` on
   any difference.
+- **pyarrow** 25.x. The extension loads Arrow and Parquet out of the installed
+  `pyarrow` package by versioned library name rather than bundling its own
+  copy, so the pyarrow major is an ABI dependency, the same one `oefp` carries.
 - **C++17**, **CMake** 3.21+, and **SWIG** 4.0+ when building from source.
 
 ---

@@ -14,11 +14,13 @@ env:
   # oecluster builds oefp's C++ core into its own extension, and that core links
   # Arrow unconditionally (`find_package(ArrowPython REQUIRED)`), so pyarrow has
   # to be present at configure time even though nothing in oecluster's own
-  # sources mentions Arrow. Unlike oefp, the repaired wheel vendors its Arrow
-  # rather than borrowing pyarrow's, so this pin governs which Arrow gets
-  # bundled; keep it in step with oefp so the two packages do not end up with
-  # different Arrow majors loaded side by side. Match build-system.requires in
-  # pyproject.toml.
+  # sources mentions Arrow. As in oefp, the wheel does not vendor Arrow: the
+  # extension loads libarrow/libparquet out of the sibling pyarrow package by
+  # versioned soname, because it exchanges native objects with the oefp wheel,
+  # which loads pyarrow's Arrow too, and two copies of libarrow in one process
+  # would not share them safely. The pyarrow used to build must therefore be
+  # the pyarrow installed at runtime: keep this constraint identical to the
+  # `pyarrow` entries in both pyproject.toml files and to oefp's own pin.
   PYARROW_REQUIREMENT: "pyarrow>=25,<26"
 
   # pypi.anaconda.org hosts the OpenEye channel and periodically stalls for
@@ -50,6 +52,12 @@ jobs:
             python: python3.11
             dnf_repo: powertools
             manylinux_plat: manylinux_2_28_x86_64
+            # rockylinux:8 ships gcc 8.5, which predates <span> (gcc 10+), and
+            # pyarrow's headers need C++20, so build with the newer toolset.
+            # Its newer libstdc++ pieces link statically, so the wheel keeps
+            # the manylinux_2_28 tag and still runs on stock RHEL 8 beside the
+            # g++ 8.5 OpenEye build.
+            gcc_toolset: gcc-toolset-12
 
           # The ARM SDK is an Ubuntu 22.04 build but the container is Rocky 9;
           # that pairing is deliberate and known to work (it is what produced
@@ -62,6 +70,8 @@ jobs:
             python: python3.11
             dnf_repo: crb
             manylinux_plat: manylinux_2_34_aarch64
+            # rockylinux:9 ships gcc 11, which already provides <span>.
+            gcc_toolset: ''
 
     runs-on: ${{ matrix.runner }}
     container: ${{ matrix.container }}
@@ -77,6 +87,9 @@ jobs:
             zlib-devel boost-devel boost-static boost-iostreams boost-filesystem \
             bzip2-devel xz-devel libzstd-devel \
             swig patchelf cairo findutils
+          if [ -n "${{ matrix.gcc_toolset }}" ]; then
+            dnf install -y "${{ matrix.gcc_toolset }}"
+          fi
 
       - uses: actions/checkout@v6
 
@@ -126,6 +139,10 @@ jobs:
         env:
           OPENEYE_ROOT: /opt/openeye
         run: |
+          if [ -n "${{ matrix.gcc_toolset }}" ]; then
+            . "/opt/rh/${{ matrix.gcc_toolset }}/enable"
+            echo "Using $(gcc --version | head -1)"
+          fi
           /opt/venv/bin/python scripts/build_python.py \
             --openeye-root /opt/openeye \
             --python /opt/venv/bin/python \
@@ -139,7 +156,20 @@ jobs:
           for lib in "$OE_LIB_DIR"/lib*.so; do
             EXCLUDE_ARGS="$EXCLUDE_ARGS --exclude $(basename $lib)"
           done
-          LD_LIBRARY_PATH="$OE_LIB_DIR" auditwheel repair \
+          # Arrow is loaded from the sibling pyarrow package at runtime (see
+          # PYARROW_REQUIREMENT), so its libraries are excluded from grafting
+          # but must still be resolvable for auditwheel to accept the wheel.
+          # POSIX sh has no process substitution; recent rockylinux:8 images
+          # ship without bash, so iterate with command substitution (the paths
+          # contain no spaces).
+          for pyarrow_lib_dir in $(/opt/venv/bin/python -c "import pyarrow as pa; print(' '.join(pa.get_library_dirs()))"); do
+            for lib in "$pyarrow_lib_dir"/lib*.so*; do
+              [ -e "$lib" ] || continue
+              EXCLUDE_ARGS="$EXCLUDE_ARGS --exclude $(basename "$lib")"
+            done
+          done
+          PYARROW_LD_LIBRARY_PATH=$(/opt/venv/bin/python -c "import pyarrow as pa; print(':'.join(pa.get_library_dirs()))")
+          LD_LIBRARY_PATH="$OE_LIB_DIR:$PYARROW_LD_LIBRARY_PATH" auditwheel repair \
             $EXCLUDE_ARGS \
             --plat ${{ matrix.manylinux_plat }} \
             --wheel-dir dist-repaired/ \
@@ -157,6 +187,7 @@ jobs:
           SO_FILE=$(find "$TMPDIR" -name '_oecluster*.so' | head -1)
           if [ -n "$SO_FILE" ]; then
             patchelf --add-rpath '$ORIGIN' "$SO_FILE"
+            patchelf --add-rpath '$ORIGIN/../pyarrow' "$SO_FILE"
             patchelf --add-rpath "\$ORIGIN/../openeye/libs/$OE_PLATFORM" "$SO_FILE"
             echo "SWIG module RPATH set to: $(patchelf --print-rpath "$SO_FILE")"
           fi
@@ -191,6 +222,39 @@ jobs:
             exit 1
           fi
           echo "OK: extension links no versioned Python library"
+
+      - name: Validate Arrow soname against installed pyarrow
+        run: |
+          # Arrow is deliberately not vendored: the extension loads libarrow /
+          # libparquet out of the sibling pyarrow package so Arrow C++ objects
+          # can cross the extension boundary. That makes the recorded soname a
+          # hard runtime coupling, and pip cannot see it, so every Arrow soname
+          # the extension needs must exist in the pyarrow that
+          # project.dependencies actually resolves to.
+          WHEEL=$(ls dist/oecluster-*.whl)
+          TMP=$(mktemp -d)
+          unzip -q "$WHEEL" -d "$TMP"
+          SO_FILE=$(find "$TMP" -name '_oecluster*.so' | head -1)
+          readelf -d "$SO_FILE" | grep NEEDED \
+            | grep -oE '(libarrow|libparquet)[a-z_]*\.so(\.[0-9]+)*' | sort -u > needed.txt
+          if [ ! -s needed.txt ]; then
+            echo "::error::extension links no Arrow library; the pyarrow linkage broke"
+            exit 1
+          fi
+          cat needed.txt
+          status=0
+          for soname in $(cat needed.txt); do
+            found=0
+            for dir in $(/opt/venv/bin/python -c "import pyarrow as pa; print(' '.join(pa.get_library_dirs()))"); do
+              [ -e "$dir/$soname" ] && found=1
+            done
+            if [ "$found" -eq 0 ]; then
+              echo "::error::$soname is not in the installed pyarrow; the build and runtime pyarrow majors disagree"
+              status=1
+            fi
+          done
+          [ "$status" -eq 0 ] || exit 1
+          /opt/venv/bin/python -c "import pyarrow; print('OK: Arrow sonames match pyarrow', pyarrow.__version__)"
 
       - name: Test wheel
         run: |
@@ -293,6 +357,37 @@ jobs:
             exit 1
           fi
           echo "OK: extension links no versioned Python library"
+
+      - name: Validate Arrow install names against installed pyarrow
+        run: |
+          # See the matching Linux step: Arrow is loaded from the sibling
+          # pyarrow package rather than vendored, so the versioned dylib name
+          # baked into the extension has to exist in the pyarrow that
+          # project.dependencies resolves to.
+          WHEEL=$(ls dist/oecluster-*.whl)
+          TMP=$(mktemp -d)
+          unzip -q "$WHEEL" -d "$TMP"
+          SO_FILE=$(find "$TMP" -name '_oecluster*.so' | head -1)
+          otool -L "$SO_FILE" \
+            | grep -oE '(libarrow|libparquet)[a-z_]*(\.[0-9]+)*\.dylib' | sort -u > needed.txt
+          if [ ! -s needed.txt ]; then
+            echo "::error::extension links no Arrow library; the pyarrow linkage broke"
+            exit 1
+          fi
+          cat needed.txt
+          status=0
+          for dylib in $(cat needed.txt); do
+            found=0
+            for dir in $(python -c "import pyarrow as pa; print(' '.join(pa.get_library_dirs()))"); do
+              [ -e "$dir/$dylib" ] && found=1
+            done
+            if [ "$found" -eq 0 ]; then
+              echo "::error::$dylib is not in the installed pyarrow; the build and runtime pyarrow majors disagree"
+              status=1
+            fi
+          done
+          [ "$status" -eq 0 ] || exit 1
+          python -c "import pyarrow; print('OK: Arrow install names match pyarrow', pyarrow.__version__)"
 
       - name: Test wheel
         run: |

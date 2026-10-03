@@ -460,6 +460,26 @@ def build_wheel(project_dir, python_exe, openeye_root, openeye_info, config,
     return wheel_file
 
 
+def get_pyarrow_library_dirs(python_exe):
+    """Return the directories pyarrow ships its Arrow and Parquet libraries in.
+
+    :param python_exe: Path to the Python executable.
+    :returns: List of directory strings, as ``pyarrow.get_library_dirs()``
+        reports them.
+    """
+    result = subprocess.run(
+        [
+            python_exe,
+            '-c',
+            "import pyarrow as pa; print('\\n'.join(pa.get_library_dirs()))",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return [line for line in result.stdout.splitlines() if line]
+
+
 def run_delocate(project_dir, python_exe, wheel_file, openeye_info, config,
                  verbose=False):
     """Run delocate to bundle non-OpenEye dependencies (macOS only).
@@ -489,12 +509,21 @@ def run_delocate(project_dir, python_exe, wheel_file, openeye_info, config,
     expected_missing = set(config.get('expected-missing-libs', []))
 
     try:
+        # Arrow is loaded from the sibling pyarrow package at runtime: the
+        # extension exchanges native objects with the oefp wheel, which loads
+        # pyarrow's Arrow too, so a second copy must not be bundled here. The
+        # matching rpath is added in fix_rpath_and_sign.
+        exclude_args = []
+        for lib_dir in get_pyarrow_library_dirs(python_exe):
+            exclude_args.extend(['--exclude', lib_dir])
+
         # Run delocate and capture output to filter expected missing library warnings
         result = subprocess.run([
             python_exe, '-m', 'delocate.cmd.delocate_wheel',
             '-w', str(delocated_dir),
             '-v',
             '--ignore-missing-dependencies',
+            *exclude_args,
             str(wheel_file)
         ], check=False, capture_output=True, text=True)
 
@@ -602,6 +631,13 @@ def fix_rpath_and_sign(wheel_file, openeye_info, config):
                 subprocess.run([
                     'install_name_tool', '-add_rpath',
                     rpath,
+                    str(so_file)
+                ], check=False, capture_output=True)
+                # Arrow is not bundled (see run_delocate); it is loaded out of
+                # the sibling pyarrow package at runtime.
+                subprocess.run([
+                    'install_name_tool', '-add_rpath',
+                    '@loader_path/../pyarrow',
                     str(so_file)
                 ], check=False, capture_output=True)
 

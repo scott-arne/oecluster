@@ -101,7 +101,11 @@ def _ensure_compat_symlinks():
 
 
 def _setup_library_env():
-    """Set LD_LIBRARY_PATH so the binary can find OpenEye shared libraries."""
+    """Set the library search path so the binary finds OpenEye and Arrow.
+
+    The binary links Arrow and Parquet out of the installed pyarrow package,
+    exactly as the extension does, and carries no rpath into that package.
+    """
     pkg_dir = os.path.dirname(__file__)
     extra_paths = [pkg_dir]
 
@@ -113,6 +117,17 @@ def _setup_library_env():
         oe_lib_dir = libs.FindOpenEyeDLLSDirectory()
         if os.path.isdir(oe_lib_dir):
             extra_paths.append(oe_lib_dir)
+    except Exception:  # noqa: BLE001, S110
+        pass
+
+    # Same stance for pyarrow: without it the binary fails to start with a
+    # clear loader message naming libarrow, which is more useful than anything
+    # this wrapper could print.
+    try:
+        import pyarrow
+        extra_paths.extend(
+            path for path in pyarrow.get_library_dirs() if os.path.isdir(path)
+        )
     except Exception:  # noqa: BLE001, S110
         pass
 
