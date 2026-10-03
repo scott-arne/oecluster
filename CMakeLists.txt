@@ -122,6 +122,7 @@ set(OECLUSTER_SOURCES
     src/CDist.cpp
     src/DistanceMatrix.cpp
     src/Subset.cpp
+    src/Consensus.cpp
     src/comparisons/MetricTable.cpp
     src/comparisons/FingerprintComparison.cpp
     src/comparisons/ROCSComparison.cpp

@@ -55,6 +55,7 @@ add_executable(oecluster_tests
     cpp/test_murcko_scaffold.cpp
     cpp/test_umbrella_header.cpp
     cpp/test_subset.cpp
+    cpp/test_consensus.cpp
 )
 
 target_link_libraries(oecluster_tests
