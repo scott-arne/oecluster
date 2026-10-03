@@ -234,6 +234,12 @@ def build_comparison(items, comparison, similarity, kwargs, *, symmetric):
     """
     name = _resolve_name(comparison)
     params = {'comparison_type': name, 'similarity': similarity}
+    if name == 'descriptor':
+        # Recorded before the builder pops it: ``take`` needs the policy to
+        # know what a NaN-free subset of a NaN-present matrix may claim.
+        missing = kwargs.get('missing')
+        params['missing'] = ('complete_case' if missing is None
+                             else str(missing).lower())
     comparison_obj, comparison_name = _BUILDERS[name](
         items, similarity, kwargs, symmetric)
     # A correct builder pops all consumed options and raises TypeError for the

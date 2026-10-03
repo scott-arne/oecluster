@@ -28,6 +28,9 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   memory-mapped source re-runs the triangle probe when the source's had
   run (a sparse subset inherits the probe fields), and a source stamped
   NaN-present is re-measured on the subset.
+- Descriptor distance matrices record the `missing` policy in `params`, so
+  `take()` can tell an ignore-scored matrix from a propagated one after
+  excluding the NaN items.
 
 ## [5.15.2] - 2026-10-03
 

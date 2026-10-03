@@ -72,12 +72,35 @@ def _thread_count(num_threads):
     return int(num_threads)
 
 
+def _integrity_after_nan_exclusion(subset):
+    """What a NaN-free proper subset of a NaN-present source may claim.
+
+    A descriptor comparison under ``missing="ignore"`` scores each pair on
+    the dimensions both items have, which is subset-scored; an observed
+    NaN then escalates the stamp to NaN-present and hides it (the
+    comparison ranks an observed NaN above the policy). Excluding the NaN
+    items uncovers the subset-scored matrix underneath, not a complete
+    one. Under ``propagate`` and ``complete_case`` every remaining pair
+    was scored on the full data, so the subset is complete. A descriptor
+    matrix that records no policy (one saved before 5.16.0) is treated as
+    subset-scored, which never claims more than the data supports.
+    """
+    if subset.comparison_name != "descriptor":
+        return "complete"
+    policy = subset.params.get("missing")
+    if policy in ("propagate", "complete_case"):
+        return "complete"
+    return "subset_scored"
+
+
 def _data_facts(subset, source_facts):
     """The facts a proper subset re-measures: the probe and NaN presence.
 
     The comparison facts (``is_distance``, ``zero_self``, ``triangle``) and
     a complete or subset-scored ``data_integrity`` describe the comparison
-    and are inherited by the caller; these two describe the data.
+    and are inherited by the caller; the probe and the NaN presence describe
+    the data. The NaN re-measure defers to ``_integrity_after_nan_exclusion``
+    for what a NaN-free subset may claim.
     """
     sparse = isinstance(subset.storage, _oecluster.SparseStorage)
     facts = {}
@@ -95,7 +118,8 @@ def _data_facts(subset, source_facts):
                          for _, _, value in subset.storage._entries())
         else:
             finite = bool(np.isfinite(subset.condensed).all())
-        facts["data_integrity"] = "complete" if finite else "nan_present"
+        facts["data_integrity"] = (_integrity_after_nan_exclusion(subset)
+                                   if finite else "nan_present")
     return facts
 
 
@@ -132,8 +156,9 @@ def take(items, indices, *, num_threads=0):
     carried over. A permutation of every item inherits every fact; a proper
     subset of a dense or memory-mapped source re-runs the triangle probe when
     the source's had run, and a source stamped NaN-present is re-measured on
-    the subset. An ``oefp.OEFPBatch`` yields a new batch with the same
-    fingerprint spec and the selected rows.
+    the subset (a NaN-free subset of an ignore-scored descriptor matrix is
+    subset-scored, not complete). An ``oefp.OEFPBatch`` yields a new batch
+    with the same fingerprint spec and the selected rows.
 
     :param items: A ``SymmetricDistanceMatrix`` or an ``oefp.OEFPBatch``.
     :param indices: Integer positions, distinct and in range, in any order.

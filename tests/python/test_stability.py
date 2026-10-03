@@ -6,6 +6,7 @@ import numpy as np
 import oecluster
 import oefp
 import pytest
+from openeye import oechem
 
 # --- fixtures ----------------------------------------------------------------
 
@@ -16,6 +17,16 @@ FP_ROWS = ([set(range(8)) | {16 + i} for i in range(5)]
 def _batch(rows):
     return oefp.OEFPBatch.from_fingerprints(
         [oefp.OEFP.from_on_bits(64, sorted(on)) for on in rows])
+
+
+def _mols(smiles_list):
+    mols = []
+    for idx, smi in enumerate(smiles_list):
+        mol = oechem.OEGraphMol()
+        oechem.OESmilesToMol(mol, smi)
+        mol.SetTitle(f"mol{idx}")
+        mols.append(mol)
+    return mols
 
 
 def _fps():
@@ -821,3 +832,43 @@ def test_retained_labels_are_snapshots_of_each_resample():
                                   np.ones(10, dtype=np.intp))
     np.testing.assert_array_equal(stability.labels[1],
                                   np.zeros(10, dtype=np.intp))
+
+
+DESCRIPTOR_COLUMNS = ["FractionCsp3", "MolecularWeight"]
+
+
+def _descriptor_matrix(missing):
+    """Water has no carbon, so FractionCsp3 is present-and-NaN for it."""
+    mols = _mols(["O", "CCO", "CCCO", "c1ccccc1", "CC(=O)O"])
+    return oecluster.pdist(mols, "descriptor", missing=missing,
+                           metric="euclidean", columns=DESCRIPTOR_COLUMNS)
+
+
+def test_take_keeps_an_ignore_scored_descriptor_subset_subset_scored():
+    source = _descriptor_matrix("ignore")
+    assert source.params["missing"] == "ignore"
+    assert source.facts["data_integrity"] == "nan_present"
+    subset = oecluster.take(source, [1, 2, 3, 4])
+    assert subset.facts["data_integrity"] == "subset_scored"
+    with pytest.raises(ValueError):
+        oecluster.k_medoids(subset, n_clusters=2)
+
+
+def test_take_completes_a_propagated_descriptor_subset():
+    source = _descriptor_matrix("propagate")
+    assert source.params["missing"] == "propagate"
+    assert source.facts["data_integrity"] == "nan_present"
+    subset = oecluster.take(source, [1, 2, 3, 4])
+    assert subset.facts["data_integrity"] == "complete"
+    assert oecluster.k_medoids(subset, n_clusters=2).num_samples == 4
+
+
+def test_take_treats_an_unrecorded_descriptor_policy_as_subset_scored():
+    storage = oecluster.DenseStorage(3)
+    storage.Set(0, 1, math.nan)
+    storage.Set(0, 2, 0.4)
+    storage.Set(1, 2, 0.5)
+    source = oecluster.SymmetricDistanceMatrix(
+        storage, "descriptor", None, {"comparison_type": "descriptor"},
+        {"data_integrity": "nan_present"})
+    assert oecluster.take(source, [1, 2]).facts["data_integrity"] == "subset_scored"
