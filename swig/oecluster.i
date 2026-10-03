@@ -17,6 +17,7 @@
 #include "oecluster/PDist.h"
 #include "oecluster/CDist.h"
 #include "oecluster/DistanceMatrix.h"
+#include "oecluster/Subset.h"
 #include "oecluster/comparisons/FingerprintComparison.h"
 #include "oecluster/comparisons/ROCSComparison.h"
 #include "oecluster/comparisons/SuperposeComparison.h"
@@ -883,6 +884,12 @@ OECLUSTER_GIL_EXCEPTION(OECluster::sphere_exclusion, sphere_exclusion)
 OECLUSTER_GIL_EXCEPTION(OECluster::knn_graph, knn_graph)
 OECLUSTER_GIL_EXCEPTION(OECluster::jarvis_patrick, jarvis_patrick)
 
+// take_pairs reads m(m-1)/2 native distances on worker threads and
+// take_fingerprints copies m rows; neither has a Python object in reach, and
+// the input typemaps finished with the GIL held before $action runs.
+OECLUSTER_GIL_EXCEPTION(OECluster::take_pairs, take_pairs)
+OECLUSTER_GIL_EXCEPTION(OECluster::take_fingerprints, take_fingerprints)
+
 // leiden builds the same graph, weighs it on worker threads and runs a
 // serial optimizer that can take seconds at scale.
 OECLUSTER_GIL_EXCEPTION(OECluster::leiden, leiden)
@@ -1235,6 +1242,15 @@ public:
 %feature("compactdefaultargs") OECluster::murcko_scaffolds;
 %feature("compactdefaultargs") OECluster::murcko_cluster;
 %include "oecluster/clustering/MurckoScaffold.h"
+
+// ============================================================================
+// Row subsets
+// ============================================================================
+// take_pairs defaults num_threads and chunk_size; compacting the defaults into
+// one wrapper keeps the StorageBackend and SizeTVector typemaps' own messages
+// in front of the caller instead of an overload dispatcher's, as for murcko.
+%feature("compactdefaultargs") OECluster::take_pairs;
+%include "oecluster/Subset.h"
 
 // ============================================================================
 // Version macros

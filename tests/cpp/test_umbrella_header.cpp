@@ -12,6 +12,7 @@
  */
 
 #include <gtest/gtest.h>
+#include <stdexcept>
 #include <oecluster/oecluster.h>
 
 namespace {
@@ -206,4 +207,16 @@ TEST(UmbrellaHeaderTest, ReachesTheISimReportHeader) {
     const OECluster::ISimReportOptions report_options;
     EXPECT_FALSE(report_options.compute_centroid_indices);
     EXPECT_NE(definition_size<OECluster::ISimReport>(), 0u);
+}
+
+// Subset.h joined the umbrella in 5.16.0; both gathers are called so the
+// definitions, not only the declarations, must be reachable.
+TEST(UmbrellaHeaderTest, ReachesTheSubsetHeader) {
+    OECluster::DenseStorage source(2);
+    source.Set(0, 1, 0.25);
+    OECluster::DenseStorage destination(2);
+    OECluster::take_pairs(source, {1, 0}, destination);
+    EXPECT_DOUBLE_EQ(destination.Get(0, 1), 0.25);
+    EXPECT_THROW(OECluster::take_fingerprints(OEFP::OEFPBatch(), {}),
+                 std::invalid_argument);
 }
