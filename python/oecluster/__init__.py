@@ -72,6 +72,7 @@ __all__ = [  # noqa: RUF022
     "select_parameter",
     "ParameterSelection",
     "SweepRow",
+    "take",
     "partition_agreement",
     "scaffold_agreement",
     "sar_coherence",
@@ -744,6 +745,7 @@ from ._parameter_selection import (
     SweepRow,
     select_parameter,
 )
+from ._stability import take
 
 
 class _StorageView:
