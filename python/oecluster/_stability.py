@@ -479,7 +479,7 @@ def cluster_stability(algorithm, items, *, resamples=100, fraction=0.5, seed=0,
     :raises ValueError: For an argument out of range, a reference of another
         size, a callable whose result does not match the item count, or one
         that returns the reference object again or relabels it during
-        resampling.
+        resampling, or labels that are not one-dimensional.
     """
     spec = (algorithm if isinstance(algorithm, ClusteringSpec)
             else ClusteringSpec(algorithm))
@@ -513,6 +513,10 @@ def cluster_stability(algorithm, items, *, resamples=100, fraction=0.5, seed=0,
     subset_size = max(2, round(fraction * num_items))
     # A copy: the object behind ``reference`` may be mutated by a callable.
     reference_labels = np.array(reference.labels, dtype=np.intp)
+    if reference_labels.ndim != 1:
+        raise ValueError(
+            f"reference labels must be one-dimensional, not shape "
+            f"{reference_labels.shape}")
     record_labels, row_of_label = _reference_rows(reference_labels)
     jaccard = np.full((record_labels.size, resamples), np.nan, dtype=np.float64)
     agreement = []
@@ -533,7 +537,14 @@ def cluster_stability(algorithm, items, *, resamples=100, fraction=0.5, seed=0,
                 f"resample {index}: {spec!r} returned {result.num_samples} "
                 f"labels for {subset_size} items")
         ref_rows = row_of_label[chosen]
-        codes = _dense_codes(result.labels)
+        # A column-shaped label array passes the sample-count check yet
+        # broadcasts the scoring masks to (m, m).
+        labels = np.asarray(result.labels)
+        if labels.ndim != 1:
+            raise ValueError(
+                f"resample {index}: {spec!r} returned labels of shape "
+                f"{labels.shape}; labels must be one-dimensional")
+        codes = _dense_codes(labels)
         jaccard[:, index] = _best_jaccard(ref_rows, codes, record_labels.size)
         agreement.append(package.partition_agreement(
             ref_rows, codes, noise=noise).adjusted_rand_index)
@@ -541,7 +552,7 @@ def cluster_stability(algorithm, items, *, resamples=100, fraction=0.5, seed=0,
             kept_indices.append(chosen)
             # A copy, not a view: a callable that reuses one result object
             # and relabels it in place must not rewrite earlier partitions.
-            kept_labels.append(np.array(result.labels, dtype=np.intp))
+            kept_labels.append(np.array(labels, dtype=np.intp))
     # Two checks because they catch different aliasing: the identity check
     # names the offending resample as soon as a callable hands back the
     # object it already returned, and this comparison catches a callable that

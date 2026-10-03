@@ -547,3 +547,24 @@ def test_a_reference_relabelled_during_resampling_is_refused():
     with pytest.raises(ValueError, match="changed the reference"):
         oecluster.cluster_stability(relabelling, _blobs20(), resamples=2,
                                     reference=reference)
+
+
+def test_column_shaped_resample_labels_are_refused():
+    def columns(items, **options):
+        size = items.num_samples
+        return oecluster.ClusteringResult([[p % 2] for p in range(size)],
+                                          ((0,), (1,)))
+
+    with pytest.raises(ValueError, match="one-dimensional"):
+        oecluster.cluster_stability(columns, _blobs20(), resamples=1,
+                                    reference=_result(HAND_REFERENCE))
+
+
+def test_column_shaped_reference_labels_are_refused():
+    calls = []
+    reference = oecluster.ClusteringResult([[p % 2] for p in range(20)],
+                                           ((0,), (1,)))
+    with pytest.raises(ValueError, match="one-dimensional"):
+        oecluster.cluster_stability(_fixed(_thirds, calls), _blobs20(),
+                                    resamples=1, reference=reference)
+    assert calls == []
