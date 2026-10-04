@@ -595,11 +595,32 @@ def test_a_memory_error_is_not_reported_as_a_bad_file(tmp_path, monkeypatch):
         _cli_input.load(_npy(tmp_path), warn=lambda message: None)
 
 
-def test_a_bug_in_this_module_is_not_reported_as_a_bad_file(tmp_path,
-                                                            monkeypatch):
-    # The companion constraint: each catch sits on a library call, not on a
-    # whole function, so a mistake in our own code still reads as a bug
-    # instead of being blamed on the user's file.
+def test_a_library_bug_is_blamed_on_the_file_but_stays_diagnosable(
+        tmp_path, monkeypatch):
+    # The price of the inverted net, pinned rather than wished away:
+    # load_distance_matrix is this project's own parser, so a bug inside it
+    # is caught by the .npz guard and reported as an unusable file. What the
+    # guard must not do is erase it -- the exception's own text is carried
+    # into the message verbatim, which is what keeps the misattributed
+    # report diagnosable.
+    source = _cli_input.load(_npy(tmp_path), warn=lambda message: None)
+    out = str(tmp_path / "m.npz")
+    source.to_file(out)
+
+    def explode(path):
+        raise NameError("name 'maht' is not defined")
+
+    monkeypatch.setattr(_cli_input, "load_distance_matrix", explode)
+    with pytest.raises(_cli_input.InputError, match="'maht' is not defined"):
+        _cli_input.load(out, warn=lambda message: None)
+
+
+def test_the_guards_do_not_wrap_whole_functions(tmp_path, monkeypatch):
+    # _items_from_pairs is called outside every guard, so a fault in it
+    # escapes as itself. Read this narrowly: it pins only that the guards
+    # stay around individual library calls, and would fail if one were ever
+    # widened to the body of load(). It proves nothing about code reached
+    # inside a guard -- the test above states what happens there.
     def explode(count):
         raise NameError("name 'maht' is not defined")
 
@@ -608,8 +629,31 @@ def test_a_bug_in_this_module_is_not_reported_as_a_bad_file(tmp_path,
         _cli_input.load(_npy(tmp_path), warn=lambda message: None)
 
 
-def test_a_path_object_is_accepted(tmp_path):
+@pytest.mark.parametrize("wrap", [str, Path, os.fsencode])
+def test_any_path_like_argument_is_accepted(tmp_path, wrap):
     # Tasks 3-5 declare the argument with click.Path(path_type=Path), and
-    # every format check here is a string operation.
-    matrix = _cli_input.load(Path(_npy(tmp_path)), warn=lambda message: None)
+    # every format check here is a string operation. Bytes cannot arrive
+    # from click, but os.fspath passes them through unchanged, so decoding
+    # is what keeps the str-only checks below honest.
+    matrix = _cli_input.load(wrap(_npy(tmp_path)), warn=lambda message: None)
     assert matrix.num_samples == 12
+
+
+def test_an_npz_whose_orientation_fact_is_not_a_boolean_warns(tmp_path):
+    # The sidecar's similarity flag and the archive's is_distance fact are
+    # the same gate read from two files, and both are arbitrary JSON. The
+    # library refuses only `is_distance is False`, so a corrupted fact of 0
+    # -- falsy, and plainly not a proven distance -- passed the gate, and an
+    # equality test against "unknown" meant the CLI did not warn either.
+    matrix = oecluster.SymmetricDistanceMatrix.from_condensed(
+        np.array([0.1, 0.9, 0.2, 0.8, 0.3, 0.7]), labels=["a", "b", "c", "d"])
+    good = str(tmp_path / "good.npz")
+    matrix.to_file(good)
+    with np.load(good, allow_pickle=False) as archive:
+        fields = {key: archive[key] for key in archive.files}
+    fields["facts_json"] = np.array(json.dumps({"is_distance": 0}))
+    path = str(tmp_path / "fact.npz")
+    np.savez(path, **fields)
+    seen = []
+    assert _cli_input.load(path, warn=seen.append).num_samples == 4
+    assert "orientation unproven" in seen[0]

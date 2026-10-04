@@ -128,8 +128,10 @@ def load(path, *, warn=None):
     warn = warn or (lambda message: print(message, file=sys.stderr))
     # click hands back a pathlib.Path when the argument is declared with
     # click.Path(path_type=Path), and every format check below is a string
-    # operation that would raise AttributeError on one.
-    path = os.fspath(path)
+    # operation that would raise AttributeError on one. Decoded rather than
+    # just fspath'd, because fspath passes bytes straight through and the
+    # checks would fail the same way on those.
+    path = os.fsdecode(path)
     if not os.path.isfile(path):
         raise InputError(f"no such file: {path}")
     if path.endswith(".csv"):
@@ -148,16 +150,11 @@ def load(path, *, warn=None):
             raise InputError(
                 "this is a cross-distance matrix; clustering needs a "
                 "symmetric one")
-        # Reading the restored state is still library code acting on the
-        # archive's contents, so it is guarded too; the checks on what it
-        # returns are ours and stay outside.
-        try:
-            labelled, items = len(matrix.labels), matrix.num_samples
-            orientation = matrix.is_distance
-        except MemoryError:
-            raise
-        except Exception as error:  # noqa: BLE001
-            _unreadable(path, error)
+        # Unguarded: these three read state the call above already built,
+        # and 34 corrupted archives produced none that loads and then fails
+        # a read. A guard with no reachable catch is surface, not safety.
+        labelled, items = len(matrix.labels), matrix.num_samples
+        orientation = matrix.is_distance
         # from_condensed enforces this, but the .npz path restores state
         # directly and does not. A short list would silently truncate every
         # per-item output to its length.
@@ -165,7 +162,11 @@ def load(path, *, warn=None):
             raise InputError(
                 f"{os.path.basename(path)} carries {labelled} labels for "
                 f"{items} items")
-        if orientation == "unknown":
+        # Tested against the two booleans rather than for "unknown": facts
+        # are arbitrary JSON here, the library's gate refuses only
+        # `is_distance is False`, and a corrupted fact of 0 is neither a
+        # refusal nor a proof. Anything that is not a boolean is unproven.
+        if orientation is not True and orientation is not False:
             warn(f"{os.path.basename(path)}: orientation unproven, treating "
                  "values as distances")
         return matrix
