@@ -1119,3 +1119,42 @@ def test_the_consensus_copy_typemaps_guard_their_allocation():
             f"{header} does not allocate inside its own try block")
         assert "SWIG_exception_fail(SWIG_MemoryError" in body, (
             f"{header} does not turn the failure into a MemoryError")
+
+
+def test_the_consensus_strength_members_are_read_only(native):
+    """The guarded typemaps above cover only the getters, so the members are
+    ``%immutable`` and the setters are never generated.
+
+    A generated setter assigns a ``std::vector`` with no catch ladder around
+    it -- an out typemap is emitted on the read path only -- so a large
+    assignment would let ``std::bad_alloc`` escape the extension and terminate
+    the interpreter, the failure the getter guards exist to prevent. Dropping
+    the setters is also the better API: a ``ConsensusStrength`` is a kernel
+    return value, and writing into one changes nothing the kernel computed.
+
+    Checked against a returned struct rather than a default-constructed one,
+    so that it is the object callers actually hold that refuses.
+    """
+    destination = native.DenseStorage(4)
+    native.coassociation_distances(
+        4,
+        native.SizeTVector([0, 4]),
+        native.SizeTVector([0, 1, 2, 3]),
+        native.IntVector([0, 0, 1, 1]),
+        destination)
+    strength = native.consensus_strength(
+        destination, native.IntVector([0, 0, 1, 1]))
+
+    for name, replacement in (("item_consensus", [9.0] * 4),
+                              ("cluster_consensus", [9.0] * 2)):
+        before = list(getattr(strength, name))
+        with pytest.raises(AttributeError):
+            setattr(strength, name, native.DoubleVector(replacement))
+        # A setter that raised after assigning would pass the check above, so
+        # the read back is what proves nothing was written.
+        assert list(getattr(strength, name)) == before
+
+    # The getters must survive the change: three fix rounds turned them into
+    # owned copies so that a member read off a temporary stays valid.
+    assert list(strength.item_consensus) == [1.0, 1.0, 1.0, 1.0]
+    assert list(strength.cluster_consensus) == [1.0, 1.0]

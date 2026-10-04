@@ -1292,6 +1292,15 @@ public:
         SWIG_exception_fail(SWIG_MemoryError, e.what());
     }
 }
+// A generated setter assigns a std::vector outside any catch ladder -- an
+// out typemap guards only the getter -- so a large assignment would let
+// std::bad_alloc escape the extension and terminate the interpreter. These
+// two are kernel outputs that nothing assigns to, so drop the setters rather
+// than guard them. Named one at a time: ConsensusOptions must stay writable,
+// since callers set num_threads and chunk_size on it.
+%immutable OECluster::ConsensusStrength::item_consensus;
+%immutable OECluster::ConsensusStrength::cluster_consensus;
+
 // The default getter hands back a pointer into the parent struct, which is
 // freed as soon as a temporary such as consensus_strength(...).item_consensus
 // goes out of scope. %naturalvar would copy but converts to a tuple, so copy
