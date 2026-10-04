@@ -1,9 +1,13 @@
 """The oecluster command line: registry, inputs, commands and output."""
+import json
+import os
 import time
 
+import numpy as np
+import oecluster
 import pytest
 from click.testing import CliRunner
-from oecluster import _cli_registry
+from oecluster import _cli_input, _cli_registry
 from oecluster._cli_main import cli
 
 # Later steps and tasks append test functions at the END of this file and
@@ -316,3 +320,176 @@ def test_algorithms_explains_an_ineligible_entry():
 def test_algorithms_refuses_an_unknown_name():
     result = _run("algorithms", "nosuch")
     assert result.exit_code == 2
+
+
+# Fixtures below build oepdist-shaped files: a condensed .npy or raw .bin
+# plus the JSON sidecar oepdist writes beside it.
+def _condensed(n=12):
+    rng = np.random.default_rng(0)
+    points = np.vstack([rng.normal(centre, 0.2, (n // 2, 2))
+                        for centre in (0.0, 4.0)])
+    return np.array([float(np.linalg.norm(points[i] - points[j]))
+                     for i in range(n) for j in range(i + 1, n)])
+
+
+def _write_sidecar(path, n, **overrides):
+    body = {"mode": "pdist", "comparison": "tanimoto",
+            "params": {"similarity": False}, "n_rows": n, "n_cols": n,
+            "row_labels": [f"m{i}" for i in range(n)], "col_labels": []}
+    body.update(overrides)
+    with open(os.path.splitext(path)[0] + ".json", "w", encoding="utf-8") as f:
+        json.dump(body, f)
+
+
+def _npy(tmp_path, **overrides):
+    values = _condensed()
+    path = str(tmp_path / "d.npy")
+    np.save(path, values)
+    _write_sidecar(path, 12, **overrides)
+    return path
+
+
+def test_an_npy_and_its_sidecar_load_with_provenance(tmp_path):
+    matrix = _cli_input.load(_npy(tmp_path), warn=lambda message: None)
+    assert matrix.num_samples == 12
+    assert list(matrix.labels)[:2] == ["m0", "m1"]
+    assert matrix.comparison_name == "tanimoto"
+
+
+def test_bin_and_npy_agree(tmp_path):
+    values = _condensed()
+    npy = str(tmp_path / "a.npy")
+    np.save(npy, values)
+    _write_sidecar(npy, 12)
+    raw = str(tmp_path / "b.bin")
+    values.tofile(raw)
+    _write_sidecar(raw, 12)
+    first = _cli_input.load(npy, warn=lambda message: None)
+    second = _cli_input.load(raw, warn=lambda message: None)
+    assert np.allclose(list(first.condensed), list(second.condensed))
+
+
+def test_an_npz_round_trips(tmp_path):
+    source = _cli_input.load(_npy(tmp_path), warn=lambda message: None)
+    out = str(tmp_path / "m.npz")
+    source.to_file(out)
+    loaded = _cli_input.load(out, warn=lambda message: None)
+    assert loaded.num_samples == source.num_samples
+
+
+def test_a_similarity_file_is_refused(tmp_path):
+    # The most dangerous input there is: clustering it would invert every
+    # result, and nothing in the numbers reveals it.
+    path = _npy(tmp_path, params={"similarity": True})
+    with pytest.raises(_cli_input.InputError, match="similarities"):
+        _cli_input.load(path, warn=lambda message: None)
+
+
+def test_an_absent_similarity_flag_warns_but_proceeds(tmp_path):
+    # The rocs case. The library refuses only a proven similarity, so the CLI
+    # matches it rather than being stricter, and warns instead.
+    path = _npy(tmp_path, params={})
+    seen = []
+    matrix = _cli_input.load(path, warn=seen.append)
+    assert matrix.num_samples == 12
+    assert "orientation unproven" in seen[0]
+
+
+@pytest.mark.parametrize("overrides, needle", [
+    ({"mode": "cdist"}, "cross-distance"),
+    ({"n_rows": 99, "n_cols": 99}, "sidecar says"),
+    ({"n_rows": 12, "n_cols": 7}, "not square"),
+])
+def test_a_bad_sidecar_is_refused(tmp_path, overrides, needle):
+    path = _npy(tmp_path, **overrides)
+    with pytest.raises(_cli_input.InputError, match=needle):
+        _cli_input.load(path, warn=lambda message: None)
+
+
+def test_a_missing_sidecar_is_refused(tmp_path):
+    path = _npy(tmp_path)
+    os.remove(os.path.splitext(path)[0] + ".json")
+    with pytest.raises(_cli_input.InputError, match="sidecar"):
+        _cli_input.load(path, warn=lambda message: None)
+
+
+def test_an_unparseable_sidecar_names_the_likely_cause(tmp_path):
+    # oepdist's JsonEscape handles only quotes and backslashes, so a title
+    # with a newline produces invalid JSON.
+    path = _npy(tmp_path)
+    with open(os.path.splitext(path)[0] + ".json", "w", encoding="utf-8") as f:
+        f.write('{"mode": "pdist", "row_labels": ["a\nb"]}')
+    with pytest.raises(_cli_input.InputError, match="newline"):
+        _cli_input.load(path, warn=lambda message: None)
+
+
+def test_a_non_triangular_count_is_refused(tmp_path):
+    path = str(tmp_path / "odd.npy")
+    np.save(path, np.zeros(5))
+    _write_sidecar(path, 12)
+    with pytest.raises(_cli_input.InputError, match="condensed"):
+        _cli_input.load(path, warn=lambda message: None)
+
+
+def test_csv_is_refused_with_a_remedy(tmp_path):
+    path = tmp_path / "m.csv"
+    path.write_text(",a,b\na,0,1\nb,1,0\n", encoding="utf-8")
+    with pytest.raises(_cli_input.InputError, match="re-run oepdist"):
+        _cli_input.load(str(path), warn=lambda message: None)
+
+
+def _patched_npz(tmp_path, name, **patch):
+    """A .npz written by the API, rewritten with one field corrupted."""
+    matrix = oecluster.SymmetricDistanceMatrix.from_condensed(
+        np.array([0.1, 0.9, 0.2, 0.8, 0.3, 0.7]), labels=["a", "b", "c", "d"])
+    good = str(tmp_path / "good.npz")
+    matrix.to_file(good)
+    with np.load(good, allow_pickle=False) as archive:
+        fields = {key: archive[key] for key in archive.files}
+    fields.update(patch)
+    path = str(tmp_path / f"{name}.npz")
+    np.savez(path, **fields)
+    return path
+
+
+def test_malformed_npz_metadata_is_an_input_error(tmp_path):
+    # facts_json is decoded JSON of any shape. A scalar reaches dict.update
+    # deep in the library and raises TypeError -- not one of the types the
+    # loader was catching, so it escaped the InputError contract and
+    # _translate would have reported an unreadable file as a usage error.
+    path = _patched_npz(tmp_path, "facts", facts_json=np.array("42"))
+    with pytest.raises(_cli_input.InputError, match="cannot read"):
+        _cli_input.load(path, warn=lambda message: None)
+
+
+@pytest.mark.parametrize("labels, count", [
+    (["a"], 1),
+    (["a", "b", "c", "d", "e", "f"], 6),
+])
+def test_an_npz_label_count_mismatch_is_refused(tmp_path, labels, count):
+    # from_condensed enforces this, but the .npz path restores state
+    # directly and does not. A short list silently truncated every per-item
+    # output: a four-item matrix with one label wrote one CSV row.
+    path = _patched_npz(tmp_path, "labels", labels=np.array(labels))
+    with pytest.raises(_cli_input.InputError, match=f"{count} labels"):
+        _cli_input.load(path, warn=lambda message: None)
+
+
+def test_a_non_object_params_sidecar_is_refused(tmp_path):
+    # `params` is raw JSON from oepdist, so it can be any type. A truthy
+    # non-object reaches params.get(...) and raises AttributeError, which
+    # the command layer never promised and would not translate.
+    path = _npy(tmp_path, params="oops")
+    with pytest.raises(_cli_input.InputError, match="non-object"):
+        _cli_input.load(path, warn=lambda message: None)
+
+
+def test_a_cross_distance_npz_is_refused(tmp_path):
+    # Build one through the public API so the test pins the real shape.
+    # CrossDistanceMatrix has no from_values: the real API is
+    # __init__(matrix, comparison_name, ...) and from_file.
+    cross = oecluster.CrossDistanceMatrix(np.zeros((2, 3)), "precomputed")
+    out = str(tmp_path / "cross.npz")
+    cross.to_file(out)
+    with pytest.raises(_cli_input.InputError, match="symmetric"):
+        _cli_input.load(out, warn=lambda message: None)
