@@ -1273,21 +1273,39 @@ public:
 %feature("compactdefaultargs") OECluster::consensus_components;
 %feature("compactdefaultargs") OECluster::consensus_strength;
 
+// The allocations below are guarded inside the typemap bodies rather than by
+// an %exception: %exception wraps only $action, and an out typemap is emitted
+// after that catch ladder has closed (a member getter has none at all), so an
+// escaping std::bad_alloc would terminate the interpreter. Both bad_alloc and
+// length_error map to SWIG_MemoryError, as in OECLUSTER_GIL_MEMORY_EXCEPTION.
+
 // std_vector.i turns a by-value std::vector return into a tuple, but the
 // Python layer is promised an IntVector, so hand back an owned one.
 %typemap(out) std::vector<int> consensus_components {
-    $result = SWIG_NewPointerObj(new std::vector<int>($1),
-                                 $descriptor(std::vector<int>*),
-                                 SWIG_POINTER_OWN);
+    try {
+        $result = SWIG_NewPointerObj(new std::vector<int>($1),
+                                     $descriptor(std::vector<int>*),
+                                     SWIG_POINTER_OWN);
+    } catch (const std::bad_alloc&) {
+        SWIG_exception_fail(SWIG_MemoryError, "consensus_components: out of memory");
+    } catch (const std::length_error& e) {
+        SWIG_exception_fail(SWIG_MemoryError, e.what());
+    }
 }
 // The default getter hands back a pointer into the parent struct, which is
 // freed as soon as a temporary such as consensus_strength(...).item_consensus
 // goes out of scope. %naturalvar would copy but converts to a tuple, so copy
 // into an owned DoubleVector instead, scoped to these two members.
 %typemap(out) std::vector<double>* item_consensus, std::vector<double>* cluster_consensus {
-    $result = SWIG_NewPointerObj(new std::vector<double>(*$1),
-                                 $descriptor(std::vector<double>*),
-                                 SWIG_POINTER_OWN);
+    try {
+        $result = SWIG_NewPointerObj(new std::vector<double>(*$1),
+                                     $descriptor(std::vector<double>*),
+                                     SWIG_POINTER_OWN);
+    } catch (const std::bad_alloc&) {
+        SWIG_exception_fail(SWIG_MemoryError, "ConsensusStrength: out of memory");
+    } catch (const std::length_error& e) {
+        SWIG_exception_fail(SWIG_MemoryError, e.what());
+    }
 }
 %include "oecluster/Consensus.h"
 

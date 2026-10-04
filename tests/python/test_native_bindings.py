@@ -1067,3 +1067,32 @@ def test_the_consensus_entry_points_release_the_gil():
         assert text.index(invocation) < include_at, (
             f"{invocation} must precede the %include that declares {name}, or "
             "SWIG applies the exception handler to nothing")
+
+
+def test_the_consensus_copy_typemaps_guard_their_allocation():
+    """The owned-copy typemaps allocate after any %exception ladder has closed,
+    so each body must carry its own catch mapping to ``SWIG_MemoryError``.
+
+    A member getter has no ladder at all and ``consensus_components`` emits its
+    typemap after the ladder, so dropping the guard from a typemap body would
+    let ``std::bad_alloc`` terminate the interpreter, silently. Checked against
+    the generated wrapper, where each allocation site is a function body.
+    """
+    wrapper = pathlib.Path(__file__).resolve().parents[2] / "build" / "swig" / "oeclusterPYTHON_wrap.cxx"
+    if not wrapper.exists():
+        pytest.skip("the generated SWIG wrapper is not in build/swig")
+    text = wrapper.read_text(encoding="utf-8")
+
+    for function in ("_wrap_consensus_components",
+                     "_wrap_ConsensusStrength_item_consensus_get",
+                     "_wrap_ConsensusStrength_cluster_consensus_get"):
+        start = text.index(f"SWIGINTERN PyObject *{function}(")
+        body = text[start:text.index("\nSWIGINTERN PyObject *", start + 1)]
+        allocation = body.index("SWIG_NewPointerObj(new std::vector<")
+        # The nearest try must open just before the allocation, not be the
+        # %exception ladder around $action, which closes earlier.
+        guarded = body[body.rindex("try {", 0, allocation):]
+        assert guarded.index("catch") > guarded.index("SWIG_NewPointerObj"), (
+            f"{function}: the allocation is not inside its own try block")
+        assert "catch (const std::bad_alloc&)" in guarded
+        assert "SWIG_exception_fail(SWIG_MemoryError" in guarded
