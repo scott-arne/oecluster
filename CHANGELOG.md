@@ -2,6 +2,26 @@
 
 This file starts at 5.0.0; earlier releases are not recorded here.
 
+## [5.17.0] - 2026-10-03
+
+### Added
+
+- `consensus()` combines an ensemble of partitions into one. It accumulates
+  how often each pair of items shared a cluster, divides by how often the
+  pair was observed together, and extracts a partition from the resulting
+  co-association distances: by default the connected components of the pairs
+  supported by at least `threshold` (0.5) of the members that saw them, or
+  any matrix-consuming `ClusteringSpec` passed as `method=`. The ensemble is
+  a `ClusterStability`, a `ParameterSelection`, or a sequence of
+  `ClusteringResult` and `(positions, labels)` members, so partial partitions
+  are normalized per pair. The read-only `ConsensusResult` is itself a
+  `ClusteringResult` and carries the co-association matrix, one
+  `ConsensusRecord` per cluster with Monti's cluster consensus, the per-item
+  consensus, and one adjusted Rand index per member.
+- The matrix is a `DenseStorage` by default and an `MMapStorage` when
+  `output=` names a file, the `pdist` convention, so a consensus over tens of
+  thousands of items can live on disk.
+
 ## [5.16.0] - 2026-10-03
 
 ### Added

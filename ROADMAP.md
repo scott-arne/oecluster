@@ -34,7 +34,7 @@ they are not recoveries of the original intent.
 | B2 | Approximate fingerprint-native (iSIM) A metrics | shipped 5.14.0 |
 | D3a | Parameter selection: `ClusteringSpec`, `select_parameter` | shipped 5.15.0 |
 | D3b | Stability resampling: subsample-Jaccard over a `ClusteringSpec` | shipped 5.16.0 |
-| D3c | Consensus clustering over an ensemble of partitions | planned |
+| D3c | Consensus clustering over an ensemble of partitions | shipped 5.17.0 |
 | D3d | Clustering CLI over oepdist output | planned |
 | D4 | Out-of-core and streaming clustering | planned |
 
@@ -164,9 +164,11 @@ shipped as four slices:
   one adjusted Rand index per resample; `take` is the row-subset primitive
   over `SymmetricDistanceMatrix` and `oefp.OEFPBatch`, backed by the native
   `take_pairs` and `take_fingerprints`, which D3c and D3d reuse.
-- **D3c.** Consensus clustering over an ensemble of partitions, which D3a
-  sweeps and D3b resamples both produce, scored against its inputs with
-  A2's agreement machinery.
+- **D3c (shipped 5.17.0).** Consensus clustering. `consensus` accumulates a
+  co-association matrix over an ensemble of full or partial partitions, which
+  D3a sweeps and D3b resamples both produce, extracts a partition by
+  majority-evidence components or by any matrix-consuming `ClusteringSpec`,
+  and scores every member against the result with A2's agreement machinery.
 - **D3d.** A clustering CLI over oepdist's `.npz` output exposing the
   roster and the three features above as subcommands. `oepdist` computes
   distances; nothing yet drives clustering from the command line.

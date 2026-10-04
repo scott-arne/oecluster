@@ -46,6 +46,9 @@ cluster summaries as well as lower-level control over distance computation.
   spec on resampled subsets and reports per cluster how often it dissolved
   or was recovered (Hennig's clusterboot statistics), plus one adjusted Rand
   index per resample.
+- **Combine an ensemble of partitions** with `consensus`, which builds the
+  co-association matrix behind a sweep or a stability run and reads one
+  agreed partition off it, with Monti's per-cluster evidence scores.
 - **Compute molecular distances** for fingerprints, ROCS shape/color overlay,
   protein superposition, and binding-site comparison.
 - **Scale distance storage** with dense in-memory arrays, memory-mapped files,
@@ -388,6 +391,25 @@ stability.mean_agreement  # adjusted Rand index, reference versus resamples
 `SymmetricDistanceMatrix` or an `oefp.OEFPBatch`. See
 [Cluster Stability](docs/python-api.md#cluster-stability) for the scoring
 rules, the noise handling and the memory figures.
+
+### Reaching A Consensus
+
+`consensus` turns an ensemble of partitions into one. It counts how often
+each pair of items was clustered together, divides by how often the pair was
+seen together, and extracts a partition from the resulting distances:
+
+```python
+stability = oecluster.cluster_stability(spec, dm, resamples=100, seed=0)
+agreed = oecluster.consensus(stability)
+print(agreed)                 # clusters with their consensus scores
+agreed.matrix                 # the co-association SymmetricDistanceMatrix
+```
+
+The default merges pairs supported by at least half the members that saw
+them; `method=` runs any matrix-consuming `ClusteringSpec` on the matrix
+instead. See
+[Consensus Clustering](docs/python-api.md#consensus-clustering) for the
+ensemble kinds, the scoring rules and the memory figures.
 
 ---
 

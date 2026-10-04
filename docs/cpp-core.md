@@ -134,6 +134,42 @@ The dense gather reads `m(m-1)/2` distances and the new dense storage holds
 `4 m (m - 1)` bytes, so a large fraction of a huge memory-mapped matrix needs
 that much RAM for the subset.
 
+## Consensus
+
+`Consensus.h` builds a co-association matrix from an ensemble of partitions
+and reads a partition back off it. Python's `consensus()` is built on these.
+
+- `coassociation_distances(num_items, offsets, positions, labels, destination, options)`
+  zeroes `destination` and fills it with `1 - co/obs` for every pair, where
+  `co` counts the members that placed both items in one cluster and `obs`
+  the members that observed both; a pair no member observed together gets
+  1.0 and is counted in the returned summary. Members arrive concatenated:
+  `offsets` holds `R + 1` entries and member `r` owns
+  `positions[offsets[r] .. offsets[r+1])` with its labels at the same slots.
+  A negative label is noise and joins no cluster. The destination is
+  caller-allocated with `NumSamples() == num_items`, as `pdist`'s is, and is
+  zeroed first because `MMapStorage` reuses a file of the right size without
+  clearing it. Accumulation runs the clusters of one member in parallel,
+  which is safe because two clusters of one member share no pair. It throws
+  `std::invalid_argument` for fewer than two items, a destination of another
+  size or without contiguous data, offsets that do not start at zero, do not
+  increase, or do not end at the position count, a position count that
+  disagrees with the label count, an empty member, an out-of-range or
+  repeated position within one member, and a zero chunk size.
+- `consensus_components(matrix, threshold, options)` unions every pair whose
+  distance is at most `1 - threshold` and returns one label per item,
+  numbered by each component's smallest member position. It is a single
+  sequential sweep of the condensed array, so a memory-mapped matrix is read
+  once, front to back, and it needs only `O(N)` beyond the matrix. It throws
+  for a matrix without contiguous data or with fewer than two items, and for
+  a threshold that is not a finite fraction in `[0, 1]`.
+- `consensus_strength(matrix, labels, options)` returns each item's mean
+  co-association with the rest of its cluster and each cluster's mean over
+  its pairs, NaN for a cluster of one and for a noise item, with one cluster
+  entry per distinct non-negative label in ascending order. It throws for a
+  matrix without contiguous data, a label count that disagrees with it, and
+  a zero chunk size.
+
 ## Clustering
 
 The clustering headers under `oecluster/clustering` provide the algorithms and

@@ -1095,6 +1095,150 @@ stability = oecluster.cluster_stability(spec, batch, resamples=50, seed=0)
 unstable = [r.label for r in stability.records if r.recovered < 0.5]
 ```
 
+## Consensus Clustering
+
+`consensus()` turns an ensemble of partitions into one partition. It counts
+how often each pair of items was placed in the same cluster, divides by how
+often the pair was observed together, and reads a partition off the
+resulting co-association distances. The ensemble is whatever the other
+workflow features produce.
+
+```python
+import oecluster
+
+matrix = oecluster.load_distance_matrix("distances.npz")
+spec = oecluster.ClusteringSpec("butina", threshold=0.3)
+stability = oecluster.cluster_stability(spec, matrix, resamples=100, seed=0)
+
+agreed = oecluster.consensus(stability)
+print(agreed)                      # one line per consensus cluster
+for record in agreed.records:
+    if record.cluster_consensus < 0.6:
+        print(f"cluster {record.label} rests on thin evidence")
+```
+
+### The ensemble
+
+`ensemble` is one of three things:
+
+- a `ClusterStability` whose `keep_partitions` was true, contributing one
+  member per resample. Its reference partition is not a member: it was not
+  drawn from the same process, and including it would weight one full-data
+  run against every subsample.
+- a `ParameterSelection`, contributing every row's `result` in grid order,
+  ineligible rows included. A row is a partition the sweep produced; the
+  bounds that made it ineligible decide which row wins, not whether the
+  partition is evidence.
+- a sequence whose elements are each a `ClusteringResult` over all `N`
+  items or a `(positions, labels)` tuple describing a partial member.
+
+`num_items` is inferred from the first full member or from a stability
+reference. It is required when every member is partial, because positions
+alone do not bound the item count, and when you pass it as well it must
+agree with what the ensemble implies.
+
+Positions must be distinct and in range; their order does not matter,
+because only the set of observed items and the grouping among them is read.
+Labels must be a one-dimensional integer array of the member's length, and
+any negative label is noise.
+
+### The co-association matrix
+
+For each pair, `d(i, j) = 1 - co(i, j) / obs(i, j)`, where `co` counts the
+members that placed both items in one cluster and `obs` the members that
+observed both. An item a member labelled noise was still observed: the
+member saw it and placed it in no cluster, which is evidence against
+co-clustering rather than an absence of evidence. A pair no member observed
+together has no evidence either way, is given distance 1.0, and is counted
+in `result.unobserved_pairs`.
+
+`result.matrix` is an ordinary `SymmetricDistanceMatrix`, so everything that
+takes one takes it: `cluster_report`, the representative selectors, another
+clustering run. It is a `DenseStorage` by default and an `MMapStorage` when
+`output=` names a file, as `pdist` does. Its facts record `is_distance` and
+`zero_self` as true and leave `triangle` unknown, with the usual triangle
+probe: a co-association distance obeys the inequality for some ensembles and
+not others.
+
+### Extracting the partition
+
+By default every pair whose co-association is at least `threshold` (0.5) is
+merged, and the connected components are the clusters. This needs no cluster
+count, costs only `O(N)` beyond the matrix, and reads a memory-mapped matrix
+front to back once. An item that merges with nothing is a cluster of one,
+not noise.
+
+The comparison runs in the distance domain, against `1 - threshold`, so a
+pair whose support is exactly the threshold merges. Supports an ensemble of
+`R` members can produce are separated by at least `1 / R^2`, far above the
+resolution of a double, so the boundary is unambiguous for any ensemble up
+to about a million members. Perturbing the threshold itself by one
+representable step is a different matter and is not guaranteed to change
+anything.
+
+Single-link extraction can chain: a strand of moderately supported pairs
+joins two groups that mostly disagree. That shows up in the output, as a low
+`cluster_consensus` for the merged cluster and low `item_consensus` for the
+bridging items, and `threshold` and `method` are the levers.
+
+`method=` replaces the default with any clustering spec that accepts a
+distance matrix, which is the classical evidence-accumulation form:
+
+```python
+spec = oecluster.ClusteringSpec("agglomerative", n_clusters=4,
+                                linkage="average")
+agreed = oecluster.consensus(selection, method=spec)
+```
+
+A custom method is handed the consensus matrix itself, not a copy, because
+copying it would cost `O(N^2)` on every call and defeat the memory-mapped
+`output=` path this feature exists to support at scale. A spec's entry point
+must therefore treat the matrix as read-only: writing through
+`matrix.condensed` from inside a method leaves `result.matrix` disagreeing
+with the `num_partitions` and `unobserved_pairs` already computed from it,
+and with the consensus statistics computed after it. The same holds for
+writing through `result.matrix.condensed` after the call.
+
+`threshold` and `method` are mutually exclusive. The roster entries that
+take fingerprints or molecules (`bitbirch`, `bitbirch_recluster`,
+`bitbirch_refine`, `murcko`) are refused by name. If the matrix probed a
+triangle violation, an entry point that insists on a metric needs
+`allow_nonmetric=True` among the spec's options; `k_medoids` needs nothing,
+since PAM never appeals to the triangle inequality.
+
+### What the result reports
+
+`ConsensusResult` is a `ClusteringResult`, so `labels` and `clusters` behave
+as they do everywhere else. Its labels are canonical, `0..K-1` with `-1` for
+noise, whichever extraction produced them: the package's own consumers
+require it, and a spec's original label values are not retained.
+
+| Attribute | Content |
+|---|---|
+| `matrix` | the consensus `SymmetricDistanceMatrix` |
+| `threshold`, `spec` | whichever extraction ran; the other is `None` |
+| `num_partitions` | number of members |
+| `unobserved_pairs` | pairs no member observed together |
+| `records` | one `ConsensusRecord(label, size, cluster_consensus)` per cluster |
+| `item_consensus` | read-only array, each item's mean co-association with its own cluster |
+| `agreement`, `mean_agreement` | one adjusted Rand index per member, and the mean over the defined ones |
+| `columns`, `to_table()` | the record fields and a fresh list of tuples |
+
+`item_consensus` and `cluster_consensus` are Monti's consensus statistics.
+An item that travels with its cluster in every member scores 1.0; an item
+merged in over a thin bridge scores near the threshold or below. Both are
+NaN for a cluster of one. `agreement` compares the consensus with each
+member over the items that member observed, and `noise` chooses how
+`partition_agreement` treats noise there; it never affects the matrix.
+
+### Memory
+
+The matrix dominates: `4 N (N - 1)` bytes, which is 100 MB at 5000 items and
+1.6 GB at 20000, the scale at which `output=` starts to matter. Beside it
+the kernel holds one membership bitmask per item (`8 N ceil(R / 64)` bytes)
+and the ensemble is copied once into contiguous native vectors (about
+`12 R N` bytes for full partitions). Extraction needs `O(N)`.
+
 ## Partition Agreement
 
 `partition_agreement()` scores two labelings of the same samples against each
