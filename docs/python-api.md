@@ -1157,8 +1157,21 @@ takes one takes it: `cluster_report`, the representative selectors, another
 clustering run. It is a `DenseStorage` by default and an `MMapStorage` when
 `output=` names a file, as `pdist` does. Its facts record `is_distance` and
 `zero_self` as true and leave `triangle` unknown, with the usual triangle
-probe: a co-association distance obeys the inequality for some ensembles and
-not others.
+probe.
+
+What the probe finds depends on the ensemble. An ensemble of full partitions
+always gives a metric: co-clustering is transitive within a member, and every
+pair divides by the same member count. Members that observe different items
+divide by different counts and can violate the inequality, and a
+`ClusterStability`'s members are partial by construction — so the matrix from
+the example above is the case that can be non-metric, and a consumer that
+assumes a metric refuses it until it is told otherwise:
+
+```python
+report = oecluster.cluster_report(agreed, agreed.matrix, allow_nonmetric=True)
+```
+
+`matrix.metric_probe` says which case you have before you call anything.
 
 ### Extracting the partition
 
@@ -1196,7 +1209,7 @@ copying it would cost `O(N^2)` on every call and defeat the memory-mapped
 `output=` path this feature exists to support at scale. A spec's entry point
 must therefore treat the matrix as read-only: writing through
 `matrix.condensed` from inside a method contaminates the retained matrix
-and every statistic computed after it, so `item_consensus` and
+and every statistic computed after it, so `item_consensus` and each record's
 `cluster_consensus` describe the mutated matrix rather than the ensemble,
 while `num_partitions` and `unobserved_pairs`, computed before extraction,
 still describe the original. Writing through `result.matrix.condensed`
@@ -1233,10 +1246,12 @@ in-place writes, but `labels` and the matrix are writable like any
 | `agreement`, `mean_agreement` | one adjusted Rand index per member, and the mean over the defined ones |
 | `columns`, `to_table()` | the record fields and a fresh list of tuples |
 
-`item_consensus` and `cluster_consensus` are Monti's consensus statistics.
-An item that travels with its cluster in every member scores 1.0; an item
-merged in over a thin bridge scores near the threshold or below. Both are
-NaN for a cluster of one. `agreement` compares the consensus with each
+`item_consensus` and each record's `cluster_consensus` are Monti's consensus
+statistics. An item that travels with its cluster in every member scores 1.0;
+an item merged in over a thin bridge scores near the threshold or below. Both
+are NaN for a cluster of one, and `item_consensus` is NaN as well for an item
+the extraction left unlabelled, which a `method=` spec that emits noise can
+produce. `agreement` compares the consensus with each
 member over the items that member observed, and `noise` chooses how
 `partition_agreement` treats noise there; it never affects the matrix.
 
@@ -1246,7 +1261,9 @@ The matrix dominates: `4 N (N - 1)` bytes, which is 100 MB at 5000 items and
 1.6 GB at 20000, the scale at which `output=` starts to matter. Beside it
 the kernel holds one membership bitmask per item (`8 N ceil(R / 64)` bytes)
 and the ensemble is copied once into contiguous native vectors (about
-`12 R N` bytes for full partitions). Extraction needs `O(N)`.
+`12 R N` bytes for full partitions, plus the Python lists the SWIG vectors
+are filled from, which dominate that figure while the call is being built).
+Extraction needs `O(N)`.
 
 ## Partition Agreement
 
