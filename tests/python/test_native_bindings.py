@@ -1075,24 +1075,47 @@ def test_the_consensus_copy_typemaps_guard_their_allocation():
 
     A member getter has no ladder at all and ``consensus_components`` emits its
     typemap after the ladder, so dropping the guard from a typemap body would
-    let ``std::bad_alloc`` terminate the interpreter, silently. Checked against
-    the generated wrapper, where each allocation site is a function body.
-    """
-    wrapper = pathlib.Path(__file__).resolve().parents[2] / "build" / "swig" / "oeclusterPYTHON_wrap.cxx"
-    if not wrapper.exists():
-        pytest.skip("the generated SWIG wrapper is not in build/swig")
-    text = wrapper.read_text(encoding="utf-8")
+    let ``std::bad_alloc`` terminate the interpreter, silently.
 
-    for function in ("_wrap_consensus_components",
-                     "_wrap_ConsensusStrength_item_consensus_get",
-                     "_wrap_ConsensusStrength_cluster_consensus_get"):
-        start = text.index(f"SWIGINTERN PyObject *{function}(")
-        body = text[start:text.index("\nSWIGINTERN PyObject *", start + 1)]
-        allocation = body.index("SWIG_NewPointerObj(new std::vector<")
-        # The nearest try must open just before the allocation, not be the
-        # %exception ladder around $action, which closes earlier.
-        guarded = body[body.rindex("try {", 0, allocation):]
-        assert guarded.index("catch") > guarded.index("SWIG_NewPointerObj"), (
-            f"{function}: the allocation is not inside its own try block")
-        assert "catch (const std::bad_alloc&)" in guarded
-        assert "SWIG_exception_fail(SWIG_MemoryError" in guarded
+    Asserted against the interface file, as the two tests above are, rather
+    than against the generated wrapper: the wrapper's path follows the build
+    directory, which ``build-dir = "build/{wheel_tag}"`` moves for a pip or
+    wheel build, so a check against ``build/swig/`` skips everywhere except a
+    developer machine that has run CMake directly.
+
+    Three wrapper functions allocate -- ``consensus_components`` and the two
+    ``ConsensusStrength`` member getters -- from the two typemaps below, so
+    the member typemap has to keep covering both members.
+    """
+    interface = pathlib.Path(__file__).resolve().parents[2] / "swig" / "oecluster.i"
+    text = _SWIG_COMMENT.sub("", interface.read_text(encoding="utf-8"))
+
+    allocation = "SWIG_NewPointerObj(new std::vector<"
+    found = text.count(allocation)
+    assert found == 2, (
+        "each owned-copy allocation needs a guarded typemap of its own; the "
+        f"interface has {found} of them and the two checked below are the "
+        "only ones known to be guarded")
+
+    headers = (
+        "%typemap(out) std::vector<int> consensus_components {",
+        ("%typemap(out) std::vector<double>* item_consensus, "
+         "std::vector<double>* cluster_consensus {"),
+    )
+    for header in headers:
+        assert text.count(header) == 1, f"{header} must appear exactly once"
+        start = text.index(header)
+        end = text.find("\n}\n", start)
+        assert end > start, f"{header} is never closed"
+        body = text[start:end]
+
+        opened = body.find("try {")
+        allocated = body.find(allocation)
+        caught = body.find("catch (const std::bad_alloc&)")
+        assert opened >= 0, f"{header} opens no try block"
+        assert allocated >= 0, f"{header} allocates no owned copy"
+        assert caught >= 0, f"{header} catches no std::bad_alloc"
+        assert opened < allocated < caught, (
+            f"{header} does not allocate inside its own try block")
+        assert "SWIG_exception_fail(SWIG_MemoryError" in body, (
+            f"{header} does not turn the failure into a MemoryError")

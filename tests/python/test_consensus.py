@@ -798,3 +798,28 @@ def test_the_result_is_accepted_by_the_packages_own_consumers():
     assert oecluster.cluster_report(result, _blobs20()).num_clusters == 2
     assert oecluster.partition_agreement(
         result, blobs).adjusted_rand_index == pytest.approx(1.0)
+
+
+def test_a_consumer_of_result_matrix_can_need_allow_nonmetric():
+    # Passing result.matrix back in is not the same as passing the source
+    # matrix the test above uses. Only members that observe different items
+    # can break the triangle inequality: within one full member co-clustering
+    # is transitive and every pair divides by the same member count, so an
+    # ensemble of full partitions is always a metric. A ClusterStability's
+    # members are partial by construction, and it is the documented example.
+    matrix = _blobs20()
+    spec = oecluster.ClusteringSpec("butina", threshold=0.2)
+    stability = oecluster.cluster_stability(spec, matrix, resamples=8, seed=0)
+    result = oecluster.consensus(stability)
+    assert result.matrix.facts["metric_probe"] == "violations_found"
+    with pytest.raises(ValueError, match="allow_nonmetric"):
+        oecluster.cluster_report(result, result.matrix)
+    report = oecluster.cluster_report(result, result.matrix,
+                                      allow_nonmetric=True)
+    assert report.num_clusters == result.num_clusters
+
+    full = oecluster.consensus([oecluster.butina(matrix, threshold=0.2),
+                                oecluster.butina(matrix, threshold=0.5)])
+    assert full.matrix.facts["metric_probe"] == "no_violations_found"
+    assert oecluster.cluster_report(
+        full, full.matrix).num_clusters == full.num_clusters

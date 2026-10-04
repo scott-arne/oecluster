@@ -117,6 +117,42 @@ TEST(CoassociationTest, PairsNoMemberObservedTogetherAreCounted) {
     EXPECT_DOUBLE_EQ(destination.Get(0, 2), 1.0);
 }
 
+TEST(CoassociationTest, MoreThanSixtyFourMembersUseEveryMaskWord) {
+    // The membership bitmask is ceil(R / 64) words per item, so an ensemble
+    // past 64 members is the first that must read and intersect a second
+    // word. It is also the documented default: cluster_stability resamples
+    // 100 times. Every member observes items 0, 1 and 2 and splits {0,1}
+    // from {2}; only the last five, which live in the second word, observe
+    // item 3 at all, two of them with {0,1} and three with {2}.
+    std::vector<size_t> offsets{0};
+    std::vector<size_t> positions;
+    std::vector<int> labels;
+    for (size_t member = 0; member < 70; ++member) {
+        positions.insert(positions.end(), {0u, 1u, 2u});
+        labels.insert(labels.end(), {0, 0, 1});
+        if (member >= 65) {
+            positions.push_back(3);
+            labels.push_back(member < 67 ? 0 : 1);
+        }
+        offsets.push_back(positions.size());
+    }
+
+    DenseStorage destination(4);
+    const ConsensusMatrixSummary summary =
+        coassociation_distances(4, offsets, positions, labels, destination);
+
+    EXPECT_EQ(summary.num_partitions, 70u);
+    EXPECT_EQ(summary.unobserved_pairs, 0u);
+    // co/obs: (0,1)=70/70 (0,2)=0/70 (1,2)=0/70, and item 3 is observed by
+    // five members only, so its denominator is 5 and not 70.
+    EXPECT_DOUBLE_EQ(destination.Get(0, 1), 0.0);
+    EXPECT_DOUBLE_EQ(destination.Get(0, 2), 1.0);
+    EXPECT_DOUBLE_EQ(destination.Get(1, 2), 1.0);
+    EXPECT_DOUBLE_EQ(destination.Get(0, 3), 1.0 - 2.0 / 5.0);
+    EXPECT_DOUBLE_EQ(destination.Get(1, 3), 1.0 - 2.0 / 5.0);
+    EXPECT_DOUBLE_EQ(destination.Get(2, 3), 1.0 - 3.0 / 5.0);
+}
+
 TEST(CoassociationTest, ThreadCountDoesNotChangeTheResult) {
     // Sixteen items in one member of four clusters, so the accumulation
     // spreads over several chunks with more than one worker.
