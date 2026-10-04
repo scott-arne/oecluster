@@ -1,4 +1,6 @@
 """The oecluster command line: registry, inputs, commands and output."""
+import time
+
 import pytest
 from click.testing import CliRunner
 from oecluster import _cli_registry
@@ -122,6 +124,53 @@ def test_an_integer_option_is_preserved_exactly(assignment, expected):
     options = _cli_registry.resolve(
         "leiden", [assignment, "k=5"], _registry())
     assert options["n_iterations"] == expected
+
+
+@pytest.mark.parametrize("value", [
+    # An exponent typo in --set used to be built out digit by digit before
+    # anything looked at the magnitude: 1e100000 hit CPython's 4300-digit
+    # conversion limit, whose message names sys.set_int_max_str_digits at a
+    # user who only mistyped a number.
+    "1e100000", "1e400",
+    # 2**64, the first magnitude past the widest native parameter.
+    "18446744073709551616", "-18446744073709551616",
+])
+def test_an_out_of_range_integer_option_is_refused(value):
+    with pytest.raises(ValueError, match="out of range"):
+        _cli_registry.resolve("leiden", [f"n_iterations={value}", "k=5"],
+                              _registry())
+
+
+def test_refusing_an_enormous_exponent_is_prompt():
+    # The bound has to be applied before int() materializes the digits.
+    # Building 10**999999999 consumes unbounded CPU and memory, so the
+    # command hung before reading a single file and had to be killed.
+    start = time.monotonic()
+    with pytest.raises(ValueError, match="out of range"):
+        _cli_registry.resolve("leiden", ["n_iterations=1e999999999", "k=5"],
+                              _registry())
+    assert time.monotonic() - start < 1.0
+
+
+def test_the_largest_in_range_integer_is_accepted_exactly():
+    # leiden's seed is a uint64 natively, so 2**64-1 is the widest value any
+    # of these parameters takes and the bound must not refuse it.
+    options = _cli_registry.resolve(
+        "leiden", ["seed=18446744073709551615", "k=5"], _registry())
+    assert options["seed"] == 2**64 - 1
+
+
+def test_an_integer_option_coerces_the_same_way_whatever_its_default():
+    # dbscan.min_samples has an int default and hdbscan.min_samples a None
+    # default with a declared type. Both are integer options, so they must
+    # not disagree about what an integer looks like or share none of the
+    # range guard.
+    registry = _registry()
+    assert _cli_registry.resolve(
+        "dbscan", ["eps=0.5", "min_samples=4.0"], registry)["min_samples"] == 4
+    with pytest.raises(ValueError, match="out of range"):
+        _cli_registry.resolve("dbscan", ["eps=0.5", "min_samples=1e400"],
+                              registry)
 
 
 @pytest.mark.parametrize("assignment", [

@@ -57,6 +57,21 @@ _CONDITIONALLY_REQUIRED = {"jarvis_patrick.k", "leiden.k"}
 #: Not expressible in a ``key=value`` grammar.
 _SEQUENCE = {"k_medoids.initial_medoids"}
 
+#: Widest magnitude any native integer parameter can hold. The clustering
+#: signatures use ``size_t`` for the counts, ``int64_t`` for
+#: ``leiden.n_iterations`` and ``uint64_t`` for ``leiden.seed``, so no single
+#: native type covers them all; ``uint64``'s maximum is the widest of the
+#: three and is therefore the only bound that refuses nothing the library
+#: accepts. The per-parameter limits are left to the library, which already
+#: checks each one and names it ("n_iterations must be between -1 and ...").
+#: The bound here exists to keep a mistyped exponent from being built into an
+#: integer at all, not to second-guess those checks.
+_MAGNITUDE_MAX = 2**64 - 1
+
+#: ``Decimal.adjusted()`` of ``_MAGNITUDE_MAX``: anything larger needs more
+#: than 20 digits and is refused before ``int()`` sees it.
+_MAGNITUDE_DIGITS = 19
+
 
 class Entry:
     """One algorithm's command-line schema."""
@@ -132,6 +147,15 @@ def _as_int(option, raw):
     # an opaque ValueError on the second.
     if not number.is_finite() or number != number.to_integral_value():
         raise ValueError(f"{option} must be an integer, got {raw!r}")
+    # The magnitude is bounded before int() is allowed to materialize the
+    # digits. int(Decimal("1e999999999")) builds a billion-digit integer and
+    # hangs, and anything past 4300 digits trips CPython's conversion limit,
+    # whose message tells the user about sys.set_int_max_str_digits. Both
+    # reach a user who merely mistyped a number. adjusted() is the base-10
+    # exponent of the leading digit, so it bounds the size without building
+    # anything; past 20 digits the value cannot fit any native parameter.
+    if number.adjusted() > _MAGNITUDE_DIGITS or abs(int(number)) > _MAGNITUDE_MAX:
+        raise ValueError(f"{option} is out of range, got {raw!r}")
     return int(number)
 
 
@@ -193,10 +217,10 @@ def coerce(algorithm, option, raw, entry):
     if isinstance(default, str):
         return raw
     if isinstance(default, int):
-        try:
-            return int(raw)
-        except ValueError:
-            raise ValueError(f"{option} must be an integer, got {raw!r}") from None
+        # Same path as a declared integer: an option is no less an integer
+        # for having inferred its type from its default, and a bare int()
+        # here would take neither the exactness nor the range guard.
+        return _as_int(option, raw)
     if isinstance(default, float):
         return _as_float(option, raw)
     # Only an option defaulting to None reaches here, and every one the
