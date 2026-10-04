@@ -657,3 +657,87 @@ def test_an_npz_whose_orientation_fact_is_not_a_boolean_warns(tmp_path):
     seen = []
     assert _cli_input.load(path, warn=seen.append).num_samples == 4
     assert "orientation unproven" in seen[0]
+
+
+@pytest.mark.parametrize("labels", [
+    "abcdefghijkl",
+    {f"m{i}": i for i in range(12)},
+    5,
+])
+def test_sidecar_row_labels_that_are_not_an_array_are_refused(tmp_path,
+                                                              labels):
+    # from_condensed runs list() over whatever it is given, so a string
+    # spells itself out and a dict hands over its keys. Both of these have
+    # twelve entries, so every length check passed and the per-item output
+    # was labelled with identities the user never wrote.
+    path = _npy(tmp_path, row_labels=labels)
+    with pytest.raises(_cli_input.InputError, match="row_labels"):
+        _cli_input.load(path, warn=lambda message: None)
+
+
+@pytest.mark.parametrize("entry", [0, None, ["m3"], 1.5, True])
+def test_a_sidecar_row_label_that_is_not_a_string_is_refused(tmp_path, entry):
+    # Refused rather than coerced: str(None) is "None" and str(0) is "0",
+    # which are invented identities exactly like the cases above. oepdist
+    # writes titles as JSON strings, so a non-string is a broken producer.
+    labels = [f"m{i}" for i in range(12)]
+    labels[3] = entry
+    path = _npy(tmp_path, row_labels=labels)
+    with pytest.raises(_cli_input.InputError, match="row_labels"):
+        _cli_input.load(path, warn=lambda message: None)
+
+
+def test_an_npz_holding_a_negative_distance_is_refused(tmp_path):
+    # Reachable through the public API, not only by editing an archive:
+    # condensed is writeable and to_file keeps the facts it was built with,
+    # so the file claims a proven distance matrix while holding a negative
+    # value. The clustering gate does not cover it either -- it re-scans for
+    # non-finite values, not for negatives -- so butina clustered this.
+    matrix = oecluster.SymmetricDistanceMatrix.from_condensed(
+        np.array([0.1, 0.9, 0.2, 0.8, 0.3, 0.7]), labels=["a", "b", "c", "d"])
+    matrix.condensed[0] = -1.0
+    out = str(tmp_path / "neg.npz")
+    matrix.to_file(out)
+    with pytest.raises(_cli_input.InputError, match="negative"):
+        _cli_input.load(out, warn=lambda message: None)
+
+
+def test_a_raw_file_holding_a_negative_distance_is_refused(tmp_path):
+    # The twin of the case above, pinned so the two paths cannot drift: it
+    # is the asymmetry between them that let the .npz through.
+    values = _condensed()
+    values[0] = -1.0
+    path = str(tmp_path / "neg.npy")
+    np.save(path, values)
+    _write_sidecar(path, 12)
+    with pytest.raises(_cli_input.InputError, match="negative"):
+        _cli_input.load(path, warn=lambda message: None)
+
+
+@pytest.mark.parametrize("params", [[], 0, "", False])
+def test_a_falsy_non_object_params_sidecar_is_refused(tmp_path, params):
+    # `sidecar.get("params") or {}` applied the default before the type
+    # check, so every falsy non-object was read as "no params" instead of
+    # as the producer fault it is -- and then drew the unproven-orientation
+    # warning rather than a refusal.
+    path = _npy(tmp_path, params=params)
+    with pytest.raises(_cli_input.InputError, match="non-object"):
+        _cli_input.load(path, warn=lambda message: None)
+
+
+@pytest.mark.parametrize("suffix", [".NPY", ".BIN"])
+def test_an_uppercase_extension_is_accepted(tmp_path, suffix):
+    # oepdist lowercases the extension before dispatching on it
+    # (tools/OutputWriter.cpp:19-24), so `-o out.NPY` writes a real .NPY
+    # that this loader was refusing as an unsupported format.
+    values = _condensed()
+    if suffix == ".NPY":
+        np.save(str(tmp_path / "source.npy"), values)
+        data = (tmp_path / "source.npy").read_bytes()
+    else:
+        data = values.tobytes()
+    path = tmp_path / f"d{suffix}"
+    path.write_bytes(data)
+    _write_sidecar(str(path), 12)
+    matrix = _cli_input.load(str(path), warn=lambda message: None)
+    assert matrix.num_samples == 12

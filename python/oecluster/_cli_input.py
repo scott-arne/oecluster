@@ -13,7 +13,7 @@ from typing import NoReturn
 
 import numpy as np
 
-from . import SymmetricDistanceMatrix, load_distance_matrix
+from . import SparseStorage, SymmetricDistanceMatrix, load_distance_matrix
 
 
 class InputError(Exception):
@@ -38,6 +38,66 @@ def _unreadable(path, error) -> NoReturn:
     """
     raise InputError(
         f"cannot read {os.path.basename(path)}: {error}") from None
+
+
+def _refuse_negative(matrix, path):
+    """Refuse a matrix holding a negative distance.
+
+    Shared by both paths so they cannot drift again. ``from_condensed``
+    already refuses this on the raw path; a ``.npz`` is used as loaded and
+    so never saw the check, and nothing downstream covers the difference --
+    the clustering gate re-scans for non-finite values, not for negatives.
+    A negative distance reaches an archive through the public API, not only
+    by editing one: ``condensed`` is writeable and ``to_file`` writes the
+    mutated values under the facts the matrix was built with.
+
+    :param matrix: The loaded matrix.
+    :param path: The file it came from, named in the message.
+    :raises InputError: If any stored distance is below zero.
+    """
+    if isinstance(matrix.storage, SparseStorage):
+        # The entry list, not ``condensed``: that property answers the
+        # question by densifying a sparse matrix into n(n-1)/2 floats, and
+        # the omitted pairs it invents are zeros that cannot be negative.
+        values = np.array([entry[2] for entry in matrix.storage._entries()],
+                          dtype=np.float64)
+    else:
+        values = matrix.condensed
+    # ``min`` propagates NaN and ``nan < 0`` is False, so a non-finite value
+    # cannot switch this check off; refusing those is the gate's job.
+    if values.size and float(values.min()) < 0.0:
+        raise InputError(
+            f"{os.path.basename(path)} holds negative values, so it is not "
+            "a distance matrix; a distance cannot be below zero")
+
+
+def _label_list(labels, sidecar):
+    """Validate a sidecar's ``row_labels`` field.
+
+    ``from_condensed`` runs ``list()`` over whatever it is handed, so a
+    string becomes one label per character and an object becomes its keys.
+    With a matching entry count both pass every length check and the labels
+    reach the output as identities the user never wrote. A non-string entry
+    is refused rather than coerced for the same reason: ``str(None)`` is an
+    invented identity, and oepdist writes every title as a JSON string.
+
+    :param labels: The raw ``row_labels`` value, or None if absent.
+    :param sidecar: Sidecar path, named in the message.
+    :returns: The labels, or None if there are none to use.
+    :raises InputError: If the field is present but not a list of strings.
+    """
+    if labels is None:
+        return None
+    if not isinstance(labels, list):
+        raise InputError(
+            f"{os.path.basename(sidecar)} has a 'row_labels' field that is "
+            f"a {type(labels).__name__}, not an array of strings")
+    for index, label in enumerate(labels):
+        if not isinstance(label, str):
+            raise InputError(
+                f"{os.path.basename(sidecar)} has a 'row_labels' entry at "
+                f"index {index} that is not a string: {label!r}")
+    return labels or None
 
 
 def _sidecar_path(path):
@@ -76,15 +136,17 @@ def _read_sidecar(path, raw_path):
         _unreadable(path, error)
 
 
-def _values(path):
+def _values(path, suffix):
     """Read ``path`` as a flat float64 array.
 
+    :param path: The raw input file.
+    :param suffix: Its lowercased extension, ``.npy`` or ``.bin``.
     :returns: The file's values as one-dimensional float64.
     :raises InputError: If the file cannot be read, or holds anything but
         real numbers.
     """
     try:
-        if path.endswith(".npy"):
+        if suffix == ".npy":
             array = np.load(path, allow_pickle=False)
         else:
             with open(path, "rb") as handle:
@@ -134,12 +196,17 @@ def load(path, *, warn=None):
     path = os.fsdecode(path)
     if not os.path.isfile(path):
         raise InputError(f"no such file: {path}")
-    if path.endswith(".csv"):
+    # Lowercased once and dispatched on throughout: oepdist lowercases the
+    # extension before choosing a writer (tools/OutputWriter.cpp:19-24), so
+    # `-o out.NPY` writes a real .NPY that a case-sensitive check refuses as
+    # an unsupported format.
+    suffix = os.path.splitext(path)[1].lower()
+    if suffix == ".csv":
         raise InputError(
             "csv is not accepted: oepdist writes titles unquoted and values "
             "at 8 significant digits, and records no provenance; re-run "
             "oepdist with a .npy output, or save a .npz from Python")
-    if path.endswith(".npz"):
+    if suffix == ".npz":
         try:
             matrix = load_distance_matrix(path)
         except MemoryError:
@@ -169,8 +236,9 @@ def load(path, *, warn=None):
         if orientation is not True and orientation is not False:
             warn(f"{os.path.basename(path)}: orientation unproven, treating "
                  "values as distances")
+        _refuse_negative(matrix, path)
         return matrix
-    if not path.endswith((".npy", ".bin")):
+    if suffix not in (".npy", ".bin"):
         raise InputError(f"unsupported input format: {path}")
 
     sidecar = _read_sidecar(_sidecar_path(path), path)
@@ -184,7 +252,7 @@ def load(path, *, warn=None):
     rows, cols = sidecar.get("n_rows"), sidecar.get("n_cols")
     if rows != cols:
         raise InputError(f"sidecar is {rows}x{cols}, not square")
-    values = _values(path)
+    values = _values(path, suffix)
     items = _items_from_pairs(values.size)
     if items is None:
         raise InputError(
@@ -193,7 +261,12 @@ def load(path, *, warn=None):
         raise InputError(
             f"{values.size} values describe {items} items, but the sidecar "
             f"says {rows}")
-    params = sidecar.get("params") or {}
+    # Typed before the default is applied, not after: `or {}` turned every
+    # falsy non-object -- [], 0, "" and False -- into "no params", so a
+    # producer fault read as a sidecar that simply recorded nothing.
+    params = sidecar.get("params")
+    if params is None:
+        params = {}
     if not isinstance(params, dict):
         raise InputError(
             f"{os.path.basename(_sidecar_path(path))} has a non-object "
@@ -214,13 +287,13 @@ def load(path, *, warn=None):
         raise InputError(
             f"sidecar records similarity={similarity!r}, which is neither "
             "true nor false; orientation cannot be read from it")
-    labels = sidecar.get("row_labels") or None
+    labels = _label_list(sidecar.get("row_labels"), _sidecar_path(path))
     # from_condensed runs the library's own validation and metric probe; its
     # refusals are the user's problem with this file, so they arrive as
     # InputError like every other unusable input rather than as a bare
     # ValueError that the caller would map to a usage error.
     try:
-        return SymmetricDistanceMatrix.from_condensed(
+        matrix = SymmetricDistanceMatrix.from_condensed(
             values, labels=labels,
             comparison_name=sidecar.get("comparison") or "precomputed",
             params=params or None)
@@ -230,3 +303,5 @@ def load(path, *, warn=None):
         raise InputError(
             f"{os.path.basename(path)} is not a usable distance matrix: "
             f"{error}") from None
+    _refuse_negative(matrix, path)
+    return matrix
