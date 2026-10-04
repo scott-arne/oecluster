@@ -17,7 +17,7 @@ namespace OECluster {
  */
 struct ConsensusOptions {
     size_t num_threads = 0;   ///< Worker threads; 0 auto-detects hardware concurrency.
-    size_t chunk_size = 4096; ///< Rows or clusters per work unit.
+    size_t chunk_size = 4096; ///< Work-unit size for the parallel passes.
 };
 
 /**

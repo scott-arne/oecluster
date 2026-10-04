@@ -47,14 +47,6 @@ uint32_t popcount64(const uint64_t word) {
 #endif
 }
 
-/// ThreadPool's chunk count is `(range + chunk_size - 1) / chunk_size`, which
-/// wraps to zero chunks for a chunk size near SIZE_MAX and would drop the
-/// whole pass in silence. A chunk larger than the range is the same single
-/// chunk, so clamping it costs nothing and keeps the sum in range.
-size_t bounded_chunk(size_t chunk_size, size_t range) {
-    return std::max<size_t>(1, std::min(chunk_size, range));
-}
-
 const double* contiguous_data(const StorageBackend& matrix,
                               const char* function_name) {
     const double* data = matrix.Data();
@@ -247,7 +239,21 @@ ConsensusMatrixSummary coassociation_distances(
     }
 
     std::atomic<size_t> unobserved{0};
-    pool.ParallelFor(0, num_items, bounded_chunk(options.chunk_size, num_items),
+    // More workers than rows do nothing; capping before the arithmetic keeps
+    // 4 * workers from wrapping for any count the size_t interface admits,
+    // and the final min keeps a chunk near SIZE_MAX from wrapping
+    // ThreadPool's own (range + chunk_size - 1) chunk count.
+    const size_t finalize_workers =
+        std::max<size_t>(1, std::min(pool.NumThreads(), num_items));
+    // chunk_size is the ceiling, not the chunk: ThreadPool starts at most one
+    // worker per chunk, so a run small enough to fit one chunk would finalize
+    // single-threaded, and the shrinking upper-triangular rows stay within a
+    // bounded imbalance only when each worker takes several chunks.
+    const size_t finalize_spread =
+        (num_items + 4 * finalize_workers - 1) / (4 * finalize_workers);
+    const size_t items_per_chunk =
+        std::max<size_t>(1, std::min(options.chunk_size, finalize_spread));
+    pool.ParallelFor(0, num_items, items_per_chunk,
         [&](size_t chunk_begin, size_t chunk_end) {
             size_t local_unobserved = 0;
             for (size_t i = chunk_begin; i < chunk_end; ++i) {
@@ -391,7 +397,19 @@ ConsensusStrength consensus_strength(const StorageBackend& matrix,
     const double nan_value = std::numeric_limits<double>::quiet_NaN();
     std::vector<double> sums(num_items, 0.0);
     ThreadPool pool(options.num_threads);
-    pool.ParallelFor(0, num_items, bounded_chunk(options.chunk_size, num_items),
+    // More workers than rows do nothing; capping before the arithmetic keeps
+    // 4 * workers from wrapping for any count the size_t interface admits,
+    // and the final min keeps a chunk near SIZE_MAX from wrapping
+    // ThreadPool's own (range + chunk_size - 1) chunk count.
+    const size_t workers =
+        std::max<size_t>(1, std::min(pool.NumThreads(), num_items));
+    // chunk_size is the ceiling, not the chunk: ThreadPool starts at most one
+    // worker per chunk, so a matrix small enough to fit one chunk would be
+    // scanned single-threaded however many threads the caller asked for.
+    const size_t spread = (num_items + 4 * workers - 1) / (4 * workers);
+    const size_t items_per_chunk =
+        std::max<size_t>(1, std::min(options.chunk_size, spread));
+    pool.ParallelFor(0, num_items, items_per_chunk,
         [&](size_t chunk_begin, size_t chunk_end) {
             for (size_t i = chunk_begin; i < chunk_end; ++i) {
                 const size_t cluster = cluster_of_item[i];
