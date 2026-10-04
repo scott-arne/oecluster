@@ -2,6 +2,8 @@
 import json
 import os
 import time
+import warnings
+from pathlib import Path
 
 import numpy as np
 import oecluster
@@ -373,8 +375,16 @@ def test_an_npz_round_trips(tmp_path):
     source = _cli_input.load(_npy(tmp_path), warn=lambda message: None)
     out = str(tmp_path / "m.npz")
     source.to_file(out)
-    loaded = _cli_input.load(out, warn=lambda message: None)
+    seen = []
+    loaded = _cli_input.load(out, warn=seen.append)
     assert loaded.num_samples == source.num_samples
+    # from_condensed stamps is_distance "unknown" unconditionally, so every
+    # .npz written from a raw input warns on reload. Asserted here because
+    # this is the only test that reaches the .npz warning at all: with the
+    # callback discarded, deleting the branch left the suite green, and the
+    # orientation warning is what stands between a similarity file and
+    # silently inverted clusters.
+    assert "orientation unproven" in seen[0]
 
 
 def test_a_similarity_file_is_refused(tmp_path):
@@ -438,7 +448,7 @@ def test_csv_is_refused_with_a_remedy(tmp_path):
         _cli_input.load(str(path), warn=lambda message: None)
 
 
-def _patched_npz(tmp_path, name, **patch):
+def _patched_npz(tmp_path, name, *, drop=(), **patch):
     """A .npz written by the API, rewritten with one field corrupted."""
     matrix = oecluster.SymmetricDistanceMatrix.from_condensed(
         np.array([0.1, 0.9, 0.2, 0.8, 0.3, 0.7]), labels=["a", "b", "c", "d"])
@@ -446,6 +456,8 @@ def _patched_npz(tmp_path, name, **patch):
     matrix.to_file(good)
     with np.load(good, allow_pickle=False) as archive:
         fields = {key: archive[key] for key in archive.files}
+    for key in drop:
+        del fields[key]
     fields.update(patch)
     path = str(tmp_path / f"{name}.npz")
     np.savez(path, **fields)
@@ -493,3 +505,111 @@ def test_a_cross_distance_npz_is_refused(tmp_path):
     cross.to_file(out)
     with pytest.raises(_cli_input.InputError, match="symmetric"):
         _cli_input.load(out, warn=lambda message: None)
+
+
+@pytest.mark.parametrize("dtype", [
+    "complex128", "datetime64[s]", "bool", "<U4",
+    [("a", "<f8"), ("b", "<i4")],
+])
+def test_a_non_real_numeric_npy_is_refused(tmp_path, dtype):
+    # Every one of these used to reach float64 and be clustered: complex
+    # kept its real part behind a ComplexWarning (defeating the refusal
+    # from_condensed places at __init__.py:1350 for exactly this reason),
+    # datetime64 became epoch seconds, and bool became 0/1 -- which for an
+    # adjacency matrix is a similarity, the inversion this module exists to
+    # refuse. The structured dtype raised a bare TypeError from the cast.
+    path = str(tmp_path / "odd.npy")
+    np.save(path, np.zeros(6, dtype=dtype))
+    _write_sidecar(path, 4)
+    with pytest.raises(_cli_input.InputError, match="real numbers"):
+        _cli_input.load(path, warn=lambda message: None)
+
+
+def test_a_complex_npy_is_refused_before_any_warning(tmp_path):
+    # The cast emitted ComplexWarning, so under -W error the warning itself
+    # escaped load() ahead of any refusal: not an InputError, and not even
+    # an exception the command layer could name a file for.
+    path = str(tmp_path / "c.npy")
+    np.save(path, np.array([1 + 1j, 2 + 2j, 3 + 3j]))
+    _write_sidecar(path, 3)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(_cli_input.InputError, match="real numbers"):
+            _cli_input.load(path, warn=lambda message: None)
+
+
+@pytest.mark.parametrize("name, drop, patch", [
+    # The first two escaped the enumerated catch: a 0-d condensed indexes
+    # shape[0] inside from_file, and a negative num_samples reaches
+    # DenseStorage's size_t. The rest already refused and are pinned so a
+    # future narrowing of the net cannot quietly let them through.
+    ("zero_d", (), {"condensed": np.array(1.0)}),
+    ("negative", (), {"num_samples": np.array(-4), "condensed": np.zeros(10)}),
+    ("rank", (), {"condensed": np.zeros((2, 3))}),
+    ("text", (), {"condensed": np.array(["a"] * 6)}),
+    ("complex", (), {"condensed": np.zeros(6, dtype="complex128")}),
+    ("flat_labels", (), {"labels": np.zeros(())}),
+    ("no_values", ("condensed",), {}),
+])
+def test_a_structurally_broken_npz_is_an_input_error(tmp_path, name, drop,
+                                                     patch):
+    path = _patched_npz(tmp_path, name, drop=drop, **patch)
+    with pytest.raises(_cli_input.InputError, match="cannot read"):
+        _cli_input.load(path, warn=lambda message: None)
+
+
+def test_an_npz_archive_under_a_npy_name_is_refused(tmp_path):
+    # np.load reads the bytes, not the name, and hands back a lazy NpzFile
+    # for any zip: the dtype check then read .dtype on an archive object and
+    # raised AttributeError. Found by fuzzing the fix, not by review.
+    source = _cli_input.load(_npy(tmp_path), warn=lambda message: None)
+    real = str(tmp_path / "real.npz")
+    source.to_file(real)
+    renamed = tmp_path / "renamed.npy"
+    renamed.write_bytes(Path(real).read_bytes())
+    _write_sidecar(str(renamed), 12)
+    with pytest.raises(_cli_input.InputError, match="archive"):
+        _cli_input.load(str(renamed), warn=lambda message: None)
+
+
+@pytest.mark.parametrize("flag", [1, 0, "true", "false", [], {}])
+def test_a_sidecar_similarity_that_is_not_a_boolean_is_refused(tmp_path, flag):
+    # The orientation gate tests `is True` and `is None`, so any other value
+    # fell between the two branches: 1 and "true" were clustered as proven
+    # distances on the strength of a flag that says the opposite, and
+    # without even the unproven-orientation warning. Found by fuzzing.
+    path = _npy(tmp_path, params={"similarity": flag})
+    with pytest.raises(_cli_input.InputError, match="neither true nor false"):
+        _cli_input.load(path, warn=lambda message: None)
+
+
+def test_a_memory_error_is_not_reported_as_a_bad_file(tmp_path, monkeypatch):
+    # The inverted catch has to let this one through: the command layer maps
+    # MemoryError to exit 1 with the --mmap hint, and a file too large to
+    # hold is not a malformed one.
+    def explode(*args, **kwargs):
+        raise MemoryError("Unable to allocate 32.0 GiB")
+
+    monkeypatch.setattr(_cli_input.np, "load", explode)
+    with pytest.raises(MemoryError):
+        _cli_input.load(_npy(tmp_path), warn=lambda message: None)
+
+
+def test_a_bug_in_this_module_is_not_reported_as_a_bad_file(tmp_path,
+                                                            monkeypatch):
+    # The companion constraint: each catch sits on a library call, not on a
+    # whole function, so a mistake in our own code still reads as a bug
+    # instead of being blamed on the user's file.
+    def explode(count):
+        raise NameError("name 'maht' is not defined")
+
+    monkeypatch.setattr(_cli_input, "_items_from_pairs", explode)
+    with pytest.raises(NameError):
+        _cli_input.load(_npy(tmp_path), warn=lambda message: None)
+
+
+def test_a_path_object_is_accepted(tmp_path):
+    # Tasks 3-5 declare the argument with click.Path(path_type=Path), and
+    # every format check here is a string operation.
+    matrix = _cli_input.load(Path(_npy(tmp_path)), warn=lambda message: None)
+    assert matrix.num_samples == 12
