@@ -823,3 +823,43 @@ def test_a_consumer_of_result_matrix_can_need_allow_nonmetric():
     assert full.matrix.facts["metric_probe"] == "no_violations_found"
     assert oecluster.cluster_report(
         full, full.matrix).num_clusters == full.num_clusters
+
+
+def test_a_sparse_triangle_violation_hides_from_the_probe():
+    """Known limitation, pinned deliberately: ``no_violations_found`` is not a
+    certification, so a provably non-metric matrix can pass the metric gate.
+
+    ``probe_triangle`` samples a bounded number of triples rather than
+    enumerating all ``O(N^3)``, and it can only disprove. The test above is
+    the case where a violation is dense enough to be drawn; this is the other
+    side of the same coin, and the assertions below describe what the package
+    really does rather than what a reader might hope it does. Making the probe
+    exhaustive is not the fix -- the sampling trade-off is deliberate and
+    predates consensus clustering.
+    """
+    num_items = 1000
+    # The only co-clustered pairs are (0, 1) and (1, 2). Every other pair,
+    # (0, 2) included, is unobserved and so takes distance 1.0.
+    result = oecluster.consensus([([0, 1], [0, 0]), ([1, 2], [0, 0])],
+                                 num_items=num_items)
+    storage = result.matrix.storage
+
+    # The violation is exact, not a rounding artefact: 1.0 > 0.0 + 0.0.
+    assert storage.Get(0, 1) == 0.0
+    assert storage.Get(1, 2) == 0.0
+    assert storage.Get(0, 2) == 1.0
+    assert storage.Get(0, 2) > storage.Get(0, 1) + storage.Get(1, 2)
+
+    # The probe nevertheless reports nothing. One violating triple out of the
+    # ~5e8 distinct inequalities a 1000-item matrix admits is essentially
+    # never drawn by a 100,000-triple sample.
+    facts = result.matrix.facts
+    assert facts["metric_probe"] == "no_violations_found"
+    assert facts["probe_violations"] == 0
+    assert 0 < facts["probe_sampled"] <= 100000
+
+    # So the gate accepts it: the refusal keys off "violations_found", and the
+    # matrix never earned that stamp. No allow_nonmetric is needed, and none
+    # would help -- there is nothing to override.
+    report = oecluster.cluster_report(result, result.matrix)
+    assert report.num_clusters == result.num_clusters

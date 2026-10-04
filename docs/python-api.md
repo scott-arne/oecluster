@@ -1164,14 +1164,27 @@ always gives a metric: co-clustering is transitive within a member, and every
 pair divides by the same member count. Members that observe different items
 divide by different counts and can violate the inequality, and a
 `ClusterStability`'s members are partial by construction — so the matrix from
-the example above is the case that can be non-metric, and a consumer that
-assumes a metric refuses it until it is told otherwise:
+the example above is the case that can be non-metric. When the probe does find
+a violation, a consumer that assumes a metric refuses the matrix until it is
+told otherwise:
 
 ```python
 report = oecluster.cluster_report(agreed, agreed.matrix, allow_nonmetric=True)
 ```
 
-`matrix.metric_probe` says which case you have before you call anything.
+`matrix.metric_probe` reports what the probe saw, and it reads one way only.
+`"violations_found"` is conclusive: the matrix is definitely not a metric, and
+`cluster_report` and the other metric-assuming consumers will refuse it.
+`"no_violations_found"` is not a certification. The probe samples a bounded
+number of triples — 100,000 — rather than enumerating all `O(N^3)` of them, so
+a violation confined to a few triples can hide, and a matrix that is provably
+non-metric can still pass both the probe and the gate. A partial-member
+ensemble that co-clusters only a handful of pairs is exactly that shape: with
+`d(0, 1) = d(1, 2) = 0` and the unobserved `d(0, 2) = 1.0`, the one violating
+triple is almost never drawn out of a thousand items. Treat the probe as a
+cheap way to catch the common case, not as a proof of metricity; if a
+downstream result must not depend on the triangle inequality, decide that from
+how the ensemble was built rather than from the probe.
 
 ### Extracting the partition
 
