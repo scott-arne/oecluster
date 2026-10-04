@@ -149,8 +149,10 @@ and reads a partition back off it. Python's `consensus()` is built on these.
   A negative label is noise and joins no cluster. The destination is
   caller-allocated with `NumSamples() == num_items`, as `pdist`'s is, and is
   zeroed first because `MMapStorage` reuses a file of the right size without
-  clearing it. Accumulation runs the clusters of one member in parallel,
-  which is safe because two clusters of one member share no pair. It throws
+  clearing it. Accumulation runs in parallel over pair rows within a
+  cluster, chunked adaptively, so a member of a few large clusters still
+  spreads its quadratic work; this is safe because distinct rows own
+  distinct pairs. It throws
   `std::invalid_argument` for fewer than two items, a destination of another
   size or without contiguous data, offsets that do not start at zero, do not
   increase, or do not end at the position count, a position count that

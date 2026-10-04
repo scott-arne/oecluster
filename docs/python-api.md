@@ -1181,13 +1181,14 @@ joins two groups that mostly disagree. That shows up in the output, as a low
 `cluster_consensus` for the merged cluster and low `item_consensus` for the
 bridging items, and `threshold` and `method` are the levers.
 
-`method=` replaces the default with any clustering spec that accepts a
-distance matrix, which is the classical evidence-accumulation form:
+`method=` replaces the default with any clustering spec, roster name or
+callable that accepts a distance matrix, which is the classical
+evidence-accumulation form:
 
 ```python
 spec = oecluster.ClusteringSpec("agglomerative", n_clusters=4,
                                 linkage="average")
-agreed = oecluster.consensus(selection, method=spec)
+agreed = oecluster.consensus(stability, method=spec)
 ```
 
 A custom method is handed the consensus matrix itself, not a copy, because
@@ -1201,7 +1202,8 @@ writing through `result.matrix.condensed` after the call.
 
 `threshold` and `method` are mutually exclusive. The roster entries that
 take fingerprints or molecules (`bitbirch`, `bitbirch_recluster`,
-`bitbirch_refine`, `murcko`) are refused by name. If the matrix probed a
+`bitbirch_refine`, `murcko`) cannot read a distance matrix and are
+refused. If the matrix probed a
 triangle violation, an entry point that insists on a metric needs
 `allow_nonmetric=True` among the spec's options; `k_medoids` needs nothing,
 since PAM never appeals to the triangle inequality.
