@@ -129,6 +129,20 @@ def _condensed(distances, num_items):
                      for j in range(i + 1, num_items)])
 
 
+def _is_swig_vector(value, name):
+    """True when ``value`` is the SWIG proxy for a vector, not a tuple.
+
+    oecluster and oefp both register ``std::vector<double>`` in the SWIG
+    runtime type table they share, so the proxy class for a returned vector
+    belongs to whichever package registered it and import order decides --
+    seven test modules here import oefp. Asserting the class identity would
+    pin that accident. What the bindings promise is a vector proxy rather
+    than the tuple SWIG returns by default, which is the defect these
+    assertions exist to catch.
+    """
+    return not isinstance(value, (tuple, list)) and type(value).__name__ == name
+
+
 # --- native bindings ---------------------------------------------------------
 
 def test_native_coassociation_distances_fills_a_destination():
@@ -158,13 +172,13 @@ def test_native_consensus_components_and_strength_round_trip():
         native.IntVector([0, 0, 1, 1]),
         destination)
     components = native.consensus_components(destination, 0.5)
-    assert isinstance(components, native.IntVector)
+    assert _is_swig_vector(components, "IntVector")
     labels = list(components)
     assert labels == [0, 0, 1, 1]
     strength = native.consensus_strength(
         destination, native.IntVector(labels))
-    assert isinstance(strength.item_consensus, native.DoubleVector)
-    assert isinstance(strength.cluster_consensus, native.DoubleVector)
+    assert _is_swig_vector(strength.item_consensus, "DoubleVector")
+    assert _is_swig_vector(strength.cluster_consensus, "DoubleVector")
     assert list(strength.item_consensus) == [1.0, 1.0, 1.0, 1.0]
     assert list(strength.cluster_consensus) == [1.0, 1.0]
 
@@ -192,8 +206,8 @@ def test_native_strength_members_survive_a_temporary():
     labels = native.IntVector([0, 0, 1, 1])
     item = native.consensus_strength(destination, labels).item_consensus
     cluster = native.consensus_strength(destination, labels).cluster_consensus
-    assert isinstance(item, native.DoubleVector)
-    assert isinstance(cluster, native.DoubleVector)
+    assert _is_swig_vector(item, "DoubleVector")
+    assert _is_swig_vector(cluster, "DoubleVector")
     assert list(item) == [1.0, 1.0, 1.0, 1.0]
     assert list(cluster) == [1.0, 1.0]
 
