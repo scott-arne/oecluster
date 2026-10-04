@@ -76,6 +76,8 @@ __all__ = [  # noqa: RUF022
     "cluster_stability",
     "ClusterStability",
     "ClusterStabilityRecord",
+    "consensus",
+    "ConsensusResult",
     "partition_agreement",
     "scaffold_agreement",
     "sar_coherence",
@@ -7743,3 +7745,9 @@ class MCSComparison:
         # refuses a string the caller meant as false.
         opts.similarity = similarity
         return _MCSComparison(mols, opts)
+
+
+# Imported last: ConsensusResult subclasses ClusteringResult, which is defined
+# above, and `from . import ClusteringResult` inside the module resolves only
+# once the attribute is bound.
+from ._consensus import ConsensusResult, consensus
