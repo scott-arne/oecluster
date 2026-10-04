@@ -587,3 +587,200 @@ def test_item_consensus_refuses_in_place_edits():
 def test_the_package_exports_the_record_type():
     assert "ConsensusRecord" in oecluster.__all__
     assert oecluster.ConsensusRecord is not None
+
+
+# --- semantics over real ensembles -------------------------------------------
+
+def test_an_identical_ensemble_reproduces_its_partition():
+    blobs = oecluster.butina(_blobs20(), threshold=0.2)
+    result = oecluster.consensus([blobs, blobs, blobs])
+    assert result.num_clusters == blobs.num_clusters
+    assert result.agreement == (1.0, 1.0, 1.0)
+    assert result.mean_agreement == 1.0
+    assert [record.cluster_consensus for record in result.records] == [1.0, 1.0]
+    assert float(np.min(result.item_consensus)) == 1.0
+
+
+def test_a_mutually_disagreeing_ensemble_yields_singletons():
+    # Three partitions that share no pair: every co-association is 0.
+    rotations = [
+        _result([0, 0, 1, 1, 2, 2]),
+        _result([0, 1, 2, 0, 1, 2]),
+        _result([0, 1, 1, 2, 2, 0]),
+    ]
+    result = oecluster.consensus(rotations, num_items=6)
+    assert result.num_clusters == 6
+    assert all(math.isnan(value) for value in result.item_consensus)
+    assert all(math.isnan(record.cluster_consensus)
+               for record in result.records)
+
+
+def test_a_single_member_reproduces_itself():
+    member = _result([0, 0, 1, 1, 2])
+    result = oecluster.consensus([member], num_items=5)
+    assert result.labels.tolist() == [0, 0, 1, 1, 2]
+    assert result.agreement == (1.0,)
+
+
+def test_a_member_that_sees_only_noise_contributes_denominators_only():
+    ensemble = [_result([0, 0, 1, 1]), _result([-1, -1, -1, -1])]
+    result = oecluster.consensus(ensemble, num_items=4)
+    # Support for (0,1) halves from 1/1 to 1/2, which still clears 0.5.
+    assert result.matrix.squareform()[0][1] == 0.5
+    assert result.unobserved_pairs == 0
+    assert result.num_clusters == 2
+
+
+def test_an_item_only_one_member_observed_is_normalized_by_that_member():
+    ensemble = [
+        (np.array([0, 1, 2]), np.array([0, 0, 1])),
+        (np.array([0, 1]), np.array([0, 0])),
+        (np.array([0, 1]), np.array([0, 1])),
+    ]
+    result = oecluster.consensus(ensemble, num_items=3)
+    square = result.matrix.squareform()
+    assert square[0][1] == pytest.approx(1.0 - 2.0 / 3.0)
+    assert square[0][2] == 1.0  # one observer, never together
+
+
+# --- the threshold boundary --------------------------------------------------
+
+def _support(total, together):
+    """`total` full members of two items, `together` of which co-cluster them."""
+    return [oecluster.ClusteringResult(
+                [0, 0] if index < together else [0, 1],
+                ((0, 1),) if index < together else ((0,), (1,)))
+            for index in range(total)]
+
+
+@pytest.mark.parametrize("total, together, threshold, merged", [
+    (10, 1, 0.1, True),
+    (3, 2, 2 / 3, True),
+    (2, 1, 0.5, True),
+    (10, 4, 0.5, False),
+    (10, 5, 0.5, True),
+])
+def test_a_support_at_the_threshold_merges(total, together, threshold, merged):
+    result = oecluster.consensus(_support(total, together), num_items=2,
+                                 threshold=threshold)
+    assert (result.num_clusters == 1) is merged
+
+
+def test_different_denominators_are_resolved_against_one_threshold():
+    # Pair (0,1) is seen by 7 members and held together by 3 -> 3/7.
+    # Pair (2,3) is seen by 9 members and held together by 4 -> 4/9.
+    # A threshold between them must split the first and keep the second.
+    members = []
+    for index in range(9):
+        if index < 7:
+            positions = np.array([0, 1, 2, 3])
+            labels = np.array([0, 0 if index < 3 else 1,
+                               2, 2 if index < 4 else 3])
+        else:
+            positions = np.array([2, 3])
+            labels = np.array([0, 0 if index < 4 else 1])
+        members.append((positions, labels))
+    result = oecluster.consensus(members, num_items=4, threshold=0.435)
+    square = result.matrix.squareform()
+    assert square[0][1] == pytest.approx(1.0 - 3.0 / 7.0)
+    assert square[2][3] == pytest.approx(1.0 - 4.0 / 9.0)
+    assert result.labels[0] != result.labels[1]
+    assert result.labels[2] == result.labels[3]
+
+
+# --- storage, determinism and noise ------------------------------------------
+
+def test_a_memory_mapped_matrix_equals_the_dense_one(tmp_path):
+    ensemble = [_result([0, 0, 1, 1]), _result([0, 0, 0, 1])]
+    dense = oecluster.consensus(ensemble, num_items=4)
+    path = tmp_path / "consensus.bin"
+    mapped = oecluster.consensus(ensemble, num_items=4, output=str(path))
+    assert isinstance(mapped.matrix.storage, oecluster.MMapStorage)
+    np.testing.assert_array_equal(mapped.matrix.condensed,
+                                  dense.matrix.condensed)
+    np.testing.assert_array_equal(mapped.labels, dense.labels)
+    assert path.exists()
+
+
+def test_a_reused_output_path_does_not_accumulate(tmp_path):
+    # MMapStorage keeps a file of the right size, so the kernel zeroes the
+    # destination; without that the second run would double every count.
+    ensemble = [_result([0, 0, 1, 1]), _result([0, 0, 0, 1])]
+    dense = oecluster.consensus(ensemble, num_items=4)
+    path = tmp_path / "consensus.bin"
+    first = oecluster.consensus(ensemble, num_items=4, output=str(path))
+    first_condensed = np.array(first.matrix.condensed)
+    # The first mapping is released before the path is opened again: Windows
+    # shares a mapped file for reading only, so a second writable open while
+    # the first is alive would be denied.
+    del first
+    second = oecluster.consensus(ensemble, num_items=4, output=str(path))
+    np.testing.assert_array_equal(first_condensed, dense.matrix.condensed)
+    np.testing.assert_array_equal(second.matrix.condensed,
+                                  dense.matrix.condensed)
+    del second
+
+
+@pytest.mark.parametrize("num_threads", [0, 1, 2])
+def test_the_result_does_not_depend_on_the_thread_count(num_threads):
+    blobs = oecluster.butina(_blobs20(), threshold=0.2)
+    singletons = _result(list(range(20)))
+    reference = oecluster.consensus([blobs, singletons, blobs])
+    result = oecluster.consensus([blobs, singletons, blobs],
+                                 num_threads=num_threads)
+    np.testing.assert_array_equal(result.matrix.condensed,
+                                  reference.matrix.condensed)
+    np.testing.assert_array_equal(result.labels, reference.labels)
+    assert result.agreement == reference.agreement
+
+
+def test_noise_mode_changes_agreement_but_never_the_matrix():
+    ensemble = [
+        oecluster.ClusteringResult([0, 0, 0, 0, 1, 1, -1, -1],
+                                   ((0, 1, 2, 3), (4, 5))),
+        oecluster.ClusteringResult([0, 0, 0, -1, 1, 1, -1, 2],
+                                   ((0, 1, 2), (4, 5), (7,))),
+    ]
+    results = {mode: oecluster.consensus(ensemble, num_items=8, noise=mode)
+               for mode in ("singletons", "grouped", "excluded")}
+    baseline = results["singletons"].matrix.condensed
+    for mode, result in results.items():
+        np.testing.assert_array_equal(result.matrix.condensed, baseline)
+        expected = _slow_agreement(ensemble, result.labels, 8, mode)
+        assert result.agreement == pytest.approx(expected, nan_ok=True)
+    assert len({result.agreement for result in results.values()}) == 3
+
+
+# --- interoperability --------------------------------------------------------
+
+def test_a_member_with_huge_labels_is_scored_correctly():
+    big = 2 ** 40
+    ensemble = [
+        oecluster.ClusteringResult([big, big, big + 1, big + 1],
+                                   ((0, 1), (2, 3))),
+        _result([0, 0, 1, 1]),
+    ]
+    result = oecluster.consensus(ensemble, num_items=4)
+    np.testing.assert_allclose(result.matrix.condensed,
+                               _condensed(_slow_matrix(ensemble, 4), 4))
+    assert result.labels.tolist() == [0, 0, 1, 1]
+
+
+def test_the_result_is_accepted_by_the_packages_own_consumers():
+    # The partition is canonical precisely so these two never refuse it:
+    # cluster_report rejects a label that is not its cluster's ordinal, and
+    # both reject labels outside the signed 32-bit range.
+    blobs = oecluster.butina(_blobs20(), threshold=0.2)
+
+    def sparse_labels(items, **options):
+        size = items.num_samples
+        half = size // 2
+        return oecluster.ClusteringResult(
+            [2 ** 40] * half + [5] * (size - half),
+            (tuple(range(half)), tuple(range(half, size))))
+
+    result = oecluster.consensus([blobs, blobs], method=sparse_labels)
+    assert isinstance(result, oecluster.ClusteringResult)
+    assert oecluster.cluster_report(result, _blobs20()).num_clusters == 2
+    assert oecluster.partition_agreement(
+        result, blobs).adjusted_rand_index == pytest.approx(1.0)
