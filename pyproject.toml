@@ -33,10 +33,11 @@ classifiers = [
 # extension links its OpenEye shared libraries by versioned soname, so the
 # runtime toolkit has to be the one the wheel was built against.
 requires-python = ">=3.11"
-dependencies = ["openeye-toolkits>=2026.1", "numpy>=1.20", "oefp==0.3.0", "pyarrow>=25,<26"]
+dependencies = ["openeye-toolkits>=2026.1", "numpy>=1.20", "oefp==0.3.0", "pyarrow>=25,<26", "rich-click>=1.9"]
 
 [project.scripts]
 oepdist = "_oepdist_main:main"
+oecluster = "oecluster._cli_main:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0", "scikit-learn>=1.3", "scipy>=1.7", "vrzn>=0.1.0"]
