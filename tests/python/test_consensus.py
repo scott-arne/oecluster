@@ -459,3 +459,14 @@ def test_the_package_exports_what_this_task_adds():
     for name in ("consensus", "ConsensusResult"):
         assert name in oecluster.__all__
         assert hasattr(oecluster, name)
+
+
+def test_a_caller_supplied_none_for_positions_is_refused_before_native_work(
+        monkeypatch):
+    # The module marks a full member with a private sentinel; a caller's
+    # literal None must not borrow that meaning.
+    monkeypatch.setattr(
+        oecluster.oecluster, "coassociation_distances",
+        lambda *args, **kwargs: pytest.fail("the matrix was built anyway"))
+    with pytest.raises(TypeError, match="indices"):
+        oecluster.consensus([(None, [0, 0, 1, 1])], num_items=4)

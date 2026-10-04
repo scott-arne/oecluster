@@ -25,6 +25,11 @@ from . import oecluster as _oecluster
 from ._parameter_selection import ClusteringSpec, _package, _roster
 from ._stability import _dense_codes, _positions, _thread_count
 
+# Marks a member that covers every item. A private object rather than None so
+# that a caller's own ``(None, labels)`` tuple reaches _positions and is
+# refused instead of being credited with observing every item.
+_FULL = object()
+
 # Resolved only when no ``method`` extracts the partition; see _resolve_threshold.
 _DEFAULT_THRESHOLD = 0.5
 
@@ -64,7 +69,7 @@ def _member_labels(labels, expected, what):
 def _resolve_members(ensemble):
     """Turn an ensemble into ``(members, inferred)``.
 
-    A member is ``(positions, labels)`` with ``positions`` None for a full
+    A member is ``(positions, labels)`` with ``positions`` _FULL for a full
     partition. ``inferred`` is the item count the ensemble implies, from the
     first full member or a :class:`ClusterStability`'s reference, or None
     when every member is partial. Reconciling it with the caller's
@@ -90,7 +95,7 @@ def _resolve_members(ensemble):
         rows = ensemble.rows
         if not rows:
             raise ValueError("the ensemble is empty")
-        return ([(None, row.result.labels) for row in rows],
+        return ([(_FULL, row.result.labels) for row in rows],
                 rows[0].result.num_samples)
 
     if isinstance(ensemble, (str, bytes)) or not hasattr(ensemble, "__iter__"):
@@ -113,7 +118,7 @@ def _resolve_members(ensemble):
             # malformed num_items is reported before a member mismatch.
             if total is None:
                 total = element.num_samples
-            members.append((None, element.labels))
+            members.append((_FULL, element.labels))
         elif isinstance(element, tuple) and len(element) == 2:
             members.append(element)
         else:
@@ -128,9 +133,9 @@ def _validate_members(members, num_items):
     checked = []
     for index, (positions, labels) in enumerate(members):
         what = f"member {index}"
-        if positions is None:
+        if positions is _FULL:
             values = _member_labels(labels, num_items, what)
-            checked.append((None, _dense_codes(values)))
+            checked.append((_FULL, _dense_codes(values)))
             continue
         chosen = _positions(positions, num_items)
         values = _member_labels(labels, chosen.size, what)
@@ -198,7 +203,7 @@ def _build_matrix(members, num_items, options, output):
     chunks_positions = []
     chunks_labels = []
     for positions, codes in members:
-        if positions is None:
+        if positions is _FULL:
             positions = np.arange(num_items, dtype=np.intp)
         chunks_positions.append(positions)
         chunks_labels.append(codes)
