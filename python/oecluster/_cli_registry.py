@@ -122,6 +122,20 @@ def _as_int(option, raw):
     return int(number)
 
 
+def _as_float(option, raw):
+    """:raises ValueError: If ``raw`` is not a finite number."""
+    try:
+        number = float(raw)
+    except ValueError:
+        raise ValueError(f"{option} must be a number, got {raw!r}") from None
+    # An infinite or NaN threshold, epsilon or alpha is not something the
+    # native layer rejects with a message a user can act on, so every float
+    # path refuses it here rather than only the declared required ones.
+    if not math.isfinite(number):
+        raise ValueError(f"{option} must be finite, got {raw!r}")
+    return number
+
+
 def option_type(algorithm, option, entry):
     """:returns: A short type name for the schema table."""
     key = f"{algorithm}.{option}"
@@ -151,13 +165,7 @@ def coerce(algorithm, option, raw, entry):
         want = _REQUIRED_TYPES[key]
         if want is int:
             return _as_int(option, raw)
-        try:
-            number = float(raw)
-        except ValueError:
-            raise ValueError(f"{option} must be a number, got {raw!r}") from None
-        if not math.isfinite(number):
-            raise ValueError(f"{option} must be finite, got {raw!r}")
-        return number
+        return _as_float(option, raw)
     if key in _INTEGER:
         return _as_int(option, raw)
     default = entry.optional.get(option)
@@ -173,18 +181,20 @@ def coerce(algorithm, option, raw, entry):
         except ValueError:
             raise ValueError(f"{option} must be an integer, got {raw!r}") from None
     if isinstance(default, float):
-        try:
-            return float(raw)
-        except ValueError:
-            raise ValueError(f"{option} must be a number, got {raw!r}") from None
+        return _as_float(option, raw)
     # Only options whose default is None reach here, and their type is
     # genuinely unknown, so the permissive pass stays -- but it never sees a
     # required option, which is where guessing did real damage.
     for convert in (int, float):
         try:
-            return convert(raw)
+            value = convert(raw)
         except ValueError:
             continue
+        # Unknown type or not, a value that parses as a number is a number,
+        # and the finiteness rule applies to it as much as to a declared one.
+        if convert is float and not math.isfinite(value):
+            raise ValueError(f"{option} must be finite, got {raw!r}")
+        return value
     if raw.lower() in ("true", "false"):
         return raw.lower() == "true"
     return raw
@@ -207,7 +217,10 @@ def resolve(algorithm, assignments, registry, *, swept=None):
         if "=" not in item:
             raise ValueError(f"--set expects KEY=VALUE, got {item!r}")
         key, raw = item.split("=", 1)
-        key = key.strip()
+        # Both sides are stripped: a shell-quoted `--set "linkage = ward"`
+        # would otherwise carry the space into the value, where a string
+        # option smuggles it through and a bool option refuses outright.
+        key, raw = key.strip(), raw.strip()
         if key in _FLAG_OPTIONS:
             raise ValueError(f"set {key} with {_FLAG_OPTIONS[key]}, not --set")
         if key in entry.sequence:

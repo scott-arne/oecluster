@@ -84,6 +84,18 @@ def test_resolve_coerces_by_the_defaults_type():
     assert linkage == {"linkage": "ward", "n_clusters": 4}
 
 
+def test_whitespace_around_a_value_is_ignored():
+    # A shell-quoted `--set "linkage = ward"` must not smuggle a leading
+    # space into the value: the key is stripped, so the value has to be too,
+    # or a bool assignment spelled that way is refused outright.
+    registry = _registry()
+    assert _cli_registry.resolve(
+        "agglomerative", ["linkage = ward"], registry) == {"linkage": "ward"}
+    assert _cli_registry.resolve(
+        "butina", ["threshold=0.3", "reordering = true"],
+        registry) == {"threshold": 0.3, "reordering": True}
+
+
 def test_an_integer_option_refuses_a_non_integral_value():
     # The library coerces with a bare int(), so 1.5 would silently become 1.
     registry = _registry()
@@ -127,11 +139,20 @@ def test_a_non_finite_integer_option_is_refused(assignment):
         _cli_registry.resolve("k_medoids", [assignment], _registry())
 
 
-def test_a_non_finite_float_option_is_refused():
+@pytest.mark.parametrize("algorithm, assignment", [
+    # One case per coercion branch, because the guard has to sit on all
+    # three: a declared required float, an option whose default is None and
+    # so takes the permissive fallback, and one whose default is a float.
+    ("butina", "threshold=inf"),
+    ("agglomerative", "distance_threshold=inf"),
+    ("hdbscan", "cluster_selection_epsilon=inf"),
+    ("hdbscan", "alpha=nan"),
+])
+def test_a_non_finite_float_option_is_refused(algorithm, assignment):
     # float("inf") parses happily, so without the guard an infinite
     # threshold reaches the native layer.
     with pytest.raises(ValueError, match="must be finite"):
-        _cli_registry.resolve("butina", ["threshold=inf"], _registry())
+        _cli_registry.resolve(algorithm, [assignment], _registry())
 
 
 def test_every_declared_override_names_a_real_parameter():
@@ -141,7 +162,7 @@ def test_every_declared_override_names_a_real_parameter():
     from oecluster._parameter_selection import _roster
     roster = _roster()
     declared = (_cli_registry._INTEGER | _cli_registry._CONDITIONALLY_REQUIRED
-                | _cli_registry._SEQUENCE)
+                | _cli_registry._SEQUENCE | _cli_registry._REQUIRED_TYPES.keys())
     for key in declared:
         algorithm, option = key.split(".", 1)
         assert algorithm in roster, key
@@ -162,8 +183,14 @@ def test_algorithms_lists_every_roster_entry():
 def test_algorithms_shows_one_algorithms_schema():
     result = _run("algorithms", "butina")
     assert result.exit_code == 0
-    assert "threshold" in result.output
-    assert "required" in result.output
+    # Assert on the row, not on the words anywhere in the output: "required"
+    # is also a column header, printed even for an algorithm whose required
+    # list is empty, so the required/optional split could vanish entirely
+    # and a bare substring check would still hold.
+    rows = [line for line in result.output.splitlines() if "threshold" in line]
+    assert len(rows) == 1
+    assert "float" in rows[0]
+    assert "required" in rows[0]
 
 
 def test_algorithms_explains_an_ineligible_entry():
