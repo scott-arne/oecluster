@@ -5,6 +5,7 @@ parameter's kind and its default value, plus a small declared table for what
 introspection cannot reach. Deriving rather than hardcoding means a new roster
 entry appears on the command line without touching this module.
 """
+import decimal
 import difflib
 import inspect
 import math
@@ -43,6 +44,12 @@ _INTEGER = {
     "jarvis_patrick.kmin", "k_medoids.max_iterations", "k_medoids.n_clusters",
     "leiden.k", "leiden.n_iterations",
 }
+
+#: Float-valued but defaulting to ``None``, so there is no default to infer a
+#: type from. Declared rather than guessed: guessing from the value shape read
+#: ``distance_threshold=ward`` as a string and ``=true`` as a bool, which
+#: agglomerative then takes as 1.0.
+_FLOAT = {"agglomerative.distance_threshold"}
 
 #: Default ``None`` in the signature, but required when the input is a matrix.
 _CONDITIONALLY_REQUIRED = {"jarvis_patrick.k", "leiden.k"}
@@ -111,13 +118,19 @@ def build():
 
 def _as_int(option, raw):
     """:raises ValueError: If ``raw`` is not a finite exact integer."""
+    # Decimal, not float: the value is decimal text, and a binary float
+    # cannot hold it faithfully. Past 2**53 consecutive integers collapse
+    # onto the same float, so 2**53+1 came back one short, and 1e-324
+    # underflows to 0.0, which reads as the integer 0 rather than as the
+    # fraction it is. Decimal keeps the written value exact.
     try:
-        number = float(raw)
-    except ValueError:
+        number = decimal.Decimal(raw)
+    except decimal.InvalidOperation:
         raise ValueError(f"{option} must be an integer, got {raw!r}") from None
-    # int(float("inf")) raises OverflowError, and int(float("nan")) raises
-    # ValueError; both would escape as something the CLI never promised.
-    if not math.isfinite(number) or number != int(number):
+    # Decimal("inf") and Decimal("nan") parse, so finiteness is checked here
+    # rather than left to int(), which raises OverflowError on the first and
+    # an opaque ValueError on the second.
+    if not number.is_finite() or number != number.to_integral_value():
         raise ValueError(f"{option} must be an integer, got {raw!r}")
     return int(number)
 
@@ -143,6 +156,8 @@ def option_type(algorithm, option, entry):
         return _REQUIRED_TYPES[key].__name__
     if key in _INTEGER:
         return "int"
+    if key in _FLOAT:
+        return "float"
     default = entry.optional.get(option)
     if isinstance(default, bool):
         return "bool"
@@ -168,6 +183,8 @@ def coerce(algorithm, option, raw, entry):
         return _as_float(option, raw)
     if key in _INTEGER:
         return _as_int(option, raw)
+    if key in _FLOAT:
+        return _as_float(option, raw)
     default = entry.optional.get(option)
     if isinstance(default, bool):
         if raw.lower() in ("true", "false"):
@@ -182,22 +199,15 @@ def coerce(algorithm, option, raw, entry):
             raise ValueError(f"{option} must be an integer, got {raw!r}") from None
     if isinstance(default, float):
         return _as_float(option, raw)
-    # Only options whose default is None reach here, and their type is
-    # genuinely unknown, so the permissive pass stays -- but it never sees a
-    # required option, which is where guessing did real damage.
-    for convert in (int, float):
-        try:
-            value = convert(raw)
-        except ValueError:
-            continue
-        # Unknown type or not, a value that parses as a number is a number,
-        # and the finiteness rule applies to it as much as to a declared one.
-        if convert is float and not math.isfinite(value):
-            raise ValueError(f"{option} must be finite, got {raw!r}")
-        return value
-    if raw.lower() in ("true", "false"):
-        return raw.lower() == "true"
-    return raw
+    # Only an option defaulting to None reaches here, and every one the
+    # roster has is numeric and declared in a table above, so this is a
+    # registry gap rather than user error. It used to guess from the value
+    # shape, which accepted `distance_threshold=ward` as a string and
+    # `=true` as a bool. Refusing keeps the guess from coming back; the
+    # companion test over None defaults turns a new undeclared option into a
+    # suite failure rather than a message a user has to decipher.
+    raise ValueError(f"{option} has no declared type; declare one in "
+                     f"_cli_registry for {key}")
 
 
 def resolve(algorithm, assignments, registry, *, swept=None):

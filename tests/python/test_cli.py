@@ -96,11 +96,76 @@ def test_whitespace_around_a_value_is_ignored():
         registry) == {"threshold": 0.3, "reordering": True}
 
 
-def test_an_integer_option_refuses_a_non_integral_value():
+@pytest.mark.parametrize("algorithm, assignment", [
+    ("hdbscan", "min_samples=1.5"),
+    # 1e-324 underflows to 0.0 in binary floating point, so a coercion that
+    # round-trips through float reads it as the integer 0 and accepts it.
+    ("jarvis_patrick", "kmin=1e-324"),
+])
+def test_an_integer_option_refuses_a_non_integral_value(algorithm, assignment):
     # The library coerces with a bare int(), so 1.5 would silently become 1.
-    registry = _registry()
     with pytest.raises(ValueError, match="must be an integer"):
-        _cli_registry.resolve("hdbscan", ["min_samples=1.5"], registry)
+        _cli_registry.resolve(algorithm, [assignment], _registry())
+
+
+@pytest.mark.parametrize("assignment, expected", [
+    ("n_iterations=12", 12),
+    # Accepted deliberately: an integral float spelling is unambiguous.
+    ("n_iterations=12.0", 12),
+    # Past 2**53 a binary float can no longer represent consecutive
+    # integers, so a float round-trip silently returns a different number
+    # than the user typed.
+    ("n_iterations=9007199254740993", 2**53 + 1),
+    ("n_iterations=9223372036854775807", 2**63 - 1),
+])
+def test_an_integer_option_is_preserved_exactly(assignment, expected):
+    options = _cli_registry.resolve(
+        "leiden", [assignment, "k=5"], _registry())
+    assert options["n_iterations"] == expected
+
+
+@pytest.mark.parametrize("assignment", [
+    "distance_threshold=true", "distance_threshold=false",
+    "distance_threshold=ward",
+])
+def test_a_numeric_option_refuses_a_non_numeric_value(assignment):
+    # distance_threshold defaults to None, so there is no default to infer a
+    # type from. Guessing from the value shape accepted a bool, which
+    # agglomerative then reads as 1.0, and a string, which only blows up
+    # after the matrix has been loaded -- defeating the point of validating
+    # before any file is read.
+    with pytest.raises(ValueError, match="must be a number"):
+        _cli_registry.resolve("agglomerative", [assignment], _registry())
+
+
+def test_every_option_defaulting_to_none_declares_a_type():
+    # The companion to the override tripwire: an option whose default is
+    # None has no type to infer, so a new roster entry with one must declare
+    # it here rather than reach a guess.
+    declared = (_cli_registry._INTEGER | _cli_registry._FLOAT
+                | _cli_registry._REQUIRED_TYPES.keys())
+    for name, entry in _registry().items():
+        for option, default in entry.optional.items():
+            if default is None:
+                assert f"{name}.{option}" in declared, f"{name}.{option}"
+
+
+def test_the_chunk_size_tuning_knob_stays_hidden():
+    # Emptying _HIDDEN would leak chunk_size into every schema with the rest
+    # of the suite still green. Both halves are pinned, so the assertion
+    # cannot go vacuous if the roster drops the parameter instead.
+    import inspect
+
+    from oecluster._parameter_selection import _roster
+    carriers = [name for name, fn in _roster().items()
+                if "chunk_size" in inspect.signature(fn).parameters]
+    assert carriers, "no roster entry takes chunk_size; this test is vacuous"
+    registry = _registry()
+    for entry in registry.values():
+        assert "chunk_size" not in entry.known()
+    with pytest.raises(ValueError, match="no option"):
+        _cli_registry.resolve("butina", ["threshold=0.3", "chunk_size=64"],
+                              registry)
 
 
 @pytest.mark.parametrize("assignments, needle", [
