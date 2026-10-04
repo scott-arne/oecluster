@@ -78,6 +78,7 @@ __all__ = [  # noqa: RUF022
     "ClusterStabilityRecord",
     "consensus",
     "ConsensusResult",
+    "ConsensusRecord",
     "partition_agreement",
     "scaffold_agreement",
     "sar_coherence",
@@ -7750,4 +7751,4 @@ class MCSComparison:
 # Imported last: ConsensusResult subclasses ClusteringResult, which is defined
 # above, and `from . import ClusteringResult` inside the module resolves only
 # once the attribute is bound.
-from ._consensus import ConsensusResult, consensus
+from ._consensus import ConsensusRecord, ConsensusResult, consensus

@@ -93,6 +93,36 @@ def _slow_components(distances, num_items, threshold):
     return labels
 
 
+def _slow_strength(distances, labels, num_items):
+    """Monti's item and cluster consensus, computed from the distance dict."""
+    def co(i, j):
+        return 1.0 - distances[(min(i, j), max(i, j))]
+
+    item = []
+    for i in range(num_items):
+        peers = [j for j in range(num_items)
+                 if j != i and labels[j] == labels[i] and labels[i] >= 0]
+        item.append(sum(co(i, j) for j in peers) / len(peers)
+                    if peers else math.nan)
+    cluster = []
+    for label in sorted({value for value in labels if value >= 0}):
+        members = [i for i in range(num_items) if labels[i] == label]
+        pairs = [(i, j) for i in members for j in members if i < j]
+        cluster.append(sum(co(i, j) for i, j in pairs) / len(pairs)
+                       if pairs else math.nan)
+    return item, cluster
+
+
+def _slow_agreement(ensemble, consensus_labels, num_items, noise):
+    """The per-member adjusted Rand index over each member's own positions."""
+    scores = []
+    for positions, labels in _members(ensemble, num_items):
+        observed = [int(consensus_labels[p]) for p in positions]
+        scores.append(oecluster.partition_agreement(
+            observed, labels, noise=noise).adjusted_rand_index)
+    return scores
+
+
 def _condensed(distances, num_items):
     return np.array([distances[(i, j)]
                      for i in range(num_items)
@@ -470,3 +500,90 @@ def test_a_caller_supplied_none_for_positions_is_refused_before_native_work(
         lambda *args, **kwargs: pytest.fail("the matrix was built anyway"))
     with pytest.raises(TypeError, match="indices"):
         oecluster.consensus([(None, [0, 0, 1, 1])], num_items=4)
+
+
+# --- consensus strength and agreement ----------------------------------------
+
+def test_strength_matches_the_slow_reference():
+    ensemble = [
+        _result([0, 0, 1, 1]),
+        _result([0, 0, 0, 1]),
+        (np.array([0, 1, 3]), np.array([0, 0, 1])),
+    ]
+    result = oecluster.consensus(ensemble, num_items=4)
+    distances = _slow_matrix(ensemble, 4)
+    item, cluster = _slow_strength(distances, result.labels.tolist(), 4)
+    np.testing.assert_allclose(result.item_consensus, item, equal_nan=True)
+    np.testing.assert_allclose(
+        [record.cluster_consensus for record in result.records], cluster,
+        equal_nan=True)
+
+
+def test_agreement_matches_the_slow_reference_on_observed_positions():
+    ensemble = [
+        _result([0, 0, 1, 1]),
+        _result([0, 0, 0, 1]),
+        (np.array([0, 1, 3]), np.array([0, 0, 1])),
+    ]
+    result = oecluster.consensus(ensemble, num_items=4)
+    expected = _slow_agreement(ensemble, result.labels, 4, "singletons")
+    assert result.agreement == pytest.approx(expected, nan_ok=True)
+    assert result.mean_agreement == pytest.approx(
+        float(np.nanmean(result.agreement)))
+
+
+def test_mean_agreement_averages_the_defined_entries_only():
+    # Under "excluded" a member that calls every item noise leaves the index
+    # undefined, and the mean must skip it rather than poison the figure.
+    ensemble = [_result([0, 0, 1, 1]), _result([-1, -1, -1, -1])]
+    result = oecluster.consensus(ensemble, num_items=4, noise="excluded")
+    assert math.isnan(result.agreement[1])
+    assert result.mean_agreement == pytest.approx(result.agreement[0])
+
+
+def test_a_singleton_cluster_has_no_consensus_value():
+    # Item 3 agrees with nobody, so it is its own cluster.
+    ensemble = [_result([0, 0, 1, 2]), _result([0, 0, 1, 2])]
+    result = oecluster.consensus(ensemble, num_items=4)
+    singleton = result.labels[3]
+    record = next(r for r in result.records if r.label == singleton)
+    assert record.size == 1
+    assert math.isnan(record.cluster_consensus)
+    assert math.isnan(result.item_consensus[3])
+
+
+def test_records_columns_and_to_table():
+    result = oecluster.consensus([_result([0, 0, 1, 1])] * 2, num_items=4)
+    assert result.columns == ("label", "size", "cluster_consensus")
+    assert [record.label for record in result.records] == [0, 1]
+    assert [record.size for record in result.records] == [2, 2]
+    table = result.to_table()
+    assert table == [tuple(record) for record in result.records]
+    assert table is not result.to_table()
+
+
+def test_repr_heads_the_table_with_the_extraction():
+    result = oecluster.consensus([_result([0, 0, 1, 1])] * 2, num_items=4)
+    text = repr(result)
+    lines = text.splitlines()
+    assert lines[0].startswith(
+        "ConsensusResult(num_partitions=2, threshold=0.5, num_clusters=2, "
+        "mean_agreement=")
+    assert "label  size  cluster_consensus" in lines[1]
+    assert len(lines) == 2 + len(result.records)
+
+    spec = oecluster.ClusteringSpec("agglomerative", n_clusters=2)
+    by_spec = oecluster.consensus([_result([0, 0, 1, 1])] * 2, num_items=4,
+                                  method=spec)
+    assert "spec=ClusteringSpec('agglomerative'" in repr(by_spec)
+
+
+def test_item_consensus_refuses_in_place_edits():
+    result = oecluster.consensus([_result([0, 0, 1, 1])] * 2, num_items=4)
+    with pytest.raises(ValueError):
+        result.item_consensus[0] = 0.0
+
+
+def test_the_package_exports_the_record_type():
+    assert "ConsensusRecord" in oecluster.__all__
+    assert oecluster.ConsensusRecord is not None

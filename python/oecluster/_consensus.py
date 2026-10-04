@@ -17,6 +17,7 @@ reason. Everything else from the package is resolved at call time, as
 import math
 import numbers
 import os
+from typing import NamedTuple
 
 import numpy as np
 
@@ -237,6 +238,14 @@ def _clusters_from_labels(labels, num_clusters):
                  for label in range(num_clusters))
 
 
+class ConsensusRecord(NamedTuple):
+    """One consensus cluster and the evidence behind it."""
+
+    label: int
+    size: int
+    cluster_consensus: float
+
+
 class ConsensusResult(ClusteringResult):
     """Outcome of :func:`consensus`: a partition plus its evidence.
 
@@ -248,18 +257,22 @@ class ConsensusResult(ClusteringResult):
 
     Attributes other than the inherited ``labels`` and ``clusters`` are set
     here and read through properties, the convention every other result
-    subclass follows. The consensus statistics and the per-member agreement
-    join them in the next slice of this work.
+    subclass follows.
     """
 
     def __init__(self, labels, clusters, *, matrix, threshold, spec,
-                 num_partitions, unobserved_pairs):
+                 num_partitions, unobserved_pairs, records, item_consensus,
+                 agreement):
         super().__init__(labels, clusters)
+        item_consensus.setflags(write=False)
         self._matrix = matrix
         self._threshold = threshold
         self._spec = spec
         self._num_partitions = num_partitions
         self._unobserved_pairs = unobserved_pairs
+        self._records = tuple(records)
+        self._item_consensus = item_consensus
+        self._agreement = tuple(float(value) for value in agreement)
 
     @property
     def method(self):
@@ -290,6 +303,57 @@ class ConsensusResult(ClusteringResult):
         """Pairs no member observed together."""
         return self._unobserved_pairs
 
+    @property
+    def records(self):
+        """Tuple of :class:`ConsensusRecord` in ascending label order."""
+        return self._records
+
+    @property
+    def item_consensus(self):
+        """Read-only mean co-association of each item with its own cluster."""
+        return self._item_consensus
+
+    @property
+    def agreement(self):
+        """Tuple of one adjusted Rand index per member, NaN where undefined."""
+        return self._agreement
+
+    @property
+    def mean_agreement(self):
+        """Mean of the defined agreement entries, NaN when none is defined."""
+        defined = [value for value in self._agreement if not math.isnan(value)]
+        return float(np.mean(defined)) if defined else math.nan
+
+    @property
+    def columns(self):
+        """Column names of :meth:`to_table`."""
+        return ("label", "size", "cluster_consensus")
+
+    def to_table(self):
+        """Return a fresh list of tuples, one per record, matching
+        :attr:`columns`."""
+        return [tuple(record) for record in self._records]
+
+    def __repr__(self):
+        extraction = (f"threshold={self._threshold}" if self._spec is None
+                      else f"spec={self._spec!r}")
+        header = (f"ConsensusResult(num_partitions={self._num_partitions}, "
+                  f"{extraction}, num_clusters={self.num_clusters}, "
+                  f"mean_agreement={self.mean_agreement:.4f})")
+        names = self.columns
+        cells = [(str(record.label), str(record.size),
+                  f"{record.cluster_consensus:.4f}")
+                 for record in self._records]
+        widths = [max([len(name)] + [len(cell[i]) for cell in cells])
+                  for i, name in enumerate(names)]
+        lines = [header,
+                 "   " + "  ".join(f"{name:<{width}}"
+                                   for name, width in zip(names, widths))]
+        for cell in cells:
+            lines.append(("   " + "  ".join(f"{text:<{width}}"
+                                            for text, width in zip(cell, widths))).rstrip())
+        return "\n".join(lines)
+
 
 def consensus(ensemble, *, num_items=None, threshold=None, method=None,
               noise="singletons", num_threads=0, output=None):
@@ -311,7 +375,12 @@ def consensus(ensemble, *, num_items=None, threshold=None, method=None,
     :param threshold: Co-association fraction in ``[0, 1]`` for the default
         extraction; defaults to 0.5. Mutually exclusive with ``method``.
     :param method: ``None``, or a ``ClusteringSpec``, roster name or callable
-        that accepts a ``SymmetricDistanceMatrix``.
+        that accepts a ``SymmetricDistanceMatrix``. The matrix is passed by
+        reference, not copied, so the method must not write to it: a mutation
+        leaves the retained ``matrix`` disagreeing with ``num_partitions``,
+        ``unobserved_pairs`` and the consensus statistics, all of which are
+        computed from it. The same holds for writing through
+        ``result.matrix.condensed`` after the call.
     :param noise: ``"singletons"``, ``"grouped"`` or ``"excluded"``, forwarded
         to :func:`partition_agreement`; it does not affect the matrix.
     :param num_threads: Worker threads for the native passes; 0 selects the
@@ -376,6 +445,23 @@ def consensus(ensemble, *, num_items=None, threshold=None, method=None,
     num_clusters = int(labels.max()) + 1 if labels.size and labels.max() >= 0 else 0
     clusters = _clusters_from_labels(labels, num_clusters)
 
+    strength = _oecluster.consensus_strength(
+        storage, _oecluster.IntVector(labels.tolist()), options)
+    item_consensus = np.asarray(list(strength.item_consensus),
+                                dtype=np.float64)
+    cluster_consensus = list(strength.cluster_consensus)
+    records = tuple(
+        ConsensusRecord(label, len(clusters[label]),
+                        float(cluster_consensus[label]))
+        for label in range(num_clusters))
+
+    agreement = []
+    for positions, codes in members:
+        observed = labels if positions is _FULL else labels[positions]
+        agreement.append(package.partition_agreement(
+            observed, codes, noise=noise).adjusted_rand_index)
+
     return ConsensusResult(
         labels, clusters, matrix=matrix, threshold=threshold, spec=spec,
-        num_partitions=num_partitions, unobserved_pairs=unobserved_pairs)
+        num_partitions=num_partitions, unobserved_pairs=unobserved_pairs,
+        records=records, item_consensus=item_consensus, agreement=agreement)
