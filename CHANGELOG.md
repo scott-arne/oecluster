@@ -14,7 +14,7 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   any matrix-consuming `ClusteringSpec` passed as `method=`. The ensemble is
   a `ClusterStability`, a `ParameterSelection`, or a sequence of
   `ClusteringResult` and `(positions, labels)` members, so partial partitions
-  are normalized per pair. The read-only `ConsensusResult` is itself a
+  are normalized per pair. The `ConsensusResult` is itself a
   `ClusteringResult` and carries the co-association matrix, one
   `ConsensusRecord` per cluster with Monti's cluster consensus, the per-item
   consensus, and one adjusted Rand index per member.

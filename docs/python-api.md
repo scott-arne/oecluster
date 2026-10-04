@@ -1195,10 +1195,13 @@ A custom method is handed the consensus matrix itself, not a copy, because
 copying it would cost `O(N^2)` on every call and defeat the memory-mapped
 `output=` path this feature exists to support at scale. A spec's entry point
 must therefore treat the matrix as read-only: writing through
-`matrix.condensed` from inside a method leaves `result.matrix` disagreeing
-with the `num_partitions` and `unobserved_pairs` already computed from it,
-and with the consensus statistics computed after it. The same holds for
-writing through `result.matrix.condensed` after the call.
+`matrix.condensed` from inside a method contaminates the retained matrix
+and every statistic computed after it, so `item_consensus` and
+`cluster_consensus` describe the mutated matrix rather than the ensemble,
+while `num_partitions` and `unobserved_pairs`, computed before extraction,
+still describe the original. Writing through `result.matrix.condensed`
+after the call instead leaves the matrix disagreeing with statistics
+already computed from it.
 
 `threshold` and `method` are mutually exclusive. The roster entries that
 take fingerprints or molecules (`bitbirch`, `bitbirch_recluster`,
@@ -1214,6 +1217,10 @@ since PAM never appeals to the triangle inequality.
 as they do everywhere else. Its labels are canonical, `0..K-1` with `-1` for
 noise, whichever extraction produced them: the package's own consumers
 require it, and a spec's original label values are not retained.
+The result's properties cannot be rebound and `item_consensus` refuses
+in-place writes, but `labels` and the matrix are writable like any
+`ClusteringResult`, and writing to them leaves `clusters`, `records` and
+`agreement` describing the previous partition.
 
 | Attribute | Content |
 |---|---|

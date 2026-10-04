@@ -377,10 +377,12 @@ def consensus(ensemble, *, num_items=None, threshold=None, method=None,
     :param method: ``None``, or a ``ClusteringSpec``, roster name or callable
         that accepts a ``SymmetricDistanceMatrix``. The matrix is passed by
         reference, not copied, so the method must not write to it: a mutation
-        leaves the retained ``matrix`` disagreeing with ``num_partitions``,
-        ``unobserved_pairs`` and the consensus statistics, all of which are
-        computed from it. The same holds for writing through
-        ``result.matrix.condensed`` after the call.
+        contaminates the retained ``matrix`` and the consensus statistics
+        computed after it, which then describe the mutated matrix rather
+        than the ensemble, while ``num_partitions`` and ``unobserved_pairs``
+        still describe the original. Writing through
+        ``result.matrix.condensed`` after the call instead leaves the matrix
+        disagreeing with statistics already computed from it.
     :param noise: ``"singletons"``, ``"grouped"`` or ``"excluded"``, forwarded
         to :func:`partition_agreement`; it does not affect the matrix.
     :param num_threads: Worker threads for the native passes; 0 selects the
