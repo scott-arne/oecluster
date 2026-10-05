@@ -49,12 +49,6 @@ inline SphereEngineResult sphere_result_from_clusters(size_t n,
 SphereEngineResult sphere_neighbors_first(const ThresholdNeighborGraph& graph,
                                           bool reordering);
 
-inline std::runtime_error sphere_non_finite_error(size_t a, size_t b) {
-    return std::runtime_error(
-        "sphere_exclusion read a non-finite distance between items " +
-        std::to_string(a) + " and " + std::to_string(b));
-}
-
 // The nearest center to item, ties to the earlier center; best is a position
 // in centers. A non-finite read stops the scan and is reported through
 // best_distance, so the caller raises on it in a fixed order.
@@ -111,7 +105,8 @@ SphereEngineResult sphere_ordered_first(Source& source, size_t n,
         remaining.clear();
         for (size_t p = 0; p < candidates.size(); ++p) {
             if (!std::isfinite(distances[p])) {
-                throw sphere_non_finite_error(center, candidates[p]);
+                throw non_finite_distance_error("sphere_exclusion", center,
+                                                candidates[p]);
             }
             if (distances[p] <= threshold) {
                 cluster.push_back(candidates[p]);
@@ -152,7 +147,8 @@ void sphere_assign_nearest(Source& source, size_t n,
     }
     for (size_t p = 0; p < others.size(); ++p) {
         if (!std::isfinite(best_distance[p])) {
-            throw sphere_non_finite_error(centers[best[p]], others[p]);
+            throw non_finite_distance_error("sphere_exclusion",
+                                            centers[best[p]], others[p]);
         }
         clusters[best[p]].push_back(others[p]);
     }

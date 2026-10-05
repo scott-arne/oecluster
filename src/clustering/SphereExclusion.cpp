@@ -310,7 +310,7 @@ SphereExclusionResult sphere_exclusion(const StorageBackend& storage,
         for (size_t i = 0; i < n; ++i) {
             for (size_t j = i + 1; j < n; ++j, ++k) {
                 if (!std::isfinite(data[k])) {
-                    throw detail::sphere_non_finite_error(i, j);
+                    throw detail::non_finite_distance_error(SPHERE_NAME, i, j);
                 }
             }
         }

@@ -56,6 +56,7 @@ add_executable(oecluster_tests
     cpp/test_umbrella_header.cpp
     cpp/test_subset.cpp
     cpp/test_consensus.cpp
+    cpp/test_streaming_threshold_graph.cpp
 )
 
 target_link_libraries(oecluster_tests
