@@ -71,6 +71,37 @@ def _refuse_negative(matrix, path):
             "a distance matrix; a distance cannot be below zero")
 
 
+def _refuse_unrenderable_labels(matrix, path):
+    """Refuse labels that have no distinct text form.
+
+    A ``.npz`` restores whatever labels the Python API was handed, and numpy
+    brings a bytes label back as ``np.bytes_``. Bytes that are not UTF-8
+    have no faithful text form, and the lossy decodings are worse than the
+    refusal: ``errors="replace"`` maps every undecodable byte onto the one
+    replacement character, so two items export the same id and the result
+    can no longer be joined back to what the user clustered. The raw path
+    already refuses a non-UTF-8 title in its sidecar (:func:`_read_sidecar`)
+    for the same reason; refusing here is what keeps the two paths from
+    disagreeing about the same bad title.
+
+    :param matrix: The loaded matrix.
+    :param path: The file it came from, named in the message.
+    :raises InputError: If a bytes label is not valid UTF-8.
+    """
+    labels = matrix.labels if matrix.labels is not None else []
+    for index, label in enumerate(labels):
+        if not isinstance(label, bytes):
+            continue
+        try:
+            label.decode("utf-8")
+        except UnicodeDecodeError:
+            raise InputError(
+                f"{os.path.basename(path)} has a label at index {index} "
+                "whose bytes are not valid UTF-8, so it has no text form "
+                "that stays distinct from its neighbours; relabel the "
+                "matrix through the Python API") from None
+
+
 def _label_list(labels, sidecar):
     """Validate a sidecar's ``row_labels`` field.
 
@@ -236,6 +267,7 @@ def load(path, *, warn=None):
         if orientation is not True and orientation is not False:
             warn(f"{os.path.basename(path)}: orientation unproven, treating "
                  "values as distances")
+        _refuse_unrenderable_labels(matrix, path)
         _refuse_negative(matrix, path)
         return matrix
     if suffix not in (".npy", ".bin"):

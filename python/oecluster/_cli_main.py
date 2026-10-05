@@ -10,7 +10,14 @@ import os
 
 import rich_click as click
 
-from . import ClusteringSpec, __version__, _cli_input, _cli_registry, _cli_render
+from . import (
+    _SIZE_T_MAX,
+    ClusteringSpec,
+    __version__,
+    _cli_input,
+    _cli_registry,
+    _cli_render,
+)
 from ._stability import _thread_count
 
 
@@ -128,7 +135,17 @@ def _spec(algorithm, assignments, registry, threads, nonmetric, *, swept=None):
             f"{algorithm} takes {entry.kind}, not a distance matrix")
     options = _cli_registry.resolve(algorithm, assignments, registry,
                                     swept=swept)
-    options["num_threads"] = _thread_count(threads)
+    threads = _thread_count(threads)
+    # _thread_count bounds below but not above, and only some entry points
+    # bound it themselves (k_medoids does, butina does not), so an oversized
+    # value reached a native size_t setter and escaped as an OverflowError
+    # traceback after the matrix had already been loaded. The bound matches
+    # the library's own, so it refuses nothing the parameter can hold. The
+    # --set options need no equivalent: the registry caps their magnitude
+    # and the library range-checks each one with a message naming it.
+    if threads > _SIZE_T_MAX:
+        raise ValueError(f"--threads exceeds size_t maximum, got {threads}")
+    options["num_threads"] = threads
     if nonmetric and entry.accepts_nonmetric:
         options["allow_nonmetric"] = True
     return ClusteringSpec(algorithm, **options)
@@ -177,17 +194,23 @@ def _check_destinations(matrix, output, *destinations):
     overwrites the matrix while it is mapped. Every command that writes
     calls this before loading anything.
 
+    Destinations are tested against None, not for truth. ``--output ""``
+    is a shell variable that did not expand, and read as falsy it meant "no
+    output requested": the run did all its work, exited 0 and wrote nothing,
+    silently under ``--quiet``.
+
     :param matrix: The input path.
-    :param output: The ``--output`` path, or None. Its extension is checked
-        against the writer's own list as well, so a destination the writer
-        could not write is refused before the run rather than after it.
+    :param output: The ``--output`` path, or None if it was not supplied.
+        Its extension is checked against the writer's own list as well, so
+        a destination the writer could not write is refused before the run
+        rather than after it.
     :param destinations: Further destinations, such as ``--mmap``. They are
         checked for collisions only: nothing writes them through
         :func:`_cli_render.write_output`, so they carry no extension
         contract.
-    :raises ValueError: If a destination is the input or its sidecar, if two
-        destinations name one file, or if ``output`` has an extension
-        :func:`_cli_render.write_output` cannot write.
+    :raises ValueError: If a destination is empty, is the input or its
+        sidecar, if two destinations name one file, or if ``output`` has an
+        extension :func:`_cli_render.write_output` cannot write.
     """
     protected = [(matrix, "the input matrix")]
     stem, extension = os.path.splitext(matrix)
@@ -198,7 +221,11 @@ def _check_destinations(matrix, output, *destinations):
     if extension.lower() in (".npy", ".bin"):
         protected.append((stem + ".json", "the input sidecar"))
     seen = []
-    for path in [item for item in (output, *destinations) if item]:
+    for path in [item for item in (output, *destinations) if item is not None]:
+        if not path:
+            raise ValueError(
+                "a destination path is empty; an unset shell variable is "
+                "the usual cause")
         for other, what in protected:
             if _same_file(path, other):
                 raise ValueError(f"{path} is {what}; "
@@ -210,7 +237,7 @@ def _check_destinations(matrix, output, *destinations):
         seen.append(path)
     # Last, so a destination that is both unwritable and a collision is
     # reported as the collision: that is the message naming the file at risk.
-    if output:
+    if output is not None:
         _cli_render.check_output(output)
 
 
@@ -243,7 +270,7 @@ def cluster(matrix, algorithm, assignments, threads, allow_nonmetric, output,
         fraction = noise / loaded.num_samples if loaded.num_samples else 0.0
         out.print(f"clusters={result.num_clusters} noise={noise} "
                   f"({fraction:.1%})")
-    if output:
+    if output is not None:
         ids = _ids(loaded)
         named = _labels_of(loaded)
         _cli_render.write_output(output, {

@@ -767,15 +767,27 @@ def test_cluster_finds_the_four_blobs(tmp_path):
 
 def test_cluster_writes_json_matching_the_schema(tmp_path):
     out = str(tmp_path / "r.json")
-    result = _run("cluster", _matrix(tmp_path), "--algorithm", "butina",
+    path = _matrix(tmp_path)
+    result = _run("cluster", path, "--algorithm", "butina",
                   "--set", "threshold=1.0", "--output", out)
     assert result.exit_code == 0
     document = json.loads(Path(out).read_text(encoding="utf-8"))
+    # The whole envelope, not a key count: a renamed or dropped field is
+    # what a downstream reader breaks on, and a count survives a rename.
+    assert sorted(document) == ["command", "input", "result",
+                                "schema_version", "spec"]
     assert document["schema_version"] == 1
     assert document["command"] == "cluster"
-    assert sorted(document["spec"]) == ["algorithm", "options"]
+    assert document["input"] == {"path": path, "num_items": 40,
+                                 "orientation": "unknown"}
+    assert document["spec"] == {
+        "algorithm": "butina",
+        "options": {"threshold": 1.0, "num_threads": 0}}
     assert sorted(document["result"]) == ["ids", "labels", "num_clusters",
                                           "num_noise"]
+    assert document["result"]["ids"] == [f"m{i}" for i in range(40)]
+    assert document["result"]["num_clusters"] == 4
+    assert document["result"]["num_noise"] == 0
     assert len(document["result"]["labels"]) == 40
 
 
@@ -785,7 +797,14 @@ def test_cluster_writes_csv_with_the_documented_header(tmp_path):
          "--set", "threshold=1.0", "--output", out)
     lines = Path(out).read_text(encoding="utf-8").splitlines()
     assert lines[0] == "id,label"
-    assert lines[1].startswith("m0,")
+    # Every pair, not just the first: a truncated or misaligned id column
+    # reads perfectly well from row 1 alone.
+    assert len(lines) == 41
+    rows = [line.split(",") for line in lines[1:]]
+    assert [row[0] for row in rows] == [f"m{i}" for i in range(40)]
+    assigned = [row[1] for row in rows]
+    assert sorted(assigned.count(value)
+                  for value in set(assigned)) == [10, 10, 10, 10]
 
 
 def test_quiet_silences_the_table_but_not_the_warning(tmp_path):
@@ -1025,3 +1044,98 @@ def test_the_traceback_variable_treats_empty_and_zero_as_off(
         assert isinstance(result.exception, _cli_input.InputError)
     else:
         assert result.exception.__class__ is SystemExit
+
+
+def test_an_npz_label_that_is_not_utf8_is_refused(tmp_path):
+    # The .npz path takes the labels the Python API was handed, so a bytes
+    # label need not be UTF-8. The raw path already refuses a non-UTF-8
+    # title in its sidecar; refusing here keeps the two from disagreeing
+    # about the same bad title.
+    path = _patched_npz(tmp_path, "raw",
+                        labels=np.array([b"\xff", b"b", b"c", b"d"]))
+    with pytest.raises(_cli_input.InputError, match="UTF-8"):
+        _cli_input.load(path, warn=lambda message: None)
+
+
+def test_two_undecodable_byte_labels_are_refused_not_collapsed(tmp_path):
+    # errors="replace" maps every undecodable byte onto the one replacement
+    # character, so b"\xff" and b"\xfe" exported the same id and the result
+    # could no longer be joined back to the user's items.
+    path = _patched_npz(tmp_path, "raw",
+                        labels=np.array([b"\xff", b"\xfe", b"c", b"d"]))
+    out = str(tmp_path / "r.csv")
+    result = _run("cluster", path, "--algorithm", "butina",
+                  "--set", "threshold=1.0", "--output", out)
+    assert result.exit_code == 1
+    assert "UTF-8" in result.output
+    assert not Path(out).exists()
+
+
+def test_the_renderer_never_collapses_two_byte_labels():
+    # The loader refuses undecodable bytes, so this is the second line of
+    # defence rather than the first: whatever reaches the renderer, two
+    # distinct labels must not leave it as one id.
+    assert _cli_render.text(b"\xff") != _cli_render.text(b"\xfe")
+    assert _cli_render.text(b"a") == "a"
+
+
+@pytest.mark.parametrize("threads", ["18446744073709551616", str(2**100)])
+def test_an_oversized_thread_count_is_refused_before_the_load(tmp_path,
+                                                              threads):
+    # _thread_count bounds below but not above, so the value reached a
+    # native size_t setter after the matrix had been loaded and escaped as
+    # an OverflowError traceback. The input here does not exist, so a
+    # refusal that reads the file first would exit 1 instead of 2.
+    result = _run("cluster", str(tmp_path / "gone.npz"), "--algorithm",
+                  "butina", "--set", "threshold=1.0", "--threads", threads)
+    assert result.exit_code == 2
+    assert "size_t" in result.output
+
+
+def test_the_largest_in_range_thread_count_is_still_accepted(tmp_path):
+    # The bound must refuse nothing the native parameter can hold, or it is
+    # second-guessing the library rather than guarding the conversion.
+    registry = _cli_registry.build()
+    spec = _cli_main._spec("butina", ["threshold=1.0"], registry,
+                           oecluster._SIZE_T_MAX, False)
+    assert spec.options["num_threads"] == oecluster._SIZE_T_MAX
+
+
+def test_an_empty_output_path_is_refused(tmp_path):
+    # `--output "$OUT"` with an unset variable discarded the whole run:
+    # both the validation and the write tested truthiness, so "" read as
+    # "no output requested" and the command exited 0 having written
+    # nothing. Under --quiet that was completely silent.
+    result = _run("cluster", _matrix(tmp_path), "--algorithm", "butina",
+                  "--set", "threshold=1.0", "--quiet", "--output", "")
+    assert result.exit_code == 2
+    assert "empty" in result.output
+    assert "clusters=" not in result.output
+
+
+def test_omitting_output_entirely_is_still_fine(tmp_path):
+    # The other half of the distinction: not supplied is not the same as
+    # supplied empty, and only the second is an error.
+    result = _run("cluster", _matrix(tmp_path), "--algorithm", "butina",
+                  "--set", "threshold=1.0")
+    assert result.exit_code == 0
+
+
+@pytest.mark.parametrize("algorithm, assignment", [
+    ("k_medoids", "n_clusters=18446744073709551615"),
+    ("hdbscan", "min_cluster_size=18446744073709551615"),
+    ("agglomerative", "n_clusters=18446744073709551615"),
+])
+def test_a_set_integer_at_the_native_maximum_exits_cleanly(tmp_path,
+                                                           algorithm,
+                                                           assignment):
+    # The companion to the --threads bound, and the reason --set needs no
+    # equivalent: the registry caps magnitude at the widest native integer
+    # and the library range-checks each option by name, so the overflow
+    # --threads produced cannot be reached this way. Pinned so that
+    # widening either cap reopens it as a failure here rather than as a
+    # traceback in front of a user.
+    result = _run("cluster", _matrix(tmp_path), "--algorithm", algorithm,
+                  "--quiet", "--set", assignment)
+    assert result.exit_code == 2
+    assert result.exception.__class__ is SystemExit

@@ -53,11 +53,18 @@ def text(value):
     writes titles as JSON strings; the ``.npz`` path accepts them because they
     are the user's own API input, so the rendering happens here instead.
 
+    Undecodable bytes cannot reach here from a loaded matrix, because
+    ``_cli_input`` refuses them outright. The fallback is
+    ``backslashreplace`` rather than ``replace`` so that if one ever did,
+    two labels would still not collapse onto a single id: ``replace`` maps
+    every undecodable byte onto the same character, which is the exact
+    failure the loader's refusal exists to prevent.
+
     :param value: A label of any type.
     :returns: Its text form.
     """
     if isinstance(value, bytes):
-        return value.decode("utf-8", "replace")
+        return value.decode("utf-8", "backslashreplace")
     return str(value)
 
 
