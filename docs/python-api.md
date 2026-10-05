@@ -1498,6 +1498,26 @@ sidecar beside it: the sidecar supplies the shape and the provenance, and the
 titles when it records any. A missing sidecar is refused rather than guessed
 around.
 
+A `.npy` read this way must be one-dimensional. `oepdist` writes a condensed
+`pdist` array as 1-D and a cross-distance matrix as 2-D, and it writes the
+data file before its sidecar — so an interrupted run can leave a 2-D
+cross-distance file beside the previous run's `pdist` sidecar. Flattened, a
+2x3 cross matrix holds six values, which is exactly the condensed size of
+four items, so every count agrees and the cross-distances would cluster as
+four items. The shape is the only thing that disagrees, and it is named in
+the refusal:
+
+```
+cross.npy holds an array of shape (2, 3), not a one-dimensional condensed
+array; oepdist writes a cross-distance matrix as 2-D, so this file and its
+pdist sidecar are from different runs
+```
+
+A `.bin` cannot be checked this way. It is doubles and nothing else, so a 2x3
+cross matrix and a four-item condensed matrix are the same 48 bytes, and a
+mismatched pair is indistinguishable from a good one. Keep a `.bin` with the
+sidecar written beside it.
+
 `.csv` is not accepted. `oepdist` writes titles unquoted, which a title
 containing a comma makes unparseable, writes values at eight significant
 digits, and records no provenance at all. Re-run `oepdist` with a `.npy`
@@ -1535,6 +1555,13 @@ summary on stdout only. A `.npz` built by
 `SymmetricDistanceMatrix.from_condensed()` warns too: that constructor stamps
 all three capability facts `"unknown"`, because the caller asserting an
 orientation is not evidence.
+
+A sidecar that records `similarity: false` is proof the other way, and is
+read as such: no warning, and `input.orientation` reads `"true"` in the JSON
+output. The producer's record is evidence where a caller's assertion is not,
+so the loader stamps the matrix it builds with what the sidecar proved — and
+a `.npz` saved from that matrix carries the fact and reloads without a
+warning.
 
 Two more refusals land before the clustering rather than after it. A matrix
 holding a negative value is not a distance matrix. And two *different* labels

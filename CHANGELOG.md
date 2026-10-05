@@ -15,12 +15,20 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   and `--set`; `algorithms` takes neither, only an optional algorithm name.
   Options are validated against the roster before any file is read, so an
   unknown one is reported with a suggestion rather than as a `TypeError` from
-  deep in the library. `--threads` and `--allow-nonmetric` are first-class
-  flags and route to every place the underlying call needs them.
+  deep in the library. The workflow options are checked before the read too
+  — `--criterion`, `--min-clusters`, `--max-clusters`,
+  `--max-noise-fraction`, `--resamples`, `--fraction`, `--seed` and
+  `--threshold` — by calling the library's own validators, so a bad bound
+  never costs a file read. `--threads` and `--allow-nonmetric` are
+  first-class flags and route to every place the underlying call needs them.
 - The command line reads `.npz` matrices and `oepdist`'s `.npy` and `.bin`
   output through its JSON sidecar. A file holding similarities rather than
-  distances is refused, and one whose orientation the sidecar does not
-  record warns on stderr and proceeds, matching the library's own rule.
+  distances is refused, one whose orientation neither the sidecar nor the
+  archive records warns on stderr and proceeds, matching the library's own
+  rule, and one the sidecar proves holds distances is reported as such. A
+  `.npy` on the sidecar path must be one-dimensional: `oepdist` writes a
+  condensed matrix as 1-D and a cross-distance matrix as 2-D, and a 2-D
+  file beside a mismatched sidecar would otherwise cluster as nonsense.
   `.csv` is not accepted: `oepdist` writes titles unquoted and values at
   eight significant digits, and records no provenance.
 - `--output` writes results as CSV or JSON. The JSON carries

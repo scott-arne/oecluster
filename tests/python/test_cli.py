@@ -374,19 +374,36 @@ def test_bin_and_npy_agree(tmp_path):
 
 
 def test_an_npz_round_trips(tmp_path):
-    source = _cli_input.load(_npy(tmp_path), warn=lambda message: None)
+    # The source sidecar records no similarity flag, so nothing proves the
+    # orientation and the saved archive inherits that: the reload warns.
+    # A sidecar that does record similarity=false proves it, and the
+    # loader now stamps the matrix with what it proved, so the same round
+    # trip from `_npy(tmp_path)` would warn about nothing -- which is the
+    # point of the stamp, and the subject of its own test below.
+    source = _cli_input.load(_npy(tmp_path, params={}),
+                             warn=lambda message: None)
     out = str(tmp_path / "m.npz")
     source.to_file(out)
     seen = []
     loaded = _cli_input.load(out, warn=seen.append)
     assert loaded.num_samples == source.num_samples
-    # from_condensed stamps is_distance "unknown" unconditionally, so every
-    # .npz written from a raw input warns on reload. Asserted here because
-    # this is the only test that reaches the .npz warning at all: with the
-    # callback discarded, deleting the branch left the suite green, and the
-    # orientation warning is what stands between a similarity file and
-    # silently inverted clusters.
+    # Asserted here because with the callback discarded, deleting the
+    # branch left the suite green, and the orientation warning is what
+    # stands between a similarity file and silently inverted clusters.
     assert "orientation unproven" in seen[0]
+
+
+def test_a_proven_sidecar_survives_the_round_trip(tmp_path):
+    # The other half: a sidecar that proves distances is carried into the
+    # matrix, so an archive saved from it is proven too and reloads
+    # without a warning.
+    source = _cli_input.load(_npy(tmp_path), warn=lambda message: None)
+    assert source.is_distance is True
+    out = str(tmp_path / "p.npz")
+    source.to_file(out)
+    seen = []
+    assert _cli_input.load(out, warn=seen.append).is_distance is True
+    assert seen == []
 
 
 def test_a_similarity_file_is_refused(tmp_path):
@@ -1872,18 +1889,50 @@ def test_selection_without_the_flag_is_refused_on_a_nonmetric_matrix(
 def test_nothing_is_read_before_validation_finishes(tmp_path, monkeypatch):
     # The recording stub the spec asks for: if validation is ordered
     # correctly, a bad option is reported without the loader ever running.
+    # An AssertionError escaping the stub is caught by the translator's
+    # catch-all and exits 1, so exit 2 is what distinguishes the two.
+    #
+    # Every option a command validates itself is listed, not a sample of
+    # them: the four workflow bounds and the two resampling knobs were all
+    # left to the library, which checks them only once it has the matrix,
+    # and the two cases this list did cover (registry errors, --resamples)
+    # kept passing throughout.
     def refuse(*args, **kwargs):
         raise AssertionError("the matrix was loaded before validation")
 
     monkeypatch.setattr("oecluster._cli_main._cli_input.load", refuse)
+    sweep = ["--algorithm", "butina", "--parameter", "threshold",
+             "--values", "0.5,0.8"]
+    resample = ["--algorithm", "butina", "--set", "threshold=1.0"]
     for args in (
         ["cluster", "x.npz", "--algorithm", "butina", "--set", "nope=1"],
         ["cluster", "x.npz", "--algorithm", "nosuch", "--set", "a=1"],
+        ["cluster", "x.npz", "--algorithm", "butina", "--set",
+         "threshold=1.0", "--threads", "-1"],
         ["consensus", "x.npz", "--member", "butina;thresold=1.0"],
         ["consensus", "x.npz", "--algorithm", "butina", "--set",
          "threshold=1.0", "--resamples", "4", "--member", "dbscan;eps=1"],
+        ["consensus", "x.npz", "--member", "butina;threshold=1.0",
+         "--threshold", "1.5"],
+        ["consensus", "x.npz", "--algorithm", "butina", "--set",
+         "threshold=1.0", "--resamples", "0"],
         ["select-parameter", "x.npz", "--algorithm", "butina",
          "--parameter", "nosuch", "--values", "1"],
+        ["select-parameter", "x.npz", *sweep, "--criterion", "nosuch"],
+        # A validity index cluster_report does not produce: the library
+        # names the two refusals apart, so both are reached from here.
+        ["select-parameter", "x.npz", *sweep, "--criterion",
+         "isim_silhouette"],
+        ["select-parameter", "x.npz", *sweep, "--min-clusters", "-5"],
+        ["select-parameter", "x.npz", *sweep, "--max-clusters", "0"],
+        ["select-parameter", "x.npz", *sweep, "--max-noise-fraction", "2.0"],
+        ["select-parameter", "x.npz", *sweep, "--max-noise-fraction", "-0.5"],
+        ["select-parameter", "x.npz", *sweep, "--min-clusters", "9",
+         "--max-clusters", "3"],
+        ["stability", "x.npz", *resample, "--resamples", "0"],
+        ["stability", "x.npz", *resample, "--fraction", "5.0"],
+        ["stability", "x.npz", *resample, "--fraction", "0"],
+        ["stability", "x.npz", *resample, "--seed", "-1"],
     ):
         result = _run(*args)
         assert result.exit_code == 2, args
@@ -2466,3 +2515,150 @@ def test_traceback_still_re_raises_an_unanticipated_exception(tmp_path,
     result = _run("cluster", _matrix(tmp_path), "--algorithm", "butina",
                   "--set", "threshold=1.0", "--traceback")
     assert isinstance(result.exception, KeyError)
+
+
+@pytest.mark.parametrize("shape", [(2, 3), (3, 2), ()])
+def test_an_npy_that_is_not_one_dimensional_is_refused(tmp_path, shape):
+    # oepdist writes a pdist array 1-D and a cdist array 2-D, and it writes
+    # the data file before its sidecar -- so an interrupted run leaves a
+    # cdist file beside the previous run's pdist sidecar. Flattened, a 2x3
+    # cdist is six values, which is exactly the pair count of four items:
+    # every length check then agreed and the cross-distances clustered as
+    # four items, at exit 0, with nothing on stderr.
+    path = str(tmp_path / "cross.npy")
+    np.save(path, np.full(shape, 0.5))
+    _write_sidecar(path, 4 if shape else 2, row_labels=[])
+    with pytest.raises(_cli_input.InputError, match=r"shape"):
+        _cli_input.load(path, warn=lambda message: None)
+
+
+def test_the_refused_shape_is_named(tmp_path):
+    # The shape is the one fact that tells the user which file they have.
+    path = str(tmp_path / "cross.npy")
+    np.save(path, np.full((2, 3), 0.5))
+    _write_sidecar(path, 4, row_labels=[])
+    with pytest.raises(_cli_input.InputError, match=r"\(2, 3\)"):
+        _cli_input.load(path, warn=lambda message: None)
+
+
+def test_a_sidecar_only_refusal_precedes_the_payload_read(tmp_path,
+                                                          monkeypatch):
+    # _values reads the whole O(N^2) payload, so a file whose sidecar
+    # already proves it is a similarity used to cost its own size in
+    # memory before being refused on metadata that was there all along.
+    # The read is stubbed rather than measured: a file large enough to
+    # exhaust memory is not a test.
+    def refuse(*args, **kwargs):
+        raise AssertionError("the payload was read before the refusal")
+
+    monkeypatch.setattr(_cli_input, "_values", refuse)
+    for params in ({"similarity": True}, {"similarity": "true"}, 0):
+        path = _npy(tmp_path, params=params)
+        with pytest.raises(_cli_input.InputError):
+            _cli_input.load(path, warn=lambda message: None)
+    path = _npy(tmp_path, row_labels="abc")
+    with pytest.raises(_cli_input.InputError, match="array of strings"):
+        _cli_input.load(path, warn=lambda message: None)
+
+
+def test_an_unproven_orientation_still_warns_only_after_the_read(tmp_path):
+    # The ordering fix moved the checks, not the warning: a file that is
+    # about to be refused never warned first, and must not start. Here the
+    # sidecar records no similarity flag and the value count is wrong, so
+    # the old order printed nothing before refusing.
+    path = str(tmp_path / "odd.npy")
+    np.save(path, np.zeros(5))
+    _write_sidecar(path, 12, params={})
+    seen = []
+    with pytest.raises(_cli_input.InputError, match="condensed"):
+        _cli_input.load(path, warn=seen.append)
+    assert seen == []
+
+
+@pytest.mark.parametrize("suffix", [".npy", ".bin"])
+def test_a_sidecar_proven_distance_reports_orientation_true(tmp_path, suffix):
+    # The CLI refuses a sidecar-proven similarity and warns when the flag
+    # is absent, so it plainly reads the flag as evidence -- but
+    # from_condensed stamps "unknown" on principle, and the document then
+    # reported "unknown" for a file the loader had already judged. Acting
+    # on evidence and declining to publish it is the defect; "true" was
+    # unreachable on this path for the same reason.
+    values = _condensed()
+    path = str(tmp_path / f"d{suffix}")
+    if suffix == ".npy":
+        np.save(path, values)
+    else:
+        values.tofile(path)
+    _write_sidecar(path, 12)
+    out = str(tmp_path / "r.json")
+    result = _run("cluster", path, "--algorithm", "butina", "--set",
+                  "threshold=1.0", "--output", out, "--quiet")
+    assert result.exit_code == 0, result.output
+    assert "orientation unproven" not in result.stderr
+    document = json.loads(Path(out).read_text(encoding="utf-8"))
+    assert document["input"]["orientation"] == "true"
+
+
+@pytest.mark.parametrize("suffix", [".npy", ".bin"])
+def test_a_silent_sidecar_still_reports_orientation_unknown(tmp_path, suffix):
+    # The other half: the stamp follows the evidence, so a sidecar that
+    # records no flag still reports "unknown" and still warns. Without
+    # this, stamping "true" unconditionally would pass the test above.
+    values = _condensed()
+    path = str(tmp_path / f"d{suffix}")
+    if suffix == ".npy":
+        np.save(path, values)
+    else:
+        values.tofile(path)
+    _write_sidecar(path, 12, params={})
+    out = str(tmp_path / "r.json")
+    result = _run("cluster", path, "--algorithm", "butina", "--set",
+                  "threshold=1.0", "--output", out, "--quiet")
+    assert result.exit_code == 0, result.output
+    assert "orientation unproven" in result.stderr
+    document = json.loads(Path(out).read_text(encoding="utf-8"))
+    assert document["input"]["orientation"] == "unknown"
+
+
+@pytest.mark.parametrize("criterion, needle", [
+    ("nosuch", "validity index"),
+    ("isim_silhouette", "not produced"),
+])
+def test_the_criterion_check_reuses_the_librarys_own(tmp_path, criterion,
+                                                     needle):
+    # Checked early by calling the library's checker, not by restating its
+    # list of indices here: both of its refusals must still arrive, with
+    # its own wording, from a command that has read nothing.
+    result = _run("select-parameter", str(tmp_path / "gone.npz"),
+                  "--algorithm", "butina", "--parameter", "threshold",
+                  "--values", "0.5,0.8", "--criterion", criterion)
+    assert result.exit_code == 2
+    assert needle in " ".join(result.output.split())
+
+
+@pytest.mark.parametrize("option, value, needle", [
+    ("--min-clusters", "-5", "at least 1"),
+    ("--max-clusters", "0", "at least 1"),
+    ("--max-noise-fraction", "2.0", "between 0 and 1"),
+])
+def test_the_selection_bounds_keep_the_librarys_wording(tmp_path, option,
+                                                        value, needle):
+    # _validate_bounds is called rather than its three ranges restated, so
+    # the message a CLI user sees is the library's own.
+    result = _run("select-parameter", str(tmp_path / "gone.npz"),
+                  "--algorithm", "butina", "--parameter", "threshold",
+                  "--values", "0.5,0.8", option, value)
+    assert result.exit_code == 2
+    assert needle in " ".join(result.output.split())
+
+
+@pytest.mark.parametrize("option, value, needle", [
+    ("--fraction", "5.0", "(0, 1]"),
+    ("--seed", "-1", "non-negative"),
+])
+def test_the_resampling_bounds_keep_the_librarys_wording(tmp_path, option,
+                                                         value, needle):
+    result = _run("stability", str(tmp_path / "gone.npz"), "--algorithm",
+                  "butina", "--set", "threshold=1.0", option, value)
+    assert result.exit_code == 2
+    assert needle in " ".join(result.output.split())

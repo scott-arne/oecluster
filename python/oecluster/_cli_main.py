@@ -20,8 +20,9 @@ from . import (
     _cli_input,
     _cli_registry,
     _cli_render,
+    _parameter_selection,
 )
-from ._stability import _thread_count
+from ._stability import _fraction_value, _seed_value, _thread_count
 
 
 @click.group()
@@ -190,6 +191,36 @@ def _spec(algorithm, assignments, registry, threads, nonmetric, *, swept=None,
     if nonmetric and entry.accepts_nonmetric:
         options["allow_nonmetric"] = True
     return ClusteringSpec(algorithm, **options)
+
+
+def _check_criterion(criterion):
+    """Check ``--criterion`` before the matrix is read.
+
+    ``select_parameter`` validates the criterion itself, but only after
+    :func:`_scorer_for` has been handed the loaded input -- so a misspelled
+    index cost a whole file read, against the rule that nothing is read
+    before validation finishes. The scorer is knowable without the file:
+    :func:`_cli_input.load` returns a ``SymmetricDistanceMatrix`` and
+    nothing else, so ``cluster_report`` is the only scorer this command can
+    reach. The library's own checker is then called rather than its list of
+    indices restated here, which is what keeps the two from drifting.
+
+    The one refusal that genuinely needs the file -- sparse storage, which
+    ``cluster_report`` cannot score -- stays in the library, where the
+    storage can be seen.
+
+    :param criterion: The ``--criterion`` value, or None for the default.
+    :raises TypeError: As the library's own check does.
+    :raises ValueError: For a criterion that is not a validity index, or
+        that ``cluster_report`` does not produce.
+    """
+    scorer = _parameter_selection._Scorer(
+        "cluster_report", oecluster.cluster_report, oecluster.ClusterReport,
+        True)
+    # A throwaway mapping: _resolve_criterion merges the stage flag the
+    # criterion needs into whatever it is handed, and the real call makes
+    # its own copy from the command's report_options.
+    _parameter_selection._resolve_criterion(criterion, scorer, {})
 
 
 def _labels_of(matrix):
@@ -464,6 +495,14 @@ def select_parameter(matrix, algorithm, parameter, values, assignments,
     # mistyped exponent int() expands into a billion digits.
     swept = [_cli_registry.coerce(algorithm, parameter, field, entry)
              for field in fields]
+    # Last before the read, and before it on purpose. select_parameter
+    # checks all four itself, but it cannot be called until the matrix is
+    # loaded, so every one of them cost a file read first. Its own
+    # _validate_bounds is called here rather than the three ranges
+    # restated, so the CLI cannot drift from the bounds the sweep applies.
+    _parameter_selection._validate_bounds(max_noise_fraction, min_clusters,
+                                          max_clusters)
+    _check_criterion(criterion)
     loaded = _cli_input.load(matrix)
     # cluster_report runs its own metric gate, and select_parameter forwards
     # report_options to it unchanged -- so the flag has to reach both places
@@ -550,6 +589,13 @@ def stability(matrix, algorithm, assignments, resamples, fraction, seed,
     # validation finishes.
     if resamples < 1:
         raise ValueError(f"--resamples must be positive, got {resamples}")
+    # The same rule, for the two options whose range the library owns. Its
+    # validators are called rather than their limits restated, so a change
+    # to either range cannot leave the CLI refusing a value the library
+    # would take, or taking one it would refuse; and calling them here is
+    # what moves the refusal in front of the read.
+    _fraction_value(fraction)
+    _seed_value(seed)
     registry = _cli_registry.build()
     spec = _spec(algorithm, assignments, registry, threads, allow_nonmetric)
     loaded = _cli_input.load(matrix)

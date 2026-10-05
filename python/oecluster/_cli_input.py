@@ -169,6 +169,41 @@ def _items_from_pairs(count):
     return n if n * (n - 1) // 2 == count else None
 
 
+def _sidecar_orientation(params):
+    """Read the sidecar's similarity flag as orientation evidence.
+
+    Separated from the warning it may owe so that it can run before the
+    values are read. Whether a file holds similarities is a fact about its
+    metadata alone, and deciding it after :func:`_values` means an O(N^2)
+    payload is pulled into memory before a refusal its sidecar already
+    proved. The caller emits the warning instead, once the file has
+    survived every refusal: warning about a file that is then refused
+    anyway would be noise this never used to print.
+
+    :param params: The sidecar's ``params`` object, already typed.
+    :returns: True if the sidecar proves distances, False if it is silent
+        and the caller owes an unproven-orientation warning.
+    :raises InputError: If the flag proves a similarity, or is neither JSON
+        boolean.
+    """
+    similarity = params.get("similarity")
+    if similarity is True:
+        raise InputError(
+            "this file holds similarities, not distances; re-run oepdist "
+            "without --sim, or convert it with the Python API")
+    if similarity is False:
+        return True
+    if similarity is None:
+        return False
+    # Only the JSON booleans mean anything here. Tested by identity, so
+    # 1 and "true" reach this refusal rather than either branch above:
+    # neither refused nor warned about, they would be clustered as proven
+    # distances on the strength of a flag that in fact says the opposite.
+    raise InputError(
+        f"sidecar records similarity={similarity!r}, which is neither "
+        "true nor false; orientation cannot be read from it")
+
+
 def _read_sidecar(path, raw_path):
     if not os.path.isfile(path):
         raise InputError(
@@ -200,8 +235,8 @@ def _values(path, suffix):
     :param path: The raw input file.
     :param suffix: Its lowercased extension, ``.npy`` or ``.bin``.
     :returns: The file's values as one-dimensional float64.
-    :raises InputError: If the file cannot be read, or holds anything but
-        real numbers.
+    :raises InputError: If the file cannot be read, holds anything but real
+        numbers, or is not a one-dimensional array.
     """
     try:
         if suffix == ".npy":
@@ -231,6 +266,22 @@ def _values(path, suffix):
         raise InputError(
             f"{os.path.basename(path)} holds {array.dtype} values; a "
             "distance matrix must hold real numbers")
+    # Checked before the ravel, which is where the rank is lost. oepdist
+    # writes a pdist array as 1-D and a cdist array as 2-D
+    # (tools/OutputWriter.cpp:160-185), and it writes the data file before
+    # its sidecar -- so an interrupted run leaves a 2-D cdist file beside
+    # the previous run's pdist sidecar. Flattened, a 2x3 cdist is six
+    # values, which is exactly the pair count of four items: every length
+    # check below then agrees and the cross-distances cluster as four
+    # items. A .bin cannot be caught this way and does not reach here with
+    # a rank: np.frombuffer yields 1-D whatever was written, because the
+    # format records no shape at all.
+    if array.ndim != 1:
+        raise InputError(
+            f"{os.path.basename(path)} holds an array of shape "
+            f"{array.shape}, not a one-dimensional condensed array; "
+            "oepdist writes a cross-distance matrix as 2-D, so this file "
+            "and its pdist sidecar are from different runs")
     # Left outside the guard above: on an array already known to be
     # real-numeric the only failure left is MemoryError, which must reach
     # the caller as itself.
@@ -326,15 +377,12 @@ def load(path, *, warn=None):
     rows, cols = sidecar.get("n_rows"), sidecar.get("n_cols")
     if rows != cols:
         raise InputError(f"sidecar is {rows}x{cols}, not square")
-    values = _values(path, suffix)
-    items = _items_from_pairs(values.size)
-    if items is None:
-        raise InputError(
-            f"{values.size} values is not a condensed symmetric matrix")
-    if items != rows:
-        raise InputError(
-            f"{values.size} values describe {items} items, but the sidecar "
-            f"says {rows}")
+    # Every refusal the sidecar alone can settle runs here, ahead of
+    # _values: that call reads the whole O(N^2) payload, so a file the
+    # metadata already disqualifies -- a proven similarity above all --
+    # used to cost its own size in memory before being refused on a fact
+    # that was in the JSON all along.
+    #
     # Typed before the default is applied, not after: `or {}` turned every
     # falsy non-object -- [], 0, "" and False -- into "no params", so a
     # producer fault read as a sidecar that simply recorded nothing.
@@ -345,23 +393,23 @@ def load(path, *, warn=None):
         raise InputError(
             f"{os.path.basename(_sidecar_path(path))} has a non-object "
             "'params' field")
-    similarity = params.get("similarity")
-    if similarity is True:
+    proven = _sidecar_orientation(params)
+    labels = _label_list(sidecar.get("row_labels"), _sidecar_path(path))
+    values = _values(path, suffix)
+    items = _items_from_pairs(values.size)
+    if items is None:
         raise InputError(
-            "this file holds similarities, not distances; re-run oepdist "
-            "without --sim, or convert it with the Python API")
-    if similarity is None:
+            f"{values.size} values is not a condensed symmetric matrix")
+    if items != rows:
+        raise InputError(
+            f"{values.size} values describe {items} items, but the sidecar "
+            f"says {rows}")
+    # Emitted here rather than beside the check it comes from, so that the
+    # reordering above changed no output: a file that is about to be
+    # refused never warned first, and still does not.
+    if not proven:
         warn(f"{os.path.basename(path)}: orientation unproven (the sidecar "
              "records no similarity flag), treating values as distances")
-    elif similarity is not False:
-        # Only the JSON booleans mean anything here. Tested by identity, so
-        # 1 and "true" fall through both branches above: neither refused nor
-        # warned about, they would be clustered as proven distances on the
-        # strength of a flag that in fact says the opposite.
-        raise InputError(
-            f"sidecar records similarity={similarity!r}, which is neither "
-            "true nor false; orientation cannot be read from it")
-    labels = _label_list(sidecar.get("row_labels"), _sidecar_path(path))
     # from_condensed runs the library's own validation and metric probe; its
     # refusals are the user's problem with this file, so they arrive as
     # InputError like every other unusable input rather than as a bare
@@ -377,6 +425,18 @@ def load(path, *, warn=None):
         raise InputError(
             f"{os.path.basename(path)} is not a usable distance matrix: "
             f"{error}") from None
+    # from_condensed stamps every capability "unknown" on principle -- it
+    # has no metric object to interrogate and will not take a caller's word
+    # -- and that principle is right for the generic entry point, so it is
+    # left alone. This path is not generic: the producer recorded
+    # similarity=false beside the data, which is the same evidence the
+    # refusal two steps up acts on. Acting on it and then reporting
+    # "unknown" put the CLI in the position of trusting evidence it
+    # declined to publish, in a versioned schema; stamping it here is what
+    # makes the orientation the document reports the orientation the
+    # loader decided.
+    if proven:
+        matrix._facts["is_distance"] = True
     # Run on this path too: _label_list proves the labels are strings, not
     # that they can be written. A JSON "\udcff" escape decodes to a lone
     # surrogate, which is a perfectly ordinary str until the writer tries
