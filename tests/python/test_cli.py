@@ -1658,20 +1658,33 @@ def test_a_singleton_records_consensus_encodes_as_null(tmp_path):
     assert None in values
 
 
-def test_the_consensus_noise_mode_reaches_the_json_output(tmp_path):
-    # --noise governs the agreement call behind mean_agreement and nothing
-    # else, exactly as it does for stability, so the mode travels beside the
-    # statistic as its unit: the same partitions score differently under
-    # each, and a number recorded without its convention cannot be compared
-    # across runs that chose differently.
-    out = str(tmp_path / "n.json")
+def _consensus_payload(tmp_path, mode):
+    # butina at two thresholds plus dbscan disagree, which is what makes the
+    # three modes score differently; an ensemble that agrees scores 1.0
+    # under all three and the comparison below goes vacuous.
+    out = str(tmp_path / f"{mode}.json")
     result = _run("consensus", _matrix(tmp_path), "--member",
-                  "butina;threshold=1.0", "--member", "dbscan;eps=1.5",
-                  "--noise", "excluded", "--quiet", "--output", out)
+                  "butina;threshold=1.0", "--member", "butina;threshold=0.3",
+                  "--member", "dbscan;eps=0.3", "--noise", mode, "--quiet",
+                  "--output", out)
     assert result.exit_code == 0, result.output
-    document = json.loads(Path(out).read_text(encoding="utf-8"))
-    assert document["result"]["noise"] == "excluded"
-    assert "mean_agreement" in document["result"]
+    return json.loads(Path(out).read_text(encoding="utf-8"))
+
+
+def test_the_consensus_noise_mode_reaches_the_json_output(tmp_path):
+    # Three distinct values, not merely the echoed mode: --noise is copied
+    # straight from the parameter into the document, so asserting only
+    # result["noise"] passes with the kernel argument deleted. This is the
+    # shape the stability test already uses, for the same reason.
+    documents = {mode: _consensus_payload(tmp_path, mode)
+                 for mode in ("singletons", "grouped", "excluded")}
+    assert len({document["result"]["mean_agreement"]
+                for document in documents.values()}) == 3
+    for mode, document in documents.items():
+        # The mode travels beside the statistic as its unit: the same
+        # partitions score differently under each, so a mean_agreement
+        # recorded without its convention cannot be compared across runs.
+        assert document["result"]["noise"] == mode
 
 
 def test_the_consensus_csv_stays_one_row_per_item(tmp_path):
@@ -1969,3 +1982,155 @@ def test_the_traceback_environment_variable_does_too(tmp_path, monkeypatch):
     result = _run("cluster", str(tmp_path / "gone.npz"), "--algorithm",
                   "butina", "--set", "threshold=1.0")
     assert isinstance(result.exception, _cli_input.InputError)
+
+
+def test_consensus_writes_json_matching_the_schema(tmp_path):
+    # The whole envelope and the whole result key set, not a key count:
+    # consensus has the longest schema in the design and a count survives a
+    # rename. The ensemble deliberately disagrees, so every statistic below
+    # is a real number rather than the 1.0 a unanimous ensemble produces --
+    # a constant substituted for any of them fails here.
+    path = _matrix(tmp_path)
+    out = str(tmp_path / "s.json")
+    result = _run("consensus", path, "--member", "butina;threshold=1.0",
+                  "--member", "butina;threshold=0.3", "--member",
+                  "dbscan;eps=0.3", "--quiet", "--output", out)
+    assert result.exit_code == 0, result.output
+    document = json.loads(Path(out).read_text(encoding="utf-8"))
+    assert sorted(document) == ["command", "input", "result",
+                                "schema_version", "spec"]
+    assert document["schema_version"] == 1
+    assert document["command"] == "consensus"
+    assert document["input"] == {"path": path, "num_items": 40,
+                                 "orientation": "unknown"}
+    outcome = document["result"]
+    assert sorted(outcome) == [
+        "agreement", "ids", "item_consensus", "labels", "mean_agreement",
+        "noise", "num_clusters", "num_noise", "num_partitions", "records",
+        "threshold", "unobserved_pairs"]
+    assert outcome["ids"] == [f"m{i}" for i in range(40)]
+    assert len(outcome["labels"]) == 40
+    assert outcome["num_clusters"] == 12
+    assert outcome["num_noise"] == sum(1 for v in outcome["labels"] if v < 0)
+    assert outcome["num_partitions"] == 3
+    # Zero here and non-zero for a bootstrap ensemble below, so no one
+    # constant satisfies both.
+    assert outcome["unobserved_pairs"] == 0
+    assert outcome["threshold"] == 0.5
+    assert outcome["noise"] == "singletons"
+    # One per member, all different from each other and from 1.0.
+    assert len(outcome["agreement"]) == 3
+    assert len(set(outcome["agreement"])) == 3
+    assert all(0.0 < value < 1.0 for value in outcome["agreement"])
+    assert 0.0 < outcome["mean_agreement"] < 1.0
+    assert len(outcome["item_consensus"]) == 40
+    assert len({str(value) for value in outcome["item_consensus"]}) > 1
+    assert len(outcome["records"]) == 12
+    assert sorted(outcome["records"][0]) == ["cluster_consensus", "label",
+                                             "size"]
+    assert [record["label"] for record in outcome["records"]] == list(range(12))
+    assert sum(record["size"] for record in outcome["records"]) == 40
+
+
+def test_a_bootstrap_ensemble_reports_the_pairs_no_resample_observed(
+        tmp_path):
+    # The other half of the unobserved_pairs pin: resamples are partial, so
+    # some pairs are seen by no member at all, and a constant that satisfied
+    # the full-member case above cannot satisfy this one.
+    document = _result(tmp_path, "u.json", "consensus", _matrix(tmp_path),
+                       "--algorithm", "butina", "--set", "threshold=1.0",
+                       "--resamples", "6")
+    assert document["num_partitions"] == 6
+    assert 0 < document["unobserved_pairs"] <= 40 * 39 // 2
+
+
+@pytest.mark.parametrize("threshold, clusters", [("0.0", 1), ("0.6", 12),
+                                                 ("1.0", 27)])
+def test_the_extraction_threshold_changes_the_partition(tmp_path, threshold,
+                                                        clusters):
+    # Dropping threshold= at the call site reverts every run to the library
+    # default of 0.5, which yields 12 -- the same as the 0.6 row. Only a
+    # grid whose outcomes differ from the default catches that, so all
+    # three are pinned by value.
+    document = _result(tmp_path, f"t{threshold}.json", "consensus",
+                       _matrix(tmp_path), "--member", "butina;threshold=1.0",
+                       "--member", "butina;threshold=0.3", "--member",
+                       "dbscan;eps=0.3", "--threshold", threshold)
+    assert document["threshold"] == float(threshold)
+    assert document["num_clusters"] == clusters
+
+
+@pytest.mark.parametrize("extra", [
+    ["--member", "butina;threshold=1.0", "--member", "dbscan;eps=1.5"],
+    ["--algorithm", "butina", "--set", "threshold=1.0", "--resamples", "4"],
+])
+def test_the_mmap_file_holds_the_whole_co_association_matrix(tmp_path, extra):
+    # Both modes, because each builds the matrix through a different
+    # ensemble shape. The file is the condensed upper triangle as float64,
+    # so its size is fixed by the item count alone -- a truncated or
+    # unwritten mapping is the failure this catches. The values are
+    # co-association distances, so a unanimous pair is 0.0 and a spot check
+    # of the first bytes can look like an empty file.
+    mapped = str(tmp_path / "coassoc.bin")
+    result = _run("consensus", _matrix(tmp_path), *extra, "--mmap", mapped,
+                  "--quiet")
+    assert result.exit_code == 0, result.output
+    assert Path(mapped).stat().st_size == 40 * 39 // 2 * 8
+    values = np.fromfile(mapped, dtype=np.float64)
+    assert len(values) == 40 * 39 // 2
+    assert np.all(np.isfinite(values))
+    assert values.min() >= 0.0
+    assert values.max() <= 1.0
+
+
+@pytest.mark.parametrize("destination", ["--output", "--mmap"])
+def test_a_destination_in_a_missing_directory_is_refused_first(tmp_path,
+                                                               monkeypatch,
+                                                               destination):
+    # open() only fails where the file is written, which for consensus is
+    # after every member has clustered and the matrix has been built. The
+    # same rule that refuses a bad extension before the run applies here.
+    def refuse(*args, **kwargs):
+        raise AssertionError("work started before the path check")
+
+    monkeypatch.setattr("oecluster._cli_main._cli_input.load", refuse)
+    result = _run("consensus", _matrix(tmp_path), "--member",
+                  "butina;threshold=1.0", destination,
+                  str(tmp_path / "missing" / "x.json"))
+    assert result.exit_code == 2
+    assert "directory" in result.output
+
+
+def test_a_member_option_value_may_not_contain_an_equals_sign(tmp_path):
+    # No roster option takes a value containing '=' or ';', so the grammar
+    # refuses one with that reason rather than inventing an escape syntax
+    # for a case that does not exist.
+    result = _run("consensus", str(tmp_path / "gone.npz"), "--member",
+                  "butina;threshold=1=0")
+    assert result.exit_code == 2
+    assert "may not contain" in result.output
+
+
+@pytest.mark.parametrize("extra", [
+    ["--algorithm", "butina", "--set", "threshold=1.0"],
+    ["--resamples", "4"],
+])
+def test_bootstrap_mode_needs_both_halves(tmp_path, extra):
+    # Either one alone selects bootstrap mode, so neither can be inferred
+    # from the other: a lone --algorithm must not silently resample once,
+    # and a lone --resamples has nothing to resample.
+    result = _run("consensus", str(tmp_path / "gone.npz"), *extra)
+    assert result.exit_code == 2
+    assert "needs both" in result.output
+
+
+def test_a_member_is_told_how_to_supply_its_own_options(tmp_path):
+    # The registry's advice is written for --set, which this same command
+    # refuses in cross-algorithm mode: `--member butina` was answered
+    # "butina requires --set threshold=…", which cannot be followed.
+    result = _run("consensus", str(tmp_path / "gone.npz"), "--member",
+                  "butina")
+    assert result.exit_code == 2
+    assert "requires" in result.output
+    assert "--member" in result.output
+    assert "--set" not in result.output

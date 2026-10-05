@@ -234,13 +234,19 @@ def coerce(algorithm, option, raw, entry):
                      f"_cli_registry for {key}")
 
 
-def resolve(algorithm, assignments, registry, *, swept=None):
+def resolve(algorithm, assignments, registry, *, swept=None, remedy="--set"):
     """Validate ``--set`` assignments and return the options mapping.
 
     :param algorithm: Roster name, already known to exist.
     :param assignments: Raw ``KEY=VALUE`` strings.
     :param registry: Mapping from :func:`build`.
     :param swept: Option name supplied per value by a sweep, if any.
+    :param remedy: The syntax the caller actually accepts an option in,
+        named in every message that tells the user what to do about one.
+        ``consensus`` validates each ``--member``'s options through here and
+        refuses ``--set`` in that mode, so a member missing a required
+        option was answered "butina requires --set threshold=…" -- advice
+        the same command rejects.
     :returns: Coerced option mapping for :class:`ClusteringSpec`.
     :raises ValueError: For an unknown, excluded, duplicated or malformed key,
         a bad value, or a missing required option.
@@ -249,14 +255,15 @@ def resolve(algorithm, assignments, registry, *, swept=None):
     options = {}
     for item in assignments:
         if "=" not in item:
-            raise ValueError(f"--set expects KEY=VALUE, got {item!r}")
+            raise ValueError(f"{remedy} expects KEY=VALUE, got {item!r}")
         key, raw = item.split("=", 1)
         # Both sides are stripped: a shell-quoted `--set "linkage = ward"`
         # would otherwise carry the space into the value, where a string
         # option smuggles it through and a bool option refuses outright.
         key, raw = key.strip(), raw.strip()
         if key in _FLAG_OPTIONS:
-            raise ValueError(f"set {key} with {_FLAG_OPTIONS[key]}, not --set")
+            raise ValueError(
+                f"set {key} with {_FLAG_OPTIONS[key]}, not {remedy}")
         if key in entry.sequence:
             raise ValueError(
                 f"{key} takes a sequence; use the Python API for it")
@@ -265,11 +272,13 @@ def resolve(algorithm, assignments, registry, *, swept=None):
             suffix = f"; did you mean {hint[0]!r}?" if hint else ""
             raise ValueError(f"{algorithm} has no option {key!r}{suffix}")
         if key in options:
-            raise ValueError(f"--set {key} given twice")
+            raise ValueError(f"{key} given twice in {remedy}")
         if swept is not None and key == swept:
-            raise ValueError(f"{key} is the swept parameter; drop it from --set")
+            raise ValueError(
+                f"{key} is the swept parameter; drop it from {remedy}")
         options[key] = coerce(algorithm, key, raw, entry)
     for name in entry.required:
         if name not in options and name != swept:
-            raise ValueError(f"{algorithm} requires --set {name}=…")
+            raise ValueError(
+                f"{algorithm} requires {name}=…; supply it with {remedy}")
     return options

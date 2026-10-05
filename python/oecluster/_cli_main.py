@@ -148,15 +148,19 @@ def _entry(algorithm, registry):
     return entry
 
 
-def _spec(algorithm, assignments, registry, threads, nonmetric, *, swept=None):
+def _spec(algorithm, assignments, registry, threads, nonmetric, *, swept=None,
+          remedy="--set"):
     """Validate an algorithm and its options into a ClusteringSpec.
 
+    :param remedy: The syntax this caller accepts options in, forwarded to
+        :func:`_cli_registry.resolve` so its advice is followable; a
+        ``consensus`` member is not configured with ``--set``.
     :raises ValueError: For an unknown or ineligible algorithm, or any option
         the registry refuses.
     """
     entry = _entry(algorithm, registry)
     options = _cli_registry.resolve(algorithm, assignments, registry,
-                                    swept=swept)
+                                    swept=swept, remedy=remedy)
     threads = _thread_count(threads)
     # _thread_count bounds below but not above, and only some entry points
     # bound it themselves (k_medoids does, butina does not), so an oversized
@@ -236,7 +240,8 @@ def _check_destinations(matrix, output, *destinations):
         :func:`_cli_render.write_output`, so they carry no extension
         contract.
     :raises ValueError: If a destination is empty, is the input or its
-        sidecar, if two destinations name one file, or if ``output`` has an
+        sidecar, if two destinations name one file, if a destination's
+        parent is not an existing directory, or if ``output`` has an
         extension :func:`_cli_render.write_output` cannot write.
     """
     protected = [(matrix, "the input matrix")]
@@ -262,6 +267,17 @@ def _check_destinations(matrix, output, *destinations):
                 raise ValueError(f"{path} and {other} are the same "
                                  "file; choose different files")
         seen.append(path)
+    # After the collisions, for the same reason the extension check is: a
+    # destination that is both a collision and unwritable is reported as the
+    # collision, which is the message naming the file at risk. The directory
+    # is checked at all because `open` only fails where the file is written
+    # -- for consensus that is after every member has clustered and the
+    # co-association matrix has been built.
+    for path in seen:
+        parent = os.path.dirname(os.path.abspath(path))
+        if not os.path.isdir(parent):
+            raise ValueError(f"cannot write {path}: {parent} is not an "
+                             "existing directory")
     # Last, so a destination that is both unwritable and a collision is
     # reported as the collision: that is the message naming the file at risk.
     if output is not None:
@@ -544,7 +560,11 @@ def _member(text, registry, threads, nonmetric):
             raise ValueError(
                 f"member option values may not contain '=', got {item!r}")
         options.append(f"{key.strip()}={value}")
-    return _spec(name, options, registry, threads, nonmetric)
+    # The remedy names this member rather than --set, which the same command
+    # refuses in cross-algorithm mode: `--member butina` was answered
+    # "butina requires --set threshold=…", advice that cannot be followed.
+    return _spec(name, options, registry, threads, nonmetric,
+                 remedy=f"--member '{name};…'")
 
 
 @cli.command()
@@ -562,7 +582,7 @@ def _member(text, registry, threads, nonmetric):
               type=click.Choice(["singletons", "grouped", "excluded"]),
               help="How noise points count towards mean_agreement.")
 @click.option("--mmap", "mmap", default=None, metavar="PATH",
-              help="Keep the co-association matrix on disk.")
+              help="Keep the co-association matrix on disk, for large N.")
 @_common
 @_translate
 def consensus(matrix, algorithm, assignments, resamples, members, threshold,
