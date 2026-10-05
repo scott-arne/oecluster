@@ -164,6 +164,31 @@ def panel(command, spec, path, num_items):
     return Panel(f"{what}\n{path}  ({num_items} items)", title=command)
 
 
+def orientation(is_distance):
+    """Spell a matrix's orientation fact for the JSON document.
+
+    ``str()`` on the fact cannot do this job: the library reports a proven
+    orientation as a Python ``bool`` and an unproven one as the string
+    ``"unknown"``, so the repr put ``"True"`` and ``"unknown"`` in one
+    ``schema_version`` 1 field -- two casing conventions a reader would have
+    to know about. The field stays a string rather than becoming a JSON
+    boolean beside a ``"unknown"`` string, because a union-typed field is
+    the harder thing for a typed consumer to read.
+
+    Anything that is not one of the two booleans is ``"unknown"``, matching
+    the loader: ``facts_json`` is arbitrary JSON, so a corrupted fact of 0
+    is unproven rather than false.
+
+    :param is_distance: ``SymmetricDistanceMatrix.is_distance``.
+    :returns: ``"true"``, ``"false"`` or ``"unknown"``.
+    """
+    if is_distance is True:
+        return "true"
+    if is_distance is False:
+        return "false"
+    return "unknown"
+
+
 def encode(value):
     """Encode one statistic for JSON.
 
@@ -215,15 +240,18 @@ def _encoded(value):
 
 
 def _csv_cell(value):
+    # Spelled here rather than at the call site so one convention covers
+    # every column: csv.writer falls back to str(), which writes Python's
+    # repr "True", while select-parameter's own `winner` column and the
+    # JSON document both spell a boolean lowercase. One select-parameter
+    # row was carrying both conventions at once.
+    if isinstance(value, bool):
+        return "true" if value else "false"
     if isinstance(value, float):
         if math.isnan(value):
             return ""
         if math.isinf(value):
             return "inf" if value > 0 else "-inf"
-    # csv.writer falls back to str() for anything it is not given as text,
-    # which turns a np.bytes_ label into b'x'.
-    if isinstance(value, bytes):
-        return text(value)
     return "" if value is None else value
 
 
@@ -237,9 +265,6 @@ def write_output(path, payload):
     behind that: a value the walk somehow did not reach fails the write
     loudly instead of becoming a file no strict parser will load.
 
-    :param path: Destination; must end in ``.csv`` or ``.json``.
-    :param payload: Mapping with ``header`` and ``rows`` for CSV and
-        ``document`` for JSON.
     The file is rendered and encoded in full before it is opened, so a
     failure part way through leaves no file rather than a truncated one: a
     header-only CSV on disk reads as a run that succeeded and found

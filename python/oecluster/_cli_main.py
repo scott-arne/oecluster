@@ -94,10 +94,13 @@ def _translate(function):
             return function(*args, **kwargs)
         except (TypeError, ValueError) as error:
             raise click.UsageError(str(error)) from None
-        except (click.exceptions.Exit, click.Abort):
-            # Click's own control flow, and both subclass RuntimeError: the
-            # arm below would turn ctx.exit(0) into exit 1 with the message
-            # "0", and an aborted confirmation into a failed run.
+        except (click.exceptions.Exit, click.Abort, click.ClickException):
+            # Click's own control flow and its own already-carried errors.
+            # Exit and Abort subclass RuntimeError, so the arm below would
+            # turn ctx.exit(0) into exit 1 with the message "0" and an
+            # aborted confirmation into a failed run; a ClickException
+            # already names its exit code, which the catch-all at the end
+            # would flatten to 1.
             raise
         except (_cli_input.InputError, RuntimeError, OSError) as error:
             raise click.ClickException(str(error)) from None
@@ -105,6 +108,17 @@ def _translate(function):
             raise click.ClickException(
                 f"out of memory: {error}; for consensus, --mmap keeps the "
                 "matrix on disk") from None
+        except Exception as error:  # noqa: BLE001
+            # No reachable trigger for this arm was found, which is the
+            # reason to keep it: the promise is that nothing reaches the
+            # user as a traceback unless they asked for one, and an
+            # enumerated list of types cannot hold that against library
+            # calls that may raise anything. The type is named because the
+            # message alone from an unanticipated exception is often
+            # unreadable without it. --traceback never arrives here -- it
+            # takes the branch above, which re-raises.
+            raise click.ClickException(
+                f"{type(error).__name__}: {error}") from None
     return wrapper
 
 
@@ -384,7 +398,8 @@ def cluster(matrix, algorithm, assignments, threads, allow_nonmetric, output,
                 "schema_version": _cli_render.SCHEMA_VERSION,
                 "command": "cluster",
                 "input": {"path": matrix, "num_items": loaded.num_samples,
-                          "orientation": str(loaded.is_distance)},
+                          "orientation": _cli_render.orientation(
+                              loaded.is_distance)},
                 "spec": described,
                 "result": {"labels": labels,
                            # Conditional per the spec: present only when the
@@ -486,13 +501,17 @@ def select_parameter(matrix, algorithm, parameter, values, assignments,
     if output is not None:
         _cli_render.write_output(output, {
             "header": ["winner", *selection.columns],
-            "rows": [[str(index == selection.winner_index).lower(), *row]
+            # Left as a boolean for write_output to spell. Spelling it here
+            # instead is how this column and the `eligible` column beside
+            # it ended up on two conventions in one row.
+            "rows": [[index == selection.winner_index, *row]
                      for index, row in enumerate(rows)],
             "document": {
                 "schema_version": _cli_render.SCHEMA_VERSION,
                 "command": "select-parameter",
                 "input": {"path": matrix, "num_items": loaded.num_samples,
-                          "orientation": str(loaded.is_distance)},
+                          "orientation": _cli_render.orientation(
+                              loaded.is_distance)},
                 "spec": described,
                 "result": {
                     "columns": list(selection.columns),
@@ -524,6 +543,13 @@ def stability(matrix, algorithm, assignments, resamples, fraction, seed,
               noise, threads, allow_nonmetric, output, quiet):
     """Score how well each cluster survives resampling."""
     _check_destinations(matrix, output)
+    # Before the load, as consensus checks the same option. The library
+    # refuses this too, but only after the matrix has been read -- so the
+    # unproven-orientation warning was printed for a run that could never
+    # have happened, against the rule that nothing is read before
+    # validation finishes.
+    if resamples < 1:
+        raise ValueError(f"--resamples must be positive, got {resamples}")
     registry = _cli_registry.build()
     spec = _spec(algorithm, assignments, registry, threads, allow_nonmetric)
     loaded = _cli_input.load(matrix)
@@ -567,7 +593,8 @@ def stability(matrix, algorithm, assignments, resamples, fraction, seed,
                 "schema_version": _cli_render.SCHEMA_VERSION,
                 "command": "stability",
                 "input": {"path": matrix, "num_items": loaded.num_samples,
-                          "orientation": str(loaded.is_distance)},
+                          "orientation": _cli_render.orientation(
+                              loaded.is_distance)},
                 "spec": described,
                 "result": {
                     "columns": list(scored.columns),
@@ -739,7 +766,8 @@ def consensus(matrix, algorithm, assignments, resamples, members, threshold,
                 "schema_version": _cli_render.SCHEMA_VERSION,
                 "command": "consensus",
                 "input": {"path": matrix, "num_items": loaded.num_samples,
-                          "orientation": str(loaded.is_distance)},
+                          "orientation": _cli_render.orientation(
+                              loaded.is_distance)},
                 "spec": described,
                 "result": {
                     "labels": labels,

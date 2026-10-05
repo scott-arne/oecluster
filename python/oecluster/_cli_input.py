@@ -287,11 +287,25 @@ def load(path, *, warn=None):
             raise InputError(
                 f"{os.path.basename(path)} carries {labelled} labels for "
                 f"{items} items")
-        # Tested against the two booleans rather than for "unknown": facts
-        # are arbitrary JSON here, the library's gate refuses only
-        # `is_distance is False`, and a corrupted fact of 0 is neither a
-        # refusal nor a proof. Anything that is not a boolean is unproven.
-        if orientation is not True and orientation is not False:
+        # Refused here rather than left to the library's clustering gate.
+        # The gate raises ValueError, which the command layer maps to a
+        # usage error -- exit 2, with Click's "try --help" advice, for a
+        # fact recorded in the file that no change to the invocation can
+        # answer. The sidecar path already refuses the byte-identical
+        # evidence as an unusable input, so the same fact now gets the same
+        # exit code whichever file carries it. The gate stays as the
+        # library's own backstop for callers that do not come through here.
+        if orientation is False:
+            raise InputError(
+                f"{os.path.basename(path)} holds similarities, not "
+                "distances: its stored facts record is_distance false. "
+                "Rebuild it from distances, or convert it with the Python "
+                "API")
+        # Tested by identity against True rather than for "unknown": facts
+        # are arbitrary JSON here, so a corrupted fact of 0 -- falsy, and
+        # plainly not a proven distance -- is neither a refusal nor a
+        # proof. Anything that is not True is unproven.
+        if orientation is not True:
             warn(f"{os.path.basename(path)}: orientation unproven, treating "
                  "values as distances")
         _refuse_unrenderable_labels(matrix, path)

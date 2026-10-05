@@ -1511,6 +1511,14 @@ this file holds similarities, not distances; re-run oepdist without --sim,
 or convert it with the Python API
 ```
 
+A `.npz` is refused on the same evidence read from the archive's own facts:
+
+```
+sim.npz holds similarities, not distances: its stored facts record
+is_distance false. Rebuild it from distances, or convert it with the Python
+API
+```
+
 That refusal needs proof. A sidecar that records `similarity: true` is proof;
 one that records no similarity flag at all is not, and every `oepdist rocs`
 sidecar is in that position, since the ROCS writer records `score` and
@@ -1559,12 +1567,17 @@ The CSV is the command's own table, with no summary row beyond it:
 `select-parameter`'s columns follow the criterion that ran, so the header is
 `winner,threshold,silhouette,num_clusters,noise_fraction,eligible,rejection`
 for the sweep above. Where there is an `id` column it holds the matrix's own
-labels, or the item indices when it has none.
+labels, or the item indices when it has none. Every boolean cell is written
+lowercase, `true` or `false`, so the `winner` column and the `eligible`
+column beside it read the same way.
 
 The JSON adds what a flat table has no room for: the structured results, and
 the scalars that describe the run as a whole rather than one row of it. It is
-a `schema_version` 1 envelope, the same five keys for every command — here in
-full, from a four-item matrix:
+a `schema_version` 1 envelope, the same five keys for every command. A
+boolean in it is a JSON boolean. `input.orientation` is not one — it is a
+string, because orientation has three states, and it reads `"true"` or
+`"unknown"`; a proven similarity never reaches the output, having been
+refused at the load. Here in full, from a four-item matrix:
 
 ```json
 {
@@ -1674,22 +1687,17 @@ covers Click's parse errors and the command's own validation — and also the
 library's gates, which raise `ValueError`. Everything the loader refuses, and
 every other runtime failure, exits 1.
 
-That has one consequence worth knowing before a script branches on it: the
-same mistake can give either code depending on which layer catches it. A
-`.npy` whose sidecar records `similarity: true` exits **1**, refused by the
-loader. A `.npz` whose stored facts record `is_distance` false exits **2**,
-refused by the clustering gate:
+That has one consequence worth knowing before a script branches on it. A
+matrix with proven triangle violations, under an algorithm that assumes a
+metric, exits **2** rather than 1: the refusal comes from the library's gate,
+which raises `ValueError`. Reading it as a usage error is defensible here,
+because there is an invocation that works — `--allow-nonmetric`.
 
-```
-butina requires distances, but this matrix holds a similarity (precomputed).
-```
-
-A matrix with proven triangle violations, under an algorithm that assumes a
-metric, exits 2 for the same reason. Measured against the cases in this
-section: `.csv` input, a missing file, a missing sidecar, a sidecar-proven
-similarity, a negative value and a label collision exit 1; an unknown `--set`
-key, a bad value, a colliding destination, a `.npz` proven to hold
-similarities and an unflagged non-metric matrix exit 2.
+Measured against the cases in this section: `.csv` input, a missing file, a
+missing sidecar, a sidecar-proven similarity, a `.npz` whose stored facts
+record `is_distance` false, a negative value and a label collision exit 1;
+an unknown `--set` key, a bad value, a colliding destination and an unflagged
+non-metric matrix exit 2.
 
 Both codes print the message in an error panel, word-wrapped to the terminal,
 rather than a traceback.

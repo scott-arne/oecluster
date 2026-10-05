@@ -2318,3 +2318,151 @@ def test_a_refused_link_destination_leaves_no_target_behind(tmp_path):
     assert ".csv or .json" in result.output
     assert link.is_symlink()
     assert not (tmp_path / "written.txt").exists()
+
+
+def _similarity_npz(tmp_path):
+    """A .npz whose stored facts record ``is_distance`` false."""
+    return _patched_npz(tmp_path, "sim", facts_json=np.array(
+        json.dumps({"is_distance": False})))
+
+
+def test_a_proven_similarity_npz_is_refused_by_the_loader(tmp_path):
+    # Left to the library's clustering gate this raised ValueError, which
+    # the command layer reads as a bad invocation: exit 2, and Click's
+    # "try --help" advice for a fact recorded inside the file that no
+    # change to the command line can answer. The byte-identical evidence
+    # in a sidecar has always exited 1.
+    result = _run("cluster", _similarity_npz(tmp_path), "--algorithm",
+                  "butina", "--set", "threshold=1.0")
+    assert result.exit_code == 1
+    assert "similarities" in result.output
+    assert "--help" not in result.output
+
+
+def test_the_npz_similarity_refusal_is_an_input_error(tmp_path):
+    with pytest.raises(_cli_input.InputError, match="is_distance false"):
+        _cli_input.load(_similarity_npz(tmp_path), warn=lambda message: None)
+
+
+@pytest.mark.parametrize("fact, spelled", [
+    (True, "true"),
+    (False, "false"),
+    ("unknown", "unknown"),
+    (0, "unknown"),
+    (1, "unknown"),
+    (None, "unknown"),
+])
+def test_orientation_has_one_spelling_for_every_fact(fact, spelled):
+    # facts_json is arbitrary JSON, so anything that is not one of the two
+    # booleans is unproven -- the same rule the loader warns by.
+    assert _cli_render.orientation(fact) == spelled
+
+
+def test_a_proven_distance_records_orientation_lowercase(tmp_path):
+    # str(loaded.is_distance) wrote Python's bool repr, "True", into a
+    # schema_version 1 field whose other value is the library's lowercase
+    # "unknown" -- two casing conventions in one string field.
+    path = _patched_npz(tmp_path, "proven", facts_json=np.array(
+        json.dumps({"is_distance": True})))
+    out = str(tmp_path / "r.json")
+    result = _run("cluster", path, "--algorithm", "butina", "--set",
+                  "threshold=0.5", "--output", out, "--quiet")
+    assert result.exit_code == 0, result.output
+    document = json.loads(Path(out).read_text(encoding="utf-8"))
+    assert document["input"]["orientation"] == "true"
+
+
+def _swept_csv(tmp_path):
+    """A select-parameter CSV over a grid whose first two rows score NaN."""
+    out = str(tmp_path / "s.csv")
+    result = _run("select-parameter", _matrix(tmp_path), "--algorithm",
+                  "dbscan", "--parameter", "eps", "--values",
+                  "0.005,0.02,0.4", "--quiet", "--output", out)
+    assert result.exit_code == 0, result.output
+    return [line.split(",") for line in
+            Path(out).read_text(encoding="utf-8").splitlines()]
+
+
+def test_a_nan_csv_cell_is_empty_rather_than_a_number(tmp_path):
+    # Section 6.3 of the design: NaN is an empty field, and "a reader must
+    # not infer zero". No CSV assertion in this file reached a NaN cell, so
+    # _csv_cell returning 0 for NaN passed the whole suite. At eps=0.005
+    # and eps=0.02 dbscan clusters nothing, so silhouette is undefined.
+    rows = _swept_csv(tmp_path)
+    column = rows[0].index("silhouette")
+    # By position, not by count: a cell holding "0" would satisfy a check
+    # that merely counted the empty ones somewhere in the column.
+    assert rows[1][column] == ""
+    assert rows[2][column] == ""
+    assert float(rows[3][column]) > 0.0
+
+
+def test_every_boolean_csv_cell_is_lowercase(tmp_path):
+    # The winner column was lowercased at the call site and eligible
+    # arrived through csv.writer's str(), so one row carried "true" and
+    # "True" at once. The spelling belongs to the writer, not to either
+    # caller.
+    rows = _swept_csv(tmp_path)
+    eligible = rows[0].index("eligible")
+    for row in rows[1:]:
+        assert row[0] in ("true", "false")
+        assert row[eligible] in ("true", "false")
+    assert sum(1 for row in rows[1:] if row[0] == "true") == 1
+
+
+def test_num_noise_counts_the_noise_points(tmp_path):
+    # Hardcoding num_noise to 0 in every document passed the whole suite:
+    # the only assertion on it was the consensus cross-check, and
+    # consensus_components structurally never emits -1. dbscan does.
+    out = str(tmp_path / "d.json")
+    result = _run("cluster", _matrix(tmp_path), "--algorithm", "dbscan",
+                  "--set", "eps=0.02", "--set", "min_samples=5", "--quiet",
+                  "--output", out)
+    assert result.exit_code == 0, result.output
+    outcome = json.loads(Path(out).read_text(encoding="utf-8"))["result"]
+    assert outcome["num_noise"] == 40
+    assert outcome["num_noise"] == sum(1 for value in outcome["labels"]
+                                       if value < 0)
+
+
+def test_stability_refuses_a_nonpositive_resample_count_before_the_load(
+        tmp_path):
+    # consensus checks this before reading anything and stability did not,
+    # so the matrix was loaded and the unproven-orientation warning printed
+    # for a run the library was about to refuse. The input does not exist,
+    # so the refusal arriving at all proves it precedes the load.
+    result = _run("stability", str(tmp_path / "gone.npz"), "--algorithm",
+                  "butina", "--set", "threshold=1.0", "--resamples", "0")
+    assert result.exit_code == 2
+    assert "positive" in result.output
+
+
+def test_an_unanticipated_exception_is_still_not_a_traceback(tmp_path,
+                                                             monkeypatch):
+    # The translator enumerated exception types, so section 7's promise --
+    # no traceback unless one is asked for -- was held by that list rather
+    # than by construction. No reachable escape was found, so the one here
+    # is injected: that is the only way to pin a guarantee about the
+    # exceptions nobody anticipated.
+    def explode(*args, **kwargs):
+        raise KeyError("unanticipated")
+
+    monkeypatch.setattr(_cli_main, "_spec", explode)
+    result = _run("cluster", _matrix(tmp_path), "--algorithm", "butina",
+                  "--set", "threshold=1.0")
+    assert result.exit_code == 1
+    assert result.exception.__class__ is SystemExit
+    # The type is named because the message alone is often unreadable.
+    assert "KeyError" in result.output
+
+
+def test_traceback_still_re_raises_an_unanticipated_exception(tmp_path,
+                                                              monkeypatch):
+    # The catch-all must not swallow what --traceback exists to show.
+    def explode(*args, **kwargs):
+        raise KeyError("unanticipated")
+
+    monkeypatch.setattr(_cli_main, "_spec", explode)
+    result = _run("cluster", _matrix(tmp_path), "--algorithm", "butina",
+                  "--set", "threshold=1.0", "--traceback")
+    assert isinstance(result.exception, KeyError)
