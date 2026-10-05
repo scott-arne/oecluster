@@ -5,6 +5,7 @@ whole job. The algorithm and its options arrive as ``--algorithm NAME`` plus
 repeatable ``--set key=value``, validated against the registry before any file
 is read.
 """
+import contextlib
 import functools
 import os
 
@@ -205,9 +206,9 @@ def _same_file(first, second):
     ``realpath`` resolves symlinks but then compares bytes, so on a
     case-folding filesystem it reports ``d.json`` and ``D.JSON`` as two
     files where there is only one. ``samefile`` asks the filesystem, which
-    is the only authority on that, but it needs both paths to exist; a
-    destination not yet written can only be compared by name, which is what
-    the first test covers.
+    is the only authority on that, but it needs both paths to exist --
+    hence :func:`_reserve`, which makes a destination exist so that this
+    can be answered rather than guessed.
     """
     if os.path.realpath(first) == os.path.realpath(second):
         return True
@@ -215,6 +216,43 @@ def _same_file(first, second):
         return os.path.samefile(first, second)
     except OSError:
         return False
+
+
+def _reserve(paths):
+    """Create every destination that does not exist yet, and say which.
+
+    Two destinations that do not exist cannot be told apart by asking the
+    filesystem, and their names do not settle it in either direction: byte
+    comparison calls ``r.json`` and ``R.JSON`` two files, so on a
+    case-folding volume ``--output r.json --mmap R.JSON`` built the
+    co-association matrix, mapped it, and then let the result writer
+    truncate it in place -- exiting 0 with the artifact the user asked for
+    destroyed. Folding the case unconditionally is wrong the other way: on
+    a case-sensitive volume those really are two files and the invocation
+    is legitimate, so a blanket fold would refuse a working command there.
+
+    Making each one exist moves the question to the filesystem, which is
+    the only thing that knows which behaviour it has.
+
+    An existing path is left alone, and so is a symbolic link: POSIX
+    requires ``O_CREAT | O_EXCL`` to fail with ``EEXIST`` on a symlink
+    whatever it points at, so this never creates a link's target and
+    :func:`os.unlink` is therefore never handed a link to remove.
+
+    :param paths: Destination paths, none of them empty.
+    :returns: The subset this call created, for the caller to remove again.
+    """
+    created = []
+    for path in paths:
+        try:
+            handle = os.open(path, os.O_CREAT | os.O_EXCL, 0o600)
+        except OSError:
+            # Already there, a symlink, or not creatable at all. Each of
+            # those is settled by a check the caller runs anyway.
+            continue
+        os.close(handle)
+        created.append(path)
+    return created
 
 
 def _check_destinations(matrix, output, *destinations):
@@ -252,36 +290,49 @@ def _check_destinations(matrix, output, *destinations):
     # the run overwrote the one file that makes the input readable.
     if extension.lower() in (".npy", ".bin"):
         protected.append((stem + ".json", "the input sidecar"))
-    seen = []
-    for path in [item for item in (output, *destinations) if item is not None]:
+    paths = [item for item in (output, *destinations) if item is not None]
+    for path in paths:
         if not path:
             raise ValueError(
                 "a destination path is empty; an unset shell variable is "
                 "the usual cause")
-        for other, what in protected:
-            if _same_file(path, other):
-                raise ValueError(f"{path} is {what}; "
-                                 "choose different files")
-        for other in seen:
-            if _same_file(path, other):
-                raise ValueError(f"{path} and {other} are the same "
-                                 "file; choose different files")
-        seen.append(path)
-    # After the collisions, for the same reason the extension check is: a
-    # destination that is both a collision and unwritable is reported as the
-    # collision, which is the message naming the file at risk. The directory
-    # is checked at all because `open` only fails where the file is written
-    # -- for consensus that is after every member has clustered and the
-    # co-association matrix has been built.
-    for path in seen:
-        parent = os.path.dirname(os.path.abspath(path))
-        if not os.path.isdir(parent):
-            raise ValueError(f"cannot write {path}: {parent} is not an "
-                             "existing directory")
-    # Last, so a destination that is both unwritable and a collision is
-    # reported as the collision: that is the message naming the file at risk.
-    if output is not None:
-        _cli_render.check_output(output)
+    created = _reserve(paths)
+    try:
+        seen = []
+        for path in paths:
+            for other, what in protected:
+                if _same_file(path, other):
+                    raise ValueError(f"{path} is {what}; "
+                                     "choose different files")
+            for other in seen:
+                if _same_file(path, other):
+                    raise ValueError(f"{path} and {other} are the same "
+                                     "file; choose different files")
+            seen.append(path)
+        # After the collisions, for the same reason the extension check is:
+        # a destination that is both a collision and unwritable is reported
+        # as the collision, which is the message naming the file at risk.
+        # The directory is checked at all because `open` only fails where
+        # the file is written -- for consensus that is after every member
+        # has clustered and the co-association matrix has been built.
+        # realpath, not abspath: a symbolic link's own directory exists
+        # while the target it would be written through need not.
+        for path in seen:
+            parent = os.path.dirname(os.path.realpath(path))
+            if not os.path.isdir(parent):
+                raise ValueError(f"cannot write {path}: {parent} is not an "
+                                 "existing directory")
+        # Last, so a destination that is both unwritable and a collision is
+        # reported as the collision: the message naming the file at risk.
+        if output is not None:
+            _cli_render.check_output(output)
+    finally:
+        for path in created:
+            # Nothing has been written at this point, so a placeholder left
+            # behind is an empty results file for a run that never happened
+            # -- which reads as a run that succeeded and found nothing.
+            with contextlib.suppress(OSError):
+                os.unlink(path)
 
 
 @cli.command()

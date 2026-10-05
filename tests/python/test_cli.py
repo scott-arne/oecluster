@@ -2028,8 +2028,15 @@ def test_consensus_writes_json_matching_the_schema(tmp_path):
     assert len(outcome["records"]) == 12
     assert sorted(outcome["records"][0]) == ["cluster_consensus", "label",
                                              "size"]
-    assert [record["label"] for record in outcome["records"]] == list(range(12))
-    assert sum(record["size"] for record in outcome["records"]) == 40
+    # Cross-checked against the labels rather than counted: a sum of 40 and
+    # a length of 40 are both satisfied by forty zeroes, so without this
+    # the test accepts a labels array that describes a different partition
+    # from the one the records describe.
+    sizes = {label: outcome["labels"].count(label)
+             for label in set(outcome["labels"])}
+    assert sorted(sizes) == list(range(12))
+    assert {record["label"]: record["size"]
+            for record in outcome["records"]} == sizes
 
 
 def test_a_bootstrap_ensemble_reports_the_pairs_no_resample_observed(
@@ -2037,11 +2044,22 @@ def test_a_bootstrap_ensemble_reports_the_pairs_no_resample_observed(
     # The other half of the unobserved_pairs pin: resamples are partial, so
     # some pairs are seen by no member at all, and a constant that satisfied
     # the full-member case above cannot satisfy this one.
-    document = _result(tmp_path, "u.json", "consensus", _matrix(tmp_path),
-                       "--algorithm", "butina", "--set", "threshold=1.0",
-                       "--resamples", "6")
-    assert document["num_partitions"] == 6
-    assert 0 < document["unobserved_pairs"] <= 40 * 39 // 2
+    out = str(tmp_path / "u.json")
+    result = _run("consensus", _matrix(tmp_path), "--algorithm", "butina",
+                  "--set", "threshold=1.0", "--resamples", "6", "--quiet",
+                  "--output", out)
+    assert result.exit_code == 0, result.output
+    document = json.loads(Path(out).read_text(encoding="utf-8"))
+    # resamples sits in spec because it describes the ensemble that was
+    # built rather than how any one number is read. Nothing else records
+    # it: num_partitions would survive its removal unchanged.
+    assert document["spec"] == {
+        "algorithm": "butina",
+        "options": {"threshold": 1.0, "num_threads": 0},
+        "resamples": 6}
+    outcome = document["result"]
+    assert outcome["num_partitions"] == 6
+    assert 0 < outcome["unobserved_pairs"] <= 40 * 39 // 2
 
 
 @pytest.mark.parametrize("threshold, clusters", [("0.0", 1), ("0.6", 12),
@@ -2134,3 +2152,102 @@ def test_a_member_is_told_how_to_supply_its_own_options(tmp_path):
     assert "requires" in result.output
     assert "--member" in result.output
     assert "--set" not in result.output
+
+
+def test_two_absent_destinations_that_are_one_file_are_refused(tmp_path):
+    # The data-loss case, and the reason the identity probe exists.
+    # `--output r.json --mmap R.JSON` with neither file present: realpath
+    # compares bytes, so the two names looked like two files. The run built
+    # the 6240-byte co-association matrix, mapped it, and then let the JSON
+    # writer truncate it in place -- exiting 0 with the artifact the user
+    # asked for destroyed and no message at all.
+    #
+    # Both directions are asserted, because the obvious fix is wrong on a
+    # case-sensitive filesystem, where r.json and R.JSON really are two
+    # files and the invocation is legitimate. CI runs on Linux, so a
+    # blanket case fold would pass here and refuse a working command there.
+    first = tmp_path / "r.json"
+    second = tmp_path / "R.JSON"
+    result = _run("consensus", _matrix(tmp_path), "--member",
+                  "butina;threshold=1.0", "--quiet", "--output", str(first),
+                  "--mmap", str(second))
+    if _case_folding(tmp_path):
+        assert result.exit_code == 2
+        assert "different files" in result.output
+        assert not first.exists()
+    else:
+        assert result.exit_code == 0, result.output
+        assert json.loads(first.read_text(encoding="utf-8"))["command"] \
+            == "consensus"
+        assert second.stat().st_size == 40 * 39 // 2 * 8
+
+
+def test_two_absent_destinations_with_distinct_names_are_accepted(tmp_path):
+    # The converse the probe must not break: making both paths exist to ask
+    # the filesystem must not make two genuinely different names collide.
+    out = tmp_path / "r.json"
+    mapped = tmp_path / "s.bin"
+    result = _run("consensus", _matrix(tmp_path), "--member",
+                  "butina;threshold=1.0", "--quiet", "--output", str(out),
+                  "--mmap", str(mapped))
+    assert result.exit_code == 0, result.output
+    assert mapped.stat().st_size == 40 * 39 // 2 * 8
+    assert json.loads(out.read_text(encoding="utf-8"))["command"] == "consensus"
+
+
+def test_a_refused_destination_leaves_no_placeholder(tmp_path):
+    # The probe creates each absent destination so the filesystem can
+    # answer. Nothing has been written at that point, so a placeholder left
+    # behind is an empty results file for a run that never happened --
+    # which reads as a run that succeeded and found nothing.
+    out = tmp_path / "r.txt"
+    result = _run("cluster", _matrix(tmp_path), "--algorithm", "butina",
+                  "--set", "threshold=1.0", "--output", str(out))
+    assert result.exit_code == 2
+    assert not out.exists()
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["m.npz"]
+
+
+def test_the_probe_does_not_disturb_an_existing_destination(tmp_path):
+    # O_EXCL leaves an existing file alone, so a destination the user means
+    # to overwrite still holds its old bytes until the writer replaces them
+    # -- and a refusal for some other reason leaves it untouched.
+    out = tmp_path / "r.txt"
+    out.write_text("keep me", encoding="utf-8")
+    result = _run("cluster", _matrix(tmp_path), "--algorithm", "butina",
+                  "--set", "threshold=1.0", "--output", str(out))
+    assert result.exit_code == 2
+    assert out.read_text(encoding="utf-8") == "keep me"
+
+
+def test_a_dangling_symlink_into_a_missing_directory_is_refused(tmp_path,
+                                                                monkeypatch):
+    # The link's own directory exists, so checking dirname(abspath(path))
+    # passed it and the open failed only at write time. The write goes
+    # through the resolved target, so that is what has to be checked.
+    def refuse(*args, **kwargs):
+        raise AssertionError("work started before the path check")
+
+    monkeypatch.setattr("oecluster._cli_main._cli_input.load", refuse)
+    link = tmp_path / "out.json"
+    link.symlink_to(tmp_path / "missing" / "x.json")
+    result = _run("consensus", _matrix(tmp_path), "--member",
+                  "butina;threshold=1.0", "--output", str(link))
+    assert result.exit_code == 2
+    assert "directory" in result.output
+
+
+def test_a_consensus_member_honours_allow_nonmetric(tmp_path, monkeypatch):
+    # The only routing hole left: every other nonmetric case goes through
+    # `cluster`, so dropping the flag from the member path left the suite
+    # green while each member spec silently lost it.
+    used = _specs_used(monkeypatch)
+    path = _nonmetric(tmp_path)
+    members = ["--member", "butina;threshold=0.15",
+               "--member", "agglomerative;n_clusters=2"]
+    refused = _run("consensus", path, *members, "--quiet")
+    assert refused.exit_code != 0
+    used.clear()
+    allowed = _run("consensus", path, *members, "--allow-nonmetric", "--quiet")
+    assert allowed.exit_code == 0, allowed.output
+    assert [options["allow_nonmetric"] for options in used] == [True, True]
