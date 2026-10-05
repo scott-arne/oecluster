@@ -2251,3 +2251,70 @@ def test_a_consensus_member_honours_allow_nonmetric(tmp_path, monkeypatch):
     allowed = _run("consensus", path, *members, "--allow-nonmetric", "--quiet")
     assert allowed.exit_code == 0, allowed.output
     assert [options["allow_nonmetric"] for options in used] == [True, True]
+
+
+def test_two_dangling_links_onto_one_target_are_refused(tmp_path):
+    # The fourth route into the same data loss, and the reason the checks
+    # resolve first. O_CREAT | O_EXCL fails on a link whatever it points
+    # at, so reserving the typed paths reserved nothing: there were no
+    # inodes to compare, the two realpath strings differed by case, and
+    # the run wrote the JSON document over the mapped matrix.
+    #
+    # Both directions again: on a case-sensitive filesystem the two
+    # targets really are two files and the invocation is legitimate.
+    first = tmp_path / "a.json"
+    first.symlink_to(tmp_path / "result.json")
+    second = tmp_path / "b.json"
+    second.symlink_to(tmp_path / "RESULT.JSON")
+    result = _run("consensus", _matrix(tmp_path), "--member",
+                  "butina;threshold=1.0", "--quiet", "--output", str(first),
+                  "--mmap", str(second))
+    if _case_folding(tmp_path):
+        assert result.exit_code == 2
+        assert "different files" in result.output
+        # Neither the target nor a reservation placeholder is left behind,
+        # and the links the user made are still links.
+        assert not (tmp_path / "result.json").exists()
+        assert first.is_symlink()
+        assert second.is_symlink()
+    else:
+        assert result.exit_code == 0, result.output
+        assert json.loads((tmp_path / "result.json").read_text(
+            encoding="utf-8"))["command"] == "consensus"
+        assert (tmp_path / "RESULT.JSON").stat().st_size == 40 * 39 // 2 * 8
+
+
+def test_a_dangling_link_is_written_through_to_its_target(tmp_path):
+    # The converse the resolution must not break: distinct targets are
+    # accepted, and the write lands on the target rather than replacing
+    # the link. This also proves the reservation released the target --
+    # a placeholder left in place would be overwritten here and hide it,
+    # but a target deleted along with the link would not reappear.
+    out = tmp_path / "out.json"
+    out.symlink_to(tmp_path / "written.json")
+    mapped = tmp_path / "map.bin"
+    mapped.symlink_to(tmp_path / "written.bin")
+    result = _run("consensus", _matrix(tmp_path), "--member",
+                  "butina;threshold=1.0", "--quiet", "--output", str(out),
+                  "--mmap", str(mapped))
+    assert result.exit_code == 0, result.output
+    assert out.is_symlink()
+    assert mapped.is_symlink()
+    assert json.loads((tmp_path / "written.json").read_text(
+        encoding="utf-8"))["command"] == "consensus"
+    assert (tmp_path / "written.bin").stat().st_size == 40 * 39 // 2 * 8
+
+
+def test_a_refused_link_destination_leaves_no_target_behind(tmp_path):
+    # The reservation now creates the link's target, which is a different
+    # path from the one the user typed. Cleaning up the typed path would
+    # delete the link and leave the placeholder standing -- the exact
+    # inverse of what the cleanup is for.
+    link = tmp_path / "out.txt"
+    link.symlink_to(tmp_path / "written.txt")
+    result = _run("cluster", _matrix(tmp_path), "--algorithm", "butina",
+                  "--set", "threshold=1.0", "--output", str(link))
+    assert result.exit_code == 2
+    assert ".csv or .json" in result.output
+    assert link.is_symlink()
+    assert not (tmp_path / "written.txt").exists()
