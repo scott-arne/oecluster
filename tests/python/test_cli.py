@@ -10,6 +10,7 @@ import click
 import numpy as np
 import oecluster
 import pytest
+import rich_click.rich_click
 from click.testing import CliRunner
 from oecluster import _cli_input, _cli_main, _cli_registry, _cli_render
 from oecluster._cli_main import cli
@@ -20,6 +21,30 @@ from oecluster._cli_main import cli
 # import added ahead of its first use is rejected as F401. Each step below
 # prints the block verbatim at that point. `oecluster` is third-party here
 # (the package lives under `python/`), so it sorts with numpy and pytest.
+
+# Wider than any message the suite produces, so none wraps: the longest is a
+# collision refusal naming two absolute paths, which nears 450 columns under
+# Windows' long temporary directories.
+_RENDER_WIDTH = 1000
+
+
+@pytest.fixture(autouse=True)
+def _plain_unwrapped_rendering(monkeypatch):
+    # The assertions read rendered terminal text, so its shape must not
+    # depend on where the suite runs, and v5.18.0's wheels failed because it
+    # did. rich-click forces a colour terminal when GITHUB_ACTIONS, FORCE_COLOR
+    # or PY_COLORS is set -- read once at import into the globals it rebuilds
+    # its configuration from on every invocation -- and the escape codes split
+    # any needle that spans a styled option name. rich wraps at 80 columns, so
+    # a needle beside a long path splits across two panel lines for some path
+    # lengths. rich's own console, which prints the panels and summaries,
+    # honours FORCE_COLOR, TTY_COMPATIBLE and COLUMNS, so those are pinned too.
+    monkeypatch.setattr(rich_click.rich_click, "FORCE_TERMINAL", False)
+    monkeypatch.setattr(rich_click.rich_click, "WIDTH", _RENDER_WIDTH)
+    monkeypatch.setattr(rich_click.rich_click, "MAX_WIDTH", _RENDER_WIDTH)
+    monkeypatch.delenv("FORCE_COLOR", raising=False)
+    monkeypatch.delenv("TTY_COMPATIBLE", raising=False)
+    monkeypatch.setenv("COLUMNS", str(_RENDER_WIDTH))
 
 
 def _registry():
@@ -2662,3 +2687,26 @@ def test_the_resampling_bounds_keep_the_librarys_wording(tmp_path, option,
                   "butina", "--set", "threshold=1.0", option, value)
     assert result.exit_code == 2
     assert needle in " ".join(result.output.split())
+
+
+def test_a_refusal_reads_whole_at_every_path_length(tmp_path):
+    # Where rich wraps a panel depends on how long the paths inside it are,
+    # so a needle beside a path splits across two lines for some lengths and
+    # not others: v5.18.0's wheels failed on Windows alone because its
+    # temporary paths happened to land in that window. Walking one full line
+    # of lengths makes the test fail on every platform, not only the unlucky.
+    matrix = oecluster.SymmetricDistanceMatrix.from_condensed(
+        np.array([0.1, 0.9, 0.2, 0.8, 0.3, 0.7]))
+    source = str(tmp_path / "m.npz")
+    matrix.to_file(source)
+    split = []
+    for extra in range(80):
+        directory = tmp_path / ("d" + "x" * extra)
+        directory.mkdir()
+        target = str(directory / "x.json")
+        result = _run("consensus", source, "--member", "butina;threshold=1.0",
+                      "--output", target, "--mmap", target)
+        assert result.exit_code == 2
+        if "different files" not in result.output:
+            split.append(extra)
+    assert split == []
