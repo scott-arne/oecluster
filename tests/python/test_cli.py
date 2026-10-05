@@ -1231,3 +1231,155 @@ def test_check_ids_states_the_rule_it_enforces():
     # and the guard refuses what it cannot settle rather than exporting an
     # id two items might share.
     assert _cli_render.check_ids([np.array([1.0, 2.0])]) == ["[1. 2.]"]
+
+
+def _nonmetric(tmp_path, n=12):
+    """A matrix with a proven triangle inequality violation."""
+    values = np.array([0.1 if i // (n // 2) == j // (n // 2) else 0.2
+                       for i in range(n) for j in range(i + 1, n)])
+    values[0] = 0.9
+    matrix = oecluster.SymmetricDistanceMatrix.from_condensed(
+        values, labels=[f"m{i}" for i in range(n)])
+    path = str(tmp_path / "nm.npz")
+    matrix.to_file(path)
+    return path
+
+
+def test_select_parameter_sweeps_and_names_a_winner(tmp_path):
+    result = _run("select-parameter", _matrix(tmp_path), "--algorithm",
+                  "butina", "--parameter", "threshold", "--values",
+                  "0.8,1.0,1.2")
+    assert result.exit_code == 0, result.output
+    assert "winner threshold=" in result.stdout
+
+
+def test_select_parameter_does_not_require_the_swept_option(tmp_path):
+    # The normal form omits --set threshold=, because the sweep supplies it.
+    result = _run("select-parameter", _matrix(tmp_path), "--algorithm",
+                  "butina", "--parameter", "threshold", "--values", "0.8,1.0")
+    assert result.exit_code == 0, result.output
+
+
+def test_passing_the_swept_option_again_is_an_error(tmp_path):
+    result = _run("select-parameter", _matrix(tmp_path), "--algorithm",
+                  "butina", "--parameter", "threshold", "--values", "0.8,1.0",
+                  "--set", "threshold=0.9")
+    assert result.exit_code == 2
+    assert "swept parameter" in result.output
+
+
+def test_select_parameter_csv_marks_the_winner(tmp_path):
+    out = str(tmp_path / "s.csv")
+    _run("select-parameter", _matrix(tmp_path), "--algorithm", "butina",
+         "--parameter", "threshold", "--values", "0.8,1.0,1.2",
+         "--output", out)
+    lines = Path(out).read_text(encoding="utf-8").splitlines()
+    assert lines[0].startswith("winner,")
+    assert sum(1 for line in lines[1:] if line.startswith("true,")) == 1
+
+
+def test_select_parameter_json_carries_the_winner_index(tmp_path):
+    out = str(tmp_path / "s.json")
+    _run("select-parameter", _matrix(tmp_path), "--algorithm", "butina",
+         "--parameter", "threshold", "--values", "0.8,1.0", "--output", out)
+    document = json.loads(Path(out).read_text(encoding="utf-8"))
+    assert document["command"] == "select-parameter"
+    assert isinstance(document["result"]["winner_index"], int)
+
+
+def test_an_unknown_swept_option_is_refused(tmp_path):
+    result = _run("select-parameter", _matrix(tmp_path), "--algorithm",
+                  "butina", "--parameter", "nosuch", "--values", "1")
+    assert result.exit_code == 2
+    assert "no option" in result.output
+
+
+def test_a_misspelled_swept_option_is_named_before_requiredness(tmp_path):
+    # Reversing the two checks reports "butina requires --set threshold=…"
+    # for a misspelled --parameter, because the swept name excused the real
+    # option from requiredness.
+    result = _run("select-parameter", _matrix(tmp_path), "--algorithm",
+                  "butina", "--parameter", "treshold", "--values", "1.0")
+    assert result.exit_code == 2
+    assert "no option" in result.output
+    assert "requires" not in result.output
+
+
+@pytest.mark.parametrize("algorithm, parameter, values, needle", [
+    ("butina", "threshold", "0.8,abc", "number"),
+    ("butina", "threshold", "inf", "finite"),
+    ("butina", "threshold", "nan", "finite"),
+    ("butina", "threshold", "1e999", "finite"),
+    ("agglomerative", "n_clusters", "1e999", "range"),
+    ("agglomerative", "n_clusters", "2.5", "integer"),
+    ("butina", "threshold", ",", "at least one"),
+])
+def test_a_bad_sweep_value_is_refused_before_the_load(tmp_path, algorithm,
+                                                      parameter, values,
+                                                      needle):
+    # --values does not pass through _cli_registry.resolve(), so without a
+    # coercion of its own the grid reached the library untyped: a string
+    # threshold, an infinity, or a mistyped exponent that int() expands into
+    # a billion digits. The input here does not exist, so a refusal that
+    # loaded the matrix first would exit 1 instead of 2.
+    result = _run("select-parameter", str(tmp_path / "gone.npz"),
+                  "--algorithm", algorithm, "--parameter", parameter,
+                  "--values", values)
+    assert result.exit_code == 2
+    assert needle in result.output
+
+
+def test_select_parameter_routes_nonmetric_to_the_scorer_too(tmp_path):
+    # cluster_report runs its own metric gate and select_parameter forwards
+    # report_options to it unchanged, so a flag that reaches only the spec
+    # clusters fine and then fails in scoring.
+    result = _run("select-parameter", _nonmetric(tmp_path), "--algorithm",
+                  "butina", "--parameter", "threshold", "--values", "0.15,0.5",
+                  "--allow-nonmetric")
+    assert result.exit_code == 0, result.output
+    assert "winner threshold=" in result.stdout
+
+
+def test_a_nonmetric_matrix_without_the_flag_is_refused(tmp_path):
+    result = _run("select-parameter", _nonmetric(tmp_path), "--algorithm",
+                  "butina", "--parameter", "threshold", "--values", "0.15,0.5")
+    assert result.exit_code == 2
+    assert "triangle inequality" in result.output
+
+
+def test_stability_scores_every_cluster(tmp_path):
+    result = _run("stability", _matrix(tmp_path), "--algorithm", "butina",
+                  "--set", "threshold=1.0", "--resamples", "8")
+    assert result.exit_code == 0, result.output
+    assert "resamples=8" in result.stdout
+    assert "mean_jaccard=" in result.stdout
+
+
+def test_stability_json_exports_reference_labels(tmp_path):
+    # Named explicitly: ClusterStability also has per-resample labels paired
+    # with indices, and a bare "labels" would be ambiguous between them.
+    out = str(tmp_path / "st.json")
+    _run("stability", _matrix(tmp_path), "--algorithm", "butina",
+         "--set", "threshold=1.0", "--resamples", "6", "--output", out)
+    document = json.loads(Path(out).read_text(encoding="utf-8"))
+    assert len(document["result"]["reference_labels"]) == 40
+    assert "labels" not in document["result"]
+
+
+def test_stability_csv_carries_the_record_columns(tmp_path):
+    out = str(tmp_path / "st.csv")
+    _run("stability", _matrix(tmp_path), "--algorithm", "butina",
+         "--set", "threshold=1.0", "--resamples", "6", "--output", out)
+    lines = Path(out).read_text(encoding="utf-8").splitlines()
+    assert lines[0] == "label,size,mean_jaccard,dissolved,recovered,evaluated"
+    assert len(lines) == 5
+
+
+def test_a_bad_stability_output_extension_is_refused_before_the_run(tmp_path):
+    # The run is minutes long, so the extension has to be refused in front
+    # of it; --output is the only destination the contract applies to.
+    result = _run("stability", _matrix(tmp_path), "--algorithm", "butina",
+                  "--set", "threshold=1.0", "--resamples", "4", "--output",
+                  str(tmp_path / "st.txt"))
+    assert result.exit_code == 2
+    assert ".csv or .json" in result.output

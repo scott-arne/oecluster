@@ -10,6 +10,8 @@ import os
 
 import rich_click as click
 
+import oecluster
+
 from . import (
     _SIZE_T_MAX,
     ClusteringSpec,
@@ -293,6 +295,154 @@ def cluster(matrix, algorithm, assignments, threads, allow_nonmetric, output,
                            **({"ids": named} if named else {}),
                            "num_clusters": result.num_clusters,
                            "num_noise": noise},
+            }})
+
+
+@cli.command("select-parameter")
+@click.argument("matrix")
+@click.option("--algorithm", required=True, help="Roster name.")
+@click.option("--parameter", required=True, help="Option to sweep.")
+@click.option("--values", required=True,
+              help="Comma-separated values for the swept option.")
+@click.option("--set", "assignments", multiple=True, metavar="KEY=VALUE",
+              help="Fixed algorithm option; repeatable.")
+@click.option("--criterion", default=None, help="Scoring criterion.")
+@click.option("--max-noise-fraction", type=float, default=None)
+@click.option("--min-clusters", type=int, default=None)
+@click.option("--max-clusters", type=int, default=None)
+@_common
+@_translate
+def select_parameter(matrix, algorithm, parameter, values, assignments,
+                     criterion, max_noise_fraction, min_clusters,
+                     max_clusters, threads, allow_nonmetric, output, quiet):
+    """Sweep one option over several values and pick a winner."""
+    _check_destinations(matrix, output)
+    registry = _cli_registry.build()
+    if algorithm not in registry:
+        raise ValueError(
+            f"unknown algorithm {algorithm!r}; run 'oecluster algorithms'")
+    entry = registry[algorithm]
+    # Check the swept name BEFORE building the spec. Reversing these reports
+    # "butina requires --set threshold=…" for a misspelled --parameter,
+    # because the swept name excused the real option from requiredness.
+    if parameter not in entry.known():
+        raise ValueError(f"{algorithm} has no option {parameter!r} to sweep")
+    # The swept option satisfies requiredness: select_parameter supplies it
+    # per value, so demanding it in --set would reject the normal form.
+    spec = _spec(algorithm, assignments, registry, threads, allow_nonmetric,
+                 swept=parameter)
+    # Coerced through the same function --set uses: the grid does not pass
+    # through _cli_registry.resolve(), so without this it reached the
+    # library as untyped text -- a string threshold, an infinity, or a
+    # mistyped exponent int() expands into a billion digits.
+    swept = [_cli_registry.coerce(algorithm, parameter, item.strip(), entry)
+             for item in values.split(",") if item.strip()]
+    if not swept:
+        raise ValueError("--values needs at least one value")
+    loaded = _cli_input.load(matrix)
+    # cluster_report runs its own metric gate, and select_parameter forwards
+    # report_options to it unchanged -- so the flag has to reach both places
+    # or clustering succeeds and scoring then fails.
+    report_options = {"allow_nonmetric": True} if allow_nonmetric else None
+    selection = oecluster.select_parameter(
+        spec, loaded, parameter, swept, criterion=criterion,
+        max_noise_fraction=max_noise_fraction, min_clusters=min_clusters,
+        max_clusters=max_clusters, report_options=report_options)
+    rows = selection.to_table()
+    described = {"algorithm": algorithm, "options": dict(spec.options)}
+    if not quiet:
+        out = _cli_render.console()
+        out.print(_cli_render.panel("select-parameter", described, matrix,
+                                    loaded.num_samples))
+        out.print(_cli_render.table(selection.columns, rows))
+        # winner is legitimately None when every row was ineligible or
+        # unscorable; that is a valid outcome, not a crash.
+        if selection.winner is None:
+            out.print(f"no winner: no eligible {parameter} value "
+                      f"({len(rows)} evaluated)")
+        else:
+            won = selection.winner.result
+            noise = sum(1 for value in won.labels if value < 0)
+            fraction = noise / loaded.num_samples if loaded.num_samples else 0.0
+            out.print(f"winner {parameter}={selection.winner.value} "
+                      f"({len(rows)} evaluated) "
+                      f"clusters={won.num_clusters} noise={noise} "
+                      f"({fraction:.1%})")
+    if output is not None:
+        _cli_render.write_output(output, {
+            "header": ["winner", *selection.columns],
+            "rows": [[str(index == selection.winner_index).lower(), *row]
+                     for index, row in enumerate(rows)],
+            "document": {
+                "schema_version": _cli_render.SCHEMA_VERSION,
+                "command": "select-parameter",
+                "input": {"path": matrix, "num_items": loaded.num_samples,
+                          "orientation": str(loaded.is_distance)},
+                "spec": described,
+                "result": {
+                    "columns": list(selection.columns),
+                    "rows": [[_cli_render.encode(value) for value in row]
+                             for row in rows],
+                    "winner_index": selection.winner_index},
+            }})
+
+
+@cli.command()
+@click.argument("matrix")
+@click.option("--algorithm", required=True, help="Roster name.")
+@click.option("--set", "assignments", multiple=True, metavar="KEY=VALUE",
+              help="Algorithm option; repeatable.")
+@click.option("--resamples", default=100, show_default=True)
+@click.option("--fraction", default=0.5, show_default=True)
+@click.option("--seed", default=0, show_default=True)
+@click.option("--noise", default="singletons", show_default=True,
+              type=click.Choice(["singletons", "grouped", "excluded"]))
+@_common
+@_translate
+def stability(matrix, algorithm, assignments, resamples, fraction, seed,
+              noise, threads, allow_nonmetric, output, quiet):
+    """Score how well each cluster survives resampling."""
+    _check_destinations(matrix, output)
+    registry = _cli_registry.build()
+    spec = _spec(algorithm, assignments, registry, threads, allow_nonmetric)
+    loaded = _cli_input.load(matrix)
+    out = _cli_render.console()
+    # keep_partitions=False: this command exports only the reference
+    # partition, so retaining every resample is pure memory cost. The
+    # consensus command passes True, because it consenses them.
+    with out.status(f"running {resamples} resamples"):
+        scored = oecluster.cluster_stability(
+            spec, loaded, resamples=resamples, fraction=fraction, seed=seed,
+            noise=noise, keep_partitions=False,
+            num_threads=_thread_count(threads))
+    rows = scored.to_table()
+    reference = [int(value) for value in scored.reference.labels]
+    described = {"algorithm": algorithm, "options": dict(spec.options)}
+    if not quiet:
+        out.print(_cli_render.panel("stability", described, matrix,
+                                    loaded.num_samples))
+        out.print(_cli_render.table(scored.columns, rows))
+        noise_count = sum(1 for value in reference if value < 0)
+        noise_fraction = (noise_count / loaded.num_samples
+                          if loaded.num_samples else 0.0)
+        out.print(f"resamples={resamples} clusters={len(rows)} "
+                  f"noise={noise_count} ({noise_fraction:.1%}) "
+                  f"mean_jaccard={scored.mean_jaccard:.4f}")
+    if output is not None:
+        _cli_render.write_output(output, {
+            "header": list(scored.columns),
+            "rows": rows,
+            "document": {
+                "schema_version": _cli_render.SCHEMA_VERSION,
+                "command": "stability",
+                "input": {"path": matrix, "num_items": loaded.num_samples,
+                          "orientation": str(loaded.is_distance)},
+                "spec": described,
+                "result": {
+                    "columns": list(scored.columns),
+                    "rows": [[_cli_render.encode(value) for value in row]
+                             for row in rows],
+                    "reference_labels": reference},
             }})
 
 
