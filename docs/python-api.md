@@ -1307,9 +1307,10 @@ oecluster cluster distances.npz --algorithm butina --set threshold=1.5
 clusters=4 noise=0 (0.0%)
 ```
 
-`consensus` takes the same pair in bootstrap mode, and in cross-algorithm mode
-takes its members as `--member 'NAME;key=value'` instead, where `--algorithm`
-and `--set` are refused.
+`consensus` takes the same pair in bootstrap mode, where `--resamples` is
+required as well — it has no default, unlike `stability`'s 100. In
+cross-algorithm mode it takes its members as `--member 'NAME;key=value'`
+instead, and `--algorithm` and `--set` are refused.
 
 `--help` is the command line's own documentation. Every command carries a
 description there and every option its help text, `oecluster algorithms`
@@ -1433,8 +1434,10 @@ clusters=4 noise=0 (0.0%) partitions=3 mean_agreement=1.0000
 ```
 
 The two modes are exclusive: `--algorithm` or `--resamples` selects the first,
-`--member` the second, and mixing them is refused. `--set` belongs to bootstrap
-mode and is refused in the other. The member grammar is deliberately minimal —
+`--member` the second, and mixing them is refused. Bootstrap mode needs both
+of its own — either one alone is refused with `bootstrap mode needs both
+--algorithm and --resamples`. `--set` belongs to bootstrap mode and is refused
+in the other. The member grammar is deliberately minimal —
 no roster option takes a value containing `;` or `=`, so one is refused rather
 than escaped.
 
@@ -1607,11 +1610,19 @@ plus `num_partitions`, `unobserved_pairs`, `threshold`, `mean_agreement`,
 `noise`, the per-member `agreement`, `item_consensus` and one `records` entry
 per cluster.
 
-It is not a record of the invocation. `spec` holds the algorithm and the
-options resolved for it, and nothing else does: a `stability` run given
+`spec` describes what ran, in one of two shapes. `cluster`,
+`select-parameter`, `stability` and bootstrap `consensus` write
+`{"algorithm": …, "options": {…}}`, and bootstrap `consensus` adds
+`"resamples"` to it. Cross-algorithm `consensus` writes
+`{"members": [{"algorithm": …, "options": {…}}, …]}` instead, with no
+top-level `algorithm` or `options` at all.
+
+Do not read `spec` as the command line. Some run parameters are recorded, some
+are not, and which is which varies by command: a `stability` run given
 `--resamples 4 --fraction 0.7 --seed 3` writes a document in which none of
-those three appears. The document says what was produced, not how to reproduce
-it; keep the command line itself if you need that.
+those three appears anywhere, while the same `--resamples` under bootstrap
+`consensus` lands in `spec`. Check the document for the field you need rather
+than assuming the invocation can be recovered from it.
 
 `mean_agreement` and the `noise` mode it was computed under are JSON-only on
 purpose. A CSV here is one row per cluster or one row per item, so a trailing
@@ -1630,8 +1641,8 @@ infinities are `inf` and `-inf`.
 
 A value that was simply absent encodes the same way as a NaN: `null` in JSON,
 empty in a CSV. A `select-parameter` row reads
-`[100.0, null, 1, 0.0, true, null]`, where the second `null` is a NaN
-`silhouette` and the last is a `rejection` the row never had.
+`[100.0, null, 1, 0.0, true, null]`, where the first `null` is a NaN
+`silhouette` and the second a `rejection` the row never had.
 
 The file is rendered and encoded in full before it is opened, so a value the
 encoder cannot write fails before anything is touched. That ordering does not
@@ -1654,15 +1665,34 @@ it is two.
 | Code | Meaning |
 |---|---|
 | 0 | the run succeeded |
-| 1 | the run failed: an unusable input, or a failure inside the library |
-| 2 | the invocation was wrong: an unknown option, a bad value, a colliding destination |
+| 1 | the loader refused the file, or the run failed inside the library |
+| 2 | the invocation was refused, including by one of the library's own gates |
 
-A validation failure of the invocation exits 2, as Click's own parse errors
-do. A file that cannot be used exits 1, even though the path was the user's to
-choose: `.csv` input, a missing file and a similarity-oriented one all exit 1,
-while an unknown `--set` key and a colliding destination exit 2. Both codes
-print the message in an error panel, word-wrapped to the terminal, rather than
-a traceback.
+The line between 1 and 2 follows the kind of error raised, not how the problem
+reads. A `ValueError` or `TypeError` becomes a usage error and exits 2, which
+covers Click's parse errors and the command's own validation — and also the
+library's gates, which raise `ValueError`. Everything the loader refuses, and
+every other runtime failure, exits 1.
+
+That has one consequence worth knowing before a script branches on it: the
+same mistake can give either code depending on which layer catches it. A
+`.npy` whose sidecar records `similarity: true` exits **1**, refused by the
+loader. A `.npz` whose stored facts record `is_distance` false exits **2**,
+refused by the clustering gate:
+
+```
+butina requires distances, but this matrix holds a similarity (precomputed).
+```
+
+A matrix with proven triangle violations, under an algorithm that assumes a
+metric, exits 2 for the same reason. Measured against the cases in this
+section: `.csv` input, a missing file, a missing sidecar, a sidecar-proven
+similarity, a negative value and a label collision exit 1; an unknown `--set`
+key, a bad value, a colliding destination, a `.npz` proven to hold
+similarities and an unflagged non-metric matrix exit 2.
+
+Both codes print the message in an error panel, word-wrapped to the terminal,
+rather than a traceback.
 
 `--traceback`, or `OECLUSTER_CLI_TRACEBACK` set to a non-empty value other than
 `0`, shows the original exception instead, with the frame that actually failed
