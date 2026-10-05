@@ -122,11 +122,21 @@ def _common(function):
     return function
 
 
-def _spec(algorithm, assignments, registry, threads, nonmetric, *, swept=None):
-    """Validate an algorithm and its options into a ClusteringSpec.
+def _entry(algorithm, registry):
+    """Look up an algorithm that is allowed to run on a distance matrix.
 
-    :raises ValueError: For an unknown or ineligible algorithm, or any option
-        the registry refuses.
+    Both questions are asked here rather than at each call site, and in this
+    order. ``select-parameter`` asked only the first before checking its
+    swept name, so ``--algorithm murcko`` was answered "murcko has no option
+    'threshold' to sweep" where ``cluster`` says "murcko takes mols, not a
+    distance matrix" -- and only because ``bitbirch`` happens to have a
+    ``threshold``, so the wrong message was not even consistent.
+
+    :param algorithm: Roster name as the user spelled it.
+    :param registry: Mapping from :func:`_cli_registry.build`.
+    :returns: The :class:`_cli_registry.Entry` for ``algorithm``.
+    :raises ValueError: For an unknown name, or one whose input is not a
+        distance matrix.
     """
     if algorithm not in registry:
         raise ValueError(
@@ -135,6 +145,16 @@ def _spec(algorithm, assignments, registry, threads, nonmetric, *, swept=None):
     if not entry.eligible:
         raise ValueError(
             f"{algorithm} takes {entry.kind}, not a distance matrix")
+    return entry
+
+
+def _spec(algorithm, assignments, registry, threads, nonmetric, *, swept=None):
+    """Validate an algorithm and its options into a ClusteringSpec.
+
+    :raises ValueError: For an unknown or ineligible algorithm, or any option
+        the registry refuses.
+    """
+    entry = _entry(algorithm, registry)
     options = _cli_registry.resolve(algorithm, assignments, registry,
                                     swept=swept)
     threads = _thread_count(threads)
@@ -306,10 +326,14 @@ def cluster(matrix, algorithm, assignments, threads, allow_nonmetric, output,
               help="Comma-separated values for the swept option.")
 @click.option("--set", "assignments", multiple=True, metavar="KEY=VALUE",
               help="Fixed algorithm option; repeatable.")
-@click.option("--criterion", default=None, help="Scoring criterion.")
-@click.option("--max-noise-fraction", type=float, default=None)
-@click.option("--min-clusters", type=int, default=None)
-@click.option("--max-clusters", type=int, default=None)
+@click.option("--criterion", default=None,
+              help="Validity index to rank by; the scorer picks one if unset.")
+@click.option("--max-noise-fraction", type=float, default=None,
+              help="Reject a value whose noise fraction exceeds this.")
+@click.option("--min-clusters", type=int, default=None,
+              help="Reject a value that yields fewer clusters than this.")
+@click.option("--max-clusters", type=int, default=None,
+              help="Reject a value that yields more clusters than this.")
 @_common
 @_translate
 def select_parameter(matrix, algorithm, parameter, values, assignments,
@@ -318,10 +342,7 @@ def select_parameter(matrix, algorithm, parameter, values, assignments,
     """Sweep one option over several values and pick a winner."""
     _check_destinations(matrix, output)
     registry = _cli_registry.build()
-    if algorithm not in registry:
-        raise ValueError(
-            f"unknown algorithm {algorithm!r}; run 'oecluster algorithms'")
-    entry = registry[algorithm]
+    entry = _entry(algorithm, registry)
     # Check the swept name BEFORE building the spec. Reversing these reports
     # "butina requires --set threshold=…" for a misspelled --parameter,
     # because the swept name excused the real option from requiredness.
@@ -381,8 +402,10 @@ def select_parameter(matrix, algorithm, parameter, values, assignments,
                 "spec": described,
                 "result": {
                     "columns": list(selection.columns),
-                    "rows": [[_cli_render.encode(value) for value in row]
-                             for row in rows],
+                    # Not encoded here: write_output walks the whole document
+                    # itself, precisely so a call site cannot leave a NaN in
+                    # it by forgetting to.
+                    "rows": [list(row) for row in rows],
                     "winner_index": selection.winner_index},
             }})
 
@@ -392,11 +415,15 @@ def select_parameter(matrix, algorithm, parameter, values, assignments,
 @click.option("--algorithm", required=True, help="Roster name.")
 @click.option("--set", "assignments", multiple=True, metavar="KEY=VALUE",
               help="Algorithm option; repeatable.")
-@click.option("--resamples", default=100, show_default=True)
-@click.option("--fraction", default=0.5, show_default=True)
-@click.option("--seed", default=0, show_default=True)
+@click.option("--resamples", default=100, show_default=True,
+              help="Number of resampled runs to score against.")
+@click.option("--fraction", default=0.5, show_default=True,
+              help="Fraction of the items drawn for each resample.")
+@click.option("--seed", default=0, show_default=True,
+              help="Seed for the resampling draws, for a reproducible run.")
 @click.option("--noise", default="singletons", show_default=True,
-              type=click.Choice(["singletons", "grouped", "excluded"]))
+              type=click.Choice(["singletons", "grouped", "excluded"]),
+              help="How noise points count towards mean_agreement.")
 @_common
 @_translate
 def stability(matrix, algorithm, assignments, resamples, fraction, seed,
@@ -425,9 +452,13 @@ def stability(matrix, algorithm, assignments, resamples, fraction, seed,
         noise_count = sum(1 for value in reference if value < 0)
         noise_fraction = (noise_count / loaded.num_samples
                           if loaded.num_samples else 0.0)
+        # mean_agreement is reported because --noise governs nothing else:
+        # the Jaccard matching never treats noise as a cluster, so with the
+        # agreement left out the flag changed no number the user could see.
         out.print(f"resamples={resamples} clusters={len(rows)} "
                   f"noise={noise_count} ({noise_fraction:.1%}) "
-                  f"mean_jaccard={scored.mean_jaccard:.4f}")
+                  f"mean_jaccard={scored.mean_jaccard:.4f} "
+                  f"mean_agreement={scored.mean_agreement:.4f}")
     if output is not None:
         _cli_render.write_output(output, {
             "header": list(scored.columns),
@@ -440,8 +471,8 @@ def stability(matrix, algorithm, assignments, resamples, fraction, seed,
                 "spec": described,
                 "result": {
                     "columns": list(scored.columns),
-                    "rows": [[_cli_render.encode(value) for value in row]
-                             for row in rows],
+                    # Left to write_output's own walk, as its contract says.
+                    "rows": [list(row) for row in rows],
                     "reference_labels": reference},
             }})
 

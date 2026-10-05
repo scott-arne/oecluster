@@ -1383,3 +1383,135 @@ def test_a_bad_stability_output_extension_is_refused_before_the_run(tmp_path):
                   str(tmp_path / "st.txt"))
     assert result.exit_code == 2
     assert ".csv or .json" in result.output
+
+
+def _result(tmp_path, name, *args):
+    """Run a command with a JSON --output and return the result document."""
+    out = str(tmp_path / name)
+    result = _run(*args, "--quiet", "--output", out)
+    assert result.exit_code == 0, result.output
+    return json.loads(Path(out).read_text(encoding="utf-8"))["result"]
+
+
+def test_the_criterion_reaches_the_scorer(tmp_path):
+    # The criterion names the second column, so dropping criterion= at the
+    # call site silently reverts the whole ranking to silhouette.
+    document = _result(tmp_path, "c.json", "select-parameter",
+                       _matrix(tmp_path), "--algorithm", "butina",
+                       "--parameter", "threshold", "--values", "0.8,1.0",
+                       "--criterion", "davies_bouldin_medoid")
+    assert document["columns"][1] == "davies_bouldin_medoid"
+
+
+def test_max_noise_fraction_rejects_only_the_noisy_value(tmp_path):
+    # dbscan at eps 0.2 leaves 33 of 40 items as noise and at 0.5 leaves
+    # none, so the bound has to discriminate between the two rows rather
+    # than reject or keep both.
+    document = _result(tmp_path, "n.json", "select-parameter",
+                       _matrix(tmp_path), "--algorithm", "dbscan",
+                       "--parameter", "eps", "--values", "0.2,0.5",
+                       "--set", "min_samples=5",
+                       "--max-noise-fraction", "0.5")
+    assert "max_noise_fraction" in document["rows"][0][-1]
+    assert document["rows"][1][-1] is None
+    assert document["winner_index"] == 1
+
+
+def test_max_clusters_rejects_an_oversized_partition(tmp_path):
+    # The rejection is read by name, not as a bare "no winner": swapping
+    # min_clusters and max_clusters at the call site leaves every row
+    # eligible here and every row rejected in the test below, so each one
+    # catches the swap the other does not.
+    document = _result(tmp_path, "x.json", "select-parameter",
+                       _matrix(tmp_path), "--algorithm", "butina",
+                       "--parameter", "threshold", "--values", "0.8,1.0",
+                       "--max-clusters", "3")
+    assert all("max_clusters" in row[-1] for row in document["rows"])
+    assert document["winner_index"] is None
+
+
+def test_no_eligible_value_is_a_clean_outcome(tmp_path):
+    # winner is legitimately None when every row was ineligible. The run
+    # succeeded and the table still shows why, so this is exit 0 with a
+    # null winner_index, not a failure.
+    out = str(tmp_path / "w.json")
+    result = _run("select-parameter", _matrix(tmp_path), "--algorithm",
+                  "butina", "--parameter", "threshold", "--values", "0.8,1.0",
+                  "--min-clusters", "99", "--output", out)
+    assert result.exit_code == 0, result.output
+    assert "no winner" in result.stdout
+    document = json.loads(Path(out).read_text(encoding="utf-8"))["result"]
+    assert document["winner_index"] is None
+    assert all("min_clusters" in row[-1] for row in document["rows"])
+
+
+def _noisy_stability(tmp_path, *args):
+    """Run stability over a reference partition that has real noise."""
+    result = _run("stability", _matrix(tmp_path), "--algorithm", "dbscan",
+                  "--set", "eps=0.3", "--set", "min_samples=5",
+                  "--resamples", "6", *args)
+    assert result.exit_code == 0, result.output
+    return result.stdout
+
+
+def _statistic(summary, name):
+    # Matched with the "=" attached: "mean_jaccard" is also a column header
+    # in the table above the summary, and that bare word matches first.
+    # The summary wraps at the console width, but rich breaks on spaces, so
+    # each key=value stays one token.
+    field = next(part for part in summary.split()
+                 if part.startswith(f"{name}="))
+    return field.split("=", 1)[1]
+
+
+def test_the_seed_changes_the_resampling_draw(tmp_path):
+    first = _noisy_stability(tmp_path, "--seed", "1")
+    second = _noisy_stability(tmp_path, "--seed", "2")
+    assert _statistic(first, "mean_jaccard") != _statistic(second,
+                                                           "mean_jaccard")
+
+
+def test_the_fraction_changes_how_much_is_drawn(tmp_path):
+    half = _noisy_stability(tmp_path, "--seed", "1", "--fraction", "0.5")
+    most = _noisy_stability(tmp_path, "--seed", "1", "--fraction", "0.9")
+    assert _statistic(half, "mean_jaccard") != _statistic(most,
+                                                          "mean_jaccard")
+
+
+def test_the_noise_mode_reaches_the_agreement(tmp_path):
+    # --noise governs the agreement and nothing else: the Jaccard matching
+    # never treats noise as a cluster, so mean_jaccard is identical across
+    # all three modes and only mean_agreement moves.
+    summaries = {mode: _noisy_stability(tmp_path, "--seed", "0", "--noise",
+                                        mode)
+                 for mode in ("singletons", "grouped", "excluded")}
+    agreements = {_statistic(summary, "mean_agreement")
+                  for summary in summaries.values()}
+    assert len(agreements) == 3
+    assert len({_statistic(summary, "mean_jaccard")
+                for summary in summaries.values()}) == 1
+
+
+def test_the_resample_count_reaches_the_library(tmp_path):
+    # The summary echoes --resamples straight back, so it proves nothing on
+    # its own; the evaluated column is the library's own count.
+    out = str(tmp_path / "e.csv")
+    _run("stability", _matrix(tmp_path), "--algorithm", "butina", "--set",
+         "threshold=1.0", "--resamples", "7", "--fraction", "0.9",
+         "--quiet", "--output", out)
+    lines = Path(out).read_text(encoding="utf-8").splitlines()[1:]
+    assert [line.split(",")[-1] for line in lines] == ["7"] * 4
+
+
+def test_an_ineligible_algorithm_reads_the_same_in_every_command(tmp_path):
+    # select-parameter duplicated only the membership half of the guard and
+    # ran it before the eligibility check, so --algorithm murcko was
+    # answered "murcko has no option 'threshold' to sweep".
+    path = _matrix(tmp_path)
+    for args in (("cluster", path, "--algorithm", "murcko"),
+                 ("select-parameter", path, "--algorithm", "murcko",
+                  "--parameter", "threshold", "--values", "1"),
+                 ("stability", path, "--algorithm", "murcko")):
+        result = _run(*args)
+        assert result.exit_code == 2
+        assert "not a distance matrix" in result.output, args
