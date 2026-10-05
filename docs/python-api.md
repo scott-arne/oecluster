@@ -1345,9 +1345,12 @@ installed library rather than a list kept beside it:
 └────────────┴───────┴──────────┴─────────┘
 ```
 
-Options the `key=value` grammar cannot express are left out of that table, so
-it is the `--set` surface rather than the full signature: `k_medoids` lists
-`init`, `max_iterations` and `n_clusters`, and not `initial_medoids`.
+The table is the `--set` surface, not the whole signature. `algorithms
+k_medoids` lists `init`, `max_iterations` and `n_clusters`; `initial_medoids`
+is not on it. These names are left off and are refused by `--set`:
+`num_threads` and `allow_nonmetric`, which have their own flags; `chunk_size`;
+`comparison` and `similarity`, on the entries that take items; and
+`initial_medoids`.
 
 Naming an ineligible one prints the reason instead: `murcko takes mols, not a
 distance matrix`.
@@ -1431,9 +1434,9 @@ clusters=4 noise=0 (0.0%) partitions=3 mean_agreement=1.0000
 
 The two modes are exclusive: `--algorithm` or `--resamples` selects the first,
 `--member` the second, and mixing them is refused. `--set` belongs to bootstrap
-mode only, since a cross-algorithm member configures itself. The member grammar
-is deliberately minimal — no roster option takes a value containing `;` or `=`,
-so one is refused rather than escaped.
+mode and is refused in the other. The member grammar is deliberately minimal —
+no roster option takes a value containing `;` or `=`, so one is refused rather
+than escaped.
 
 `--threshold` is the co-association support the default extraction merges at,
 and `--mmap PATH` keeps the co-association matrix on disk, which is the
@@ -1460,11 +1463,11 @@ option refuses a fractional value rather than truncating it, a boolean option
 takes only `true` or `false`, and a float option refuses an infinity or a NaN.
 A missing required option is named before anything is loaded.
 
-`--threads` and `--allow-nonmetric` are first-class flags rather than `--set`
-keys, because they route to more than one call: `--allow-nonmetric` reaches
-both the clustering entry point and the `cluster_report` scoring behind
-`select-parameter`, and `--threads` reaches every resample. Setting either
-through `--set` is refused pointing at the flag:
+`--threads` and `--allow-nonmetric` are flags of their own rather than `--set`
+keys. `--allow-nonmetric` reaches the `cluster_report` scoring behind
+`select-parameter` as well as the clustering call, and `--threads` reaches
+every resample. Setting either through `--set` is refused pointing at the
+flag:
 
 ```
 set num_threads with --threads, not --set
@@ -1497,8 +1500,8 @@ containing a comma makes unparseable, writes values at eight significant
 digits, and records no provenance at all. Re-run `oepdist` with a `.npy`
 output, or save a `.npz` from Python.
 
-A file holding similarities rather than distances is refused, the error with
-the worst consequences here because nothing downstream would notice it:
+A file whose sidecar records that it holds similarities rather than distances
+is refused:
 
 ```
 this file holds similarities, not distances; re-run oepdist without --sim,
@@ -1552,8 +1555,8 @@ The CSV is the command's own table, with no summary row beyond it:
 
 `select-parameter`'s columns follow the criterion that ran, so the header is
 `winner,threshold,silhouette,num_clusters,noise_fraction,eligible,rejection`
-for the sweep above. The `id` column holds the matrix's own labels, or the item
-indices when it has none.
+for the sweep above. Where there is an `id` column it holds the matrix's own
+labels, or the item indices when it has none.
 
 The JSON adds what a flat table has no room for: the structured results, and
 the scalars that describe the run as a whole rather than one row of it. It is
@@ -1619,12 +1622,16 @@ differently under each mode, so the number cannot be compared across runs that
 chose differently.
 
 Non-finite values are encoded rather than dropped. In JSON, NaN becomes `null`
-and the infinities become the strings `"inf"` and `"-inf"`, because collapsing
-them together would erase a real distinction: NaN means undefined — a cluster
-of one has no consensus score — while an infinity is a defined extreme some
-criteria produce. In a CSV, NaN is an empty field, and so is a value that was
-simply absent, such as an unrejected row's `rejection`; those two are not
-distinguishable there. The infinities are `inf` and `-inf`.
+and the infinities become the strings `"inf"` and `"-inf"`. The two are kept
+apart because collapsing them would erase a real distinction: NaN means
+undefined — a cluster of one has no consensus score — while an infinity is a
+defined extreme some criteria produce. In a CSV, NaN is an empty field and the
+infinities are `inf` and `-inf`.
+
+A value that was simply absent encodes the same way as a NaN: `null` in JSON,
+empty in a CSV. A `select-parameter` row reads
+`[100.0, null, 1, 0.0, true, null]`, where the second `null` is a NaN
+`silhouette` and the last is a `rejection` the row never had.
 
 The file is rendered and encoded in full before it is opened, so a value the
 encoder cannot write fails before anything is touched. That ordering does not
@@ -1650,10 +1657,12 @@ it is two.
 | 1 | the run failed: an unusable input, or a failure inside the library |
 | 2 | the invocation was wrong: an unknown option, a bad value, a colliding destination |
 
-The split follows where the problem is. Anything the user could have written
-differently exits 2, as Click's own parse errors do; anything about the file or
-the run exits 1. Both print the message in an error panel, word-wrapped to the
-terminal, rather than a traceback.
+A validation failure of the invocation exits 2, as Click's own parse errors
+do. A file that cannot be used exits 1, even though the path was the user's to
+choose: `.csv` input, a missing file and a similarity-oriented one all exit 1,
+while an unknown `--set` key and a colliding destination exit 2. Both codes
+print the message in an error panel, word-wrapped to the terminal, rather than
+a traceback.
 
 `--traceback`, or `OECLUSTER_CLI_TRACEBACK` set to a non-empty value other than
 `0`, shows the original exception instead, with the frame that actually failed
@@ -1661,19 +1670,19 @@ rather than the frame that renamed it.
 
 ### Memory
 
-Once a run is under way the command line adds nothing to the figures given
-under each feature above: it holds one matrix and hands it to the same
-functions. The matrix dominates, at `4 N (N - 1)` bytes dense, and `consensus`
-builds a second one of that size. `--mmap` is the lever for the second: past a
-few thousand items it keeps the co-association matrix on disk, where
-`consensus()`'s `output=` puts it.
+Once a run is under way the figures are the ones given under each feature
+above: the command line holds one matrix and hands it to the same functions,
+and its own structures — the label, id and consensus lists it builds for the
+output — are `O(N)` beside the matrix's `O(N^2)`. The matrix dominates, at
+`4 N (N - 1)` bytes dense, and `consensus` builds a second one of that size.
+`--mmap` is the lever for the second: past a few thousand items it keeps the
+co-association matrix on disk, where `consensus()`'s `output=` puts it.
 
-Loading is the exception, and it is where a large job is most likely to fail.
-The values exist as a numpy array while the native storage is being built from
-them, so the peak while loading is roughly two matrices rather than one. For a
-6000-item matrix — 144 MB of condensed values — the measured peak increase was
-334 MB from a `.npy` and 306 MB from a `.npz`. Size the job for that peak, not
-for the resident matrix.
+Loading is the exception. The values exist as a numpy array while the native
+storage is being built from them, so the peak while loading is roughly two
+matrices rather than one. For a 6000-item matrix — 144 MB of condensed
+values — the measured peak increase was 334 MB from a `.npy` and 306 MB from a
+`.npz`. Size the job for that peak, not for the resident matrix.
 
 ## Partition Agreement
 

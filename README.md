@@ -420,8 +420,8 @@ ensemble kinds, the scoring rules and the memory figures.
 The `oecluster` command runs the same four features over a distance matrix
 computed earlier, as a `.npz` from Python or as `oepdist`'s `.npy` or `.bin`
 beside its JSON sidecar. The algorithm is named by its roster name, with its
-options as repeated `--set key=value` — or, for a `consensus` ensemble of
-different algorithms, inside one `--member` per member:
+options as repeated `--set key=value` — or, for a `consensus` ensemble, inside
+one `--member` per member:
 
 ```bash
 oecluster algorithms butina
