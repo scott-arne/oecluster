@@ -6,11 +6,12 @@ import traceback
 import warnings
 from pathlib import Path
 
+import click
 import numpy as np
 import oecluster
 import pytest
 from click.testing import CliRunner
-from oecluster import _cli_input, _cli_registry, _cli_render
+from oecluster import _cli_input, _cli_main, _cli_registry, _cli_render
 from oecluster._cli_main import cli
 
 # Later steps and tasks append test functions at the END of this file and
@@ -917,3 +918,110 @@ def test_an_unlabelled_matrix_falls_back_to_indices(tmp_path):
     assert rows[1].startswith("0,")
     document = json.loads(Path(json_path).read_text(encoding="utf-8"))
     assert "ids" not in document["result"]
+
+
+def _case_folding(tmp_path):
+    """:returns: True if this filesystem treats two casings as one file."""
+    probe = tmp_path / "CaseProbe"
+    probe.write_text("x", encoding="utf-8")
+    return (tmp_path / "caseprobe").exists()
+
+
+def _uppercase_npy(tmp_path):
+    """An oepdist-shaped input named U.NPY, with its U.json sidecar."""
+    np.save(str(tmp_path / "source.npy"), _condensed())
+    path = tmp_path / "U.NPY"
+    path.write_bytes((tmp_path / "source.npy").read_bytes())
+    _write_sidecar(str(path), 12)
+    return str(path)
+
+
+def test_an_uppercase_input_extension_still_protects_the_sidecar(tmp_path):
+    # _cli_input dispatches on the lowercased suffix because `oepdist -o
+    # out.NPY` writes a real .NPY. Compared case-sensitively here, U.NPY
+    # looked like a format that has no sidecar, so the run overwrote the
+    # one file that makes the input readable at all.
+    path = _uppercase_npy(tmp_path)
+    sidecar = str(tmp_path / "U.json")
+    result = _run("cluster", path, "--algorithm", "butina",
+                  "--set", "threshold=1.0", "--output", sidecar)
+    assert result.exit_code == 2
+    assert "sidecar" in result.output
+    assert json.loads(Path(sidecar).read_text(encoding="utf-8"))["mode"] \
+        == "pdist"
+
+
+def test_a_recased_destination_cannot_clobber_the_sidecar(tmp_path):
+    # realpath compares bytes, so it reports d.json and D.JSON as two files
+    # even where the filesystem has only one. The sidecar has to survive
+    # either way: refused where the names collide, written beside it where
+    # they do not.
+    path = _npy(tmp_path)
+    sidecar = os.path.splitext(path)[0] + ".json"
+    recased = os.path.join(os.path.dirname(sidecar),
+                           os.path.basename(sidecar).upper())
+    result = _run("cluster", path, "--algorithm", "butina",
+                  "--set", "threshold=1.0", "--output", recased)
+    assert json.loads(Path(sidecar).read_text(encoding="utf-8"))["mode"] \
+        == "pdist"
+    if _case_folding(tmp_path):
+        assert result.exit_code == 2
+        assert "sidecar" in result.output
+    else:
+        assert result.exit_code == 0
+
+
+@pytest.mark.parametrize("error", [click.exceptions.Exit(0), click.Abort()])
+def test_translate_passes_clicks_own_control_flow_through(error):
+    # Exit and Abort both subclass RuntimeError, so the arm that maps a
+    # RuntimeError to exit 1 turned ctx.exit(0) into exit 1 with the
+    # message "0", and an aborted confirmation into a failed run.
+    @_cli_main._translate
+    def body():
+        raise error
+
+    with pytest.raises(type(error)):
+        body()
+
+
+def test_write_output_emits_strict_json_for_non_finite_values(tmp_path):
+    # Bare NaN and Infinity are a Python extension that strict parsers
+    # reject, and consensus and stability produce NaN routinely.
+    out = str(tmp_path / "r.json")
+    _cli_render.write_output(out, {"document": {
+        "x": float("nan"), "y": float("inf"),
+        "z": [float("-inf"), 0.5], "nested": {"w": float("nan")}}})
+    body = Path(out).read_text(encoding="utf-8")
+    assert "NaN" not in body
+    assert "Infinity" not in body
+    assert json.loads(body) == {"x": None, "y": "inf",
+                                "z": ["-inf", 0.5], "nested": {"w": None}}
+
+
+def test_a_bad_output_extension_is_refused_before_any_work(tmp_path):
+    # The writer validated the extension at write time, so the whole run
+    # happened first: for cluster that wastes seconds, for the commands
+    # that reuse the writer it wastes minutes.
+    result = _run("cluster", _matrix(tmp_path), "--algorithm", "butina",
+                  "--set", "threshold=1.0", "--output",
+                  str(tmp_path / "r.txt"))
+    assert result.exit_code == 2
+    assert "clusters=" not in result.output
+    assert "cluster" not in result.stdout
+
+
+@pytest.mark.parametrize("value, chained", [("", False), ("0", False),
+                                            ("1", True)])
+def test_the_traceback_variable_treats_empty_and_zero_as_off(
+        tmp_path, monkeypatch, value, chained):
+    # Any non-empty value was truthy, so OECLUSTER_CLI_TRACEBACK=0 turned
+    # tracebacks on.
+    monkeypatch.setenv("OECLUSTER_CLI_TRACEBACK", value)
+    path = _patched_npz(tmp_path, "facts", facts_json=np.array("42"))
+    result = _run("cluster", path, "--algorithm", "butina",
+                  "--set", "threshold=1.0")
+    assert result.exit_code == 1
+    if chained:
+        assert isinstance(result.exception, _cli_input.InputError)
+    else:
+        assert result.exception.__class__ is SystemExit

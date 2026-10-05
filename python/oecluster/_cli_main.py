@@ -62,8 +62,12 @@ def _translate(function):
     @functools.wraps(function)
     def wrapper(*args, **kwargs):
         # --traceback is consumed here, so command bodies never see it.
+        # The variable is read against an off-list rather than for truth:
+        # every non-empty value is truthy, so OECLUSTER_CLI_TRACEBACK=0
+        # turned tracebacks on.
         show = (kwargs.pop("traceback", False)
-                or os.environ.get("OECLUSTER_CLI_TRACEBACK"))
+                or os.environ.get("OECLUSTER_CLI_TRACEBACK", "")
+                not in ("", "0"))
         if show:
             try:
                 return function(*args, **kwargs)
@@ -80,6 +84,11 @@ def _translate(function):
             return function(*args, **kwargs)
         except (TypeError, ValueError) as error:
             raise click.UsageError(str(error)) from None
+        except (click.exceptions.Exit, click.Abort):
+            # Click's own control flow, and both subclass RuntimeError: the
+            # arm below would turn ctx.exit(0) into exit 1 with the message
+            # "0", and an aborted confirmation into a failed run.
+            raise
         except (_cli_input.InputError, RuntimeError, OSError) as error:
             raise click.ClickException(str(error)) from None
         except MemoryError as error:
@@ -142,7 +151,25 @@ def _ids(matrix):
     return _labels_of(matrix) or list(range(matrix.num_samples))
 
 
-def _check_destinations(matrix, *destinations):
+def _same_file(first, second):
+    """:returns: True if the two paths name one file.
+
+    ``realpath`` resolves symlinks but then compares bytes, so on a
+    case-folding filesystem it reports ``d.json`` and ``D.JSON`` as two
+    files where there is only one. ``samefile`` asks the filesystem, which
+    is the only authority on that, but it needs both paths to exist; a
+    destination not yet written can only be compared by name, which is what
+    the first test covers.
+    """
+    if os.path.realpath(first) == os.path.realpath(second):
+        return True
+    try:
+        return os.path.samefile(first, second)
+    except OSError:
+        return False
+
+
+def _check_destinations(matrix, output, *destinations):
     """Refuse a destination that would clobber the input or another output.
 
     With input ``d.npy`` the obvious ``--output d.json`` truncates exactly
@@ -150,23 +177,41 @@ def _check_destinations(matrix, *destinations):
     overwrites the matrix while it is mapped. Every command that writes
     calls this before loading anything.
 
-    :raises ValueError: If a destination is the input or its sidecar, or if
-        two destinations resolve to one file.
+    :param matrix: The input path.
+    :param output: The ``--output`` path, or None. Its extension is checked
+        against the writer's own list as well, so a destination the writer
+        could not write is refused before the run rather than after it.
+    :param destinations: Further destinations, such as ``--mmap``. They are
+        checked for collisions only: nothing writes them through
+        :func:`_cli_render.write_output`, so they carry no extension
+        contract.
+    :raises ValueError: If a destination is the input or its sidecar, if two
+        destinations name one file, or if ``output`` has an extension
+        :func:`_cli_render.write_output` cannot write.
     """
-    protected = {os.path.realpath(matrix): "the input matrix"}
+    protected = [(matrix, "the input matrix")]
     stem, extension = os.path.splitext(matrix)
-    if extension in (".npy", ".bin"):
-        protected[os.path.realpath(stem + ".json")] = "the input sidecar"
-    seen = {}
-    for path in [item for item in destinations if item]:
-        resolved = os.path.realpath(path)
-        if resolved in protected:
-            raise ValueError(f"{path} is {protected[resolved]}; "
-                             "choose different files")
-        if resolved in seen:
-            raise ValueError(f"{path} and {seen[resolved]} are the same "
-                             "file; choose different files")
-        seen[resolved] = path
+    # Lowercased to match _cli_input, which dispatches on the lowercased
+    # suffix because `oepdist -o out.NPY` writes a real .NPY. Compared
+    # case-sensitively, U.NPY looked like a format that has no sidecar, so
+    # the run overwrote the one file that makes the input readable.
+    if extension.lower() in (".npy", ".bin"):
+        protected.append((stem + ".json", "the input sidecar"))
+    seen = []
+    for path in [item for item in (output, *destinations) if item]:
+        for other, what in protected:
+            if _same_file(path, other):
+                raise ValueError(f"{path} is {what}; "
+                                 "choose different files")
+        for other in seen:
+            if _same_file(path, other):
+                raise ValueError(f"{path} and {other} are the same "
+                                 "file; choose different files")
+        seen.append(path)
+    # Last, so a destination that is both unwritable and a collision is
+    # reported as the collision: that is the message naming the file at risk.
+    if output:
+        _cli_render.check_output(output)
 
 
 @cli.command()

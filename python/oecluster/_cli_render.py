@@ -15,6 +15,11 @@ from rich.table import Table
 
 SCHEMA_VERSION = 1
 
+#: Extensions :func:`write_output` can write. Public so the command layer can
+#: refuse a destination before doing the work rather than after it, and so the
+#: two cannot drift into disagreeing about what is writable.
+OUTPUT_SUFFIXES = (".csv", ".json")
+
 
 def console():
     """:returns: The console every command prints through."""
@@ -93,6 +98,38 @@ def encode(value):
     return value
 
 
+def check_output(path):
+    """Refuse a destination :func:`write_output` could not write.
+
+    Separated from the write so a command can call it before the run: the
+    extension was checked where the file is opened, which is after the
+    clustering it was meant to save.
+
+    :param path: Destination path.
+    :raises ValueError: For any extension outside :data:`OUTPUT_SUFFIXES`.
+    """
+    if os.path.splitext(path)[1].lower() not in OUTPUT_SUFFIXES:
+        # Spelled from the tuple so the message cannot outlive the list it
+        # describes.
+        raise ValueError(f"--output must end in {' or '.join(OUTPUT_SUFFIXES)}"
+                         f", got {path!r}")
+
+
+def _encoded(value):
+    """:returns: ``value`` with every float encoded for strict JSON.
+
+    The walk has to happen before :func:`json.dump`, not inside it: its
+    ``default`` hook fires only for types json cannot serialize, and a NaN
+    float is not one of them -- json writes it as the bare ``NaN`` literal
+    that strict parsers reject.
+    """
+    if isinstance(value, dict):
+        return {key: _encoded(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_encoded(item) for item in value]
+    return encode(value)
+
+
 def _csv_cell(value):
     if isinstance(value, float):
         if math.isnan(value):
@@ -109,21 +146,28 @@ def _csv_cell(value):
 def write_output(path, payload):
     """Write results as CSV or JSON, chosen by the extension.
 
+    The document is run through :func:`encode` here rather than at each call
+    site, so a caller cannot leave a NaN in it by forgetting to; consensus
+    and stability produce NaN routinely, and the file is read by tools that
+    are stricter than Python's parser. ``allow_nan=False`` is the tripwire
+    behind that: a value the walk somehow did not reach fails the write
+    loudly instead of becoming a file no strict parser will load.
+
     :param path: Destination; must end in ``.csv`` or ``.json``.
     :param payload: Mapping with ``header`` and ``rows`` for CSV and
         ``document`` for JSON.
-    :raises ValueError: For any other extension.
+    :raises ValueError: For any other extension, or for a non-finite value
+        :func:`_encoded` did not reach.
     """
-    extension = os.path.splitext(path)[1].lower()
-    if extension == ".csv":
+    check_output(path)
+    if os.path.splitext(path)[1].lower() == ".csv":
         with open(path, "w", newline="", encoding="utf-8") as handle:
             writer = csv.writer(handle)
             writer.writerow(payload["header"])
             for row in payload["rows"]:
                 writer.writerow([_csv_cell(value) for value in row])
-    elif extension == ".json":
-        with open(path, "w", encoding="utf-8") as handle:
-            json.dump(payload["document"], handle, indent=2)
-            handle.write("\n")
     else:
-        raise ValueError(f"--output must end in .csv or .json, got {path!r}")
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(_encoded(payload["document"]), handle, indent=2,
+                      allow_nan=False)
+            handle.write("\n")
