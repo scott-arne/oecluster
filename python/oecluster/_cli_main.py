@@ -352,14 +352,26 @@ def select_parameter(matrix, algorithm, parameter, values, assignments,
     # per value, so demanding it in --set would reject the normal form.
     spec = _spec(algorithm, assignments, registry, threads, allow_nonmetric,
                  swept=parameter)
+    if not values.strip():
+        raise ValueError(
+            "--values is empty; an unset shell variable is the usual cause")
+    # Every field is kept and checked by position. Dropping the empty ones
+    # instead meant `--values 0.8,,1.0` quietly evaluated two points and
+    # named a winner from a grid the user had not written -- a silence no
+    # amount of care at the keyboard could detect, since the three-point
+    # run and the two-point run look identical in the output.
+    fields = [item.strip() for item in values.split(",")]
+    for position, field in enumerate(fields, start=1):
+        if not field:
+            raise ValueError(
+                f"--values field {position} of {len(fields)} is empty; "
+                "remove the comma or fill the gap")
     # Coerced through the same function --set uses: the grid does not pass
     # through _cli_registry.resolve(), so without this it reached the
     # library as untyped text -- a string threshold, an infinity, or a
     # mistyped exponent int() expands into a billion digits.
-    swept = [_cli_registry.coerce(algorithm, parameter, item.strip(), entry)
-             for item in values.split(",") if item.strip()]
-    if not swept:
-        raise ValueError("--values needs at least one value")
+    swept = [_cli_registry.coerce(algorithm, parameter, field, entry)
+             for field in fields]
     loaded = _cli_input.load(matrix)
     # cluster_report runs its own metric gate, and select_parameter forwards
     # report_options to it unchanged -- so the flag has to reach both places
@@ -377,9 +389,14 @@ def select_parameter(matrix, algorithm, parameter, values, assignments,
                                     loaded.num_samples))
         out.print(_cli_render.table(selection.columns, rows))
         # winner is legitimately None when every row was ineligible or
-        # unscorable; that is a valid outcome, not a crash.
+        # unscorable; that is a valid outcome, not a crash. The two are
+        # named apart because they call for opposite responses: loosen the
+        # bounds, or pick a criterion the input can actually support.
         if selection.winner is None:
-            out.print(f"no winner: no eligible {parameter} value "
+            reason = ("no eligible" if not any(row.eligible
+                                               for row in selection.rows)
+                      else "no scorable")
+            out.print(f"no winner: {reason} {parameter} value "
                       f"({len(rows)} evaluated)")
         else:
             won = selection.winner.result
@@ -461,6 +478,12 @@ def stability(matrix, algorithm, assignments, resamples, fraction, seed,
                   f"mean_agreement={scored.mean_agreement:.4f}")
     if output is not None:
         _cli_render.write_output(output, {
+            # The CSV is the per-cluster table and nothing else, so
+            # mean_agreement and the noise mode are JSON-only. That is the
+            # convention already: consensus keeps its own mean_agreement out
+            # of a CSV that is one row per item. A trailing summary row
+            # would make every column change meaning on the last line, and
+            # a repeated column would restate one scalar on every row.
             "header": list(scored.columns),
             "rows": rows,
             "document": {
@@ -473,7 +496,17 @@ def stability(matrix, algorithm, assignments, resamples, fraction, seed,
                     "columns": list(scored.columns),
                     # Left to write_output's own walk, as its contract says.
                     "rows": [list(row) for row in rows],
-                    "reference_labels": reference},
+                    "reference_labels": reference,
+                    # mean_agreement is the only number --noise governs --
+                    # the Jaccard matching never treats noise as a cluster
+                    # -- so without it here the flag changed nothing a
+                    # script could read, which is the surface --output
+                    # exists for. The mode travels with it because it is
+                    # the statistic's unit: the same partitions score
+                    # differently under each, so the number cannot be
+                    # compared across runs that chose differently.
+                    "mean_agreement": scored.mean_agreement,
+                    "noise": noise},
             }})
 
 

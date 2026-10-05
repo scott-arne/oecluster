@@ -1312,7 +1312,6 @@ def test_a_misspelled_swept_option_is_named_before_requiredness(tmp_path):
     ("butina", "threshold", "1e999", "finite"),
     ("agglomerative", "n_clusters", "1e999", "range"),
     ("agglomerative", "n_clusters", "2.5", "integer"),
-    ("butina", "threshold", ",", "at least one"),
 ])
 def test_a_bad_sweep_value_is_refused_before_the_load(tmp_path, algorithm,
                                                       parameter, values,
@@ -1501,6 +1500,87 @@ def test_the_resample_count_reaches_the_library(tmp_path):
          "--quiet", "--output", out)
     lines = Path(out).read_text(encoding="utf-8").splitlines()[1:]
     assert [line.split(",")[-1] for line in lines] == ["7"] * 4
+
+
+@pytest.mark.parametrize("values, needle", [
+    ("0.8,,1.0", "field 2 of 3"),
+    (",0.8,1.0", "field 1 of 3"),
+    ("0.8,1.0,", "field 3 of 3"),
+    ("0.8, ,1.0", "field 2 of 3"),
+    (",", "field 1 of 2"),
+    ("", "unset shell variable"),
+    ("   ", "unset shell variable"),
+])
+def test_an_empty_sweep_field_is_refused_by_position(tmp_path, values,
+                                                     needle):
+    # Dropping empty fields instead meant `--values 0.8,,1.0` evaluated two
+    # points and named a winner from a grid the user never wrote; the
+    # two-point run and the three-point run were indistinguishable in the
+    # output. The input here does not exist, so exit 2 rather than 1 proves
+    # the refusal precedes the load.
+    result = _run("select-parameter", str(tmp_path / "gone.npz"),
+                  "--algorithm", "butina", "--parameter", "threshold",
+                  "--values", values)
+    assert result.exit_code == 2
+    assert needle in result.output
+
+
+def test_every_sweep_field_written_is_a_point_evaluated(tmp_path):
+    # The positive half: three fields in, three rows out.
+    document = _result(tmp_path, "g.json", "select-parameter",
+                       _matrix(tmp_path), "--algorithm", "butina",
+                       "--parameter", "threshold", "--values", "0.8,1.0,1.2")
+    assert len(document["rows"]) == 3
+
+
+def test_an_eligible_but_unscorable_grid_is_named_apart(tmp_path):
+    # "no eligible" and "no scorable" call for opposite responses -- loosen
+    # the bounds, or pick a criterion the input supports -- so the one
+    # message for both was telling half the users the wrong thing. dbscan
+    # at eps 0.2 finds a single cluster, whose silhouette is undefined.
+    result = _run("select-parameter", _matrix(tmp_path), "--algorithm",
+                  "dbscan", "--parameter", "eps", "--values", "0.2",
+                  "--set", "min_samples=5")
+    assert result.exit_code == 0, result.output
+    assert "no scorable" in result.stdout
+
+
+def _stability_payload(tmp_path, suffix, mode):
+    out = str(tmp_path / f"{mode}.{suffix}")
+    result = _run("stability", _matrix(tmp_path), "--algorithm", "dbscan",
+                  "--set", "eps=0.3", "--set", "min_samples=5",
+                  "--resamples", "6", "--noise", mode, "--quiet",
+                  "--output", out)
+    assert result.exit_code == 0, result.output
+    return Path(out).read_text(encoding="utf-8")
+
+
+def test_the_noise_mode_reaches_the_json_output(tmp_path):
+    # --quiet --output is the whole point of the command, and all three
+    # modes wrote byte-identical JSON: the one statistic --noise governs
+    # was absent from the machine-readable surface, so the option did
+    # nothing at all in a script.
+    modes = ("singletons", "grouped", "excluded")
+    documents = {mode: json.loads(_stability_payload(tmp_path, "json", mode))
+                 for mode in modes}
+    assert len({document["result"]["mean_agreement"]
+                for document in documents.values()}) == 3
+    for mode, document in documents.items():
+        # The mode travels with the statistic because it is its unit: the
+        # same partitions score differently under each.
+        assert document["result"]["noise"] == mode
+
+
+def test_the_stability_csv_stays_the_per_cluster_table(tmp_path):
+    # Deliberate, not an oversight: the scalars are JSON-only, as consensus
+    # already keeps its own mean_agreement out of a one-row-per-item CSV.
+    # Asserted so the omission is a decision on the record rather than
+    # something a later edit discovers by accident.
+    payloads = {_stability_payload(tmp_path, "csv", mode)
+                for mode in ("singletons", "grouped", "excluded")}
+    assert len(payloads) == 1
+    assert payloads.pop().splitlines()[0] == (
+        "label,size,mean_jaccard,dissolved,recovered,evaluated")
 
 
 def test_an_ineligible_algorithm_reads_the_same_in_every_command(tmp_path):
