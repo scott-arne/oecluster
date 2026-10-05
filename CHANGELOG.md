@@ -8,12 +8,15 @@ This file starts at 5.0.0; earlier releases are not recorded here.
 
 - An `oecluster` command line over a precomputed distance matrix, with
   `cluster`, `select-parameter`, `stability` and `consensus` commands plus
-  `algorithms` for discovery. Each command takes `--algorithm NAME` with
-  repeatable `--set key=value`, validated against the roster before any file
-  is read, so an unknown option is reported with a suggestion rather than as
-  a `TypeError` from deep in the library. `--threads` and
-  `--allow-nonmetric` are first-class flags and route to every place the
-  underlying call needs them.
+  `algorithms` for discovery. `cluster`, `select-parameter`, `stability` and
+  `consensus` in bootstrap mode take `--algorithm NAME` with repeatable
+  `--set key=value`; `consensus` in cross-algorithm mode takes one
+  `--member 'NAME;key=value'` per ensemble member and refuses `--algorithm`
+  and `--set`; `algorithms` takes neither, only an optional algorithm name.
+  Options are validated against the roster before any file is read, so an
+  unknown one is reported with a suggestion rather than as a `TypeError` from
+  deep in the library. `--threads` and `--allow-nonmetric` are first-class
+  flags and route to every place the underlying call needs them.
 - The command line reads `.npz` matrices and `oepdist`'s `.npy` and `.bin`
   output through its JSON sidecar. A file holding similarities rather than
   distances is refused, and one whose orientation the sidecar does not

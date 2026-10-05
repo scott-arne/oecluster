@@ -1281,9 +1281,11 @@ Extraction needs `O(N)`.
 ## Command Line
 
 `oecluster` runs the clustering roster and the three workflow features above
-over a distance matrix that was computed somewhere else. Every working command
-takes one matrix file, one algorithm named by its roster name, and that
-algorithm's options as repeated `--set key=value`:
+over a distance matrix that was computed somewhere else. There are five
+commands. `algorithms` takes no matrix and no algorithm, only an optional
+name. `cluster`, `select-parameter` and `stability` each take one matrix file
+and one algorithm, named by its roster name with its options as repeated
+`--set key=value`:
 
 ```bash
 oecluster cluster distances.npz --algorithm butina --set threshold=1.5
@@ -1305,10 +1307,15 @@ oecluster cluster distances.npz --algorithm butina --set threshold=1.5
 clusters=4 noise=0 (0.0%)
 ```
 
-`--help` is the command line's own documentation. Every command and every
-option carries its text there, `oecluster algorithms` prints the roster as the
-installed version actually has it, and `oecluster --version` names that
-version. This section covers what a help line cannot say.
+`consensus` takes the same pair in bootstrap mode, and in cross-algorithm mode
+takes its members as `--member 'NAME;key=value'` instead, where `--algorithm`
+and `--set` are refused.
+
+`--help` is the command line's own documentation. Every command carries a
+description there and every option its help text, `oecluster algorithms`
+prints the roster as the installed version actually has it, and
+`oecluster --version` names that version. This section covers what a help line
+cannot say.
 
 ### Discovering what will run
 
@@ -1323,10 +1330,10 @@ oecluster algorithms
 oecluster algorithms butina
 ```
 
-Naming one eligible algorithm prints its options with their types, whether each
-is required, and the default of each optional one. The table is derived from
-the roster signature, so it describes the installed library rather than a list
-kept beside it:
+Naming one eligible algorithm prints the options it accepts through `--set`,
+with their types, whether each is required, and the default of each optional
+one. The table is derived from the roster signature, so it describes the
+installed library rather than a list kept beside it:
 
 ```
                   butina
@@ -1337,6 +1344,10 @@ kept beside it:
 │ reordering │ bool  │ optional │ False   │
 └────────────┴───────┴──────────┴─────────┘
 ```
+
+Options the `key=value` grammar cannot express are left out of that table, so
+it is the `--set` surface rather than the full signature: `k_medoids` lists
+`init`, `max_iterations` and `n_clusters`, and not `initial_medoids`.
 
 Naming an ineligible one prints the reason instead: `murcko takes mols, not a
 distance matrix`.
@@ -1401,8 +1412,11 @@ oecluster consensus distances.npz --algorithm butina --set threshold=1.5 \
 clusters=4 noise=0 (0.0%) partitions=50 mean_agreement=1.0000
 ```
 
-Cross-algorithm mode runs several different algorithms over all the items, one
-`--member` each, with that member's options inside its own argument:
+Cross-algorithm mode runs one or more named members over all the items, one
+`--member` each, with that member's options inside its own argument. They need
+not be different algorithms — two `butina` members at different thresholds are
+a legitimate ensemble, and a single member is accepted and reported as
+`partitions=1`:
 
 ```bash
 oecluster consensus distances.npz \
@@ -1429,10 +1443,12 @@ either of them and the input; see [Writing results](#writing-results).
 
 ### Algorithms and their options
 
-`--set key=value` is the only way to give an algorithm's options, and it is
-validated against the roster before the matrix is read. An unknown key is
-refused with a suggestion rather than arriving as a `TypeError` from inside the
-library:
+`--set key=value` gives an algorithm's options to `cluster`,
+`select-parameter`, `stability` and bootstrap `consensus`; a cross-algorithm
+`--member` carries its own inside its argument instead. Either way they reach
+the same validation, against the roster and before the matrix is read. An
+unknown key is refused with a suggestion rather than arriving as a `TypeError`
+from inside the library:
 
 ```
 butina has no option 'threshhold'; did you mean 'threshold'?
@@ -1465,23 +1481,24 @@ Three formats are read:
 
 | Input | What is needed |
 |---|---|
-| `.npz` | the archive alone; it carries its own labels and facts |
+| `.npz` | the archive alone; it carries whatever labels and facts it was saved with |
 | `.npy` | the file plus its JSON sidecar, as `oepdist` writes the pair |
 | `.bin` | the same, the raw `double` array plus its sidecar |
 
 A `.npz` was written by the Python API and is used as loaded, because
 rebuilding it would discard the orientation evidence the metric gate depends
 on. A `.npy` or `.bin` carries nothing, so it is reconstructed from the
-sidecar beside it: the sidecar supplies the shape, the provenance and the
-titles, and a missing one is refused rather than guessed around.
+sidecar beside it: the sidecar supplies the shape and the provenance, and the
+titles when it records any. A missing sidecar is refused rather than guessed
+around.
 
 `.csv` is not accepted. `oepdist` writes titles unquoted, which a title
 containing a comma makes unparseable, writes values at eight significant
 digits, and records no provenance at all. Re-run `oepdist` with a `.npy`
 output, or save a `.npz` from Python.
 
-A file holding similarities rather than distances is refused, which is the one
-error this loader exists to catch:
+A file holding similarities rather than distances is refused, the error with
+the worst consequences here because nothing downstream would notice it:
 
 ```
 this file holds similarities, not distances; re-run oepdist without --sim,
@@ -1499,8 +1516,8 @@ only a proven similarity refuses.
 distances.npz: orientation unproven, treating values as distances
 ```
 
-The warning is unconditional and is not silenced by `--quiet`, which suppresses
-the terminal summary on stdout only. A `.npz` built by
+That warning is not silenced by `--quiet`, which suppresses the terminal
+summary on stdout only. A `.npz` built by
 `SymmetricDistanceMatrix.from_condensed()` warns too: that constructor stamps
 all three capability facts `"unknown"`, because the caller asserting an
 orientation is not evidence.
@@ -1524,7 +1541,7 @@ id.
 
 `--output PATH` writes the result to a file, as CSV or JSON chosen by the
 extension; any other extension is refused before the run rather than after it.
-The CSV is the command's own table and nothing else:
+The CSV is the command's own table, with no summary row beyond it:
 
 | Command | CSV header |
 |---|---|
@@ -1538,9 +1555,10 @@ The CSV is the command's own table and nothing else:
 for the sweep above. The `id` column holds the matrix's own labels, or the item
 indices when it has none.
 
-The JSON carries everything the CSV cannot. It is a `schema_version` 1
-envelope, the same five keys for every command — here in full, from a
-four-item matrix:
+The JSON adds what a flat table has no room for: the structured results, and
+the scalars that describe the run as a whole rather than one row of it. It is
+a `schema_version` 1 envelope, the same five keys for every command — here in
+full, from a four-item matrix:
 
 ```json
 {
@@ -1586,20 +1604,34 @@ plus `num_partitions`, `unobserved_pairs`, `threshold`, `mean_agreement`,
 `noise`, the per-member `agreement`, `item_consensus` and one `records` entry
 per cluster.
 
-The two scalars are JSON-only on purpose. A CSV here is one row per cluster or
-one row per item, so a trailing summary row would make every column change
-meaning on the last line and a repeated column would restate one scalar on
-every row. The `noise` mode travels beside `mean_agreement` because it is that
-statistic's unit: the same partitions score differently under each mode, so the
-number cannot be compared across runs that chose differently.
+It is not a record of the invocation. `spec` holds the algorithm and the
+options resolved for it, and nothing else does: a `stability` run given
+`--resamples 4 --fraction 0.7 --seed 3` writes a document in which none of
+those three appears. The document says what was produced, not how to reproduce
+it; keep the command line itself if you need that.
 
-Non-finite values survive the round trip. NaN encodes as `null` and the
-infinities as the strings `"inf"` and `"-inf"`, because collapsing them
-together would erase a real distinction: NaN means undefined — a cluster of one
-has no consensus score — while an infinity is a defined extreme some criteria
-produce. In a CSV, NaN is an empty field and the infinities are `inf` and
-`-inf`. The file is rendered in full before it is opened, so a failure part way
-through leaves no file rather than a truncated one.
+`mean_agreement` and the `noise` mode it was computed under are JSON-only on
+purpose. A CSV here is one row per cluster or one row per item, so a trailing
+summary row would make every column change meaning on the last line and a
+repeated column would restate one scalar on every row. The mode travels beside
+the statistic because it is that statistic's unit: the same partitions score
+differently under each mode, so the number cannot be compared across runs that
+chose differently.
+
+Non-finite values are encoded rather than dropped. In JSON, NaN becomes `null`
+and the infinities become the strings `"inf"` and `"-inf"`, because collapsing
+them together would erase a real distinction: NaN means undefined — a cluster
+of one has no consensus score — while an infinity is a defined extreme some
+criteria produce. In a CSV, NaN is an empty field, and so is a value that was
+simply absent, such as an unrejected row's `rejection`; those two are not
+distinguishable there. The infinities are `inf` and `-inf`.
+
+The file is rendered and encoded in full before it is opened, so a value the
+encoder cannot write fails before anything is touched. That ordering does not
+survive a failure during the write itself: the file is opened `wb`, which
+truncates it, so an I/O error part way through leaves a partial file — and if
+a previous result was there, destroys it. Write to a fresh path, or to a
+temporary one you move into place, if that matters.
 
 Every destination is checked before any work is done. With input `distances.npy`
 the obvious `--output distances.json` would truncate exactly the sidecar the run
@@ -1623,17 +1655,25 @@ differently exits 2, as Click's own parse errors do; anything about the file or
 the run exits 1. Both print the message in an error panel, word-wrapped to the
 terminal, rather than a traceback.
 
-`--traceback`, or `OECLUSTER_CLI_TRACEBACK` set to anything but `0`, shows the
-original exception instead, with the frame that actually failed rather than the
-frame that renamed it.
+`--traceback`, or `OECLUSTER_CLI_TRACEBACK` set to a non-empty value other than
+`0`, shows the original exception instead, with the frame that actually failed
+rather than the frame that renamed it.
 
 ### Memory
 
-The command line adds nothing to the figures given under each feature above: it
-loads one matrix and hands it to the same functions. The matrix dominates, at
-`4 N (N - 1)` bytes dense, and `consensus` builds a second one of that size.
-`--mmap` is the lever for the second: past a few thousand items it keeps the
-co-association matrix on disk, where `consensus()`'s `output=` puts it.
+Once a run is under way the command line adds nothing to the figures given
+under each feature above: it holds one matrix and hands it to the same
+functions. The matrix dominates, at `4 N (N - 1)` bytes dense, and `consensus`
+builds a second one of that size. `--mmap` is the lever for the second: past a
+few thousand items it keeps the co-association matrix on disk, where
+`consensus()`'s `output=` puts it.
+
+Loading is the exception, and it is where a large job is most likely to fail.
+The values exist as a numpy array while the native storage is being built from
+them, so the peak while loading is roughly two matrices rather than one. For a
+6000-item matrix — 144 MB of condensed values — the measured peak increase was
+334 MB from a `.npy` and 306 MB from a `.npz`. Size the job for that peak, not
+for the resident matrix.
 
 ## Partition Agreement
 
