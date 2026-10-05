@@ -2,6 +2,7 @@
 import json
 import os
 import time
+import traceback
 import warnings
 from pathlib import Path
 
@@ -9,7 +10,7 @@ import numpy as np
 import oecluster
 import pytest
 from click.testing import CliRunner
-from oecluster import _cli_input, _cli_registry
+from oecluster import _cli_input, _cli_registry, _cli_render
 from oecluster._cli_main import cli
 
 # Later steps and tasks append test functions at the END of this file and
@@ -741,3 +742,178 @@ def test_an_uppercase_extension_is_accepted(tmp_path, suffix):
     _write_sidecar(str(path), 12)
     matrix = _cli_input.load(str(path), warn=lambda message: None)
     assert matrix.num_samples == 12
+
+
+def _matrix(tmp_path, n=40):
+    rng = np.random.default_rng(0)
+    points = np.vstack([rng.normal(centre, 0.25, (n // 4, 2))
+                        for centre in (0.0, 4.0, 8.0, 12.0)])
+    values = np.array([float(np.linalg.norm(points[i] - points[j]))
+                       for i in range(n) for j in range(i + 1, n)])
+    matrix = oecluster.SymmetricDistanceMatrix.from_condensed(
+        values, labels=[f"m{i}" for i in range(n)])
+    path = str(tmp_path / "m.npz")
+    matrix.to_file(path)
+    return path
+
+
+def test_cluster_finds_the_four_blobs(tmp_path):
+    result = _run("cluster", _matrix(tmp_path), "--algorithm", "butina",
+                  "--set", "threshold=1.0")
+    assert result.exit_code == 0
+    assert "clusters=4" in result.stdout
+
+
+def test_cluster_writes_json_matching_the_schema(tmp_path):
+    out = str(tmp_path / "r.json")
+    result = _run("cluster", _matrix(tmp_path), "--algorithm", "butina",
+                  "--set", "threshold=1.0", "--output", out)
+    assert result.exit_code == 0
+    document = json.loads(Path(out).read_text(encoding="utf-8"))
+    assert document["schema_version"] == 1
+    assert document["command"] == "cluster"
+    assert sorted(document["spec"]) == ["algorithm", "options"]
+    assert sorted(document["result"]) == ["ids", "labels", "num_clusters",
+                                          "num_noise"]
+    assert len(document["result"]["labels"]) == 40
+
+
+def test_cluster_writes_csv_with_the_documented_header(tmp_path):
+    out = str(tmp_path / "r.csv")
+    _run("cluster", _matrix(tmp_path), "--algorithm", "butina",
+         "--set", "threshold=1.0", "--output", out)
+    lines = Path(out).read_text(encoding="utf-8").splitlines()
+    assert lines[0] == "id,label"
+    assert lines[1].startswith("m0,")
+
+
+def test_quiet_silences_the_table_but_not_the_warning(tmp_path):
+    # click 8.5 has no mix_stderr; result.stdout and result.stderr are
+    # separate, and the orientation warning must survive --quiet.
+    out = str(tmp_path / "r.csv")
+    result = _run("cluster", _matrix(tmp_path), "--algorithm", "butina",
+                  "--set", "threshold=1.0", "--quiet", "--output", out)
+    assert result.exit_code == 0
+    assert "clusters=" not in result.stdout
+    assert "orientation unproven" in result.stderr
+
+
+def test_an_unsupported_output_extension_is_refused(tmp_path):
+    result = _run("cluster", _matrix(tmp_path), "--algorithm", "butina",
+                  "--set", "threshold=1.0", "--output",
+                  str(tmp_path / "r.txt"))
+    assert result.exit_code == 2
+    assert ".csv or .json" in result.output
+
+
+@pytest.mark.parametrize("extra, code, needle", [
+    ([], 2, "requires"),
+    (["--set", "threshold=x"], 2, "number"),
+    (["--set", "threshold=1.0", "--threads", "-1"], 2, "non-negative"),
+])
+def test_cluster_validation_exits_two(tmp_path, extra, code, needle):
+    result = _run("cluster", _matrix(tmp_path), "--algorithm", "butina",
+                  *extra)
+    assert result.exit_code == code
+    assert needle in result.output
+
+
+def test_an_ineligible_algorithm_exits_two(tmp_path):
+    result = _run("cluster", _matrix(tmp_path), "--algorithm", "murcko")
+    assert result.exit_code == 2
+    assert "not a distance matrix" in result.output
+
+
+def test_a_missing_input_exits_one(tmp_path):
+    result = _run("cluster", str(tmp_path / "gone.npz"),
+                  "--algorithm", "butina", "--set", "threshold=1.0")
+    assert result.exit_code == 1
+
+
+def test_nan_and_infinity_encode_distinctly():
+    assert _cli_render.encode(float("nan")) is None
+    assert _cli_render.encode(float("inf")) == "inf"
+    assert _cli_render.encode(float("-inf")) == "-inf"
+    assert _cli_render.encode(0.5) == 0.5
+
+
+def test_an_output_over_the_input_matrix_is_refused(tmp_path):
+    # Checked before anything is loaded: the run would otherwise truncate
+    # the file it is about to read.
+    path = _matrix(tmp_path)
+    result = _run("cluster", path, "--algorithm", "butina",
+                  "--set", "threshold=1.0", "--output", path)
+    assert result.exit_code == 2
+    assert "matrix" in result.output
+
+
+def test_an_output_over_the_input_sidecar_is_refused(tmp_path):
+    # With input d.npy the obvious --output d.json names exactly the sidecar
+    # that carries the shape and provenance the raw file does not.
+    path = _npy(tmp_path)
+    result = _run("cluster", path, "--algorithm", "butina", "--set",
+                  "threshold=1.0", "--output",
+                  os.path.splitext(path)[0] + ".json")
+    assert result.exit_code == 2
+    assert "sidecar" in result.output
+
+
+def test_traceback_keeps_the_underlying_failure_in_the_chain(tmp_path):
+    # _cli_input raises `from None`, which only hides a context it has
+    # already recorded. --traceback promises the full traceback, and the
+    # frames worth having are the failing library call's, not the frame that
+    # renamed the failure.
+    path = _patched_npz(tmp_path, "facts", facts_json=np.array("42"))
+    result = _run("cluster", path, "--algorithm", "butina",
+                  "--set", "threshold=1.0", "--traceback")
+    assert result.exit_code == 1
+    assert isinstance(result.exception, _cli_input.InputError)
+    rendered = "".join(traceback.format_exception(result.exception))
+    assert "During handling of the above exception" in rendered
+
+
+def test_without_traceback_the_same_failure_is_a_clean_exit(tmp_path):
+    path = _patched_npz(tmp_path, "facts", facts_json=np.array("42"))
+    result = _run("cluster", path, "--algorithm", "butina",
+                  "--set", "threshold=1.0")
+    assert result.exit_code == 1
+    assert result.exception.__class__ is SystemExit
+    assert "cannot read" in result.output
+
+
+def test_a_bytes_label_is_decoded_rather_than_repred(tmp_path):
+    # A .npz carries whatever labels the Python API was handed, and numpy
+    # brings a bytes label back as np.bytes_, whose str() is "b'a'" -- an
+    # identity the user never wrote. The sidecar path refuses non-strings;
+    # this path accepts them by design, so the output layer has to render
+    # them rather than assume str.
+    path = _patched_npz(tmp_path, "bytes",
+                        labels=np.array([b"a", b"b", b"c", b"d"]))
+    csv_path = str(tmp_path / "r.csv")
+    json_path = str(tmp_path / "r.json")
+    for out in (csv_path, json_path):
+        result = _run("cluster", path, "--algorithm", "butina",
+                      "--set", "threshold=1.0", "--output", out)
+        assert result.exit_code == 0, result.output
+    rows = Path(csv_path).read_text(encoding="utf-8").splitlines()
+    assert rows[1].startswith("a,")
+    document = json.loads(Path(json_path).read_text(encoding="utf-8"))
+    assert document["result"]["ids"] == ["a", "b", "c", "d"]
+
+
+def test_an_unlabelled_matrix_falls_back_to_indices(tmp_path):
+    # _labels_of has to tell "no labels" from a real empty list: an
+    # unlabelled matrix reports [], and the id column becomes positions.
+    matrix = oecluster.SymmetricDistanceMatrix.from_condensed(
+        np.array([0.1, 0.9, 0.2, 0.8, 0.3, 0.7]))
+    path = str(tmp_path / "plain.npz")
+    matrix.to_file(path)
+    csv_path = str(tmp_path / "r.csv")
+    json_path = str(tmp_path / "r.json")
+    for out in (csv_path, json_path):
+        assert _run("cluster", path, "--algorithm", "butina", "--set",
+                    "threshold=1.0", "--output", out).exit_code == 0
+    rows = Path(csv_path).read_text(encoding="utf-8").splitlines()
+    assert rows[1].startswith("0,")
+    document = json.loads(Path(json_path).read_text(encoding="utf-8"))
+    assert "ids" not in document["result"]
