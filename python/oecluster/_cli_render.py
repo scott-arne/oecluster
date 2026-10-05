@@ -135,22 +135,32 @@ def check_ids(labels):
     return rendered
 
 
+def _named(spec):
+    """:returns: One algorithm and its options as a single line of text."""
+    # num_threads is routed by --threads rather than chosen per run, so
+    # echoing it back as an option would be noise.
+    shown = " ".join(f"{key}={value}"
+                     for key, value in sorted(spec["options"].items())
+                     if key != "num_threads")
+    return f"{spec['algorithm']} {shown}".strip()
+
+
 def panel(command, spec, path, num_items):
     """Build the header panel naming what ran.
+
+    Ensemble members carry their options for the same reason a single spec
+    does, and more urgently: names alone rendered two butina members at
+    different thresholds as "butina, butina", erasing the one thing that
+    distinguished them.
 
     :param spec: Either ``{"algorithm": name, "options": {...}}`` or
         ``{"members": [{"algorithm": ..., "options": {...}}, ...]}``.
     :returns: A :class:`rich.panel.Panel`.
     """
     if "members" in spec:
-        what = ", ".join(member["algorithm"] for member in spec["members"])
+        what = ", ".join(_named(member) for member in spec["members"])
     else:
-        # num_threads is routed by --threads rather than chosen per run, so
-        # echoing it back as an option would be noise.
-        shown = " ".join(f"{key}={value}"
-                         for key, value in sorted(spec["options"].items())
-                         if key != "num_threads")
-        what = f"{spec['algorithm']} {shown}".strip()
+        what = _named(spec)
     return Panel(f"{what}\n{path}  ({num_items} items)", title=command)
 
 

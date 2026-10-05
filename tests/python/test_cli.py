@@ -1595,3 +1595,377 @@ def test_an_ineligible_algorithm_reads_the_same_in_every_command(tmp_path):
         result = _run(*args)
         assert result.exit_code == 2
         assert "not a distance matrix" in result.output, args
+
+
+def test_consensus_bootstrap_mode(tmp_path):
+    result = _run("consensus", _matrix(tmp_path), "--algorithm", "butina",
+                  "--set", "threshold=1.0", "--resamples", "8")
+    assert result.exit_code == 0, result.output
+    assert "partitions=8" in result.stdout
+
+
+def test_consensus_cross_algorithm_mode(tmp_path):
+    result = _run("consensus", _matrix(tmp_path),
+                  "--member", "butina;threshold=1.0",
+                  "--member", "dbscan;eps=1.5;min_samples=3")
+    assert result.exit_code == 0, result.output
+    assert "partitions=2" in result.stdout
+
+
+@pytest.mark.parametrize("extra, needle", [
+    (["--algorithm", "butina", "--set", "threshold=1.0", "--resamples", "4",
+      "--member", "butina;threshold=1.0"], "cross-algorithm mode"),
+    ([], "either --algorithm"),
+])
+def test_the_two_modes_are_mutually_exclusive(tmp_path, extra, needle):
+    result = _run("consensus", _matrix(tmp_path), *extra)
+    assert result.exit_code == 2
+    assert needle in result.output
+
+
+def test_a_malformed_member_is_refused(tmp_path):
+    result = _run("consensus", _matrix(tmp_path), "--member", "butina;oops")
+    assert result.exit_code == 2
+    assert "key=value" in result.output
+
+
+def test_a_member_typo_is_caught_before_any_work(tmp_path):
+    result = _run("consensus", _matrix(tmp_path),
+                  "--member", "butina;thresold=1.0")
+    assert result.exit_code == 2
+    assert "did you mean" in result.output
+
+
+def test_consensus_json_carries_the_ensemble_spec(tmp_path):
+    # A singular algorithm field cannot describe a cross-algorithm ensemble,
+    # so spec takes a members shape in that mode.
+    out = str(tmp_path / "c.json")
+    _run("consensus", _matrix(tmp_path), "--member", "butina;threshold=1.0",
+         "--member", "dbscan;eps=1.5;min_samples=3", "--output", out)
+    document = json.loads(Path(out).read_text(encoding="utf-8"))
+    assert [m["algorithm"] for m in document["spec"]["members"]] == [
+        "butina", "dbscan"]
+    assert document["result"]["num_partitions"] == 2
+    assert isinstance(document["result"]["records"][0]["label"], int)
+
+
+def test_a_singleton_records_consensus_encodes_as_null(tmp_path):
+    out = str(tmp_path / "c.json")
+    _run("consensus", _matrix(tmp_path), "--member", "butina;threshold=0.05",
+         "--output", out)
+    document = json.loads(Path(out).read_text(encoding="utf-8"))
+    values = [r["cluster_consensus"] for r in document["result"]["records"]]
+    assert None in values
+
+
+def test_the_consensus_noise_mode_reaches_the_json_output(tmp_path):
+    # --noise governs the agreement call behind mean_agreement and nothing
+    # else, exactly as it does for stability, so the mode travels beside the
+    # statistic as its unit: the same partitions score differently under
+    # each, and a number recorded without its convention cannot be compared
+    # across runs that chose differently.
+    out = str(tmp_path / "n.json")
+    result = _run("consensus", _matrix(tmp_path), "--member",
+                  "butina;threshold=1.0", "--member", "dbscan;eps=1.5",
+                  "--noise", "excluded", "--quiet", "--output", out)
+    assert result.exit_code == 0, result.output
+    document = json.loads(Path(out).read_text(encoding="utf-8"))
+    assert document["result"]["noise"] == "excluded"
+    assert "mean_agreement" in document["result"]
+
+
+def test_the_consensus_csv_stays_one_row_per_item(tmp_path):
+    out = str(tmp_path / "c.csv")
+    result = _run("consensus", _matrix(tmp_path), "--member",
+                  "butina;threshold=1.0", "--quiet", "--output", out)
+    assert result.exit_code == 0, result.output
+    lines = Path(out).read_text(encoding="utf-8").splitlines()
+    assert lines[0] == "id,label"
+    assert len(lines) == 41
+    assert [line.split(",")[0] for line in lines[1:]] == [
+        f"m{i}" for i in range(40)]
+
+
+def test_the_panel_tells_two_members_of_one_algorithm_apart(tmp_path):
+    # Rendering member names alone printed "butina, butina" for an ensemble
+    # whose entire content is that the two members differ.
+    result = _run("consensus", _matrix(tmp_path), "--member",
+                  "butina;threshold=1.0", "--member", "butina;threshold=0.5")
+    assert result.exit_code == 0, result.output
+    assert "butina threshold=1.0" in result.stdout
+    assert "butina threshold=0.5" in result.stdout
+
+
+@pytest.mark.parametrize("extra, needle", [
+    (["--member", "butina;threshold=1.0", "--set", "threshold=1.0"],
+     "bootstrap mode"),
+    (["--algorithm", "butina", "--set", "threshold=1.0", "--resamples", "0"],
+     "positive"),
+    (["--member", "butina;threshold=1.0", "--threshold", "1.5"], "[0, 1]"),
+    (["--member", "butina;"], "empty option"),
+    (["--member", ""], "needs an algorithm name"),
+])
+def test_consensus_validation_exits_two(tmp_path, extra, needle):
+    # The input does not exist, so exit 2 rather than 1 also proves each
+    # refusal precedes the load.
+    result = _run("consensus", str(tmp_path / "gone.npz"), *extra)
+    assert result.exit_code == 2
+    assert needle in result.output
+
+
+def _capture(monkeypatch, name):
+    """Record the arguments one library entry point is called with."""
+    seen = {}
+    original = getattr(oecluster, name)
+
+    def recorder(*args, **kwargs):
+        seen.update(kwargs)
+        seen["_args"] = args
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(oecluster, name, recorder)
+    return seen
+
+
+def _specs_used(monkeypatch):
+    """Record the options of every ClusteringSpec actually run."""
+    used = []
+    original = oecluster.ClusteringSpec.run
+
+    def recorder(self, items, *args, **kwargs):
+        used.append(dict(self.options))
+        return original(self, items, *args, **kwargs)
+
+    monkeypatch.setattr(oecluster.ClusteringSpec, "run", recorder)
+    return used
+
+
+def test_threads_reaches_the_spec_for_cluster(tmp_path, monkeypatch):
+    # Asserting only exit_code would pass with the routing deleted.
+    used = _specs_used(monkeypatch)
+    result = _run("cluster", _matrix(tmp_path), "--algorithm", "butina",
+                  "--set", "threshold=1.0", "--threads", "3")
+    assert result.exit_code == 0, result.output
+    assert used == [{"threshold": 1.0, "num_threads": 3}]
+
+
+def test_threads_reaches_stability_as_well_as_the_spec(tmp_path, monkeypatch):
+    # cluster_stability takes its own num_threads for matrix gathering while
+    # the algorithm's threads live in the spec, so one flag has two targets.
+    seen = _capture(monkeypatch, "cluster_stability")
+    result = _run("stability", _matrix(tmp_path), "--algorithm", "butina",
+                  "--set", "threshold=1.0", "--resamples", "4",
+                  "--threads", "3")
+    assert result.exit_code == 0, result.output
+    assert seen["num_threads"] == 3
+    assert seen["_args"][0].options["num_threads"] == 3
+
+
+def test_threads_reaches_every_consensus_destination(tmp_path, monkeypatch):
+    # Cross-algorithm mode: the kernel and every member spec.
+    seen = _capture(monkeypatch, "consensus")
+    used = _specs_used(monkeypatch)
+    result = _run("consensus", _matrix(tmp_path), "--member",
+                  "butina;threshold=1.0", "--member", "dbscan;eps=1.5",
+                  "--threads", "2")
+    assert result.exit_code == 0, result.output
+    assert seen["num_threads"] == 2
+    assert [options["num_threads"] for options in used] == [2, 2]
+
+
+def test_threads_reaches_consensus_bootstrap_destinations(tmp_path,
+                                                          monkeypatch):
+    # Bootstrap mode: the kernel, cluster_stability, and the spec.
+    agreed = _capture(monkeypatch, "consensus")
+    resampled = _capture(monkeypatch, "cluster_stability")
+    result = _run("consensus", _matrix(tmp_path), "--algorithm", "butina",
+                  "--set", "threshold=1.0", "--resamples", "4",
+                  "--threads", "2")
+    assert result.exit_code == 0, result.output
+    assert agreed["num_threads"] == 2
+    assert resampled["num_threads"] == 2
+    assert resampled["_args"][0].options["num_threads"] == 2
+
+
+def test_select_parameter_does_not_pass_num_threads(tmp_path, monkeypatch):
+    # select_parameter has no num_threads parameter; passing one would be a
+    # TypeError, so the flag must reach it only through the spec.
+    seen = _capture(monkeypatch, "select_parameter")
+    result = _run("select-parameter", _matrix(tmp_path), "--algorithm",
+                  "butina", "--parameter", "threshold", "--values",
+                  "0.8,1.0", "--threads", "3")
+    assert result.exit_code == 0, result.output
+    assert "num_threads" not in seen
+    assert seen["_args"][0].options["num_threads"] == 3
+
+
+@pytest.mark.parametrize("algorithm, option", [
+    ("butina", "threshold=0.5"),
+    ("dbscan", "eps=0.5"),
+    ("agglomerative", "n_clusters=2"),
+    ("hdbscan", "min_cluster_size=2"),
+])
+def test_allow_nonmetric_is_required_and_sufficient(tmp_path, algorithm,
+                                                    option):
+    # On a matrix with proven violations, each of the four accepting
+    # algorithms must refuse without the flag and succeed with it. A metric
+    # fixture would pass either way and prove nothing.
+    path = _nonmetric(tmp_path)
+    refused = _run("cluster", path, "--algorithm", algorithm, "--set", option)
+    assert refused.exit_code != 0
+    allowed = _run("cluster", path, "--algorithm", algorithm, "--set", option,
+                   "--allow-nonmetric")
+    assert allowed.exit_code == 0, allowed.output
+
+
+def test_k_medoids_accepts_the_flag_without_receiving_it(tmp_path,
+                                                         monkeypatch):
+    # k_medoids never appeals to the triangle inequality and has no such
+    # option, so the flag must be accepted and simply not forwarded.
+    used = _specs_used(monkeypatch)
+    result = _run("cluster", _nonmetric(tmp_path), "--algorithm", "k_medoids",
+                  "--set", "n_clusters=2", "--allow-nonmetric")
+    assert result.exit_code == 0, result.output
+    assert "allow_nonmetric" not in used[0]
+
+
+def test_setting_allow_nonmetric_points_at_the_flag(tmp_path):
+    result = _run("cluster", _matrix(tmp_path), "--algorithm", "butina",
+                  "--set", "threshold=1.0", "--set", "allow_nonmetric=true")
+    assert result.exit_code == 2
+    assert "--allow-nonmetric" in result.output
+
+
+def test_allow_nonmetric_reaches_the_selection_scorer(tmp_path, monkeypatch):
+    # cluster_report runs its own metric gate and select_parameter forwards
+    # report_options to it unchanged, so the flag needs both destinations.
+    seen = _capture(monkeypatch, "select_parameter")
+    result = _run("select-parameter", _nonmetric(tmp_path), "--algorithm",
+                  "butina", "--parameter", "threshold", "--values",
+                  "0.15,0.5", "--allow-nonmetric")
+    assert result.exit_code == 0, result.output
+    assert seen["report_options"] == {"allow_nonmetric": True}
+    assert seen["_args"][0].options["allow_nonmetric"] is True
+
+
+def test_selection_without_the_flag_is_refused_on_a_nonmetric_matrix(
+        tmp_path):
+    result = _run("select-parameter", _nonmetric(tmp_path), "--algorithm",
+                  "butina", "--parameter", "threshold", "--values",
+                  "0.15,0.5")
+    assert result.exit_code != 0
+
+
+def test_nothing_is_read_before_validation_finishes(tmp_path, monkeypatch):
+    # The recording stub the spec asks for: if validation is ordered
+    # correctly, a bad option is reported without the loader ever running.
+    def refuse(*args, **kwargs):
+        raise AssertionError("the matrix was loaded before validation")
+
+    monkeypatch.setattr("oecluster._cli_main._cli_input.load", refuse)
+    for args in (
+        ["cluster", "x.npz", "--algorithm", "butina", "--set", "nope=1"],
+        ["cluster", "x.npz", "--algorithm", "nosuch", "--set", "a=1"],
+        ["consensus", "x.npz", "--member", "butina;thresold=1.0"],
+        ["consensus", "x.npz", "--algorithm", "butina", "--set",
+         "threshold=1.0", "--resamples", "4", "--member", "dbscan;eps=1"],
+        ["select-parameter", "x.npz", "--algorithm", "butina",
+         "--parameter", "nosuch", "--values", "1"],
+    ):
+        result = _run(*args)
+        assert result.exit_code == 2, args
+
+
+@pytest.mark.parametrize("command, extra", [
+    ("cluster", ["--algorithm", "butina", "--set", "threshold=1.0"]),
+    ("stability", ["--algorithm", "butina", "--set", "threshold=1.0"]),
+    ("select-parameter", ["--algorithm", "butina", "--parameter",
+                          "threshold", "--values", "0.8,1.0"]),
+    ("consensus", ["--member", "butina;threshold=1.0"]),
+])
+def test_no_command_will_overwrite_the_input_sidecar(tmp_path, monkeypatch,
+                                                     command, extra):
+    # With input d.npy the obvious --output d.json truncates the sidecar the
+    # run depends on. Every writing command must refuse, before any work.
+    def refuse(*args, **kwargs):
+        raise AssertionError("work started before the path check")
+
+    monkeypatch.setattr("oecluster._cli_main._cli_input.load", refuse)
+    result = _run(command, str(tmp_path / "d.npy"), *extra,
+                  "--output", str(tmp_path / "d.json"))
+    assert result.exit_code == 2
+    assert "sidecar" in result.output
+
+
+@pytest.mark.parametrize("alias", ["same-string", "dot-segment", "symlink"])
+def test_consensus_refuses_output_and_mmap_on_one_file(tmp_path, monkeypatch,
+                                                       alias):
+    # Two identical strings never exercise realpath, so the aliases are the
+    # point: delete the normalisation and the last two cases stop failing.
+    # pathlib would collapse a "." component on construction, so the
+    # dot-segment case is built with os.path.join.
+    def refuse(*args, **kwargs):
+        raise AssertionError("work started before the path check")
+
+    monkeypatch.setattr("oecluster._cli_main._cli_input.load", refuse)
+    target = tmp_path / "x.json"
+    if alias == "same-string":
+        other = str(target)
+    elif alias == "dot-segment":
+        other = os.path.join(str(tmp_path), ".", "x.json")
+    else:
+        target.write_text("", encoding="utf-8")
+        link = tmp_path / "link.json"
+        link.symlink_to(target)
+        other = str(link)
+    result = _run("consensus", str(tmp_path / "m.npz"), "--member",
+                  "butina;threshold=1.0", "--output", str(target),
+                  "--mmap", other)
+    assert result.exit_code == 2
+    assert "different files" in result.output
+
+
+def test_ids_appear_only_when_the_matrix_is_labelled(tmp_path):
+    # An unlabelled matrix reports [] rather than None; treating that as
+    # real labels wrote a results file with no rows at all.
+    values = np.array([0.1, 0.9, 0.2, 0.8, 0.3, 0.7])
+    bare = oecluster.SymmetricDistanceMatrix.from_condensed(values)
+    path = str(tmp_path / "bare.npz")
+    bare.to_file(path)
+    out = str(tmp_path / "bare.csv")
+    result = _run("cluster", path, "--algorithm", "butina", "--set",
+                  "threshold=0.5", "--output", out)
+    assert result.exit_code == 0, result.output
+    lines = Path(out).read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 5, lines          # header plus one row per item
+    assert lines[1].startswith("0,")
+    document_path = str(tmp_path / "bare.json")
+    _run("cluster", path, "--algorithm", "butina", "--set", "threshold=0.5",
+         "--output", document_path)
+    document = json.loads(Path(document_path).read_text(encoding="utf-8"))
+    assert "ids" not in document["result"]
+    assert len(document["result"]["labels"]) == 4
+
+
+def test_translation_hides_the_exception_by_default(tmp_path):
+    # The control for the two tests below. Note what is NOT asserted:
+    # `result.exception is not None` is true here too, because Click records
+    # the SystemExit(1) that a translated error raises. Only the exception's
+    # type discriminates.
+    result = _run("cluster", str(tmp_path / "gone.npz"), "--algorithm",
+                  "butina", "--set", "threshold=1.0")
+    assert result.exit_code == 1
+    assert not isinstance(result.exception, _cli_input.InputError)
+
+
+def test_the_traceback_flag_re_raises_the_original_exception(tmp_path):
+    result = _run("cluster", str(tmp_path / "gone.npz"), "--algorithm",
+                  "butina", "--set", "threshold=1.0", "--traceback")
+    assert isinstance(result.exception, _cli_input.InputError)
+
+
+def test_the_traceback_environment_variable_does_too(tmp_path, monkeypatch):
+    monkeypatch.setenv("OECLUSTER_CLI_TRACEBACK", "1")
+    result = _run("cluster", str(tmp_path / "gone.npz"), "--algorithm",
+                  "butina", "--set", "threshold=1.0")
+    assert isinstance(result.exception, _cli_input.InputError)

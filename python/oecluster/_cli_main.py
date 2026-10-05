@@ -510,6 +510,184 @@ def stability(matrix, algorithm, assignments, resamples, fraction, seed,
             }})
 
 
+def _member(text, registry, threads, nonmetric):
+    """Parse one ``--member 'name;k=v;...'`` into a ClusteringSpec.
+
+    The grammar is deliberately minimal: no roster option takes a value
+    containing ``;`` or ``=``, so inventing an escape syntax for a case that
+    does not exist would be the wrong trade. A value containing either is
+    refused with that reason.
+
+    :param text: One ``--member`` argument as the user spelled it.
+    :param registry: Mapping from :func:`_cli_registry.build`.
+    :param threads: The ``--threads`` value, routed into the member's spec.
+    :param nonmetric: Whether ``--allow-nonmetric`` was given.
+    :returns: The member's :class:`ClusteringSpec`.
+    :raises ValueError: For a malformed member or any option the registry
+        refuses.
+    """
+    parts = text.split(";")
+    if not parts or not parts[0].strip():
+        raise ValueError("--member needs an algorithm name")
+    name = parts[0].strip()
+    options = []
+    for part in parts[1:]:
+        item = part.strip()
+        if not item:
+            # An empty segment is a typo (a doubled or trailing ';'), not an
+            # option; silently dropping it would hide the mistake.
+            raise ValueError(f"empty option in --member {text!r}")
+        if "=" not in item:
+            raise ValueError(f"member option needs key=value, got {item!r}")
+        key, value = item.split("=", 1)
+        if "=" in value:
+            raise ValueError(
+                f"member option values may not contain '=', got {item!r}")
+        options.append(f"{key.strip()}={value}")
+    return _spec(name, options, registry, threads, nonmetric)
+
+
+@cli.command()
+@click.argument("matrix")
+@click.option("--algorithm", default=None, help="Roster name, bootstrap mode.")
+@click.option("--set", "assignments", multiple=True, metavar="KEY=VALUE",
+              help="Algorithm option for bootstrap mode; repeatable.")
+@click.option("--resamples", type=int, default=None,
+              help="Bootstrap mode: resample count.")
+@click.option("--member", "members", multiple=True, metavar="'NAME;K=V;...'",
+              help="Cross-algorithm mode: one ensemble member; repeatable.")
+@click.option("--threshold", type=float, default=None,
+              help="Co-association support for the default extraction.")
+@click.option("--noise", default="singletons", show_default=True,
+              type=click.Choice(["singletons", "grouped", "excluded"]),
+              help="How noise points count towards mean_agreement.")
+@click.option("--mmap", "mmap", default=None, metavar="PATH",
+              help="Keep the co-association matrix on disk.")
+@_common
+@_translate
+def consensus(matrix, algorithm, assignments, resamples, members, threshold,
+              noise, mmap, threads, allow_nonmetric, output, quiet):
+    """Combine an ensemble of partitions into one."""
+    bootstrap = algorithm is not None or resamples is not None
+    if bootstrap and members:
+        raise ValueError(
+            "--member is the cross-algorithm mode; drop --algorithm and "
+            "--resamples, or drop --member")
+    if not bootstrap and not members:
+        raise ValueError(
+            "consensus needs either --algorithm with --resamples, or one or "
+            "more --member")
+    # Every destination must differ from every other and from the input, and
+    # from the input's sidecar: with `d.npy` the obvious `--output d.json`
+    # truncates exactly the sidecar the run depends on, and `--mmap` pointed
+    # at the input overwrites the matrix while it is mapped. --mmap is a
+    # collision only: nothing writes it through write_output, so the
+    # .csv/.json contract applies to --output alone.
+    _check_destinations(matrix, output, mmap)
+
+    if threshold is not None and not 0.0 <= threshold <= 1.0:
+        raise ValueError(f"--threshold must lie in [0, 1], got {threshold}")
+
+    # Everything above and below this line runs before the matrix is read:
+    # an invalid member or threshold must not cost a resampling run first.
+    registry = _cli_registry.build()
+    if bootstrap:
+        if algorithm is None or resamples is None:
+            raise ValueError(
+                "bootstrap mode needs both --algorithm and --resamples")
+        if resamples < 1:
+            raise ValueError(f"--resamples must be positive, got {resamples}")
+        spec = _spec(algorithm, assignments, registry, threads,
+                     allow_nonmetric)
+        described = {"algorithm": algorithm, "options": dict(spec.options),
+                     "resamples": resamples}
+        specs = None
+    else:
+        if assignments:
+            raise ValueError(
+                "--set belongs to bootstrap mode; put each member's options "
+                "inside its own --member 'name;key=value'")
+        specs = [_member(text, registry, threads, allow_nonmetric)
+                 for text in members]
+        described = {"members": [{"algorithm": item.name,
+                                  "options": dict(item.options)}
+                                 for item in specs]}
+
+    # Every member runs over this one loaded matrix. Building a member's
+    # input any other way would bypass the loader's label-collision refusal,
+    # which _labels_of would then raise as a usage error at export time.
+    loaded = _cli_input.load(matrix)
+    out = _cli_render.console()
+    if specs is None:
+        with out.status(f"running {resamples} resamples"):
+            ensemble = oecluster.cluster_stability(
+                spec, loaded, resamples=resamples, keep_partitions=True,
+                num_threads=_thread_count(threads))
+    else:
+        with out.status(f"running {len(specs)} members"):
+            ensemble = [item.run(loaded) for item in specs]
+
+    agreed = oecluster.consensus(
+        ensemble,
+        num_items=None if bootstrap else loaded.num_samples,
+        threshold=threshold, noise=noise,
+        num_threads=_thread_count(threads), output=mmap)
+    rows = agreed.to_table()
+    labels = [int(value) for value in agreed.labels]
+    # Named apart from the `noise` mode it would otherwise shadow: the mode
+    # is still needed below, as the unit mean_agreement is reported in.
+    noise_count = sum(1 for value in labels if value < 0)
+    if not quiet:
+        out.print(_cli_render.panel("consensus", described, matrix,
+                                    loaded.num_samples))
+        out.print(_cli_render.table(agreed.columns, rows))
+        fraction = (noise_count / loaded.num_samples
+                    if loaded.num_samples else 0.0)
+        out.print(f"clusters={agreed.num_clusters} noise={noise_count} "
+                  f"({fraction:.1%}) partitions={agreed.num_partitions} "
+                  f"mean_agreement={agreed.mean_agreement:.4f}")
+    if output is not None:
+        ids = _ids(loaded)
+        named = _labels_of(loaded)
+        _cli_render.write_output(output, {
+            # One row per item, so the scalars below are JSON-only, exactly
+            # as stability keeps its own out of a per-cluster table.
+            "header": ["id", "label"],
+            "rows": list(zip(ids, labels)),
+            "document": {
+                "schema_version": _cli_render.SCHEMA_VERSION,
+                "command": "consensus",
+                "input": {"path": matrix, "num_items": loaded.num_samples,
+                          "orientation": str(loaded.is_distance)},
+                "spec": described,
+                "result": {
+                    "labels": labels,
+                    **({"ids": named} if named else {}),
+                    "num_clusters": agreed.num_clusters,
+                    "num_noise": noise_count,
+                    "num_partitions": agreed.num_partitions,
+                    "unobserved_pairs": agreed.unobserved_pairs,
+                    "threshold": _cli_render.encode(agreed.threshold),
+                    "mean_agreement": _cli_render.encode(agreed.mean_agreement),
+                    # The mode travels beside the statistic because it is
+                    # its unit: --noise governs the agreement call behind
+                    # mean_agreement and nothing else, so the same
+                    # partitions score differently under each and the
+                    # number cannot be compared across runs that chose
+                    # differently. stability records the pair on the same
+                    # terms.
+                    "noise": noise,
+                    "agreement": [_cli_render.encode(v)
+                                  for v in agreed.agreement],
+                    "item_consensus": [_cli_render.encode(float(v))
+                                       for v in agreed.item_consensus],
+                    "records": [{"label": r.label, "size": r.size,
+                                 "cluster_consensus":
+                                     _cli_render.encode(r.cluster_consensus)}
+                                for r in agreed.records]},
+            }})
+
+
 def main():
     """Console-script entry point."""
     cli()
