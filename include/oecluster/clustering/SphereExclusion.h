@@ -20,7 +20,7 @@ namespace OECluster {
 /** @brief Order in which sphere exclusion takes centers. */
 enum class SphereOrder {
     Input,        ///< Ascending item index (leader clustering).
-    Neighbors,    ///< Descending neighbor count (Butina); matrix only.
+    Neighbors,    ///< Descending neighbor count (Butina).
     Permutation,  ///< SphereExclusionOptions::permutation (DISE).
 };
 
@@ -49,6 +49,11 @@ struct SphereExclusionOptions {
     size_t num_threads = 0;
     /// Pairs or items per work unit; at least one.
     size_t chunk_size = 4096;
+    /// Comparison overload under SphereOrder::Neighbors only: the most
+    /// memory the threshold graph may take, in bytes. 0 applies the default
+    /// limit, the larger of the condensed matrix the graph replaces and
+    /// 1 GiB. Any other value is refused everywhere else.
+    size_t max_graph_bytes = 0;
 };
 
 /**
@@ -91,8 +96,8 @@ private:
  * :raises std::invalid_argument: On a non-finite or negative threshold, an
  *     unknown order or assignment, reordering without the neighbor order, a
  *     permutation that is not a complete permutation of the items (or is
- *     given with another order), a zero chunk_size, or sparse or data-less
- *     storage.
+ *     given with another order), a zero chunk_size, a non-zero
+ *     max_graph_bytes, or sparse or data-less storage.
  * :raises std::runtime_error: If a distance read is NaN or infinite. Under
  *     the neighbor order every distance is read up front.
  */
@@ -102,20 +107,34 @@ SphereExclusionResult sphere_exclusion(const StorageBackend& storage,
 /**
  * @brief Sphere exclusion over a comparison, evaluated lazily.
  *
- * Supports SphereOrder::Input and SphereOrder::Permutation. Each center
+ * Under SphereOrder::Input and SphereOrder::Permutation each center
  * compares against the still-unclaimed items in parallel chunks, as
- * Compare(min, max); nearest assignment compares every non-center item with
- * every center. The result equals the matrix overload's on the same
- * distances, for every num_threads and chunk_size.
+ * Compare(min, max). Under SphereOrder::Neighbors the threshold graph is
+ * built in two passes over every pair, one to count each item's neighbors
+ * and one to record them, at 16 bytes per within-threshold pair on a 64-bit
+ * platform; its exact size is known before it is allocated, so a graph above
+ * max_graph_bytes (or the default limit) is refused rather than attempted.
+ * Nearest assignment compares every non-center item with every center. The
+ * result equals the matrix overload's on the same distances, for every
+ * num_threads and chunk_size.
+ *
+ * Precondition under SphereOrder::Neighbors: Compare(i, j) returns a
+ * bit-identical value for a pair on every call and every clone. A comparison
+ * that changes a row's neighbor count between the passes is refused; one
+ * that swaps neighbors while keeping every count is outside the contract.
  *
  * :param comparison: Distance comparison; cloned once per running chunk.
  * :param options: Threshold, order, assignment and threading options.
  * :returns: The clustering; empty for zero items.
- * :raises std::invalid_argument: On the matrix overload's option refusals,
- *     or SphereOrder::Neighbors, which needs every pairwise distance.
+ * :raises std::invalid_argument: On the matrix overload's option refusals
+ *     other than max_graph_bytes, or a non-zero max_graph_bytes with an
+ *     order other than SphereOrder::Neighbors.
  * :raises ComparisonError: If the comparison's facts rule out ranking its
  *     distances.
  * :raises std::runtime_error: If a comparison returns NaN or infinity.
+ * :raises std::length_error: If the threshold graph would exceed its limit.
+ * :raises std::logic_error: If the graph's two passes disagree on a row's
+ *     size.
  */
 SphereExclusionResult sphere_exclusion(PairwiseComparison& comparison,
                                        const SphereExclusionOptions& options);

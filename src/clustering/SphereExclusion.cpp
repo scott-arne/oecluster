@@ -281,6 +281,17 @@ SphereExclusionResult to_public_result(detail::SphereEngineResult result) {
                                  std::move(result.centers));
 }
 
+ThresholdGraphOptions neighbor_graph_options(
+    const SphereExclusionOptions& options) {
+    ThresholdGraphOptions graph_options;
+    graph_options.threshold = options.distance_threshold;
+    graph_options.num_threads = options.num_threads;
+    graph_options.chunk_size = options.chunk_size;
+    graph_options.max_graph_bytes = options.max_graph_bytes;
+    graph_options.caller = SPHERE_NAME;
+    return graph_options;
+}
+
 const std::vector<size_t>* permutation_or_null(
     const SphereExclusionOptions& options) {
     return options.order == SphereOrder::Permutation ? &options.permutation
@@ -292,6 +303,13 @@ const std::vector<size_t>* permutation_or_null(
 SphereExclusionResult sphere_exclusion(const StorageBackend& storage,
                                        const SphereExclusionOptions& options) {
     validate_sphere_options(options);
+    // Refused rather than ignored: a budget the matrix path never reads would
+    // read as protection that is not there.
+    if (options.max_graph_bytes != 0) {
+        throw std::invalid_argument(
+            "sphere_exclusion max_graph_bytes applies only when clustering from "
+            "a comparison");
+    }
     detail::validate_complete_distance_storage(storage, SPHERE_NAME);
     const size_t n = storage.NumSamples();
     validate_sphere_permutation(options, n);
@@ -340,22 +358,36 @@ SphereExclusionResult sphere_exclusion(PairwiseComparison& comparison,
                                        const SphereExclusionOptions& options) {
     validate_sphere_options(options);
     detail::validate_comparison_facts(comparison, SPHERE_NAME);
-    if (options.order == SphereOrder::Neighbors) {
+    // Only the Neighbors order builds a graph, so a budget on any other
+    // would be read by nothing.
+    if (options.max_graph_bytes != 0 && options.order != SphereOrder::Neighbors) {
         throw std::invalid_argument(
-            "sphere_exclusion with the Neighbors order needs every pairwise "
-            "distance; pass a precomputed distance matrix");
+            "sphere_exclusion max_graph_bytes requires the Neighbors order");
     }
     const size_t n = comparison.Size();
     validate_sphere_permutation(options, n);
     if (n < 2) {
+        // Nothing to cluster, but the neighbor order's trivial graph still
+        // answers to an explicit budget.
+        if (options.order == SphereOrder::Neighbors) {
+            BuildThresholdNeighborGraph(comparison, neighbor_graph_options(options));
+        }
         return small_sphere_result(n);
     }
 
+    detail::SphereEngineResult result;
+    if (options.order == SphereOrder::Neighbors) {
+        result = detail::sphere_neighbors_first(
+            BuildThresholdNeighborGraph(comparison, neighbor_graph_options(options)),
+            options.reordering);
+    }
     detail::ChunkedComparisons work(comparison, n, options.num_threads,
                                     options.chunk_size);
     ComparisonSphereSource source(work);
-    detail::SphereEngineResult result = detail::sphere_ordered_first(
-        source, n, permutation_or_null(options), options.distance_threshold);
+    if (options.order != SphereOrder::Neighbors) {
+        result = detail::sphere_ordered_first(
+            source, n, permutation_or_null(options), options.distance_threshold);
+    }
     if (options.assignment == SphereAssignment::Nearest) {
         detail::sphere_assign_nearest(source, n, result);
     }

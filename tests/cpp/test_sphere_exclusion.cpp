@@ -728,17 +728,6 @@ TEST(SphereExclusionComparisonTest, RefusesANonFiniteDistance) {
     }
 }
 
-TEST(SphereExclusionComparisonTest, RefusesTheNeighborsOrder) {
-    TableComparison table(4, Line(4));
-    SphereExclusionOptions options = Options(1.0, SphereOrder::Neighbors);
-    const std::string message =
-        "sphere_exclusion with the Neighbors order needs every pairwise "
-        "distance; pass a precomputed distance matrix";
-    ExpectInvalidArgument([&] { sphere_exclusion(table, options); }, message);
-    options.reordering = true;
-    ExpectInvalidArgument([&] { sphere_exclusion(table, options); }, message);
-}
-
 TEST(SphereExclusionComparisonTest, RefusesComparisonsItsFactsRuleOut) {
     const auto expect = [](GateFacts facts, const std::string& message) {
         SCOPED_TRACE(message);
@@ -794,7 +783,7 @@ TEST(SphereExclusionComparisonTest, SharesTheValidationOrder) {
     GateFacts similarity;
     similarity.is_distance = Capability::No;
     CountingComparison counter(4, similarity);
-    // Options before facts; facts before the Neighbors refusal.
+    // Options before facts; facts before any pair is scored.
     ExpectInvalidArgument([&] { sphere_exclusion(counter, Options(-1.0)); },
                           "sphere_exclusion distance_threshold must be "
                           "non-negative");

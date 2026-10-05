@@ -18,6 +18,7 @@
 
 #include "ChunkedComparisons.h"
 #include "oecluster/CondensedIndex.h"
+#include "oecluster/Error.h"
 #include "oecluster/ThreadPool.h"
 
 namespace OECluster {
@@ -137,6 +138,22 @@ void enforce_graph_limit(const ThresholdGraphOptions& options, size_t n,
     const size_t limit = detail::threshold_graph_limit(n, options.max_graph_bytes);
     if (bytes > limit) {
         throw std::length_error(limit_message(options, n, edges, bytes, limit));
+    }
+}
+
+// ROCS fails the repeatability precondition: its overlay keeps state between
+// calls, so a clone's score for a pair depends on what that clone scored
+// before (test_comparison_repeatability.cpp, ROCSDependsOnItsCloneHistory),
+// and the two passes could disagree. Refused by name, the remedy the design
+// gives for a family that fails.
+void refuse_unrepeatable(const PairwiseComparison& comparison,
+                         const char* caller) {
+    if (comparison.ComparisonName() == "rocs") {
+        throw ComparisonError(
+            std::string(caller) +
+            " cannot build a threshold graph from a ROCS comparison: a ROCS "
+            "score depends on what its overlay scored before, so the graph's "
+            "two passes can disagree; cluster a matrix from pdist() instead");
     }
 }
 
@@ -326,6 +343,7 @@ ThresholdNeighborGraph BuildThresholdNeighborGraph(
     if (options.threshold < 0.0) {
         throw std::invalid_argument("ThresholdGraph threshold cannot be negative");
     }
+    refuse_unrepeatable(comparison, options.caller);
 
     const size_t n = comparison.Size();
     if (n < 2) {
