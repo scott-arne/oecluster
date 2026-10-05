@@ -18,6 +18,7 @@ cluster summaries as well as lower-level control over distance computation.
 - [Quickstart: Cluster Molecules From SMILES](#quickstart-cluster-molecules-from-smiles)
 - [Core Python Workflow](#core-python-workflow)
 - [Choosing A Clustering Algorithm](#choosing-a-clustering-algorithm)
+  - [From The Command Line](#from-the-command-line)
 - [Choosing Representatives](#choosing-representatives)
 - [Assessing And Comparing Clustering Quality](#assessing-and-comparing-clustering-quality)
 - [Scaling Guidance](#scaling-guidance)

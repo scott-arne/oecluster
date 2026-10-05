@@ -1359,11 +1359,17 @@ winner threshold=1.0 (4 evaluated) clusters=4 noise=0 (0.0%)
 ```
 
 Every comma-separated field is kept and checked by position, so `0.5,,1.5` is
-refused rather than quietly evaluated as a two-point grid. `--criterion`,
-`--max-noise-fraction`, `--min-clusters` and `--max-clusters` are the bounds
-documented under [Parameter Selection](#parameter-selection); with no winner
-the command says whether no value was eligible or none was scorable, which are
-opposite problems.
+refused rather than quietly evaluated as a two-point grid. `--criterion` picks
+the validity index; `--max-noise-fraction`, `--min-clusters` and
+`--max-clusters` are the bounds. Both are documented under
+[Parameter Selection](#parameter-selection). With no winner the command says
+whether no value was eligible or none was scorable, which are opposite
+problems:
+
+```
+no winner: no eligible threshold value (2 evaluated)
+no winner: no scorable threshold value (2 evaluated)
+```
 
 `stability` reruns the spec on resampled subsets and reports Hennig's
 per-cluster statistics:
@@ -1499,9 +1505,20 @@ the terminal summary on stdout only. A `.npz` built by
 all three capability facts `"unknown"`, because the caller asserting an
 orientation is not evidence.
 
-Two more refusals land before the clustering rather than after it: a matrix
-holding a negative value is not a distance matrix, and labels that two
-different items share a rendering of cannot be told apart in the id column.
+Two more refusals land before the clustering rather than after it. A matrix
+holding a negative value is not a distance matrix. And two *different* labels
+that render as the same id cannot be told apart, so the file is refused:
+
+```
+arrays.npz: items 0 and 1 have different labels that both render as '[1.]',
+so the id column cannot tell them apart; relabel the matrix through the
+Python API
+```
+
+Two items genuinely carrying one label are fine, and are meant to be: two
+molecules both called `mol1` share an id on purpose and still export two rows.
+The rule is about a rendering that loses a distinction, not about a repeated
+id.
 
 ### Writing results
 
@@ -1522,15 +1539,16 @@ for the sweep above. The `id` column holds the matrix's own labels, or the item
 indices when it has none.
 
 The JSON carries everything the CSV cannot. It is a `schema_version` 1
-envelope, the same five keys for every command:
+envelope, the same five keys for every command — here in full, from a
+four-item matrix:
 
 ```json
 {
   "schema_version": 1,
   "command": "cluster",
   "input": {
-    "path": "small.npz",
-    "num_items": 6,
+    "path": "tiny.npz",
+    "num_items": 4,
     "orientation": "unknown"
   },
   "spec": {
@@ -1541,8 +1559,18 @@ envelope, the same five keys for every command:
     }
   },
   "result": {
-    "labels": [1, 1, 1, 0, 0, 0],
-    "ids": ["m0", "m1", "m2", "m3", "m4", "m5"],
+    "labels": [
+      1,
+      1,
+      0,
+      0
+    ],
+    "ids": [
+      "m0",
+      "m1",
+      "m2",
+      "m3"
+    ],
     "num_clusters": 2,
     "num_noise": 0
   }
@@ -1592,7 +1620,8 @@ it is two.
 
 The split follows where the problem is. Anything the user could have written
 differently exits 2, as Click's own parse errors do; anything about the file or
-the run exits 1. Both print one line in an error panel rather than a traceback.
+the run exits 1. Both print the message in an error panel, word-wrapped to the
+terminal, rather than a traceback.
 
 `--traceback`, or `OECLUSTER_CLI_TRACEBACK` set to anything but `0`, shows the
 original exception instead, with the frame that actually failed rather than the
