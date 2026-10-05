@@ -49,6 +49,9 @@ cluster summaries as well as lower-level control over distance computation.
 - **Combine an ensemble of partitions** with `consensus`, which builds the
   co-association matrix behind a sweep or a stability run and reads one
   agreed partition off it, with Monti's per-cluster evidence scores.
+- **Drive all of that from a shell** with the `oecluster` command, which
+  clusters, sweeps a parameter, scores stability and reaches a consensus over
+  a precomputed distance matrix, and writes the result as CSV or JSON.
 - **Compute molecular distances** for fingerprints, ROCS shape/color overlay,
   protein superposition, and binding-site comparison.
 - **Scale distance storage** with dense in-memory arrays, memory-mapped files,
@@ -410,6 +413,36 @@ them; `method=` runs any matrix-consuming `ClusteringSpec` on the matrix
 instead. See
 [Consensus Clustering](docs/python-api.md#consensus-clustering) for the
 ensemble kinds, the scoring rules and the memory figures.
+
+### From The Command Line
+
+The `oecluster` command runs the same four features over a distance matrix
+computed earlier, as a `.npz` from Python or as `oepdist`'s `.npy` or `.bin`
+beside its JSON sidecar. The algorithm is named by its roster name and its
+options arrive as repeated `--set key=value`:
+
+```bash
+oecluster algorithms butina
+oecluster cluster distances.npz --algorithm butina --set threshold=1.5
+```
+
+```bash
+oecluster select-parameter distances.npz --algorithm butina \
+  --parameter threshold --values 0.5,1.0,1.5,2.0 --criterion silhouette
+```
+
+```bash
+oecluster consensus distances.npz \
+  --member 'butina;threshold=1.5' \
+  --member 'dbscan;eps=1.5;min_samples=3' --output agreed.csv
+```
+
+Options are validated against the roster before the file is read, so a
+misspelling is answered with a suggestion rather than with a `TypeError` from
+inside the library. `--output` writes CSV or JSON, and `--help` documents
+every command and option. See
+[Command Line](docs/python-api.md#command-line) for the accepted inputs, the
+output schema and the exit codes.
 
 ---
 
@@ -898,6 +931,11 @@ Output format is determined by extension:
 | `.npy` | NumPy array plus JSON sidecar |
 | `.csv` | Labeled comma-separated values |
 | `.bin` | Raw double array plus JSON sidecar |
+
+`oecluster` clusters what `oepdist` wrote. It reads the `.npy` and `.bin`
+output through the sidecar and refuses the `.csv`, which records neither
+provenance nor full precision; see
+[From The Command Line](#from-the-command-line).
 
 ---
 

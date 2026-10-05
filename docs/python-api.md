@@ -1278,6 +1278,334 @@ and the ensemble is copied once into contiguous native vectors (about
 are filled from, which dominate that figure while the call is being built).
 Extraction needs `O(N)`.
 
+## Command Line
+
+`oecluster` runs the clustering roster and the three workflow features above
+over a distance matrix that was computed somewhere else. Every working command
+takes one matrix file, one algorithm named by its roster name, and that
+algorithm's options as repeated `--set key=value`:
+
+```bash
+oecluster cluster distances.npz --algorithm butina --set threshold=1.5
+```
+
+```
+╭───────────────────────────────── cluster ──────────────────────────────────╮
+│ butina threshold=1.5                                                       │
+│ distances.npz  (40 items)                                                  │
+╰────────────────────────────────────────────────────────────────────────────╯
+┏━━━━━━━━━┳━━━━━━┓
+┃ cluster ┃ size ┃
+┡━━━━━━━━━╇━━━━━━┩
+│ 0       │ 10   │
+│ 1       │ 10   │
+│ 2       │ 10   │
+│ 3       │ 10   │
+└─────────┴──────┘
+clusters=4 noise=0 (0.0%)
+```
+
+`--help` is the command line's own documentation. Every command and every
+option carries its text there, `oecluster algorithms` prints the roster as the
+installed version actually has it, and `oecluster --version` names that
+version. This section covers what a help line cannot say.
+
+### Discovering what will run
+
+`oecluster algorithms` lists every roster entry with the input it consumes and
+whether that input can be a distance matrix. The four fingerprint and molecule
+entries — `bitbirch`, `bitbirch_recluster`, `bitbirch_refine` and `murcko` —
+are listed rather than hidden, because a user who knows the name should learn
+why it cannot be used here rather than that it does not exist:
+
+```bash
+oecluster algorithms
+oecluster algorithms butina
+```
+
+Naming one eligible algorithm prints its options with their types, whether each
+is required, and the default of each optional one. The table is derived from
+the roster signature, so it describes the installed library rather than a list
+kept beside it:
+
+```
+                  butina
+┏━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━┓
+┃ option     ┃ type  ┃ required ┃ default ┃
+┡━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━┩
+│ threshold  │ float │ required │         │
+│ reordering │ bool  │ optional │ False   │
+└────────────┴───────┴──────────┴─────────┘
+```
+
+Naming an ineligible one prints the reason instead: `murcko takes mols, not a
+distance matrix`.
+
+### The four working commands
+
+`cluster` runs one algorithm once and reports the cluster sizes, the cluster
+count and the noise fraction, as in the example above.
+
+`select-parameter` sweeps one option over an explicit grid and marks a winner,
+which is `select_parameter()` with the grid given as text:
+
+```bash
+oecluster select-parameter distances.npz --algorithm butina \
+  --parameter threshold --values 0.5,1.0,1.5,2.0 --criterion silhouette
+```
+
+```
+winner threshold=1.0 (4 evaluated) clusters=4 noise=0 (0.0%)
+```
+
+Every comma-separated field is kept and checked by position, so `0.5,,1.5` is
+refused rather than quietly evaluated as a two-point grid. `--criterion`,
+`--max-noise-fraction`, `--min-clusters` and `--max-clusters` are the bounds
+documented under [Parameter Selection](#parameter-selection); with no winner
+the command says whether no value was eligible or none was scorable, which are
+opposite problems.
+
+`stability` reruns the spec on resampled subsets and reports Hennig's
+per-cluster statistics:
+
+```bash
+oecluster stability distances.npz --algorithm butina --set threshold=1.5 \
+  --resamples 50 --seed 0
+```
+
+```
+resamples=50 clusters=4 noise=0 (0.0%) mean_jaccard=1.0000 mean_agreement=1.0000
+```
+
+`--resamples`, `--fraction` and `--seed` are `cluster_stability()`'s own, and
+`--noise` chooses how noise is treated in the agreement call. It governs
+`mean_agreement` and nothing else: the Jaccard matching never treats noise as
+a cluster.
+
+`consensus` combines an ensemble into one partition, in either of two modes.
+Bootstrap mode resamples one algorithm, which is the stability ensemble reused
+as evidence:
+
+```bash
+oecluster consensus distances.npz --algorithm butina --set threshold=1.5 \
+  --resamples 50
+```
+
+```
+clusters=4 noise=0 (0.0%) partitions=50 mean_agreement=1.0000
+```
+
+Cross-algorithm mode runs several different algorithms over all the items, one
+`--member` each, with that member's options inside its own argument:
+
+```bash
+oecluster consensus distances.npz \
+  --member 'butina;threshold=1.5' \
+  --member 'dbscan;eps=1.5;min_samples=3' \
+  --member 'k_medoids;n_clusters=4'
+```
+
+```
+clusters=4 noise=0 (0.0%) partitions=3 mean_agreement=1.0000
+```
+
+The two modes are exclusive: `--algorithm` or `--resamples` selects the first,
+`--member` the second, and mixing them is refused. `--set` belongs to bootstrap
+mode only, since a cross-algorithm member configures itself. The member grammar
+is deliberately minimal — no roster option takes a value containing `;` or `=`,
+so one is refused rather than escaped.
+
+`--threshold` is the co-association support the default extraction merges at,
+and `--mmap PATH` keeps the co-association matrix on disk, which is the
+`output=` argument of `consensus()` and the thing to reach for past a few
+thousand items. `--mmap` and `--output` must name different files, and so must
+either of them and the input; see [Writing results](#writing-results).
+
+### Algorithms and their options
+
+`--set key=value` is the only way to give an algorithm's options, and it is
+validated against the roster before the matrix is read. An unknown key is
+refused with a suggestion rather than arriving as a `TypeError` from inside the
+library:
+
+```
+butina has no option 'threshhold'; did you mean 'threshold'?
+```
+
+Values are coerced to the option's own type, which the registry derives from
+the signature and declares where there is no default to derive from. An integer
+option refuses a fractional value rather than truncating it, a boolean option
+takes only `true` or `false`, and a float option refuses an infinity or a NaN.
+A missing required option is named before anything is loaded.
+
+`--threads` and `--allow-nonmetric` are first-class flags rather than `--set`
+keys, because they route to more than one call: `--allow-nonmetric` reaches
+both the clustering entry point and the `cluster_report` scoring behind
+`select-parameter`, and `--threads` reaches every resample. Setting either
+through `--set` is refused pointing at the flag:
+
+```
+set num_threads with --threads, not --set
+set allow_nonmetric with --allow-nonmetric, not --set
+```
+
+`--threads 0`, the default, auto-detects. An option that takes a sequence —
+`k_medoids`'s `initial_medoids` — is not expressible in a `key=value` grammar
+and is refused pointing at the Python API.
+
+### Accepted inputs
+
+Three formats are read:
+
+| Input | What is needed |
+|---|---|
+| `.npz` | the archive alone; it carries its own labels and facts |
+| `.npy` | the file plus its JSON sidecar, as `oepdist` writes the pair |
+| `.bin` | the same, the raw `double` array plus its sidecar |
+
+A `.npz` was written by the Python API and is used as loaded, because
+rebuilding it would discard the orientation evidence the metric gate depends
+on. A `.npy` or `.bin` carries nothing, so it is reconstructed from the
+sidecar beside it: the sidecar supplies the shape, the provenance and the
+titles, and a missing one is refused rather than guessed around.
+
+`.csv` is not accepted. `oepdist` writes titles unquoted, which a title
+containing a comma makes unparseable, writes values at eight significant
+digits, and records no provenance at all. Re-run `oepdist` with a `.npy`
+output, or save a `.npz` from Python.
+
+A file holding similarities rather than distances is refused, which is the one
+error this loader exists to catch:
+
+```
+this file holds similarities, not distances; re-run oepdist without --sim,
+or convert it with the Python API
+```
+
+That refusal needs proof. A sidecar that records `similarity: true` is proof;
+one that records no similarity flag at all is not, and every `oepdist rocs`
+sidecar is in that position, since the ROCS writer records `score` and
+`color_ff` and no orientation. An unproven orientation warns on stderr and
+proceeds, treating the values as distances, which is the library's own rule:
+only a proven similarity refuses.
+
+```
+distances.npz: orientation unproven, treating values as distances
+```
+
+The warning is unconditional and is not silenced by `--quiet`, which suppresses
+the terminal summary on stdout only. A `.npz` built by
+`SymmetricDistanceMatrix.from_condensed()` warns too: that constructor stamps
+all three capability facts `"unknown"`, because the caller asserting an
+orientation is not evidence.
+
+Two more refusals land before the clustering rather than after it: a matrix
+holding a negative value is not a distance matrix, and labels that two
+different items share a rendering of cannot be told apart in the id column.
+
+### Writing results
+
+`--output PATH` writes the result to a file, as CSV or JSON chosen by the
+extension; any other extension is refused before the run rather than after it.
+The CSV is the command's own table and nothing else:
+
+| Command | CSV header |
+|---|---|
+| `cluster` | `id,label` |
+| `select-parameter` | `winner` followed by the scored table's own columns |
+| `stability` | `label,size,mean_jaccard,dissolved,recovered,evaluated` |
+| `consensus` | `id,label` |
+
+`select-parameter`'s columns follow the criterion that ran, so the header is
+`winner,threshold,silhouette,num_clusters,noise_fraction,eligible,rejection`
+for the sweep above. The `id` column holds the matrix's own labels, or the item
+indices when it has none.
+
+The JSON carries everything the CSV cannot. It is a `schema_version` 1
+envelope, the same five keys for every command:
+
+```json
+{
+  "schema_version": 1,
+  "command": "cluster",
+  "input": {
+    "path": "small.npz",
+    "num_items": 6,
+    "orientation": "unknown"
+  },
+  "spec": {
+    "algorithm": "butina",
+    "options": {
+      "threshold": 0.5,
+      "num_threads": 0
+    }
+  },
+  "result": {
+    "labels": [1, 1, 1, 0, 0, 0],
+    "ids": ["m0", "m1", "m2", "m3", "m4", "m5"],
+    "num_clusters": 2,
+    "num_noise": 0
+  }
+}
+```
+
+`result` is what differs. `cluster` reports `labels`, `num_clusters` and
+`num_noise`, plus `ids` when the matrix carried labels of its own.
+`select-parameter` reports `columns`, `rows` and `winner_index`. `stability`
+reports `columns`, `rows` and `reference_labels`, plus `mean_agreement` and the
+`noise` mode it was computed under. `consensus` reports the `cluster` fields
+plus `num_partitions`, `unobserved_pairs`, `threshold`, `mean_agreement`,
+`noise`, the per-member `agreement`, `item_consensus` and one `records` entry
+per cluster.
+
+The two scalars are JSON-only on purpose. A CSV here is one row per cluster or
+one row per item, so a trailing summary row would make every column change
+meaning on the last line and a repeated column would restate one scalar on
+every row. The `noise` mode travels beside `mean_agreement` because it is that
+statistic's unit: the same partitions score differently under each mode, so the
+number cannot be compared across runs that chose differently.
+
+Non-finite values survive the round trip. NaN encodes as `null` and the
+infinities as the strings `"inf"` and `"-inf"`, because collapsing them
+together would erase a real distinction: NaN means undefined — a cluster of one
+has no consensus score — while an infinity is a defined extreme some criteria
+produce. In a CSV, NaN is an empty field and the infinities are `inf` and
+`-inf`. The file is rendered in full before it is opened, so a failure part way
+through leaves no file rather than a truncated one.
+
+Every destination is checked before any work is done. With input `distances.npy`
+the obvious `--output distances.json` would truncate exactly the sidecar the run
+depends on, and a `--mmap` pointed at the input would overwrite the matrix while
+it is mapped; both are refused, as is a destination whose parent directory does
+not exist. Two destinations that name one file are refused the same way, decided
+by asking the filesystem rather than by comparing the names — on a case-folding
+volume `--output r.json --mmap R.JSON` is one file, and on a case-sensitive one
+it is two.
+
+### Exit codes and failures
+
+| Code | Meaning |
+|---|---|
+| 0 | the run succeeded |
+| 1 | the run failed: an unusable input, or a failure inside the library |
+| 2 | the invocation was wrong: an unknown option, a bad value, a colliding destination |
+
+The split follows where the problem is. Anything the user could have written
+differently exits 2, as Click's own parse errors do; anything about the file or
+the run exits 1. Both print one line in an error panel rather than a traceback.
+
+`--traceback`, or `OECLUSTER_CLI_TRACEBACK` set to anything but `0`, shows the
+original exception instead, with the frame that actually failed rather than the
+frame that renamed it.
+
+### Memory
+
+The command line adds nothing to the figures given under each feature above: it
+loads one matrix and hands it to the same functions. The matrix dominates, at
+`4 N (N - 1)` bytes dense, and `consensus` builds a second one of that size.
+`--mmap` is the lever for the second: past a few thousand items it keeps the
+co-association matrix on disk, where `consensus()`'s `output=` puts it.
+
 ## Partition Agreement
 
 `partition_agreement()` scores two labelings of the same samples against each

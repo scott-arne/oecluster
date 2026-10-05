@@ -2,6 +2,36 @@
 
 This file starts at 5.0.0; earlier releases are not recorded here.
 
+## [5.18.0] - 2026-10-04
+
+### Added
+
+- An `oecluster` command line over a precomputed distance matrix, with
+  `cluster`, `select-parameter`, `stability` and `consensus` commands plus
+  `algorithms` for discovery. Each command takes `--algorithm NAME` with
+  repeatable `--set key=value`, validated against the roster before any file
+  is read, so an unknown option is reported with a suggestion rather than as
+  a `TypeError` from deep in the library. `--threads` and
+  `--allow-nonmetric` are first-class flags and route to every place the
+  underlying call needs them.
+- The command line reads `.npz` matrices and `oepdist`'s `.npy` and `.bin`
+  output through its JSON sidecar. A file holding similarities rather than
+  distances is refused, and one whose orientation the sidecar does not
+  record warns on stderr and proceeds, matching the library's own rule.
+  `.csv` is not accepted: `oepdist` writes titles unquoted and values at
+  eight significant digits, and records no provenance.
+- `--output` writes results as CSV or JSON. The JSON carries
+  `schema_version` 1; NaN encodes as `null` and the infinities as `"inf"`
+  and `"-inf"`, since collapsing them together would erase a real
+  distinction. Every destination is checked before the run: one that would
+  clobber the input, its sidecar or another destination is refused, decided
+  by filesystem identity rather than by comparing names.
+- `--quiet` suppresses the terminal summary, `--traceback` (or
+  `OECLUSTER_CLI_TRACEBACK`) shows the original exception instead of a
+  one-line message, and the exit code is 0 for success, 1 for a failed run
+  and 2 for a bad invocation. The unproven-orientation warning goes to
+  stderr unconditionally and `--quiet` does not silence it.
+
 ## [5.17.0] - 2026-10-03
 
 ### Added

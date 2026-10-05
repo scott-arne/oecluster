@@ -35,7 +35,7 @@ they are not recoveries of the original intent.
 | D3a | Parameter selection: `ClusteringSpec`, `select_parameter` | shipped 5.15.0 |
 | D3b | Stability resampling: subsample-Jaccard over a `ClusteringSpec` | shipped 5.16.0 |
 | D3c | Consensus clustering over an ensemble of partitions | shipped 5.17.0 |
-| D3d | Clustering CLI over oepdist output | planned |
+| D3d | Clustering CLI over oepdist output | shipped 5.18.0 |
 | D4 | Out-of-core and streaming clustering | planned |
 
 Sub-project A was originally scoped as one piece covering seven metric families
@@ -169,9 +169,16 @@ shipped as four slices:
   D3a sweeps and D3b resamples both produce, extracts a partition by
   majority-evidence components or by any matrix-consuming `ClusteringSpec`,
   and scores every member against the result with A2's agreement machinery.
-- **D3d.** A clustering CLI over oepdist's `.npz` output exposing the
-  roster and the three features above as subcommands. `oepdist` computes
-  distances; nothing yet drives clustering from the command line.
+- **D3d (shipped 5.18.0).** The `oecluster` command line. `cluster`,
+  `select-parameter`, `stability` and `consensus` expose the roster and the
+  three slices above as subcommands, with `algorithms` deriving the schema
+  of each entry from its signature so a new roster entry appears without an
+  edit. It reads a `.npz` written by the Python API, and `oepdist`'s `.npy`
+  and `.bin` through their JSON sidecar; `.csv` is refused because oepdist
+  writes it unquoted at eight significant digits with no provenance, and a
+  file the sidecar proves holds similarities is refused outright, while an
+  unproven orientation warns and proceeds. `oepdist` computed distances and
+  nothing drove clustering from the command line before this.
 
 Sequenced after D2 because consensus and stability are both defined over the
 algorithm roster, and that roster was not final until D2 landed.
