@@ -2,6 +2,19 @@
 
 This file starts at 5.0.0; earlier releases are not recorded here.
 
+## [5.18.1] - 2026-10-05
+
+### Fixed
+
+- Wheels build again. 5.18.0's wheel tests failed on every platform, so it
+  never reached PyPI: the command-line tests read rendered terminal text, and
+  that text changed shape under CI. rich-click forces a colour terminal when
+  `GITHUB_ACTIONS` is set, and the escape codes split an expected message
+  around a styled option name; rich also wraps at 80 columns, so beside
+  Windows' long temporary paths an expected message split across two lines.
+  The tests now pin plain, unwrapped rendering. The command line itself is
+  unchanged.
+
 ## [5.18.0] - 2026-10-04
 
 ### Added
