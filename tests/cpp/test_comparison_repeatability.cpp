@@ -1,14 +1,15 @@
 /**
  * @file test_comparison_repeatability.cpp
- * @brief Every built-in comparison family returns the same bits for a pair,
- * whatever its clone has scored before.
+ * @brief Which built-in comparison families return the same bits for a pair,
+ * whatever their clone has scored before.
  *
  * The comparison-built threshold graph scores every pair twice, once to size
  * each row and once to fill it, on whichever clone the scheduler hands the
  * chunk. Its exactness rests on Compare being repeatable across differing
- * clone histories, which PairwiseComparison does not promise and ROCS clones
- * hold mutable toolkit state for. These tests are the evidence for that
- * precondition, family by family.
+ * clone histories, which PairwiseComparison does not promise. These tests are
+ * the evidence for that precondition, family by family. ROCS fails it, and
+ * the last test records how; the threshold-graph builder refuses ROCS by name
+ * for that reason.
  */
 
 #include <gtest/gtest-spi.h>
@@ -220,10 +221,6 @@ const std::vector<const char*> FINGERPRINT_SMILES{
     "CCO",      "CCCO",       "CCCCO",   "c1ccccc1", "Cc1ccccc1", "CCc1ccccc1",
     "CC(=O)O",  "CC(=O)OC",   "CCN",     "CCCN",     "C1CCCCC1",  "c1ccncc1"};
 
-const std::vector<const char*> SHAPE_SMILES{
-    "CC(=O)Oc1ccccc1C(=O)O", "CCN(CC)CCOC(=O)c1ccccc1", "c1ccc2ccccc2c1",
-    "CCCCCCO", "OC(=O)c1ccccc1", "CC(C)Cc1ccc(cc1)C(C)C(=O)O"};
-
 const std::vector<const char*> MCS_SMILES{
     "c1ccccc1", "Cc1ccccc1", "C1CCCCC1", "Oc1ccccc1",
     "CN1CC[C@]23c4c5ccc(O)c4O[C@H]2[C@@H](O)C=C[C@H]3[C@H]1C5",
@@ -275,11 +272,6 @@ TEST(ComparisonRepeatabilityTest, Descriptor) {
     ExpectRepeatable(comparison, THREADS, CHUNKS);
 }
 
-TEST(ComparisonRepeatabilityTest, ROCS) {
-    ROCSComparison comparison(Conformers(SHAPE_SMILES));
-    ExpectRepeatable(comparison, THREADS, CHUNKS);
-}
-
 TEST(ComparisonRepeatabilityTest, RMSDInFrameAndOverlaid) {
     const std::vector<std::shared_ptr<OEChem::OEMol>> poses =
         Poses("CCCCCCOc1ccccc1", 6);
@@ -322,4 +314,29 @@ TEST(ComparisonRepeatabilityTest, SuperposeAndSiteHopper) {
         SuperposeComparison comparison(dus, options);
         ExpectRepeatable(comparison, {1, 2}, {1});
     }
+}
+
+// ROCS fails the precondition: its overlay keeps state between calls, so a
+// clone's score for a pair depends on what that clone scored before. This is
+// the evidence the builder's refusal rests on, and the test fails if a toolkit
+// change ever makes ROCS repeatable, which is the cue to revisit the refusal.
+// The stretched phenol is the case ROCSComparison.cpp documents (0.546 on a
+// fresh overlay, 1.0 on a used one); planning also measured ordinary pairs
+// moving by 0.016 depending on which reference the clone saw last.
+TEST(ComparisonRepeatabilityTest, ROCSDependsOnItsCloneHistory) {
+    std::vector<std::shared_ptr<OEChem::OEMol>> mols =
+        Conformers({"c1ccc(O)cc1", "c1ccccc1"});
+    OEChem::OEConfBase* const active = mols[0]->GetActive();
+    OESystem::OEIter<OEChem::OEAtomBase> atom = active->GetAtoms();
+    ASSERT_TRUE(atom);
+    double coords[3];
+    ASSERT_TRUE(active->GetCoords(&*atom, coords));
+    coords[0] = 200.0;
+    ASSERT_TRUE(active->SetCoords(&*atom, coords));
+
+    ROCSComparison comparison(mols);
+    std::unique_ptr<PairwiseComparison> clone = comparison.Clone();
+    const double fresh = clone->Compare(0, 1);
+    const double again = clone->Compare(0, 1);
+    EXPECT_NE(Bits(fresh), Bits(again)) << fresh << " vs " << again;
 }
