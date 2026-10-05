@@ -5,6 +5,7 @@ and markup by itself, so redirected output and the test runner both see clean
 text without a flag.
 """
 import csv
+import io
 import json
 import math
 import os
@@ -66,6 +67,72 @@ def text(value):
     if isinstance(value, bytes):
         return value.decode("utf-8", "backslashreplace")
     return str(value)
+
+
+def _identical(first, second):
+    """:returns: True if two labels are provably one and the same label.
+
+    Conservative by construction: anything this cannot settle counts as
+    "not provably the same", which refuses the run. A refusal naming the
+    two items beats an id column that silently merges them.
+
+    ``==`` alone is not enough. A numpy array answers it with an
+    elementwise array rather than a bool, and ``bool()`` on that raises for
+    anything but a single element, so the result is reduced with ``all()``
+    whenever the comparison offers one.
+    """
+    if first is second:
+        return True
+    try:
+        equal = first == second
+        reduce = getattr(equal, "all", None)
+        return bool(equal if reduce is None else reduce())
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def check_ids(labels):
+    """Render labels as the exported id column, refusing a lossy rendering.
+
+    The id column has one job -- to say which item a row is about -- so the
+    rendering has to keep distinct labels distinct. ``str`` does not:
+    numpy prints ``array([1.000000001])`` as ``[1.]``, so three different
+    labels exported one id and the result could no longer be joined back to
+    what was clustered. The rule is stated over the class rather than over
+    a type because the same defect arrived first through ``bytes`` and
+    would arrive next through a third type.
+
+    Duplicate labels stay legitimate: two items both called ``mol1`` share
+    an id on purpose and still export two rows. What is refused is two
+    *different* labels arriving at one id.
+
+    An id that cannot be encoded as UTF-8 is refused here too. It is the
+    same question -- whether a label can be an id at all -- and asking it
+    here means the answer arrives before the run rather than from inside
+    the writer.
+
+    :param labels: The labels, in item order.
+    :returns: The rendered id column, in the same order.
+    :raises ValueError: If two distinct labels render alike, or if a
+        rendered id cannot be encoded as UTF-8.
+    """
+    rendered = [text(label) for label in labels]
+    first_seen = {}
+    for index, name in enumerate(rendered):
+        try:
+            name.encode("utf-8")
+        except UnicodeEncodeError:
+            raise ValueError(
+                f"the label of item {index} cannot be encoded as UTF-8, so "
+                "it cannot be written as an id; a lone surrogate is the "
+                "usual cause") from None
+        earlier = first_seen.setdefault(name, index)
+        if earlier != index and not _identical(labels[earlier], labels[index]):
+            raise ValueError(
+                f"items {earlier} and {index} have different labels that "
+                f"both render as {name!r}, so the id column cannot tell "
+                "them apart; relabel the matrix through the Python API")
+    return rendered
 
 
 def panel(command, spec, path, num_items):
@@ -163,18 +230,30 @@ def write_output(path, payload):
     :param path: Destination; must end in ``.csv`` or ``.json``.
     :param payload: Mapping with ``header`` and ``rows`` for CSV and
         ``document`` for JSON.
+    The file is rendered and encoded in full before it is opened, so a
+    failure part way through leaves no file rather than a truncated one: a
+    header-only CSV on disk reads as a run that succeeded and found
+    nothing, which is worse than no file at all. The bytes are written
+    through a binary handle because a text handle encodes during the write,
+    which is on the far side of the open.
+
+    :param path: Destination; must end in ``.csv`` or ``.json``.
+    :param payload: Mapping with ``header`` and ``rows`` for CSV and
+        ``document`` for JSON.
     :raises ValueError: For any other extension, or for a non-finite value
         :func:`_encoded` did not reach.
     """
     check_output(path)
     if os.path.splitext(path)[1].lower() == ".csv":
-        with open(path, "w", newline="", encoding="utf-8") as handle:
-            writer = csv.writer(handle)
-            writer.writerow(payload["header"])
-            for row in payload["rows"]:
-                writer.writerow([_csv_cell(value) for value in row])
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(payload["header"])
+        for row in payload["rows"]:
+            writer.writerow([_csv_cell(value) for value in row])
+        body = buffer.getvalue()
     else:
-        with open(path, "w", encoding="utf-8") as handle:
-            json.dump(_encoded(payload["document"]), handle, indent=2,
-                      allow_nan=False)
-            handle.write("\n")
+        body = json.dumps(_encoded(payload["document"]), indent=2,
+                          allow_nan=False) + "\n"
+    data = body.encode("utf-8")
+    with open(path, "wb") as handle:
+        handle.write(data)

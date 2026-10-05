@@ -13,7 +13,12 @@ from typing import NoReturn
 
 import numpy as np
 
-from . import SparseStorage, SymmetricDistanceMatrix, load_distance_matrix
+from . import (
+    SparseStorage,
+    SymmetricDistanceMatrix,
+    _cli_render,
+    load_distance_matrix,
+)
 
 
 class InputError(Exception):
@@ -69,6 +74,28 @@ def _refuse_negative(matrix, path):
         raise InputError(
             f"{os.path.basename(path)} holds negative values, so it is not "
             "a distance matrix; a distance cannot be below zero")
+
+
+def _refuse_colliding_labels(matrix, path):
+    """Refuse labels the id column could not tell apart.
+
+    Delegated to the renderer rather than reimplemented, so what is checked
+    here is literally what will be exported: :func:`_cli_render.check_ids`
+    is the one function that turns a label into an id, and the command
+    layer calls it again on the way out. Checking it here is what makes the
+    refusal cheap -- it lands before the clustering rather than after it.
+
+    :param matrix: The loaded matrix.
+    :param path: The file it came from, named in the message.
+    :raises InputError: If two distinct labels render as one id, or if an
+        id cannot be encoded as UTF-8. Both are facts about this file, so
+        they arrive as an unusable input like every other.
+    """
+    labels = matrix.labels if matrix.labels is not None else []
+    try:
+        _cli_render.check_ids(labels)
+    except ValueError as error:
+        raise InputError(f"{os.path.basename(path)}: {error}") from None
 
 
 def _refuse_unrenderable_labels(matrix, path):
@@ -268,6 +295,7 @@ def load(path, *, warn=None):
             warn(f"{os.path.basename(path)}: orientation unproven, treating "
                  "values as distances")
         _refuse_unrenderable_labels(matrix, path)
+        _refuse_colliding_labels(matrix, path)
         _refuse_negative(matrix, path)
         return matrix
     if suffix not in (".npy", ".bin"):
@@ -335,5 +363,10 @@ def load(path, *, warn=None):
         raise InputError(
             f"{os.path.basename(path)} is not a usable distance matrix: "
             f"{error}") from None
+    # Run on this path too: _label_list proves the labels are strings, not
+    # that they can be written. A JSON "\udcff" escape decodes to a lone
+    # surrogate, which is a perfectly ordinary str until the writer tries
+    # to encode it.
+    _refuse_colliding_labels(matrix, path)
     _refuse_negative(matrix, path)
     return matrix

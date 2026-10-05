@@ -155,12 +155,17 @@ def _labels_of(matrix):
     """:returns: The matrix's own labels as text, or None when it has none.
 
     An unlabelled matrix reports ``[]`` rather than ``None``, so testing for
-    None would treat "no labels" as a real empty list. Each label is rendered
-    through :func:`_cli_render.text` because a ``.npz`` restores whatever the
-    Python API was handed, which need not be a string.
+    None would treat "no labels" as a real empty list.
+
+    :func:`_cli_render.check_ids` both renders the labels and refuses a
+    rendering that two distinct labels would share. ``_cli_input`` calls it
+    too, which is what makes the refusal cheap; calling it again here is
+    what makes it airtight, because the function that produces the exported
+    ids is then the function that checks them and no third party can
+    introduce a collision in between.
     """
     labels = list(matrix.labels) if matrix.labels is not None else []
-    return [_cli_render.text(label) for label in labels] or None
+    return _cli_render.check_ids(labels) or None
 
 
 def _ids(matrix):

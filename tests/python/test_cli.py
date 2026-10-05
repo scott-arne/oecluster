@@ -1139,3 +1139,95 @@ def test_a_set_integer_at_the_native_maximum_exits_cleanly(tmp_path,
                   "--quiet", "--set", assignment)
     assert result.exit_code == 2
     assert result.exception.__class__ is SystemExit
+
+
+def test_distinct_array_labels_that_render_alike_are_refused(tmp_path):
+    # The class, not the type: numpy prints array([1.000000001]) as "[1.]",
+    # so three distinct labels exported one id. Guarding bytes did nothing
+    # for this, and a third type would have found the same hole.
+    path = _patched_npz(tmp_path, "arrays", labels=np.array(
+        [[1.000000001], [1.000000002], [3.0], [4.0]]))
+    out = str(tmp_path / "r.csv")
+    result = _run("cluster", path, "--algorithm", "butina",
+                  "--set", "threshold=1.0", "--output", out)
+    assert result.exit_code == 1
+    assert "render" in result.output
+    assert not Path(out).exists()
+
+
+def test_two_genuinely_duplicate_labels_still_export_two_rows(tmp_path):
+    # The converse, and it is deliberate: two items really called mol1 share
+    # an id on purpose. The rule is "distinct labels that render alike", not
+    # "duplicate ids", and a fix that refused this would be wrong.
+    path = _patched_npz(tmp_path, "dup",
+                        labels=np.array(["mol1", "mol1", "c", "d"]))
+    out = str(tmp_path / "r.csv")
+    result = _run("cluster", path, "--algorithm", "butina",
+                  "--set", "threshold=1.0", "--output", out)
+    assert result.exit_code == 0
+    lines = Path(out).read_text(encoding="utf-8").splitlines()
+    assert [line.split(",")[0] for line in lines[1:]] == ["mol1", "mol1",
+                                                          "c", "d"]
+
+
+@pytest.mark.parametrize("labels, ids", [
+    (["a", "b", "c", "d"], ["a", "b", "c", "d"]),
+    ([b"a", b"b", b"c", b"d"], ["a", "b", "c", "d"]),
+    # Scalars, at the precision that defeats the array rendering: numpy
+    # scalars print in full, so these must not be caught by the guard.
+    ([1.000000001, 1.000000002, 3.0, 4.0],
+     ["1.000000001", "1.000000002", "3.0", "4.0"]),
+    ([1, 2, 3, 4], ["1", "2", "3", "4"]),
+])
+def test_label_types_that_render_distinctly_are_accepted(tmp_path, labels,
+                                                         ids):
+    path = _patched_npz(tmp_path, "kinds", labels=np.array(labels))
+    out = str(tmp_path / "r.csv")
+    result = _run("cluster", path, "--algorithm", "butina",
+                  "--set", "threshold=1.0", "--output", out)
+    assert result.exit_code == 0, result.output
+    lines = Path(out).read_text(encoding="utf-8").splitlines()
+    assert [line.split(",")[0] for line in lines[1:]] == ids
+
+
+def test_a_label_that_cannot_be_written_is_refused_before_the_run(tmp_path):
+    # A lone surrogate is a str, renders as itself and stays distinct, so
+    # every other check passes -- and then the UTF-8 encode inside the
+    # writer fails, after the header row has already reached the disk.
+    path = _patched_npz(tmp_path, "sur",
+                        labels=np.array(["a", "\udcff", "c", "d"]))
+    out = str(tmp_path / "r.csv")
+    result = _run("cluster", path, "--algorithm", "butina",
+                  "--set", "threshold=1.0", "--output", out)
+    assert result.exit_code == 1
+    assert "UTF-8" in result.output
+    assert not Path(out).exists()
+
+
+@pytest.mark.parametrize("name, payload, error", [
+    ("r.csv", {"header": ["id", "label"], "rows": [("a", 0), ("\udcff", 1)]},
+     UnicodeEncodeError),
+    ("r.json", {"document": {"x": object()}}, TypeError),
+])
+def test_a_failed_write_leaves_no_partial_file(tmp_path, name, payload,
+                                               error):
+    # A header-only CSV on disk reads as a run that succeeded and found
+    # nothing, which is worse than no file at all.
+    out = str(tmp_path / name)
+    with pytest.raises(error):
+        _cli_render.write_output(out, payload)
+    assert not Path(out).exists()
+
+
+def test_check_ids_states_the_rule_it_enforces():
+    # Read as the specification: equal labels may share an id, different
+    # labels may not.
+    assert _cli_render.check_ids(["a", "a", "b"]) == ["a", "a", "b"]
+    assert _cli_render.check_ids([]) == []
+    with pytest.raises(ValueError, match="render"):
+        _cli_render.check_ids([np.array([1.000000001]),
+                               np.array([1.000000002])])
+    # Multi-element arrays that really are equal cannot be settled cheaply,
+    # and the guard refuses what it cannot settle rather than exporting an
+    # id two items might share.
+    assert _cli_render.check_ids([np.array([1.0, 2.0])]) == ["[1. 2.]"]
