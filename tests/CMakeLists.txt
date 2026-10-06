@@ -62,6 +62,7 @@ add_executable(oecluster_tests
     cpp/test_step_team.cpp
     cpp/test_prim_mst.cpp
     cpp/test_streaming_core_distances.cpp
+    cpp/test_streaming_hdbscan.cpp
 )
 
 target_link_libraries(oecluster_tests

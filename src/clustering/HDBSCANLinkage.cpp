@@ -9,7 +9,6 @@
 #include <limits>
 #include <stdexcept>
 
-#include "DistanceAccess.h"
 
 namespace OECluster::detail {
 
@@ -60,84 +59,7 @@ private:
     size_t next_label_;
 };
 
-// HDBSCAN mutual reachability is max(core_i, core_j, d(i,j)/alpha)
-// to incorporate density-based reachability.
-double mutual_reachability(
-    const double* data,
-    size_t n,
-    const std::vector<double>& core_distances,
-    size_t i,
-    size_t j,
-    double alpha) {
-    return std::max({core_distances[i], core_distances[j],
-                     dense_distance(data, n, i, j) / alpha});
-}
-
 }  // namespace
-
-std::vector<HDBSCANMSTEdge> hdbscan_mutual_reachability_mst(
-    const StorageBackend& storage,
-    const std::vector<double>& core_distances,
-    double alpha) {
-    validate_complete_distance_storage(storage, "HDBSCAN");
-    if (alpha <= 0.0) {
-        throw std::invalid_argument("HDBSCAN alpha must be positive");
-    }
-
-    const size_t n = storage.NumSamples();
-    if (core_distances.size() != n) {
-        throw std::invalid_argument("Core distance count must match storage item count");
-    }
-    if (n < 2) {
-        return {};
-    }
-
-    std::vector<HDBSCANMSTEdge> mst;
-    mst.reserve(n - 1);
-    std::vector<bool> in_tree(n, false);
-    std::vector<double> min_reachability(n, std::numeric_limits<double>::infinity());
-    std::vector<size_t> current_sources(n, 0);
-    const double* data = storage.Data();
-    size_t current_node = 0;
-
-    for (size_t step = 0; step < n - 1; ++step) {
-        in_tree[current_node] = true;
-
-        double new_reachability = std::numeric_limits<double>::infinity();
-        size_t source_node = 0;
-        size_t new_node = 0;
-
-        for (size_t candidate = 0; candidate < n; ++candidate) {
-            if (in_tree[candidate]) {
-                continue;
-            }
-
-            const double next_min_reach = min_reachability[candidate];
-            const size_t next_source = current_sources[candidate];
-            const double distance = mutual_reachability(
-                data, n, core_distances, current_node, candidate, alpha);
-
-            if (distance < next_min_reach) {
-                min_reachability[candidate] = distance;
-                current_sources[candidate] = current_node;
-                if (distance < new_reachability) {
-                    new_reachability = distance;
-                    source_node = current_node;
-                    new_node = candidate;
-                }
-            } else if (next_min_reach < new_reachability) {
-                new_reachability = next_min_reach;
-                source_node = next_source;
-                new_node = candidate;
-            }
-        }
-
-        mst.push_back(HDBSCANMSTEdge{source_node, new_node, new_reachability});
-        current_node = new_node;
-    }
-
-    return mst;
-}
 
 std::vector<HDBSCANLinkageNode> make_hdbscan_single_linkage(
     std::vector<HDBSCANMSTEdge> mst,

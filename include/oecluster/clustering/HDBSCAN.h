@@ -1,6 +1,6 @@
 /**
  * @file HDBSCAN.h
- * @brief HDBSCAN clustering over precomputed distance matrices.
+ * @brief HDBSCAN clustering over a precomputed distance matrix or a comparison.
  */
 
 #ifndef OECLUSTER_CLUSTERING_HDBSCAN_H
@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "oecluster/PairwiseComparison.h"
 #include "oecluster/StorageBackend.h"
 #include "oecluster/clustering/ClusterTypes.h"
 
@@ -36,8 +37,8 @@ struct HDBSCANOptions {
     HDBSCANClusterSelectionMethod cluster_selection_method =
         HDBSCANClusterSelectionMethod::EOM;
     bool allow_single_cluster = false;
-    size_t num_threads = 0;
-    size_t chunk_size = 4096;
+    size_t num_threads = 0;  ///< Worker threads; 0 auto-detects hardware concurrency.
+    size_t chunk_size = 64;  ///< Ceiling on rows per work unit in the matrix core-distance pass; 0 selects 64.
 };
 
 /**
@@ -63,12 +64,41 @@ private:
 /**
  * @brief Cluster a precomputed distance matrix with HDBSCAN.
  *
+ * Every distance must be finite and non-negative; a zero is read as +0.0.
+ *
  * :param storage: Complete pairwise distance storage.
  * :param options: HDBSCAN clustering options.
  * :returns: Labels, clusters, and probabilities.
- * :raises std::invalid_argument: If min_cluster_size < 2, alpha <= 0, min_samples > NumSamples(), or storage is incomplete.
+ * :raises std::invalid_argument: If min_cluster_size < 2, alpha is not positive
+ *     (NaN included), min_samples > NumSamples(), storage is incomplete, or a
+ *     distance divided by alpha is not finite.
+ * :raises std::runtime_error: If a distance is non-finite or negative, naming the pair.
  */
 HDBSCANResult hdbscan_cluster(const StorageBackend& storage, const HDBSCANOptions& options);
+
+/**
+ * @brief Cluster from a comparison with HDBSCAN, holding no matrix.
+ *
+ * One pass compares every pair once for the core distances, holding
+ * N x (min_samples - 1) doubles; a pruned Prim pass then compares at most every
+ * pair again, holding O(N). With min_samples = 1 there is only the Prim pass.
+ * One comparison clone per worker is held on top. The result equals the
+ * storage overload's over a matrix filled through Compare(min(i, j), max(i, j)),
+ * for every num_threads, provided the comparison is repeatable: Compare(i, j)
+ * returns a bit-identical value on every call and every clone, whatever that
+ * clone scored before. ROCS is not, and is refused.
+ *
+ * :param comparison: The comparison; cloned, never called itself.
+ * :param options: HDBSCAN clustering options; chunk_size is not read.
+ * :returns: Labels, clusters, and probabilities.
+ * :raises std::invalid_argument: As the storage overload, for the options and
+ *     the min_samples bound, and if a distance divided by alpha is not finite.
+ * :raises ComparisonError: If the comparison is ROCS, reports similarities, a
+ *     non-zero self-distance, or missing='propagate'.
+ * :raises std::runtime_error: If a distance is non-finite or negative, naming the pair.
+ * :raises std::length_error: If the core-distance heaps' size overflows a size_t.
+ */
+HDBSCANResult hdbscan_cluster(PairwiseComparison& comparison, const HDBSCANOptions& options);
 
 namespace detail {
 

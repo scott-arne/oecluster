@@ -6,6 +6,7 @@
 #include "oecluster/StorageBackend.h"
 #include "oecluster/clustering/HDBSCAN.h"
 #include "../../src/clustering/HDBSCANLinkage.h"
+#include "../../src/clustering/PrimMST.h"
 
 using namespace OECluster;
 
@@ -35,9 +36,10 @@ TEST(HDBSCANInfrastructureTest, BuildsSingleLinkageTreeWithExpectedSize) {
     storage.Set(1, 3, 2.0);
     storage.Set(2, 3, 0.1);
 
-    const std::vector<double> core = detail::compute_core_distances(storage, 2, 1);
+    detail::PrimWeights weights;
+    weights.core = detail::compute_core_distances(storage, 2, 1);
     const std::vector<detail::HDBSCANMSTEdge> mst =
-        detail::hdbscan_mutual_reachability_mst(storage, core, 1.0);
+        detail::prim_mst(storage, weights, detail::PrimOptions());
     const std::vector<detail::HDBSCANLinkageNode> linkage =
         detail::make_hdbscan_single_linkage(mst, storage.NumSamples());
 

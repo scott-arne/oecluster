@@ -9,8 +9,6 @@
 #include <cstddef>
 #include <vector>
 
-#include "oecluster/StorageBackend.h"
-
 namespace OECluster::detail {
 
 struct HDBSCANMSTEdge {
@@ -25,11 +23,6 @@ struct HDBSCANLinkageNode {
     double value = 0.0;
     size_t cluster_size = 0;
 };
-
-std::vector<HDBSCANMSTEdge> hdbscan_mutual_reachability_mst(
-    const StorageBackend& storage,
-    const std::vector<double>& core_distances,
-    double alpha);
 
 std::vector<HDBSCANLinkageNode> make_hdbscan_single_linkage(
     std::vector<HDBSCANMSTEdge> mst,

@@ -6,81 +6,68 @@
 #include "oecluster/clustering/HDBSCAN.h"
 
 #include <algorithm>
+#include <cmath>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 #include "DistanceAccess.h"
+#include "DiversityValidation.h"
 #include "HDBSCANLinkage.h"
 #include "HDBSCANTree.h"
-#include "oecluster/ThreadPool.h"
+#include "PrimMST.h"
+#include "StreamingCoreDistances.h"
 
 namespace OECluster {
 
-namespace detail {
+namespace {
 
-std::vector<double> compute_core_distances(
-    const StorageBackend& storage,
-    size_t min_samples,
-    size_t num_threads) {
-    validate_complete_distance_storage(storage, "HDBSCAN");
-    const size_t n = storage.NumSamples();
-    if (min_samples == 0) {
-        throw std::invalid_argument("HDBSCAN min_samples must be at least one");
-    }
-    if (min_samples > n) {
-        throw std::invalid_argument("HDBSCAN min_samples must be at most the item count");
-    }
+constexpr const char* HDBSCAN_NAME = "hdbscan";
 
-    std::vector<double> core_distances(n, 0.0);
-    if (min_samples == 1 || n == 0) {
-        return core_distances;
-    }
-
-    const double* data = storage.Data();
-    ThreadPool pool(num_threads);
-    pool.ParallelFor(0, n, 64, [&](size_t begin, size_t end) {
-        std::vector<double> row(n);
-        for (size_t i = begin; i < end; ++i) {
-            row[0] = 0.0;
-            size_t write_index = 1;
-            for (size_t j = 0; j < n; ++j) {
-                if (i != j) {
-                    row[write_index++] = dense_distance(data, n, i, j);
-                }
-            }
-            const auto nth = row.begin() + static_cast<std::ptrdiff_t>(min_samples - 1);
-            std::nth_element(row.begin(), nth, row.end());
-            core_distances[i] = *nth;
-        }
-    });
-
-    return core_distances;
-}
-
-}  // namespace detail
-
-HDBSCANResult hdbscan_cluster(const StorageBackend& storage, const HDBSCANOptions& options) {
+// The checks that need no item count, in the order 5.19.0 applied them.
+size_t validated_min_samples(const HDBSCANOptions& options) {
     if (options.min_cluster_size < 2) {
         throw std::invalid_argument("HDBSCAN min_cluster_size must be at least two");
     }
-    if (options.alpha <= 0.0) {
+    // Written as !(alpha > 0) so that NaN, which alpha <= 0 let through, is refused.
+    if (!(options.alpha > 0.0)) {
         throw std::invalid_argument("HDBSCAN alpha must be positive");
     }
+    return options.min_samples == 0 ? options.min_cluster_size : options.min_samples;
+}
 
-    const size_t min_samples =
-        options.min_samples == 0 ? options.min_cluster_size : options.min_samples;
-    if (min_samples > storage.NumSamples()) {
+void validate_min_samples_bound(size_t min_samples, size_t n) {
+    if (min_samples > n) {
         throw std::invalid_argument("HDBSCAN min_samples must be at most the item count");
     }
+}
 
-    detail::validate_complete_distance_storage(storage, "HDBSCAN");
+// With a core pass every pair was read, so the largest distance decides whether
+// any quotient overflows; with min_samples = 1 the unpruned Prim pass checks
+// each quotient as it reads it.
+detail::PrimWeights mutual_reachability_weights(detail::CoreDistances core,
+                                                size_t min_samples, double alpha) {
+    if (min_samples > 1 && !std::isfinite(core.max_distance / alpha)) {
+        throw detail::alpha_overflow_error(HDBSCAN_NAME, alpha);
+    }
+    detail::PrimWeights weights;
+    weights.core = std::move(core.values);
+    weights.alpha = alpha;
+    weights.prune = min_samples > 1;
+    return weights;
+}
 
-    const std::vector<double> core_distances =
-        detail::compute_core_distances(storage, min_samples, options.num_threads);
-    const std::vector<detail::HDBSCANMSTEdge> mst =
-        detail::hdbscan_mutual_reachability_mst(storage, core_distances, options.alpha);
+detail::PrimOptions prim_options(const HDBSCANOptions& options) {
+    detail::PrimOptions prim;
+    prim.num_threads = options.num_threads;
+    prim.caller = HDBSCAN_NAME;
+    return prim;
+}
+
+HDBSCANResult hdbscan_from_tree(std::vector<detail::HDBSCANMSTEdge> mst, size_t n,
+                                const HDBSCANOptions& options) {
     const std::vector<detail::HDBSCANLinkageNode> linkage =
-        detail::make_hdbscan_single_linkage(mst, storage.NumSamples());
+        detail::make_hdbscan_single_linkage(std::move(mst), n);
     const std::vector<detail::CondensedNode> condensed_tree =
         detail::condense_tree(linkage, options.min_cluster_size);
     const detail::HDBSCANTreeSelection selection =
@@ -94,14 +81,58 @@ HDBSCANResult hdbscan_cluster(const StorageBackend& storage, const HDBSCANOption
     std::vector<ClusterLabel> labels = selection.labels;
     std::vector<double> probabilities = selection.probabilities;
     if (labels.empty()) {
-        labels.assign(storage.NumSamples(), NOISE_LABEL);
+        labels.assign(n, NOISE_LABEL);
     }
     if (probabilities.empty()) {
-        probabilities.assign(storage.NumSamples(), 0.0);
+        probabilities.assign(n, 0.0);
     }
     Clusters members = labels_to_clusters(labels);
     return HDBSCANResult(std::move(labels), std::move(members),
                          std::move(probabilities));
+}
+
+}  // namespace
+
+namespace detail {
+
+std::vector<double> compute_core_distances(
+    const StorageBackend& storage,
+    size_t min_samples,
+    size_t num_threads) {
+    return matrix_core_distances(storage, min_samples, num_threads, 0, HDBSCAN_NAME)
+        .values;
+}
+
+}  // namespace detail
+
+HDBSCANResult hdbscan_cluster(const StorageBackend& storage, const HDBSCANOptions& options) {
+    const size_t min_samples = validated_min_samples(options);
+    validate_min_samples_bound(min_samples, storage.NumSamples());
+    detail::validate_complete_distance_storage(storage, "HDBSCAN");
+
+    detail::PrimWeights weights = mutual_reachability_weights(
+        detail::matrix_core_distances(storage, min_samples, options.num_threads,
+                                      options.chunk_size, HDBSCAN_NAME),
+        min_samples, options.alpha);
+    return hdbscan_from_tree(detail::prim_mst(storage, weights, prim_options(options)),
+                             storage.NumSamples(), options);
+}
+
+HDBSCANResult hdbscan_cluster(PairwiseComparison& comparison, const HDBSCANOptions& options) {
+    const size_t min_samples = validated_min_samples(options);
+    detail::refuse_unrepeatable(comparison, HDBSCAN_NAME, "cluster",
+                                "its core-distance and spanning-tree passes can "
+                                "disagree");
+    detail::validate_distance_facts(comparison, HDBSCAN_NAME);
+    const size_t n = comparison.Size();
+    validate_min_samples_bound(min_samples, n);
+
+    detail::PrimWeights weights = mutual_reachability_weights(
+        detail::streaming_core_distances(comparison, min_samples, options.num_threads,
+                                         HDBSCAN_NAME),
+        min_samples, options.alpha);
+    return hdbscan_from_tree(
+        detail::prim_mst(comparison, weights, prim_options(options)), n, options);
 }
 
 }  // namespace OECluster

@@ -59,6 +59,26 @@ inline void validate_comparison_facts(const PairwiseComparison& comparison,
     }
 }
 
+// ROCS fails the repeatability precondition every comparison-built clustering
+// relies on: its overlay keeps state between calls, so a clone's score for a
+// pair depends on what that clone scored before
+// (test_comparison_repeatability.cpp, ROCSDependsOnItsCloneHistory). Refused
+// by name, the remedy the D4a design gives for a family that fails.
+//
+// :param action: What the caller cannot do, e.g. "build a threshold graph".
+// :param consequence: Why repeatability matters to it, after "so ".
+inline void refuse_unrepeatable(const PairwiseComparison& comparison,
+                                const std::string& caller,
+                                const std::string& action,
+                                const std::string& consequence) {
+    if (comparison.ComparisonName() == "rocs") {
+        throw ComparisonError(
+            caller + " cannot " + action + " from a ROCS comparison: a ROCS "
+            "score depends on what its overlay scored before, so " +
+            consequence + "; cluster a matrix from pdist() instead");
+    }
+}
+
 inline void validate_item_count(size_t n, const std::string& caller) {
     if (n == 0) {
         throw std::invalid_argument(caller + " requires at least one item");
