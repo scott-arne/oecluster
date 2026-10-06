@@ -11,12 +11,14 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   `dbscan()` take `items` first, in the three forms `cluster_report()` takes:
   a `SymmetricDistanceMatrix`, a prebuilt comparison, or a sequence of items
   with `comparison=`. `distance_matrix=` remains a keyword alias that accepts
-  only a matrix, so existing calls behave as before. The comparison forms
-  compare every pair twice, once to count each item's neighbors and once to
-  record them, and keep only the threshold graph: 16 bytes per
-  within-threshold pair plus 16 per item on a 64-bit platform, where a
-  condensed matrix costs 8 bytes for every pair. The result equals the matrix form's over a matrix
-  filled through the same `Compare`.
+  only a matrix, so existing calls need no change. The comparison forms build
+  the threshold graph by comparing every pair twice, once to count each
+  item's neighbors and once to record them, and hold no pairwise structure
+  but that graph: 16 bytes per within-threshold pair plus 16 per item on a
+  64-bit platform, where a condensed matrix costs 8 bytes for every pair.
+  `sphere_exclusion()`'s nearest assignment then compares each non-center
+  item with every center, as it always has. The result equals the matrix
+  form's over a matrix filled through the same `Compare`.
 - An exact memory guard for those graphs. The first pass gives the graph's
   size before it is allocated, and a graph above the limit raises
   `MemoryError` naming the item count, the edge count and the bytes needed.
