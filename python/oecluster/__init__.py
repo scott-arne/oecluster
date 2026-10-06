@@ -6985,7 +6985,7 @@ def _sphere_native_order(positions, source):
 
 def sphere_exclusion(items, threshold, *, order="input", reordering=False,
                      assignment="first", comparison=None, similarity=False,
-                     num_threads=0, chunk_size=4096,
+                     num_threads=0, chunk_size=4096, max_graph_bytes=None,
                      **kwargs) -> "SphereExclusionResult":
     """
     Cluster by sphere exclusion: leader, Butina or DISE, by seed order.
@@ -7005,7 +7005,9 @@ def sphere_exclusion(items, threshold, *, order="input", reordering=False,
     its nearest center, with ties going to the earlier center.
 
     ``items`` selects the path exactly as for :func:`maxmin_select`. Labels,
-    clusters, centers and ``excluded`` refer to the caller's positions.
+    clusters, centers and ``excluded`` refer to the caller's positions. On a
+    comparison, ``order="neighbors"`` builds Butina's threshold graph in two
+    passes over every pair, as :func:`butina` does, and holds no matrix.
 
     :param items: Matrix, prebuilt comparison, or sequence of items.
     :param threshold: Distance threshold; finite and non-negative.
@@ -7018,17 +7020,27 @@ def sphere_exclusion(items, threshold, *, order="input", reordering=False,
     :param num_threads: Worker threads for the lazy paths and the neighbor
         graph; 0 selects the hardware concurrency.
     :param chunk_size: Items or pairs per work unit, at least one.
+    :param max_graph_bytes: ``order="neighbors"`` on a comparison only: the
+        most memory the threshold graph may take, in bytes. None applies the
+        default limit, the larger of the condensed matrix the graph replaces
+        and 1 GiB; a larger graph is refused before it is allocated.
     :param kwargs: Comparison options for a named comparison.
     :returns: A :class:`SphereExclusionResult`.
     :raises TypeError: If the arguments fit none of the three paths, a
         comparison option is unknown, ``order`` is not a string or a sequence
-        of ints, or ``reordering`` is a string.
+        of ints, or ``reordering`` is a string; or ``max_graph_bytes``
+        accompanies a matrix or an order other than ``"neighbors"``, or is a
+        bool or not an integer.
     :raises ValueError: On an invalid ``threshold``, ``order``,
         ``assignment``, ``num_threads`` or ``chunk_size``; ``reordering``
         without the neighbor order; ``similarity=True``; sparse storage; an
-        empty sequence; the neighbor order on a lazy path; or a matrix or
-        comparison whose distances cannot be ranked.
-    :raises RuntimeError: If a comparison returns a NaN or infinite distance.
+        empty sequence; a ``max_graph_bytes`` that is not positive; a ROCS
+        comparison under the neighbor order; or a matrix or comparison whose
+        distances cannot be ranked.
+    :raises MemoryError: If the neighbor order's threshold graph would exceed
+        its limit, or memory runs out while clustering.
+    :raises RuntimeError: If a comparison returns a NaN or infinite distance,
+        or a different value for a pair on the threshold graph's second pass.
 
     Example::
 
@@ -7056,13 +7068,19 @@ def sphere_exclusion(items, threshold, *, order="input", reordering=False,
             "'first' or 'nearest'")
     num_threads_value = _diversity_int(num_threads, "num_threads", 0)
     chunk_size_value = _diversity_int(chunk_size, "chunk_size", 1)
+    builds_graph = (not isinstance(items, SymmetricDistanceMatrix)
+                    and order_native == _oecluster.SphereOrder_Neighbors)
+    refusal: str | None = None
+    if isinstance(items, SymmetricDistanceMatrix):
+        refusal = _MATRIX_BUDGET_REFUSAL
+    elif not builds_graph:
+        refusal = "only order='neighbors' builds one"
+    budget = _graph_budget(max_graph_bytes, "sphere_exclusion",
+                           refusal=refusal)
+    if builds_graph:
+        _refuse_unrepeatable(items, comparison, "sphere_exclusion")
 
     source = _diversity_source(items, comparison, kwargs, "sphere_exclusion")
-    if (order_native == _oecluster.SphereOrder_Neighbors
-            and source.matrix is None):
-        raise ValueError(
-            "sphere_exclusion() with order='neighbors' needs every pairwise "
-            "distance; pass a precomputed distance matrix from pdist()")
     native_order = (None if order_positions is None
                     else _sphere_native_order(order_positions, source))
     if source.matrix is not None:
@@ -7080,6 +7098,7 @@ def sphere_exclusion(items, threshold, *, order="input", reordering=False,
     options.assignment = _SPHERE_ASSIGNMENTS[assignment_key]
     options.num_threads = num_threads_value
     options.chunk_size = chunk_size_value
+    options.max_graph_bytes = budget
 
     native = _oecluster.sphere_exclusion(source.target, options)
     labels = [-1] * source.num_positions

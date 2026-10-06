@@ -49,6 +49,17 @@ def _line_matrix():
     return _points_matrix(_LINE)
 
 
+def _compare_matrix(comparison):
+    """The matrix a lazy path must reproduce: every pair read via Compare."""
+    n = comparison.Size()
+    storage = oecluster.DenseStorage(n)
+    for i in range(n):
+        for j in range(i + 1, n):
+            storage.Set(i, j, comparison.Compare(i, j))
+    return oecluster.SymmetricDistanceMatrix(
+        storage, "test", [f"item_{i}" for i in range(n)], {})
+
+
 def test_the_input_order_is_leader_clustering():
     result = oecluster.sphere_exclusion(_line_matrix(), 1.5)
     assert result.clusters == ((0, 1), (2,), (3, 4))
@@ -224,16 +235,90 @@ def test_ill_typed_arguments_are_type_errors(kwargs):
         oecluster.sphere_exclusion(_line_matrix(), 1.5, **kwargs)
 
 
-def test_the_neighbors_order_is_refused_on_the_lazy_paths():
+@pytest.mark.parametrize("assignment", ["first", "nearest"])
+@pytest.mark.parametrize("reordering", [False, True])
+def test_the_neighbors_order_runs_on_the_lazy_paths(reordering, assignment):
     mols = _mols(FP_SMILES)
-    for call in (
-        lambda: oecluster.sphere_exclusion(
-            oecluster.FingerprintComparison(mols), 0.75, order="neighbors"),
-        lambda: oecluster.sphere_exclusion(
-            mols, 0.75, comparison="fingerprint", order="neighbors"),
-    ):
-        with pytest.raises(ValueError, match="precomputed distance matrix"):
-            call()
+    prebuilt = oecluster.FingerprintComparison(mols)
+    expected = oecluster.sphere_exclusion(
+        _compare_matrix(prebuilt), 0.75, order="neighbors",
+        reordering=reordering, assignment=assignment)
+    for items, extra in ((prebuilt, {}),
+                         (mols, {"comparison": "fingerprint"})):
+        result = oecluster.sphere_exclusion(
+            items, 0.75, order="neighbors", reordering=reordering,
+            assignment=assignment, num_threads=4, chunk_size=3, **extra)
+        assert result.clusters == expected.clusters
+        assert result.labels.tolist() == expected.labels.tolist()
+        assert result.centers == expected.centers
+
+
+def test_the_lazy_neighbors_order_maps_positions_around_a_dropped_item():
+    mols = _mols(["O", *DESCRIPTOR_SMILES])
+    by_name = oecluster.sphere_exclusion(mols, 1.0, comparison="descriptor",
+                                         order="neighbors")
+    by_matrix = oecluster.sphere_exclusion(oecluster.pdist(mols, "descriptor"),
+                                           1.0, order="neighbors")
+    assert by_name.excluded == [[0, "missing-descriptor"]]
+    assert by_name.labels[0] == -1
+    assert by_name.labels[1:].tolist() == by_matrix.labels.tolist()
+    assert by_name.clusters == tuple(
+        tuple(i + 1 for i in cluster) for cluster in by_matrix.clusters)
+
+
+def test_a_budget_reaches_the_lazy_neighbors_graph(monkeypatch):
+    native = oecluster.oecluster
+    real = native.sphere_exclusion
+    seen = []
+
+    def spy(target, options):
+        seen.append(options.max_graph_bytes)
+        return real(target, options)
+
+    monkeypatch.setattr(native, "sphere_exclusion", spy)
+    mols = _mols(FP_SMILES)
+    oecluster.sphere_exclusion(mols, 0.75, comparison="fingerprint",
+                               order="neighbors", max_graph_bytes=1 << 30)
+    oecluster.sphere_exclusion(mols, 0.75, comparison="fingerprint",
+                               order="neighbors")
+    assert seen == [1 << 30, 0]
+
+
+def test_a_budget_needs_a_comparison_and_the_neighbors_order():
+    mols = _mols(FP_SMILES)
+    with pytest.raises(TypeError, match="no graph budget"):
+        oecluster.sphere_exclusion(oecluster.pdist(mols, "fingerprint"), 0.75,
+                                   order="neighbors", max_graph_bytes=1 << 30)
+    for order in ("input", list(range(len(mols)))):
+        with pytest.raises(TypeError,
+                           match="only order='neighbors' builds one"):
+            oecluster.sphere_exclusion(mols, 0.75, comparison="fingerprint",
+                                       order=order, max_graph_bytes=1 << 30)
+    with pytest.raises(TypeError, match="not a bool"):
+        oecluster.sphere_exclusion(mols, 0.75, comparison="fingerprint",
+                                   order="neighbors", max_graph_bytes=True)
+    with pytest.raises(ValueError, match="must be positive, got 0"):
+        oecluster.sphere_exclusion(mols, 0.75, comparison="fingerprint",
+                                   order="neighbors", max_graph_bytes=0)
+
+
+def test_the_lazy_neighbors_order_refuses_rocs():
+    # The neighbor order's graph needs repeatable scores, which ROCS does not
+    # give; refused by name before the comparison is built.
+    with pytest.raises(ValueError,
+                       match="cannot cluster a ROCS comparison without a "
+                             "matrix"):
+        oecluster.sphere_exclusion(_mols(FP_SMILES), 0.5, comparison="rocs",
+                                   order="neighbors")
+
+
+def test_an_oversized_lazy_neighbors_graph_is_a_memory_error():
+    mols = _mols(FP_SMILES)
+    with pytest.raises(MemoryError,
+                       match=r"sphere_exclusion would build a threshold graph "
+                             r"of \d+ bytes for 12 items"):
+        oecluster.sphere_exclusion(mols, 0.9, comparison="fingerprint",
+                                   order="neighbors", max_graph_bytes=64)
 
 
 def test_a_non_finite_matrix_entry_is_refused_by_the_gate():
