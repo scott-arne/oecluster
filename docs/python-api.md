@@ -101,9 +101,9 @@ The available algorithms and their key parameters:
 
 | Function | Input | Key parameters |
 |----------|-------|----------------|
-| `butina(dm, threshold, ...)` | `DistanceMatrix` | `threshold`, `reordering` |
+| `butina(items, threshold, ...)` | `DistanceMatrix`, comparison, or items | `threshold`, `reordering`, `max_graph_bytes` |
 | `sphere_exclusion(items, threshold, ...)` | `DistanceMatrix`, comparison, or items | `threshold`, `order`, `assignment` |
-| `dbscan(dm, eps, ...)` | `DistanceMatrix` | `eps`, `min_samples` |
+| `dbscan(items, eps, ...)` | `DistanceMatrix`, comparison, or items | `eps`, `min_samples`, `max_graph_bytes` |
 | `hdbscan(dm, ...)` | `DistanceMatrix` | `min_cluster_size`, `min_samples`, `cluster_selection_method` |
 | `agglomerative(dm, ...)` | `DistanceMatrix` | `n_clusters`, `distance_threshold`, `linkage` |
 | `k_medoids(dm, ...)` | `DistanceMatrix` | `n_clusters`, `init`, `initial_medoids` |
@@ -113,6 +113,89 @@ The available algorithms and their key parameters:
 Algorithm-specific outputs live on the specific result subclass — for example
 `DBSCANResult.core_sample_indices` or `BitBirchResult.centroids` — so a result
 never carries fields that do not apply to its algorithm.
+
+### Clustering without a matrix
+
+`butina()`, `dbscan()` and `sphere_exclusion(..., order="neighbors")` also
+cluster straight from a comparison, holding no N x N matrix. Their first
+argument, `items`, takes the three forms `cluster_report()` takes:
+
+- a `SymmetricDistanceMatrix`, as before: dense or memory-mapped, and for
+  `butina()` and `dbscan()` also sparse;
+- a prebuilt comparison such as `FingerprintComparison(mols)`;
+- a sequence of items with `comparison=` naming a comparison, whose options
+  go in the remaining keyword arguments.
+
+```python
+result = oecluster.butina(mols, 0.35, comparison="fingerprint",
+                          max_graph_bytes=8 * 2**30)
+result = oecluster.dbscan(oecluster.FingerprintComparison(mols), 0.35,
+                          min_samples=5)
+```
+
+For `butina()` and `dbscan()`, `distance_matrix=` remains a keyword alias
+that accepts only a matrix, so `butina(dm, 0.35)`,
+`butina(dm, threshold=0.35)` and
+`butina(distance_matrix=dm, threshold=0.35)` all behave as before.
+
+All three cluster from the threshold neighbor graph, and the comparison forms
+build it in two passes over every pair: the first counts each item's
+neighbors, the second records them. Only `sphere_exclusion()`'s
+`assignment="nearest"` compares further pairs, O(N·k) of them for k centers.
+The graph is the only pairwise structure they keep: on a 64-bit platform it
+costs 16 bytes per within-threshold pair plus 16 bytes per item, where a
+condensed matrix costs 8 bytes for every pair, about 40 GB at 100,000 items.
+
+**The memory guard.** The first pass gives the graph's exact size before any
+of it is allocated, and a graph above the limit raises `MemoryError` naming
+the item count, the edge count and the bytes it would need. By default the
+limit is the larger of the condensed matrix the graph replaces and 1 GiB;
+`max_graph_bytes=` replaces it with an explicit budget. Set one on large
+runs. At a million items the default is the 4 TB matrix size, which protects
+nothing on a real machine, and on Linux an oversized allocation usually does
+not fail when it is made: overcommit lets it succeed, and the process is
+killed later, while filling it. `max_graph_bytes` is refused with a matrix,
+and with `sphere_exclusion()` under any order other than `"neighbors"`,
+because neither builds a graph from a comparison.
+
+**Exactness.** The result equals the matrix form's over a matrix filled
+through the same `Compare`, for every `num_threads` and `chunk_size`. Against
+`pdist()` the agreement is per distance, to about 1e-12, so a pair that close
+to the threshold can be decided differently. The two passes must see the same
+value for every pair; the test suite checks every built-in comparison family
+except ROCS, in one or two configurations each, and each returns
+bit-identical values across calls and across clones with different
+histories. ROCS does not, because its overlay keeps state between calls, so
+these paths refuse a ROCS comparison; cluster a ROCS matrix from `pdist()`
+instead. A native comparison that changes a row's neighbor count between the
+passes raises `RuntimeError` rather than returning a wrong graph, and a
+non-finite distance raises `RuntimeError` naming the pair.
+
+**What is refused.** For `butina()` and `dbscan()`, as for
+`cluster_report()`'s comparison forms, and judged on the comparison's declared
+facts before any pair is scored: a similarity, a non-zero self-distance, or
+declared NaNs, always; a measure that violates the triangle inequality, or one
+scored on per-pair feature subsets, unless `allow_nonmetric=True`.
+`sphere_exclusion()` keeps its own rules, listed under
+[Sphere Exclusion](#sphere-exclusion-leader--dise). A ROCS comparison is
+refused on these paths, named or prebuilt, and a named one before it is built.
+`similarity=True` is refused, because the threshold is a distance. Items that
+normalization drops are refused by `butina()` and `dbscan()`, whose results
+have no `excluded` field; `sphere_exclusion()` keeps reporting them in
+`result.excluded`.
+
+Since 5.19.0 an allocation failure in these three functions raises
+`MemoryError` on every path, the matrix path included, where it raised
+`RuntimeError`.
+
+On an Apple M3 Max (14 CPUs, 36 GiB of memory),
+`benchmarks/streaming_threshold.py` measured Butina over 20,000 molecules at
+threshold 0.4519: from a comparison it took 1.54 s with a process peak RSS of
+293 MB, and through `pdist()`, which builds a 1.6 GB matrix, 0.68 s with a
+process peak RSS of 2.10 GB, so the comparison form took about 2.3 times as
+long for about a seventh of the peak memory. At 100,000 molecules Butina from
+a comparison took 51.8 s with a process peak RSS of 1.08 GB, and did not build
+the 40 GB matrix the matrix form would.
 
 ### k-medoids
 
@@ -1350,8 +1433,9 @@ The table is the `--set` surface, not the whole signature. `algorithms
 k_medoids` lists `init`, `max_iterations` and `n_clusters`; `initial_medoids`
 is not on it. These names are left off and are refused by `--set`:
 `num_threads` and `allow_nonmetric`, which have their own flags; `chunk_size`;
-`comparison` and `similarity`, on the entries that take items; and
-`initial_medoids`.
+`comparison`, `similarity`, `distance_matrix` and `max_graph_bytes`, on the
+entries that take items; and `initial_medoids`. The command line always loads
+a matrix, which those four describe how to build, alias, or bound.
 
 Naming an ineligible one prints the reason instead: `murcko takes mols, not a
 distance matrix`.
@@ -2459,7 +2543,7 @@ result.excluded    # [position, reason] for items normalization dropped
 | `order` | Algorithm | Inputs | Cost |
 |---------|-----------|--------|------|
 | `"input"` | Leader (Hartigan) | matrix, comparison, items | O(N·k) distances for k centers |
-| `"neighbors"` | Taylor-Butina | matrix only | O(N²) to build the threshold graph |
+| `"neighbors"` | Taylor-Butina | matrix, comparison, items | O(N²) to build the threshold graph, comparing every pair twice on the lazy paths |
 | sequence of positions | Directed Sphere Exclusion (Gobbi and Lee) | matrix, comparison, items | O(N·k) distances |
 
 - Under `order="neighbors"` with `assignment="first"` the result equals
@@ -2467,8 +2551,10 @@ result.excluded    # [position, reason] for items normalization dropped
   keeps Butina's centers but may move members between them. Equal neighbor
   counts go to the *larger* index, as in Butina, and not to the smaller-index
   rule used elsewhere in the library. `reordering=True` is accepted only with
-  this order. The lazy paths refuse the neighbor order because it needs every
-  pair.
+  this order. On the lazy paths the neighbor order builds the threshold graph
+  in two passes, as `butina()` does from a comparison (see
+  [Clustering without a matrix](#clustering-without-a-matrix)), and
+  `max_graph_bytes=` bounds it.
 - A sequence order must name every caller position exactly once, dropped
   positions included. Dropped positions are skipped. A DISE direction is one
   `argsort` of whatever ranks the items: distance to a reference compound, an
@@ -2489,17 +2575,21 @@ result.excluded    # [position, reason] for items normalization dropped
 - `reordering` without the neighbor order;
 - `similarity=True`;
 - sparse storage;
-- the neighbor order on a lazy path;
+- a ROCS comparison under the neighbor order on a lazy path;
+- a `max_graph_bytes` that is not positive;
 - comparison facts that rule out ranking.
 
 `TypeError` covers:
 - arguments that fit no input path;
 - a comparison option is unknown;
 - an `order` that is neither a string nor a sequence of ints, or has a bool entry;
-- a string `reordering`.
+- a string `reordering`;
+- a `max_graph_bytes` beside a matrix or an order other than `"neighbors"`,
+  or one that is a bool or not an integer.
 
 `RuntimeError` comes from the native layer when a comparison returns a
-non-finite distance.
+non-finite distance. `MemoryError` comes from it when the neighbor order's
+threshold graph would exceed its limit, or memory runs out.
 
 ## k-Nearest-Neighbor Graph and Jarvis-Patrick
 

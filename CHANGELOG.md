@@ -2,6 +2,52 @@
 
 This file starts at 5.0.0; earlier releases are not recorded here.
 
+## [5.19.0] - 2026-10-05
+
+### Added
+
+- `butina()`, `dbscan()` and `sphere_exclusion(..., order="neighbors")`
+  cluster straight from a comparison, holding no N x N matrix. `butina()` and
+  `dbscan()` take `items` first, in the three forms `cluster_report()` takes:
+  a `SymmetricDistanceMatrix`, a prebuilt comparison, or a sequence of items
+  with `comparison=`. `distance_matrix=` remains a keyword alias that accepts
+  only a matrix, so existing calls behave as before. The comparison forms
+  compare every pair twice, once to count each item's neighbors and once to
+  record them, and keep only the threshold graph: 16 bytes per
+  within-threshold pair plus 16 per item on a 64-bit platform, where a
+  condensed matrix costs 8 bytes for every pair. The result equals the matrix form's over a matrix
+  filled through the same `Compare`.
+- An exact memory guard for those graphs. The first pass gives the graph's
+  size before it is allocated, and a graph above the limit raises
+  `MemoryError` naming the item count, the edge count and the bytes needed.
+  The default limit is the larger of the condensed matrix and 1 GiB;
+  `max_graph_bytes=` sets an explicit budget, which large runs should do.
+- ROCS is refused on those paths, named or prebuilt: a ROCS score depends on
+  what its overlay scored before, so the graph's two passes can disagree.
+  Cluster a ROCS matrix from `pdist()` instead. Every other built-in
+  comparison passed the new repeatability tests.
+- Native overloads `butina_cluster(PairwiseComparison&, const ButinaOptions&)`
+  and `dbscan_cluster(PairwiseComparison&, const DBSCANOptions&)`, and the
+  `Neighbors` order on `sphere_exclusion`'s comparison overload.
+  `ButinaOptions`, `DBSCANOptions` and `SphereExclusionOptions` gain
+  `max_graph_bytes`.
+- `benchmarks/streaming_threshold.py`, which measures both paths in separate
+  processes. On an Apple M3 Max (14 CPUs, 36 GiB of memory), Butina over
+  20,000 molecules at threshold 0.4519 took 1.54 s with a process peak RSS of
+  293 MB from a comparison, and 0.68 s with a process peak RSS of 2.10 GB
+  through `pdist()` and the 1.6 GB matrix it builds: about 2.3 times as long,
+  for about a seventh of the peak memory. At 100,000 molecules Butina from a
+  comparison took 51.8 s with a process peak RSS of 1.08 GB, and did not
+  build the 40 GB matrix the matrix path would.
+
+### Changed
+
+- An allocation failure in `butina()`, `dbscan()` or `sphere_exclusion()` now
+  raises `MemoryError` on every path, the matrix path included, where it
+  raised `RuntimeError`.
+- `oecluster algorithms` lists `items` as the input of `butina` and `dbscan`.
+  Their `--set` options are unchanged.
+
 ## [5.18.1] - 2026-10-05
 
 ### Fixed

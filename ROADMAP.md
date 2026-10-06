@@ -36,7 +36,9 @@ they are not recoveries of the original intent.
 | D3b | Stability resampling: subsample-Jaccard over a `ClusteringSpec` | shipped 5.16.0 |
 | D3c | Consensus clustering over an ensemble of partitions | shipped 5.17.0 |
 | D3d | Clustering CLI over oepdist output | shipped 5.18.0 |
-| D4 | Out-of-core and streaming clustering | planned |
+| D4a | Streaming threshold-graph clustering: Butina, DBSCAN, neighbor-order sphere exclusion from a comparison | shipped 5.19.0 |
+| D4b | Streaming MST clustering: HDBSCAN, single-linkage agglomerative | planned |
+| D4c | Algorithms that cannot stream exactly: k-medoids, complete/average/weighted linkage | planned |
 
 Sub-project A was originally scoped as one piece covering seven metric families
 across five input shapes. It was decomposed into A1, A2 and A3 during
@@ -185,9 +187,27 @@ algorithm roster, and that roster was not final until D2 landed.
 
 ## D4 - Out-of-core and streaming clustering
 
-*Re-derived.* Every algorithm except BitBirch and Murcko requires a materialized
-distance matrix. D4 lifts that constraint at the algorithm level, building on
-B's fingerprint-native path and the completed roster.
+*Re-derived.* When this section was re-derived, every algorithm except BitBirch
+and Murcko required a materialized distance matrix. D2 changed that before D4
+began: sphere exclusion's input and permutation orders, `jarvis_patrick` and
+`leiden` already ran from a comparison. The out-of-core half was met as well,
+since `pdist(..., output=path)` writes a memory-mapped matrix that every
+algorithm taking a matrix accepts. What remained was never materializing the
+matrix at all. The remaining algorithms divide by the structure they need, so
+D4 is three slices:
+
+- **D4a (shipped 5.19.0).** Threshold-graph streaming. `butina`, `dbscan` and
+  `sphere_exclusion(order="neighbors")` need no pairwise structure beyond the
+  threshold neighbor graph, which a comparison now builds in two passes over
+  every pair, one to count each item's neighbors and one to record them. The
+  graph's exact size is known before it is allocated, so a too-dense run is
+  refused rather than attempted. The clustering engines are unchanged, and
+  the result equals the matrix path's over a matrix filled through `Compare`.
+- **D4b (planned).** MST streaming for `hdbscan` and single-linkage
+  `agglomerative`, which need a minimum spanning tree rather than a threshold
+  graph.
+- **D4c (planned).** The algorithms that cannot stream exactly: `k_medoids`
+  and complete, average and weighted linkage.
 
 ## Deferred defect backlog
 
