@@ -146,6 +146,7 @@ set(OECLUSTER_SOURCES
     src/clustering/DBSCAN.cpp
     src/clustering/HDBSCANLinkage.cpp
     src/clustering/PrimMST.cpp
+    src/clustering/StreamingCoreDistances.cpp
     src/clustering/HDBSCANTree.cpp
     src/clustering/HDBSCAN.cpp
     src/clustering/Agglomerative.cpp

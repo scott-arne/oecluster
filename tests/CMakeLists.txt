@@ -61,6 +61,7 @@ add_executable(oecluster_tests
     cpp/test_streaming_clustering.cpp
     cpp/test_step_team.cpp
     cpp/test_prim_mst.cpp
+    cpp/test_streaming_core_distances.cpp
 )
 
 target_link_libraries(oecluster_tests
