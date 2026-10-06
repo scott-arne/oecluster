@@ -59,6 +59,7 @@ add_executable(oecluster_tests
     cpp/test_streaming_threshold_graph.cpp
     cpp/test_comparison_repeatability.cpp
     cpp/test_streaming_clustering.cpp
+    cpp/test_step_team.cpp
 )
 
 target_link_libraries(oecluster_tests
