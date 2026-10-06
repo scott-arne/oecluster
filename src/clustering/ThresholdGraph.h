@@ -91,6 +91,15 @@ inline std::runtime_error non_finite_distance_error(const std::string& caller,
         std::to_string(a) + " and " + std::to_string(b));
 }
 
+// HDBSCAN's core distance treats an item's own distance as 0, which a negative
+// distance would undercut; the streaming core pass has no such zero to compare.
+inline std::runtime_error negative_distance_error(const std::string& caller,
+                                                  size_t a, size_t b) {
+    return std::runtime_error(
+        caller + " read a negative distance between items " +
+        std::to_string(a) + " and " + std::to_string(b));
+}
+
 }  // namespace detail
 
 }  // namespace OECluster
