@@ -38,8 +38,8 @@ _REQUIRED_TYPES = {
 _EXCLUDED_FOR_ITEMS = {"comparison", "distance_matrix", "max_graph_bytes",
                        "similarity"}
 
-#: The library coerces these with a bare ``int()`` (``__init__.py:2884``), so a
-#: float would be silently truncated rather than refused.
+#: The library coerces these with a bare ``int()`` (dbscan's
+#: ``options.min_samples = int(min_samples)``), so a float would be silently truncated rather than refused.
 _INTEGER = {
     "agglomerative.n_clusters", "hdbscan.max_cluster_size",
     "hdbscan.min_cluster_size", "hdbscan.min_samples", "jarvis_patrick.k",

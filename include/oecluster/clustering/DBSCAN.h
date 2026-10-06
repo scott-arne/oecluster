@@ -70,9 +70,9 @@ DBSCANResult dbscan_cluster(const StorageBackend& storage, const DBSCANOptions& 
  * each item's neighbors, one to record them -- so the result equals the
  * storage overload's on a matrix filled through Compare(i, j), for every
  * num_threads and chunk_size. The graph costs 16 bytes per within-eps pair
- * on a 64-bit platform, and its exact size is known before it is allocated,
- * so a graph above the limit is refused rather than attempted. A chunk_size
- * of 0 selects 4096, as on the storage overload.
+ * plus 16 per item on a 64-bit platform, and its exact size is known before
+ * it is allocated, so a graph above the limit is refused rather than
+ * attempted. A chunk_size of 0 selects 4096, as on the storage overload.
  *
  * Precondition: Compare(i, j) returns a bit-identical value for a pair on
  * every call and every clone. A comparison that changes a row's neighbor
@@ -84,7 +84,8 @@ DBSCANResult dbscan_cluster(const StorageBackend& storage, const DBSCANOptions& 
  * :returns: Labels, clusters, and core sample indices.
  * :raises std::invalid_argument: If eps is negative or min_samples is zero.
  * :raises ComparisonError: If the comparison reports similarities, a
- *     non-zero self-distance, or values that may be NaN.
+ *     non-zero self-distance, or values that may be NaN; or if it is a ROCS
+ *     comparison, whose scores depend on what its overlay scored before.
  * :raises std::runtime_error: If a comparison returns NaN or infinity.
  * :raises std::length_error: If the graph would exceed its limit.
  * :raises std::logic_error: If the two passes disagree on a row's size.

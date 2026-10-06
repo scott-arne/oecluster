@@ -1435,7 +1435,8 @@ is not on it. These names are left off and are refused by `--set`:
 `num_threads` and `allow_nonmetric`, which have their own flags; `chunk_size`;
 `comparison`, `similarity`, `distance_matrix` and `max_graph_bytes`, on the
 entries that take items; and `initial_medoids`. The command line always loads
-a matrix, which those four describe how to build, alias, or bound.
+a matrix, so those four, which build a comparison, alias the matrix, or bound
+a graph built from a comparison, do not apply.
 
 Naming an ineligible one prints the reason instead: `murcko takes mols, not a
 distance matrix`.

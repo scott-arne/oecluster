@@ -27,7 +27,8 @@ This file starts at 5.0.0; earlier releases are not recorded here.
 - ROCS is refused on those paths, named or prebuilt: a ROCS score depends on
   what its overlay scored before, so the graph's two passes can disagree.
   Cluster a ROCS matrix from `pdist()` instead. Every other built-in
-  comparison passed the new repeatability tests.
+  comparison family passed the new repeatability tests, which run one or two
+  configurations each.
 - Native overloads `butina_cluster(PairwiseComparison&, const ButinaOptions&)`
   and `dbscan_cluster(PairwiseComparison&, const DBSCANOptions&)`, and the
   `Neighbors` order on `sphere_exclusion`'s comparison overload.

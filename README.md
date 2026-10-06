@@ -38,8 +38,8 @@ cluster summaries as well as lower-level control over distance computation.
   agglomerative clustering, k-medoids, BitBirch, or Murcko scaffold
   clustering.
 - **Cluster without a matrix**: Butina, DBSCAN and Butina-order sphere
-  exclusion run straight from a comparison and keep only the threshold
-  neighbor graph, behind an exact memory guard, so a large fingerprint set
+  exclusion run straight from a comparison and hold no pairwise structure
+  but the threshold neighbor graph, behind an exact memory guard, so a large fingerprint set
   never needs its N x N distance matrix.
 - **Choose representatives** with true medoids, minimax/radius centers,
   highest-neighborhood Butina-style representatives, weighted medoids, ranked

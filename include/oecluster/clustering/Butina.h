@@ -61,8 +61,9 @@ ButinaResult butina_cluster(const StorageBackend& storage, const ButinaOptions& 
  * each item's neighbors, one to record them -- so the result equals the
  * storage overload's on a matrix filled through Compare(i, j), for every
  * num_threads and chunk_size. The graph costs 16 bytes per within-threshold
- * pair on a 64-bit platform, and its exact size is known before it is
- * allocated, so a graph above the limit is refused rather than attempted.
+ * pair plus 16 per item on a 64-bit platform, and its exact size is known
+ * before it is allocated, so a graph above the limit is refused rather than
+ * attempted.
  * A chunk_size of 0 selects 4096, as on the storage overload.
  *
  * Precondition: Compare(i, j) returns a bit-identical value for a pair on
@@ -75,7 +76,8 @@ ButinaResult butina_cluster(const StorageBackend& storage, const ButinaOptions& 
  * :returns: As the storage overload.
  * :raises std::invalid_argument: On a negative threshold.
  * :raises ComparisonError: If the comparison reports similarities, a
- *     non-zero self-distance, or values that may be NaN.
+ *     non-zero self-distance, or values that may be NaN; or if it is a ROCS
+ *     comparison, whose scores depend on what its overlay scored before.
  * :raises std::runtime_error: If a comparison returns NaN or infinity.
  * :raises std::length_error: If the graph would exceed its limit.
  * :raises std::logic_error: If the two passes disagree on a row's size.

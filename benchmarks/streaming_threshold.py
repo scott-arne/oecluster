@@ -141,7 +141,11 @@ def measure_in_subprocess(spec: dict[str, Any]) -> dict[str, Any]:
     """Run :func:`measure` in a fresh interpreter and return its record."""
     completed = subprocess.run(
         [sys.executable, __file__, "--child", json.dumps(spec)],
-        capture_output=True, text=True, check=True)
+        capture_output=True, text=True, check=False)
+    if completed.returncode != 0:
+        raise RuntimeError(
+            f"benchmark child failed with exit status {completed.returncode} "
+            f"for spec {spec}:\n{completed.stderr}")
     return json.loads(completed.stdout.strip().splitlines()[-1])
 
 

@@ -2588,8 +2588,9 @@ def butina(items=_MISSING, threshold=_MISSING, *, distance_matrix=_MISSING,
         prebuilt comparison such as :class:`FingerprintComparison`; or a
         sequence of items with ``comparison=``. The comparison forms hold no
         matrix. They compare every pair twice, once to count each item's
-        neighbors and once to record them, and keep only the threshold
-        graph: 16 bytes per within-threshold pair on a 64-bit platform.
+        neighbors and once to record them, and hold no pairwise structure
+        but the threshold graph: 16 bytes per within-threshold pair plus 16
+        per item on a 64-bit platform.
     :param threshold: Maximum distance for two items to be neighbors.
     :param distance_matrix: Keyword alias for ``items`` that accepts only a
         SymmetricDistanceMatrix. Passing both is a TypeError.
@@ -2633,7 +2634,7 @@ def butina(items=_MISSING, threshold=_MISSING, *, distance_matrix=_MISSING,
         a message naming the item and edge counts and the bytes needed; or if
         memory runs out while clustering.
     :raises RuntimeError: If a comparison returns a NaN or infinite
-        distance, or a different value for a pair on its second pass.
+        distance, or changes an item's neighbor count between the two passes.
     """
     items = _metric_input(items, distance_matrix, comparison, kwargs, "butina")
     if threshold is _MISSING:
@@ -3018,8 +3019,9 @@ def dbscan(items=_MISSING, eps=_MISSING, *, distance_matrix=_MISSING,
         prebuilt comparison such as :class:`FingerprintComparison`; or a
         sequence of items with ``comparison=``. The comparison forms hold no
         matrix. They compare every pair twice, once to count each item's
-        neighbors and once to record them, and keep only the eps-neighbor
-        graph: 16 bytes per within-eps pair on a 64-bit platform.
+        neighbors and once to record them, and hold no pairwise structure
+        but the eps-neighbor graph: 16 bytes per within-eps pair plus 16 per
+        item on a 64-bit platform.
     :param eps: Maximum distance for two items to be neighbors.
     :param distance_matrix: Keyword alias for ``items`` that accepts only a
         SymmetricDistanceMatrix. Passing both is a TypeError.
@@ -3062,7 +3064,7 @@ def dbscan(items=_MISSING, eps=_MISSING, *, distance_matrix=_MISSING,
         with a message naming the item and edge counts and the bytes needed;
         or if memory runs out while clustering.
     :raises RuntimeError: If a comparison returns a NaN or infinite
-        distance, or a different value for a pair on its second pass.
+        distance, or changes an item's neighbor count between the two passes.
     """
     items = _metric_input(items, distance_matrix, comparison, kwargs, "dbscan")
     if eps is _MISSING:
@@ -7040,7 +7042,8 @@ def sphere_exclusion(items, threshold, *, order="input", reordering=False,
     :raises MemoryError: If the neighbor order's threshold graph would exceed
         its limit, or memory runs out while clustering.
     :raises RuntimeError: If a comparison returns a NaN or infinite distance,
-        or a different value for a pair on the threshold graph's second pass.
+        or changes an item's neighbor count between the threshold graph's two
+        passes.
 
     Example::
 

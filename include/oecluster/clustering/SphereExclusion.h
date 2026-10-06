@@ -111,9 +111,10 @@ SphereExclusionResult sphere_exclusion(const StorageBackend& storage,
  * compares against the still-unclaimed items in parallel chunks, as
  * Compare(min, max). Under SphereOrder::Neighbors the threshold graph is
  * built in two passes over every pair, one to count each item's neighbors
- * and one to record them, at 16 bytes per within-threshold pair on a 64-bit
- * platform; its exact size is known before it is allocated, so a graph above
- * max_graph_bytes (or the default limit) is refused rather than attempted.
+ * and one to record them, at 16 bytes per within-threshold pair plus 16 per
+ * item on a 64-bit platform; its exact size is known before it is allocated,
+ * so a graph above max_graph_bytes (or the default limit) is refused rather
+ * than attempted.
  * Nearest assignment compares every non-center item with every center. The
  * result equals the matrix overload's on the same distances, for every
  * num_threads and chunk_size.
@@ -130,7 +131,8 @@ SphereExclusionResult sphere_exclusion(const StorageBackend& storage,
  *     other than max_graph_bytes, or a non-zero max_graph_bytes with an
  *     order other than SphereOrder::Neighbors.
  * :raises ComparisonError: If the comparison's facts rule out ranking its
- *     distances.
+ *     distances; or, under SphereOrder::Neighbors, if it is a ROCS
+ *     comparison, whose scores depend on what its overlay scored before.
  * :raises std::runtime_error: If a comparison returns NaN or infinity.
  * :raises std::length_error: If the threshold graph would exceed its limit.
  * :raises std::logic_error: If the graph's two passes disagree on a row's
