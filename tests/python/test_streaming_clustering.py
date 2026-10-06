@@ -247,6 +247,17 @@ def test_rocs_is_refused_before_it_is_built():
         assert len(function(matrix, 0.5, allow_nonmetric=True).labels) == 3
 
 
+def test_a_named_rocs_comparison_is_refused_before_any_item_is_read():
+    # Not molecules at all: had dispatch run first, normalizing these for
+    # ROCS would fail with an unrelated error, so only a refusal that
+    # precedes dispatch can produce this one.
+    for function in (oecluster.butina, oecluster.dbscan):
+        with pytest.raises(ValueError,
+                           match="cannot cluster a ROCS comparison without "
+                                 "a matrix"):
+            function(["not", "molecules"], 0.5, comparison="rocs")
+
+
 def test_an_oversized_graph_is_a_memory_error():
     mols = _mols(FP_SMILES)
     for function in (oecluster.butina, oecluster.dbscan):
