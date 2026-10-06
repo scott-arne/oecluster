@@ -829,8 +829,11 @@ OECLUSTER_GIL_EXCEPTION(OECluster::select_representatives, select_representative
 OECLUSTER_GIL_MEMORY_EXCEPTION(OECluster::cluster_report, cluster_report)
 
 OECLUSTER_GIL_MEMORY_EXCEPTION(OECluster::dbscan_cluster, dbscan_cluster)
-OECLUSTER_GIL_EXCEPTION(OECluster::hdbscan_cluster, hdbscan_cluster)
-OECLUSTER_GIL_EXCEPTION(OECluster::agglomerative_cluster, agglomerative_cluster)
+// Both comparison overloads hold O(N) spanning-tree arrays, and HDBSCAN's
+// holds N x (min_samples - 1) core-distance heaps, so an exhausted machine
+// reads as MemoryError on every path, the matrix paths included.
+OECLUSTER_GIL_MEMORY_EXCEPTION(OECluster::hdbscan_cluster, hdbscan_cluster)
+OECLUSTER_GIL_MEMORY_EXCEPTION(OECluster::agglomerative_cluster, agglomerative_cluster)
 OECLUSTER_GIL_EXCEPTION(OECluster::bitbirch_cluster, bitbirch_cluster)
 // isim_report's centroid stage holds a K * bits * 4 byte column store, about
 // 0.8 GB for 10^5 clusters of 2048 bits, which is within reach of a BitBirch

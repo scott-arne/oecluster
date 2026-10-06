@@ -127,6 +127,29 @@ def test_threshold_entries_keep_their_set_surface_with_an_items_input():
     }
 
 
+def test_spanning_tree_entries_keep_their_set_surface_with_an_items_input():
+    # hdbscan and agglomerative take items since 5.20.0, but the command line
+    # still loads only a matrix: the alias and the comparison options stay
+    # off --set, and every option keeps its default.
+    registry = _registry()
+    schemas = {name: (registry[name].kind, registry[name].required,
+                      registry[name].optional, registry[name].sequence,
+                      registry[name].accepts_nonmetric)
+               for name in ("hdbscan", "agglomerative")}
+    assert schemas == {
+        "hdbscan": ("items", [],
+                    {"min_cluster_size": 5, "min_samples": None,
+                     "cluster_selection_epsilon": 0.0,
+                     "max_cluster_size": None, "alpha": 1.0,
+                     "cluster_selection_method": "eom",
+                     "allow_single_cluster": False}, [], True),
+        "agglomerative": ("items", [],
+                          {"n_clusters": 2, "distance_threshold": None,
+                           "linkage": "average", "compute_full_tree": True},
+                          [], True),
+    }
+
+
 def test_resolve_coerces_by_the_defaults_type():
     registry = _registry()
     options = _cli_registry.resolve(

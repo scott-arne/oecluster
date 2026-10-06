@@ -982,9 +982,11 @@ def test_take_pairs_and_take_fingerprints_release_the_gil():
 
 def test_memory_exception_macro_raises_memory_error():
     """cluster_report, isim and isim_report can exhaust memory on inputs a
-    caller could plausibly pass, and butina_cluster, dbscan_cluster and
+    caller could plausibly pass; butina_cluster, dbscan_cluster and
     sphere_exclusion refuse an oversized threshold graph with
-    std::length_error and can exhaust memory too, so their handler maps ``std::bad_alloc`` and
+    std::length_error and can exhaust memory too; and hdbscan_cluster and
+    agglomerative_cluster hold core-distance heaps and spanning-tree arrays
+    that can. Their handler maps ``std::bad_alloc`` and
     ``std::length_error`` to MemoryError rather than RuntimeError.
 
     Asserted against the interface file for the reasons given in
@@ -1012,7 +1014,8 @@ def test_memory_exception_macro_raises_memory_error():
         assert "SWIG_MemoryError" in handler
 
     for name in ("cluster_report", "isim", "isim_report", "butina_cluster",
-                 "dbscan_cluster", "sphere_exclusion"):
+                 "dbscan_cluster", "sphere_exclusion", "hdbscan_cluster",
+                 "agglomerative_cluster"):
         assert f"OECLUSTER_GIL_MEMORY_EXCEPTION(OECluster::{name}, {name})" in text
         assert f"OECLUSTER_GIL_EXCEPTION(OECluster::{name}, {name})" not in text
 

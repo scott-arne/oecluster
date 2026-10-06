@@ -2511,18 +2511,32 @@ def _graph_budget(max_graph_bytes, caller, *, refusal=None):
     return value
 
 
-def _refuse_unrepeatable(items, comparison, caller):
-    """
-    Refuse ROCS ahead of dispatch on a path that builds a threshold graph.
+#: Why the threshold-graph paths need a repeatable comparison.
+_THRESHOLD_GRAPH_REASON = "the threshold graph compares every pair twice"
 
-    The graph compares every pair twice, and a ROCS score depends on what its
-    overlay scored before, so the two passes can disagree; the native builder
-    refuses it too. Checked here first because a ROCS build overlays every
+#: Why HDBSCAN from a comparison needs a repeatable comparison.
+_HDBSCAN_REASON = "HDBSCAN compares pairs in two passes that must agree"
+
+#: Why single linkage from a comparison needs a repeatable comparison.
+_SINGLE_LINKAGE_REASON = (
+    "the spanning tree would depend on the order the pairs are scored")
+
+
+def _refuse_unrepeatable(items, comparison, caller, reason=_THRESHOLD_GRAPH_REASON):
+    """
+    Refuse ROCS ahead of dispatch on a path that clusters from a comparison.
+
+    A ROCS score depends on what its overlay scored before, so a path that
+    compares a pair in more than one pass, or in an order unlike a matrix
+    fill, would cluster on scores no matrix holds; the native entry points
+    refuse it too. Checked here first because a ROCS build overlays every
     molecule onto itself before the native refusal could run.
 
     :param items: The resolved input.
     :param comparison: Comparison name, for the named path.
     :param caller: Entry point name for the messages.
+    :param reason: Why the path needs repeatable scores, completing "a ROCS
+        score depends on what its overlay scored before, and ...".
     :raises ValueError: If the input is a ROCS comparison, named or prebuilt.
     """
     named = isinstance(comparison, str) and comparison.lower() == "rocs"
@@ -2531,24 +2545,28 @@ def _refuse_unrepeatable(items, comparison, caller):
     if named or prebuilt:
         raise ValueError(
             f"{caller}() cannot cluster a ROCS comparison without a matrix: a "
-            "ROCS score depends on what its overlay scored before, and the "
-            "threshold graph compares every pair twice. Compute the matrix "
-            "with pdist(items, 'rocs') and pass that instead")
+            f"ROCS score depends on what its overlay scored before, and "
+            f"{reason}. Compute the matrix with pdist(items, 'rocs') and pass "
+            "that instead")
 
 
-def _threshold_target(items, comparison, kwargs, caller, allow_nonmetric):
+def _streaming_target(items, comparison, kwargs, caller, allow_nonmetric, *,
+                      reason=_THRESHOLD_GRAPH_REASON):
     """
-    Gate a threshold-graph clustering input and return what to cluster.
+    Gate a metric clustering input and return what to cluster.
 
-    A matrix passes :func:`_gate.require_metric`, exactly as before. A
-    comparison is refused on its declared facts, honoring allow_nonmetric,
-    before any pair is scored.
+    Shared by the entry points that cluster either a matrix or straight from
+    a comparison. A matrix passes :func:`_gate.require_metric`, exactly as
+    before. A comparison is refused on its declared facts, honoring
+    allow_nonmetric, before any pair is scored.
 
     :param items: The input :func:`_metric_input` resolved.
     :param comparison: Comparison name, for the named path.
     :param kwargs: Comparison options; consumed.
     :param caller: Entry point name for the messages.
     :param allow_nonmetric: Proceed despite a triangle or subset fact.
+    :param reason: Why the comparison path needs repeatable scores, for the
+        ROCS refusal.
     :returns: Native storage or a native comparison.
     :raises TypeError: If allow_nonmetric is not a bool, or a comparison
         option is unknown.
@@ -2560,11 +2578,12 @@ def _threshold_target(items, comparison, kwargs, caller, allow_nonmetric):
         # fact: a malformed override is the caller's to fix whatever the
         # comparison turns out to be.
         _gate.check_allow_nonmetric(allow_nonmetric)
-        _refuse_unrepeatable(items, comparison, caller)
-    # allow_sparse: the storage builder reads sparse entries, and both entry
-    # points have always accepted them. refuse_dropped: the results carry no
-    # excluded field, and DBSCAN's -1 already means noise, so a dropped item
-    # has no faithful representation.
+        _refuse_unrepeatable(items, comparison, caller, reason)
+    # allow_sparse: butina and dbscan read sparse entries, and hdbscan and
+    # agglomerative refuse sparse storage themselves, earlier and with their
+    # own message. refuse_dropped: none of these results carries an excluded
+    # field, and DBSCAN's and HDBSCAN's -1 already means noise, so a dropped
+    # item has no faithful representation.
     source = _diversity_source(
         items, comparison, kwargs, caller, allow_sparse=True,
         refuse_dropped=True,
@@ -2661,7 +2680,7 @@ def butina(items=_MISSING, threshold=_MISSING, *, distance_matrix=_MISSING,
         max_graph_bytes, "butina",
         refusal=(_MATRIX_BUDGET_REFUSAL
                  if isinstance(items, SymmetricDistanceMatrix) else None))
-    target = _threshold_target(items, comparison, kwargs, "butina",
+    target = _streaming_target(items, comparison, kwargs, "butina",
                                allow_nonmetric)
 
     options = ButinaOptions()
@@ -3093,7 +3112,7 @@ def dbscan(items=_MISSING, eps=_MISSING, *, distance_matrix=_MISSING,
         max_graph_bytes, "dbscan",
         refusal=(_MATRIX_BUDGET_REFUSAL
                  if isinstance(items, SymmetricDistanceMatrix) else None))
-    target = _threshold_target(items, comparison, kwargs, "dbscan",
+    target = _streaming_target(items, comparison, kwargs, "dbscan",
                                allow_nonmetric)
 
     options = DBSCANOptions()
@@ -3111,33 +3130,70 @@ def dbscan(items=_MISSING, eps=_MISSING, *, distance_matrix=_MISSING,
     )
 
 
-def hdbscan(distance_matrix, *, min_cluster_size=5, min_samples=None,
-            cluster_selection_epsilon=0.0, max_cluster_size=None, alpha=1.0,
-            cluster_selection_method="eom", allow_single_cluster=False,
-            num_threads=0, chunk_size=4096, allow_nonmetric=False):
+def hdbscan(items=_MISSING, *, distance_matrix=_MISSING, min_cluster_size=5,
+            min_samples=None, cluster_selection_epsilon=0.0,
+            max_cluster_size=None, alpha=1.0, cluster_selection_method="eom",
+            allow_single_cluster=False, comparison=None, num_threads=0,
+            chunk_size=64, allow_nonmetric=False, **kwargs):
     """
-    Cluster a precomputed distance matrix using HDBSCAN.
+    Cluster with HDBSCAN, from a distance matrix or a comparison.
 
-    :param distance_matrix: SymmetricDistanceMatrix returned by :func:`pdist`.
+    :param items: What the distances come from: a SymmetricDistanceMatrix
+        returned by :func:`pdist` (dense or memory-mapped); a prebuilt
+        comparison such as :class:`FingerprintComparison`; or a sequence of
+        items with ``comparison=``. The comparison forms hold no matrix. One
+        pass compares every pair once for the core distances, holding
+        ``min_samples - 1`` distances per item; a second pass compares at
+        most every pair again to build the spanning tree, holding a few
+        numbers per item, and skips the pairs that cannot change it. With
+        ``min_samples=1`` there is only the second pass, which then compares
+        every pair. Each worker thread also holds one clone of the
+        comparison, whose size depends on its family.
+    :param distance_matrix: Keyword alias for ``items`` that accepts only a
+        SymmetricDistanceMatrix. Passing both is a TypeError.
     :param min_cluster_size: Minimum size for selected clusters.
     :param min_samples: Self-inclusive core-distance neighbor count. Defaults
         to min_cluster_size when omitted.
     :param cluster_selection_epsilon: Epsilon threshold for merging selected
         clusters.
     :param max_cluster_size: Optional maximum selected cluster size.
-    :param alpha: Mutual-reachability distance scaling.
+    :param alpha: Mutual-reachability distance scaling; must be positive.
     :param cluster_selection_method: Cluster selection method, "eom" or "leaf".
     :param allow_single_cluster: Whether the root cluster may be selected.
-    :param num_threads: Thread count for core-distance computation.
-    :param chunk_size: Reserved for parity with other clustering wrappers.
-    :param allow_nonmetric: Cluster anyway when the distances are known not to
-        satisfy the triangle inequality. Does not override the refusals for
-        similarity-valued or non-finite matrices.
-    :returns: HDBSCANResult with labels, clusters, and probabilities.
-    :raises TypeError: If distance_matrix is not a SymmetricDistanceMatrix, or
-        allow_nonmetric is not a bool.
-    :raises ValueError: If options are invalid, the matrix uses sparse storage,
-        or the matrix is not a metric.
+    :param comparison: Comparison name, such as ``"fingerprint"``, when
+        ``items`` is a sequence of items. Its options go in ``**kwargs``.
+    :param num_threads: Worker threads. 0 uses every core for the
+        core-distance pass and at most 8 for the spanning-tree pass, which is
+        bound by memory traffic and waits for its slowest thread at every
+        step, so on a busy machine a smaller explicit value can be faster.
+    :param chunk_size: Ceiling on rows per work unit in the matrix form's
+        core-distance pass; 0 selects 64. The comparison forms do not read it.
+    :param allow_nonmetric: Cluster anyway when the distances are known not
+        to satisfy the triangle inequality, or a comparison scores on
+        per-pair feature subsets. Does not override the refusals for
+        similarity-valued or non-finite distances.
+    :param kwargs: Comparison options, with ``comparison=`` only.
+    :returns: HDBSCANResult with labels, clusters, and probabilities. A
+        comparison form returns exactly what the matrix form returns over a
+        matrix filled through the same ``Compare``, provided the comparison
+        is repeatable: ``Compare(i, j)`` returns a bit-identical value on
+        every call and every clone. Every built-in comparison but ROCS is,
+        and ROCS is refused. Against :func:`pdist`, whose batched kernels
+        agree with ``Compare`` only to about 1e-12, distances that close can
+        tie or order differently and change the tree.
+    :raises TypeError: If both or neither of ``items`` and
+        ``distance_matrix`` are given; the arguments fit none of the three
+        forms, or ``comparison`` or a keyword this function does not take
+        accompanies a matrix or a prebuilt comparison; or
+        ``allow_nonmetric`` is not a bool.
+    :raises ValueError: If options are invalid, ``alpha`` included when it is
+        NaN; ``min_samples`` exceeds the item count; the matrix uses sparse
+        storage or is not a metric, or the comparison's declared facts
+        refuse it; the input is a ROCS comparison; or normalizing the items
+        dropped one.
+    :raises MemoryError: If memory runs out while clustering.
+    :raises RuntimeError: If a distance is NaN, infinite or negative, naming
+        the two items, or a distance divided by ``alpha`` is not finite.
     """
     if min_cluster_size < 2:
         raise ValueError("HDBSCAN min_cluster_size must be at least two")
@@ -3147,10 +3203,11 @@ def hdbscan(distance_matrix, *, min_cluster_size=5, min_samples=None,
         raise ValueError("HDBSCAN cluster_selection_epsilon must be non-negative")
     if max_cluster_size is not None and max_cluster_size < 1:
         raise ValueError("HDBSCAN max_cluster_size must be at least one")
-    if alpha <= 0.0:
+    # Written as `not alpha > 0` so that NaN, which `alpha <= 0` let through,
+    # is refused too.
+    if not alpha > 0.0:
         raise ValueError("HDBSCAN alpha must be positive")
-    if not isinstance(distance_matrix, SymmetricDistanceMatrix):
-        raise TypeError("hdbscan() expects a SymmetricDistanceMatrix")
+    items = _metric_input(items, distance_matrix, comparison, kwargs, "hdbscan")
 
     method_map = {
         "eom": _oecluster.HDBSCANClusterSelectionMethod_EOM,
@@ -3179,23 +3236,32 @@ def hdbscan(distance_matrix, *, min_cluster_size=5, min_samples=None,
     # same way the native code does.
     effective_min_samples = (int(min_cluster_size) if min_samples is None
                              else int(min_samples))
-    if effective_min_samples > distance_matrix.num_samples:
-        raise ValueError(
-            "HDBSCAN min_samples must be at most "
-            f"the item count ({distance_matrix.num_samples})")
-    # ValueError, not TypeError: the argument's type is right, its storage is not.
-    if isinstance(distance_matrix.storage, SparseStorage):
-        raise ValueError(  # noqa: TRY004
-            "HDBSCAN requires complete pairwise "
-            "distances; SparseStorage is not supported")
+    is_matrix = isinstance(items, SymmetricDistanceMatrix)
+    if is_matrix:
+        if effective_min_samples > items.num_samples:
+            raise ValueError(
+                "HDBSCAN min_samples must be at most "
+                f"the item count ({items.num_samples})")
+        # ValueError, not TypeError: the argument's type is right, its storage
+        # is not.
+        if isinstance(items.storage, SparseStorage):
+            raise ValueError(
+                "HDBSCAN requires complete pairwise "
+                "distances; SparseStorage is not supported")
 
     # Local argument validation first: allow_nonmetric cannot rescue an unknown
     # cluster_selection_method, an out-of-range min_samples, or sparse storage,
     # so the gate must not pre-empt those messages. The bound and the storage
     # check run in the order hdbscan_cluster() applies them, so the fix-first
     # reason is the same whichever layer reports it.
-    _gate.require_metric(distance_matrix, "hdbscan",
-                         allow_nonmetric=allow_nonmetric)
+    target = _streaming_target(items, comparison, kwargs, "hdbscan",
+                               allow_nonmetric, reason=_HDBSCAN_REASON)
+    # A comparison's item count is known once it is built, and is checked
+    # before any pair is scored.
+    if not is_matrix and effective_min_samples > target.Size():
+        raise ValueError(
+            "HDBSCAN min_samples must be at most "
+            f"the item count ({target.Size()})")
 
     options = HDBSCANOptions()
     options.min_cluster_size = int(min_cluster_size)
@@ -3209,7 +3275,7 @@ def hdbscan(distance_matrix, *, min_cluster_size=5, min_samples=None,
     options.num_threads = num_threads_int
     options.chunk_size = chunk_size_int
 
-    result = _hdbscan_cluster(distance_matrix.storage, options)
+    result = _hdbscan_cluster(target, options)
     return HDBSCANResult(
         result.Labels(),
         result.Members(),
@@ -3217,30 +3283,70 @@ def hdbscan(distance_matrix, *, min_cluster_size=5, min_samples=None,
     )
 
 
-def agglomerative(distance_matrix, *, n_clusters=2, distance_threshold=None,
-                  linkage="average", compute_full_tree=True,
-                  num_threads=0, chunk_size=4096, allow_nonmetric=False):
+def agglomerative(items=_MISSING, *, distance_matrix=_MISSING, n_clusters=2,
+                  distance_threshold=None, linkage="average",
+                  compute_full_tree=True, comparison=None, num_threads=0,
+                  chunk_size=4096, allow_nonmetric=False, **kwargs):
     """
-    Cluster a precomputed distance matrix using hierarchical agglomerative clustering.
+    Cluster hierarchically, from a distance matrix or, for single linkage, a comparison.
 
-    :param distance_matrix: SymmetricDistanceMatrix returned by :func:`pdist`.
+    :param items: What the distances come from: a SymmetricDistanceMatrix
+        returned by :func:`pdist` (dense or memory-mapped); or, with
+        ``linkage="single"``, a prebuilt comparison such as
+        :class:`FingerprintComparison` or a sequence of items with
+        ``comparison=``. The comparison forms hold no matrix: the spanning
+        tree compares every pair exactly once and holds a few numbers per
+        item, plus one clone of the comparison per worker thread.
+    :param distance_matrix: Keyword alias for ``items`` that accepts only a
+        SymmetricDistanceMatrix. Passing both is a TypeError.
     :param n_clusters: Number of flat clusters when distance_threshold is omitted.
     :param distance_threshold: Optional merge-distance cutoff for flat clusters.
-    :param linkage: Linkage method: "single", "complete", "average", or "weighted".
+    :param linkage: Linkage method: "single", "complete", "average", or
+        "weighted". Single linkage is built from the minimum spanning tree in
+        O(N) memory beyond the input, so merges at a tied height come in the
+        tree's order: since 5.20.0 that can differ from earlier releases, and
+        an ``n_clusters`` cut that falls inside a tie level can return a
+        different, equally valid partition. Merge distances and
+        ``distance_threshold`` cuts are unchanged.
     :param compute_full_tree: Whether to request full-tree computation.
-    :param num_threads: Thread count for initial distance materialization.
-    :param chunk_size: Rows per work unit during distance materialization.
+    :param comparison: Comparison name, such as ``"fingerprint"``, when
+        ``items`` is a sequence of items. Its options go in ``**kwargs``.
+    :param num_threads: Worker threads. 0 selects every core for complete,
+        average and weighted linkage, and at most 8 for single linkage's
+        spanning-tree pass, which is bound by memory traffic and waits for
+        its slowest thread at every step, so on a busy machine a smaller
+        explicit value can be faster.
+    :param chunk_size: Rows per work unit when complete, average and weighted
+        linkage materialize their distances; single linkage does not read it.
     :param allow_nonmetric: Cluster anyway when the distances are known not to
-        satisfy the triangle inequality. Does not override the refusals for
-        similarity-valued or non-finite matrices.
-    :returns: AgglomerativeResult with labels, clusters, children, distances, and cluster sizes.
-    :raises TypeError: If distance_matrix is not a SymmetricDistanceMatrix, or
-        allow_nonmetric is not a bool.
-    :raises ValueError: If options are invalid, the matrix uses sparse storage,
-        or the matrix is not a metric.
+        satisfy the triangle inequality, or a comparison scores on per-pair
+        feature subsets. Does not override the refusals for similarity-valued
+        or non-finite distances.
+    :param kwargs: Comparison options, with ``comparison=`` only.
+    :returns: AgglomerativeResult with labels, clusters, children, distances,
+        and cluster sizes. A comparison form returns exactly what the matrix
+        form returns over a matrix filled through the same ``Compare``,
+        provided the comparison is repeatable: ``Compare(i, j)`` returns a
+        bit-identical value on every call and every clone. Every built-in
+        comparison but ROCS is, and ROCS is refused. Against :func:`pdist`,
+        whose batched kernels agree with ``Compare`` only to about 1e-12,
+        distances that close can tie or order differently.
+    :raises TypeError: If both or neither of ``items`` and
+        ``distance_matrix`` are given; the arguments fit none of the three
+        forms, or ``comparison`` or a keyword this function does not take
+        accompanies a matrix or a prebuilt comparison; or
+        ``allow_nonmetric`` is not a bool.
+    :raises ValueError: If options are invalid; a comparison form asks for a
+        linkage other than single; ``n_clusters`` exceeds the item count
+        without a ``distance_threshold``; the matrix uses sparse storage or
+        is not a metric, or the comparison's declared facts refuse it; the
+        input is a ROCS comparison; or normalizing the items dropped one.
+    :raises MemoryError: If memory runs out while clustering.
+    :raises RuntimeError: If single linkage reads a NaN or infinite distance,
+        naming the two items.
     """
-    if not isinstance(distance_matrix, SymmetricDistanceMatrix):
-        raise TypeError("agglomerative() expects a SymmetricDistanceMatrix")
+    items = _metric_input(items, distance_matrix, comparison, kwargs,
+                          "agglomerative")
     if distance_threshold is None and n_clusters < 1:
         raise ValueError("Agglomerative n_clusters must be at least one")
     if distance_threshold is not None and distance_threshold < 0.0:
@@ -3275,9 +3381,10 @@ def agglomerative(distance_matrix, *, n_clusters=2, distance_threshold=None,
     if chunk_size_int < 0:
         raise ValueError("chunk_size must be non-negative")
 
+    is_matrix = isinstance(items, SymmetricDistanceMatrix)
     # ValueError, not TypeError: the argument's type is right, its storage is not.
-    if isinstance(distance_matrix.storage, SparseStorage):
-        raise ValueError(  # noqa: TRY004
+    if is_matrix and isinstance(items.storage, SparseStorage):
+        raise ValueError(
             "Agglomerative clustering requires complete pairwise "
             "distances; SparseStorage is not supported")
 
@@ -3288,19 +3395,32 @@ def agglomerative(distance_matrix, *, n_clusters=2, distance_threshold=None,
     # The native bound on n_clusters applies only when no distance_threshold is
     # given, because a threshold cut ignores n_clusters entirely. Mirroring it
     # unconditionally would refuse calls that work today.
-    if (distance_threshold is None
-            and n_clusters_int > distance_matrix.num_samples):
+    if (is_matrix and distance_threshold is None
+            and n_clusters_int > items.num_samples):
         raise ValueError(
             "Agglomerative n_clusters must be at most "
-            f"the item count ({distance_matrix.num_samples})")
+            f"the item count ({items.num_samples})")
+
+    # Before the build: complete, average and weighted linkage update cluster
+    # distances that no single pass over the pairs can supply.
+    if not is_matrix and linkage_key != "single":
+        raise ValueError(
+            "agglomerative() clusters a comparison only with linkage='single'; "
+            f"{linkage_key} linkage needs a matrix. Pass linkage='single', or "
+            "compute the matrix with pdist() and pass that instead")
 
     # Local argument validation first: allow_nonmetric cannot rescue a bad
     # n_clusters, distance_threshold, linkage, or sparse storage, so the gate
     # must not pre-empt those messages. The storage, chunk_size, and n_clusters
     # checks run in the order agglomerative_cluster() applies them, so the
     # fix-first reason is the same whichever layer reports it.
-    _gate.require_metric(distance_matrix, "agglomerative",
-                         allow_nonmetric=allow_nonmetric)
+    target = _streaming_target(items, comparison, kwargs, "agglomerative",
+                               allow_nonmetric, reason=_SINGLE_LINKAGE_REASON)
+    if (not is_matrix and distance_threshold is None
+            and n_clusters_int > target.Size()):
+        raise ValueError(
+            "Agglomerative n_clusters must be at most "
+            f"the item count ({target.Size()})")
 
     options = AgglomerativeOptions()
     options.n_clusters = n_clusters_int
@@ -3312,7 +3432,7 @@ def agglomerative(distance_matrix, *, n_clusters=2, distance_threshold=None,
     options.num_threads = num_threads_int
     options.chunk_size = chunk_size_int
 
-    result = _agglomerative_cluster(distance_matrix.storage, options)
+    result = _agglomerative_cluster(target, options)
     children = zip(result.ChildrenLeft(), result.ChildrenRight())
     return AgglomerativeResult(
         result.Labels(),
