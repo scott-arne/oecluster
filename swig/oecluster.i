@@ -816,7 +816,7 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, _oecluster_is_oereceptor, "
 OECLUSTER_GIL_EXCEPTION(OECluster::pdist, pdist)
 OECLUSTER_GIL_EXCEPTION(OECluster::cdist, cdist)
 OECLUSTER_GIL_EXCEPTION(OECluster::cdist_into_address, cdist_into_address)
-OECLUSTER_GIL_EXCEPTION(OECluster::butina_cluster, butina_cluster)
+OECLUSTER_GIL_MEMORY_EXCEPTION(OECluster::butina_cluster, butina_cluster)
 OECLUSTER_GIL_EXCEPTION(OECluster::cluster_representative, cluster_representative)
 OECLUSTER_GIL_EXCEPTION(OECluster::rank_representatives, rank_representatives)
 OECLUSTER_GIL_EXCEPTION(OECluster::select_representatives, select_representatives)
@@ -828,7 +828,7 @@ OECLUSTER_GIL_EXCEPTION(OECluster::select_representatives, select_representative
 // Python object in reach, so the GIL stays released.
 OECLUSTER_GIL_MEMORY_EXCEPTION(OECluster::cluster_report, cluster_report)
 
-OECLUSTER_GIL_EXCEPTION(OECluster::dbscan_cluster, dbscan_cluster)
+OECLUSTER_GIL_MEMORY_EXCEPTION(OECluster::dbscan_cluster, dbscan_cluster)
 OECLUSTER_GIL_EXCEPTION(OECluster::hdbscan_cluster, hdbscan_cluster)
 OECLUSTER_GIL_EXCEPTION(OECluster::agglomerative_cluster, agglomerative_cluster)
 OECLUSTER_GIL_EXCEPTION(OECluster::bitbirch_cluster, bitbirch_cluster)
@@ -878,7 +878,7 @@ OECLUSTER_GIL_EXCEPTION(OECluster::logdet_diversity, logdet_diversity)
 // sphere_exclusion reads O(N*k) native rows, or builds the O(N^2) threshold
 // graph under the neighbor order, and its comparison overload runs clones on
 // worker threads for as long as the comparisons do.
-OECLUSTER_GIL_EXCEPTION(OECluster::sphere_exclusion, sphere_exclusion)
+OECLUSTER_GIL_MEMORY_EXCEPTION(OECluster::sphere_exclusion, sphere_exclusion)
 
 // knn_graph reads O(N^2) native distances or runs O(N^2) comparisons on worker
 // threads, and jarvis_patrick builds the same graph before linking it.

@@ -108,6 +108,25 @@ def test_items_entries_hide_matrix_inapplicable_options():
     assert "similarity" not in registry["leiden"].known()
 
 
+def test_threshold_entries_keep_their_set_surface_with_an_items_input():
+    # butina and dbscan take items since 5.19.0, but the command line still
+    # loads only a matrix: the alias, the graph budget and the comparison
+    # options must stay off --set, and the threshold must stay required even
+    # though its signature default is now a sentinel rather than empty.
+    registry = _registry()
+    schemas = {name: (registry[name].kind, registry[name].required,
+                      registry[name].optional, registry[name].sequence,
+                      registry[name].accepts_nonmetric)
+               for name in ("butina", "dbscan", "sphere_exclusion")}
+    assert schemas == {
+        "butina": ("items", ["threshold"], {"reordering": False}, [], True),
+        "dbscan": ("items", ["eps"], {"min_samples": 5}, [], True),
+        "sphere_exclusion": ("items", ["threshold"],
+                             {"order": "input", "reordering": False,
+                              "assignment": "first"}, [], False),
+    }
+
+
 def test_resolve_coerces_by_the_defaults_type():
     registry = _registry()
     options = _cli_registry.resolve(

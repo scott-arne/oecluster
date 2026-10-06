@@ -2455,31 +2455,194 @@ def cdist(items_a, items_b, comparison, *,
         labels_b=_comparisons.extract_labels(b), params=params, facts=facts)
 
 
-def butina(distance_matrix, threshold, *, reordering=False,
-           num_threads=0, chunk_size=4096, allow_nonmetric=False):
-    """
-    Cluster a precomputed distance matrix using the Butina algorithm.
+# Stands for "not given" in the signatures whose leading arguments need
+# defaults only so that an alias-only call such as
+# cluster_report(result, distance_matrix=dm) or
+# butina(distance_matrix=dm, threshold=0.3) can bind. None cannot serve: it
+# would hide a caller's explicit None behind a "missing argument" error.
+# Defined once, ahead of the first function that uses it as a default:
+# defaults are evaluated when a function is defined, and every `is _MISSING`
+# check depends on there being exactly one such object.
+_MISSING = object()
 
-    :param distance_matrix: SymmetricDistanceMatrix returned by :func:`pdist`.
-    :param threshold: Maximum distance for two items to be neighbors.
-    :param reordering: Recompute candidate neighbor counts after each cluster.
-    :param num_threads: Thread count for threshold graph construction.
-    :param chunk_size: Condensed-distance pairs per work unit.
-    :param allow_nonmetric: Cluster anyway when the distances are known not to
-        satisfy the triangle inequality. Does not override the refusals for
-        similarity-valued or non-finite matrices.
-    :returns: ButinaResult with per-item labels and grouped clusters. The
-        first member of each cluster is the highest-neighborhood representative,
-        and each member's label equals its cluster index.
-    :raises TypeError: If distance_matrix is not a SymmetricDistanceMatrix, or
-        allow_nonmetric is not a bool.
-    :raises ValueError: If threshold or a size argument is negative, or the
-        matrix is not a metric.
+
+_MATRIX_BUDGET_REFUSAL = (
+    "a distance matrix is clustered as it is, with no graph budget")
+
+
+def _graph_budget(max_graph_bytes, caller, *, refusal=None):
     """
+    Validate a threshold-graph memory budget and return its native value.
+
+    Checked in a fixed order, so a value that breaks two rules gets one
+    deterministic error: a call that builds no graph first, whatever the
+    value; then a bool; then the type and the sign.
+
+    :param max_graph_bytes: Caller value; None applies the native default.
+    :param caller: Entry point name for the messages.
+    :param refusal: Why this call builds no threshold graph, or None when it
+        builds one.
+    :returns: The byte budget, or 0 for the default limit.
+    :raises TypeError: If the call builds no graph, or the value is a bool or
+        not an integer.
+    :raises ValueError: If the value is not positive or exceeds a size_t.
+    """
+    if max_graph_bytes is None:
+        return 0
+    if refusal is not None:
+        raise TypeError(
+            f"{caller}() takes max_graph_bytes only when it builds a "
+            f"threshold graph from a comparison; {refusal}")
+    # bool is an int subclass, and True would read as a one-byte budget: the
+    # trap _comparisons.py already refuses for MCS match budgets.
+    if isinstance(max_graph_bytes, bool):
+        raise TypeError(
+            "max_graph_bytes must be an integer number of bytes, not a bool")
+    try:
+        value = operator.index(max_graph_bytes)
+    except TypeError:
+        raise TypeError(
+            "max_graph_bytes must be an integer number of bytes or None, not "
+            f"{type(max_graph_bytes).__name__}") from None
+    if value <= 0:
+        raise ValueError(f"max_graph_bytes must be positive, got {value}")
+    if value > _SIZE_T_MAX:
+        raise ValueError("max_graph_bytes exceeds size_t maximum")
+    return value
+
+
+def _refuse_unrepeatable(items, comparison, caller):
+    """
+    Refuse ROCS ahead of dispatch on a path that builds a threshold graph.
+
+    The graph compares every pair twice, and a ROCS score depends on what its
+    overlay scored before, so the two passes can disagree; the native builder
+    refuses it too. Checked here first because a ROCS build overlays every
+    molecule onto itself before the native refusal could run.
+
+    :param items: The resolved input.
+    :param comparison: Comparison name, for the named path.
+    :param caller: Entry point name for the messages.
+    :raises ValueError: If the input is a ROCS comparison, named or prebuilt.
+    """
+    named = isinstance(comparison, str) and comparison.lower() == "rocs"
+    prebuilt = (isinstance(items, _oecluster.PairwiseComparison)
+                and items.ComparisonName() == "rocs")
+    if named or prebuilt:
+        raise ValueError(
+            f"{caller}() cannot cluster a ROCS comparison without a matrix: a "
+            "ROCS score depends on what its overlay scored before, and the "
+            "threshold graph compares every pair twice. Compute the matrix "
+            "with pdist(items, 'rocs') and pass that instead")
+
+
+def _threshold_target(items, comparison, kwargs, caller, allow_nonmetric):
+    """
+    Gate a threshold-graph clustering input and return what to cluster.
+
+    A matrix passes :func:`_gate.require_metric`, exactly as before. A
+    comparison is refused on its declared facts, honoring allow_nonmetric,
+    before any pair is scored.
+
+    :param items: The input :func:`_metric_input` resolved.
+    :param comparison: Comparison name, for the named path.
+    :param kwargs: Comparison options; consumed.
+    :param caller: Entry point name for the messages.
+    :param allow_nonmetric: Proceed despite a triangle or subset fact.
+    :returns: Native storage or a native comparison.
+    :raises TypeError: If allow_nonmetric is not a bool, or a comparison
+        option is unknown.
+    :raises ValueError: If the gate refuses the input, the input is a ROCS
+        comparison, or normalizing the items dropped one.
+    """
+    if not isinstance(items, SymmetricDistanceMatrix):
+        # Before the build, as require_metric checks it before reading any
+        # fact: a malformed override is the caller's to fix whatever the
+        # comparison turns out to be.
+        _gate.check_allow_nonmetric(allow_nonmetric)
+        _refuse_unrepeatable(items, comparison, caller)
+    # allow_sparse: the storage builder reads sparse entries, and both entry
+    # points have always accepted them. refuse_dropped: the results carry no
+    # excluded field, and DBSCAN's -1 already means noise, so a dropped item
+    # has no faithful representation.
+    source = _diversity_source(
+        items, comparison, kwargs, caller, allow_sparse=True,
+        refuse_dropped=True,
+        refuse_facts=lambda obj, name: _refuse_report_comparison(
+            obj, name, allow_nonmetric=allow_nonmetric))
+    if source.matrix is not None:
+        _gate.require_metric(source.matrix, caller,
+                             allow_nonmetric=allow_nonmetric)
+    return source.target
+
+
+def butina(items=_MISSING, threshold=_MISSING, *, distance_matrix=_MISSING,
+           reordering=False, comparison=None, similarity=False, num_threads=0,
+           chunk_size=4096, allow_nonmetric=False, max_graph_bytes=None,
+           **kwargs):
+    """
+    Cluster with the Butina algorithm, from a distance matrix or a comparison.
+
+    :param items: What the distances come from: a SymmetricDistanceMatrix
+        returned by :func:`pdist` (dense, memory-mapped or sparse); a
+        prebuilt comparison such as :class:`FingerprintComparison`; or a
+        sequence of items with ``comparison=``. The comparison forms hold no
+        matrix. They compare every pair twice, once to count each item's
+        neighbors and once to record them, and keep only the threshold
+        graph: 16 bytes per within-threshold pair on a 64-bit platform.
+    :param threshold: Maximum distance for two items to be neighbors.
+    :param distance_matrix: Keyword alias for ``items`` that accepts only a
+        SymmetricDistanceMatrix. Passing both is a TypeError.
+    :param reordering: Recompute candidate neighbor counts after each cluster.
+    :param comparison: Comparison name, such as ``"fingerprint"``, when
+        ``items`` is a sequence of items. Its options go in ``**kwargs``.
+    :param similarity: Refused when True; the threshold is a distance.
+    :param num_threads: Thread count for threshold graph construction.
+    :param chunk_size: Condensed-distance pairs per work unit; 0 selects
+        4096.
+    :param allow_nonmetric: Cluster anyway when the distances are known not
+        to satisfy the triangle inequality, or a comparison scores on
+        per-pair feature subsets. Does not override the refusals for
+        similarity-valued or non-finite distances.
+    :param max_graph_bytes: The comparison forms only: the most memory the
+        threshold graph may take, in bytes. None applies the default limit,
+        the larger of the condensed matrix the graph replaces and 1 GiB. The
+        graph's exact size is known before it is allocated, so a larger one
+        is refused rather than attempted. At a million items the default is
+        the 4 TB matrix size, so set a budget on large runs.
+    :param kwargs: Comparison options, with ``comparison=`` only.
+    :returns: ButinaResult with per-item labels and grouped clusters. The
+        first member of each cluster is the highest-neighborhood
+        representative, and each member's label equals its cluster index. A
+        comparison form returns exactly what the matrix form returns over a
+        matrix filled through the same ``Compare``. Against :func:`pdist`,
+        whose batched kernels agree with ``Compare`` only to about 1e-12, a
+        pair that close to the threshold can be decided differently.
+    :raises TypeError: If both or neither of ``items`` and
+        ``distance_matrix`` are given, or ``threshold`` is missing; the
+        arguments fit none of the three forms, or ``comparison`` or a keyword
+        this function does not take accompanies a matrix or a prebuilt
+        comparison; ``allow_nonmetric`` is not a bool; or
+        ``max_graph_bytes`` accompanies a matrix, or is a bool or not an
+        integer.
+    :raises ValueError: If threshold or a size argument is negative;
+        ``similarity=True``; ``max_graph_bytes`` is not positive; the matrix
+        is not a metric or the comparison's declared facts refuse it; or
+        normalizing the items dropped one.
+    :raises MemoryError: If the threshold graph would exceed its limit, with
+        a message naming the item and edge counts and the bytes needed; or if
+        memory runs out while clustering.
+    :raises RuntimeError: If a comparison returns a NaN or infinite
+        distance, or a different value for a pair on its second pass.
+    """
+    items = _metric_input(items, distance_matrix, comparison, kwargs, "butina")
+    if threshold is _MISSING:
+        raise TypeError("butina() missing required argument: 'threshold'")
+    if similarity:
+        raise ValueError(
+            "butina() clusters on distances; similarity=True is not supported")
     if threshold < 0.0:
         raise ValueError("Butina threshold must be non-negative")
-    if not isinstance(distance_matrix, SymmetricDistanceMatrix):
-        raise TypeError("butina() expects a SymmetricDistanceMatrix")
 
     # Coerce caller arguments before the gate so that an invalid type is reported
     # ahead of an advisory refusal that names a remedy which cannot rescue it.
@@ -2493,16 +2656,21 @@ def butina(distance_matrix, threshold, *, reordering=False,
     if chunk_size_int < 0:
         raise ValueError("chunk_size must be non-negative")
 
-    _gate.require_metric(distance_matrix, "butina",
-                         allow_nonmetric=allow_nonmetric)
+    budget = _graph_budget(
+        max_graph_bytes, "butina",
+        refusal=(_MATRIX_BUDGET_REFUSAL
+                 if isinstance(items, SymmetricDistanceMatrix) else None))
+    target = _threshold_target(items, comparison, kwargs, "butina",
+                               allow_nonmetric)
 
     options = ButinaOptions()
     options.distance_threshold = float(threshold)
     options.reordering = _flag(reordering, "reordering")
     options.num_threads = num_threads_int
     options.chunk_size = chunk_size_int
+    options.max_graph_bytes = budget
 
-    result = _butina_cluster(distance_matrix.storage, options)
+    result = _butina_cluster(target, options)
     return ButinaResult(result.Labels(), result.Members())
 
 
@@ -2838,31 +3006,74 @@ def select_representatives(cluster, distance_matrix, *, k, method="medoid",
         ))
 
 
-def dbscan(distance_matrix, eps, *, min_samples=5, num_threads=0,
-           chunk_size=4096, allow_nonmetric=False):
+def dbscan(items=_MISSING, eps=_MISSING, *, distance_matrix=_MISSING,
+           min_samples=5, comparison=None, similarity=False, num_threads=0,
+           chunk_size=4096, allow_nonmetric=False, max_graph_bytes=None,
+           **kwargs):
     """
-    Cluster a precomputed distance matrix using DBSCAN.
+    Cluster with DBSCAN, from a distance matrix or a comparison.
 
-    :param distance_matrix: SymmetricDistanceMatrix returned by :func:`pdist`.
+    :param items: What the distances come from: a SymmetricDistanceMatrix
+        returned by :func:`pdist` (dense, memory-mapped or sparse); a
+        prebuilt comparison such as :class:`FingerprintComparison`; or a
+        sequence of items with ``comparison=``. The comparison forms hold no
+        matrix. They compare every pair twice, once to count each item's
+        neighbors and once to record them, and keep only the eps-neighbor
+        graph: 16 bytes per within-eps pair on a 64-bit platform.
     :param eps: Maximum distance for two items to be neighbors.
-    :param min_samples: Minimum self-inclusive neighbor count for a core sample.
+    :param distance_matrix: Keyword alias for ``items`` that accepts only a
+        SymmetricDistanceMatrix. Passing both is a TypeError.
+    :param min_samples: Minimum self-inclusive neighbor count for a core
+        sample.
+    :param comparison: Comparison name, such as ``"fingerprint"``, when
+        ``items`` is a sequence of items. Its options go in ``**kwargs``.
+    :param similarity: Refused when True; eps is a distance.
     :param num_threads: Thread count for threshold graph construction.
-    :param chunk_size: Condensed-distance pairs per work unit.
-    :param allow_nonmetric: Cluster anyway when the distances are known not to
-        satisfy the triangle inequality. Does not override the refusals for
-        similarity-valued or non-finite matrices.
-    :returns: DBSCANResult with labels, clusters, and core sample indices.
-    :raises TypeError: If distance_matrix is not a SymmetricDistanceMatrix, or
-        allow_nonmetric is not a bool.
-    :raises ValueError: If eps, min_samples, or a size argument is invalid, or
-        the matrix is not a metric.
+    :param chunk_size: Condensed-distance pairs per work unit; 0 selects
+        4096.
+    :param allow_nonmetric: Cluster anyway when the distances are known not
+        to satisfy the triangle inequality, or a comparison scores on
+        per-pair feature subsets. Does not override the refusals for
+        similarity-valued or non-finite distances.
+    :param max_graph_bytes: The comparison forms only: the most memory the
+        eps-neighbor graph may take, in bytes. None applies the default
+        limit, the larger of the condensed matrix the graph replaces and
+        1 GiB. The graph's exact size is known before it is allocated, so a
+        larger one is refused rather than attempted. At a million items the
+        default is the 4 TB matrix size, so set a budget on large runs.
+    :param kwargs: Comparison options, with ``comparison=`` only.
+    :returns: DBSCANResult with labels, clusters, and core sample indices. A
+        comparison form returns exactly what the matrix form returns over a
+        matrix filled through the same ``Compare``. Against :func:`pdist`,
+        whose batched kernels agree with ``Compare`` only to about 1e-12, a
+        pair that close to eps can be decided differently.
+    :raises TypeError: If both or neither of ``items`` and
+        ``distance_matrix`` are given, or ``eps`` is missing; the arguments
+        fit none of the three forms, or ``comparison`` or a keyword this
+        function does not take accompanies a matrix or a prebuilt
+        comparison; ``allow_nonmetric`` is not a bool; or
+        ``max_graph_bytes`` accompanies a matrix, or is a bool or not an
+        integer.
+    :raises ValueError: If eps, min_samples, or a size argument is invalid;
+        ``similarity=True``; ``max_graph_bytes`` is not positive; the matrix
+        is not a metric or the comparison's declared facts refuse it; or
+        normalizing the items dropped one.
+    :raises MemoryError: If the eps-neighbor graph would exceed its limit,
+        with a message naming the item and edge counts and the bytes needed;
+        or if memory runs out while clustering.
+    :raises RuntimeError: If a comparison returns a NaN or infinite
+        distance, or a different value for a pair on its second pass.
     """
+    items = _metric_input(items, distance_matrix, comparison, kwargs, "dbscan")
+    if eps is _MISSING:
+        raise TypeError("dbscan() missing required argument: 'eps'")
+    if similarity:
+        raise ValueError(
+            "dbscan() clusters on distances; similarity=True is not supported")
     if eps < 0.0:
         raise ValueError("DBSCAN eps must be non-negative")
     if min_samples < 1:
         raise ValueError("DBSCAN min_samples must be at least one")
-    if not isinstance(distance_matrix, SymmetricDistanceMatrix):
-        raise TypeError("dbscan() expects a SymmetricDistanceMatrix")
 
     # Coerce caller arguments before the gate so that an invalid type is reported
     # ahead of an advisory refusal that names a remedy which cannot rescue it.
@@ -2876,16 +3087,21 @@ def dbscan(distance_matrix, eps, *, min_samples=5, num_threads=0,
     if chunk_size_int < 0:
         raise ValueError("chunk_size must be non-negative")
 
-    _gate.require_metric(distance_matrix, "dbscan",
-                         allow_nonmetric=allow_nonmetric)
+    budget = _graph_budget(
+        max_graph_bytes, "dbscan",
+        refusal=(_MATRIX_BUDGET_REFUSAL
+                 if isinstance(items, SymmetricDistanceMatrix) else None))
+    target = _threshold_target(items, comparison, kwargs, "dbscan",
+                               allow_nonmetric)
 
     options = DBSCANOptions()
     options.eps = float(eps)
     options.min_samples = int(min_samples)
     options.num_threads = num_threads_int
     options.chunk_size = chunk_size_int
+    options.max_graph_bytes = budget
 
-    result = _dbscan_cluster(distance_matrix.storage, options)
+    result = _dbscan_cluster(target, options)
     return DBSCANResult(
         result.Labels(),
         result.Members(),
@@ -4380,13 +4596,6 @@ def _string_vector(value, argument_name, noun):
 def _agreement_scaffolds(value, argument_name):
     """Coerce a sequence of scaffold strings to a native StringVector."""
     return _string_vector(value, argument_name, "scaffold strings")
-
-
-# Stands for "not given" in the A-metric signatures, where the leading
-# arguments need defaults only so that an alias-only call such as
-# cluster_report(result, distance_matrix=dm) can bind. None cannot serve: it
-# would hide a caller's explicit None behind a "missing argument" error.
-_MISSING = object()
 
 
 def cluster_report(result, items=_MISSING, *, distance_matrix=_MISSING,

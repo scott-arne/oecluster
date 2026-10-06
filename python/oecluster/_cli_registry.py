@@ -33,8 +33,10 @@ _REQUIRED_TYPES = {
 }
 
 #: Meaningless when the input is already a matrix: they describe how to build
-#: one from raw items.
-_EXCLUDED_FOR_ITEMS = {"comparison", "similarity"}
+#: one from raw items, or bound the graph built from a comparison.
+#: ``distance_matrix`` is the keyword alias for the matrix itself.
+_EXCLUDED_FOR_ITEMS = {"comparison", "distance_matrix", "max_graph_bytes",
+                       "similarity"}
 
 #: The library coerces these with a bare ``int()`` (``__init__.py:2884``), so a
 #: float would be silently truncated rather than refused.
@@ -51,8 +53,10 @@ _INTEGER = {
 #: agglomerative then takes as 1.0.
 _FLOAT = {"agglomerative.distance_threshold"}
 
-#: Default ``None`` in the signature, but required when the input is a matrix.
-_CONDITIONALLY_REQUIRED = {"jarvis_patrick.k", "leiden.k"}
+#: Default ``None``, or the library's "not given" sentinel, in the signature,
+#: but required when the input is a matrix.
+_CONDITIONALLY_REQUIRED = {"butina.threshold", "dbscan.eps", "jarvis_patrick.k",
+                           "leiden.k"}
 
 #: Not expressible in a ``key=value`` grammar.
 _SEQUENCE = {"k_medoids.initial_medoids"}
