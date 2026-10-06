@@ -30,7 +30,11 @@ public:
                        size_t num_threads, size_t chunk_size)
         : prototype_(prototype),
           pool_(capped_threads(num_threads, n)),
-          chunk_size_(chunk_size) {}
+          chunk_size_(chunk_size) {
+        // At most one lease is live per pool thread, so returning a clone
+        // never allocates in normal operation.
+        free_.reserve(pool_.NumThreads());
+    }
 
     // body(PairwiseComparison& clone, size_t begin, size_t end) over [0, range).
     template <typename Body>
@@ -78,9 +82,16 @@ private:
         return clone;
     }
 
-    void Release(std::unique_ptr<PairwiseComparison> clone) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        free_.push_back(std::move(clone));
+    // Called from ~Lease, which is noexcept, so a throw here would terminate
+    // the process. If the clone cannot be returned to the free list, the
+    // by-value parameter still owns it (push_back has the strong guarantee)
+    // and destroys it; a later Acquire clones afresh.
+    void Release(std::unique_ptr<PairwiseComparison> clone) noexcept {
+        try {
+            std::lock_guard<std::mutex> lock(mutex_);
+            free_.push_back(std::move(clone));
+        } catch (...) {
+        }
     }
 
     const PairwiseComparison& prototype_;
