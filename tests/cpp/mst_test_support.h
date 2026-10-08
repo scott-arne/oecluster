@@ -8,12 +8,16 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <limits>
 #include <memory>
+#include <mutex>
+#include <set>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -168,6 +172,88 @@ private:
     std::shared_ptr<const std::vector<double>> condensed_;
     OECluster::GateFacts facts_;
     std::shared_ptr<std::vector<std::atomic<size_t>>> counts_;
+};
+
+/**
+ * @brief A condensed table that records which clone served each Compare call.
+ *
+ * Counting clones only proves they were made. Every clone here takes its own
+ * id, and Compare registers that id in a set the whole family shares, so a
+ * test can witness that the pass really read through more than one of them
+ * rather than calling one instance from every participant. The prototype keeps
+ * id 0, which also makes a call on the prototype itself visible.
+ *
+ * A participant that reached Compare first would otherwise be free to claim
+ * every work unit before the others woke, so the early calls wait until a
+ * second clone has registered. One deadline covers the whole pass, so a run
+ * that never spreads gives a failing assertion after that wait rather than a
+ * hang or a wait per call.
+ */
+class CloneWitnessComparison : public OECluster::PairwiseComparison {
+public:
+    CloneWitnessComparison(size_t n, std::vector<double> condensed)
+        : n_(n),
+          condensed_(std::make_shared<const std::vector<double>>(std::move(condensed))),
+          state_(std::make_shared<SharedState>()) {}
+
+    double Compare(size_t i, size_t j) override {
+        {
+            std::lock_guard<std::mutex> lock(state_->mutex);
+            state_->serving.insert(id_);
+        }
+        AwaitASecondClone();
+        const size_t a = std::min(i, j);
+        const size_t b = std::max(i, j);
+        return (*condensed_)[n_ * a - a * (a + 1) / 2 + b - a - 1];
+    }
+
+    OECluster::GateFacts Facts() const override { return OECluster::GateFacts(); }
+
+    std::unique_ptr<OECluster::PairwiseComparison> Clone() const override {
+        auto clone = std::make_unique<CloneWitnessComparison>(*this);
+        clone->id_ = state_->next_id.fetch_add(1);
+        return clone;
+    }
+
+    size_t Size() const override { return n_; }
+    std::string ComparisonName() const override { return "clone-witness"; }
+
+    // How many distinct instances served at least one call.
+    size_t ServingClones() const {
+        std::lock_guard<std::mutex> lock(state_->mutex);
+        return state_->serving.size();
+    }
+
+    bool PrototypeServed() const {
+        std::lock_guard<std::mutex> lock(state_->mutex);
+        return state_->serving.count(0) != 0;
+    }
+
+private:
+    struct SharedState {
+        std::mutex mutex;
+        std::set<size_t> serving;
+        std::atomic<size_t> next_id{1};
+        std::atomic<bool> settled{false};
+        const std::chrono::steady_clock::time_point deadline =
+            std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    };
+
+    void AwaitASecondClone() {
+        while (!state_->settled.load()) {
+            if (ServingClones() >= 2 ||
+                std::chrono::steady_clock::now() >= state_->deadline) {
+                state_->settled.store(true);
+                return;
+            }
+            std::this_thread::yield();
+        }
+    }
+
+    size_t n_;
+    std::shared_ptr<const std::vector<double>> condensed_;
+    size_t id_ = 0;
+    std::shared_ptr<SharedState> state_;
 };
 
 /**

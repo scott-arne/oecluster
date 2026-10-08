@@ -240,6 +240,18 @@ def test_a_truthy_allow_nonmetric_is_refused_before_dispatch():
                                 linkage="single", allow_nonmetric="False")
 
 
+def test_a_local_option_is_coerced_before_the_comparison_is_built():
+    # "nonexistent" names no comparison, so had the build run first the error
+    # would name the comparison, not the option the caller got wrong.
+    mols = _mols(FP_SMILES[:4])
+    with pytest.raises(TypeError, match="allow_single_cluster must be a bool"):
+        oecluster.hdbscan(mols, comparison="nonexistent", min_cluster_size=2,
+                          allow_single_cluster="yes")
+    with pytest.raises(TypeError, match="compute_full_tree must be a bool"):
+        oecluster.agglomerative(mols, comparison="nonexistent",
+                                linkage="single", compute_full_tree="yes")
+
+
 def test_rocs_is_refused_before_it_is_built():
     pytest.importorskip("openeye.oeomega")
     from openeye import oeomega

@@ -39,10 +39,12 @@ cluster summaries as well as lower-level control over distance computation.
   clustering.
 - **Cluster without a matrix**: Butina, DBSCAN and Butina-order sphere
   exclusion run straight from a comparison and hold no pairwise structure
-  but the threshold neighbor graph, behind an exact memory guard; HDBSCAN
-  and single-linkage agglomerative clustering build a minimum spanning tree
-  in a few numbers per item. A large fingerprint set never needs its N x N
-  distance matrix.
+  but the threshold neighbor graph, behind an exact memory guard;
+  single-linkage agglomerative clustering builds a minimum spanning tree in
+  a few numbers per item, and HDBSCAN builds the same tree after a core pass
+  that holds `min_samples` - 1 distances per item, so it is linear in the
+  item count only while `min_samples` stays small. A large fingerprint set
+  never needs its N x N distance matrix.
 - **Choose representatives** with true medoids, minimax/radius centers,
   highest-neighborhood Butina-style representatives, weighted medoids, ranked
   representative lists, and k-representative selection.

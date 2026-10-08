@@ -102,6 +102,24 @@ HDBSCANResult hdbscan_cluster(PairwiseComparison& comparison, const HDBSCANOptio
 
 namespace detail {
 
+/**
+ * @brief Each item's distance to its (min_samples - 1)-th nearest neighbor.
+ *
+ * Since 5.20.0 a wrapper on the pass HDBSCAN itself runs, so the distance
+ * domain it enforces applies here too: a non-finite or negative distance is
+ * refused rather than carried into the result, and a -0.0 is read as +0.0.
+ * Earlier releases returned whatever the matrix held.
+ *
+ * :param storage: Complete pairwise distances; sparse storage is refused.
+ * :param min_samples: Self-inclusive neighbor count, in [1, item count].
+ *     A value of 1 gives every item a core distance of zero.
+ * :param num_threads: Worker threads; 0 auto-detects hardware concurrency.
+ * :returns: One core distance per item.
+ * :raises std::invalid_argument: If min_samples is zero or above the item
+ *     count, or the storage cannot provide complete distances.
+ * :raises std::runtime_error: If a distance is non-finite or negative,
+ *     naming the pair.
+ */
 std::vector<double> compute_core_distances(
     const StorageBackend& storage,
     size_t min_samples,

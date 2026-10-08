@@ -18,20 +18,20 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   and `agglomerative_cluster(PairwiseComparison&, const AgglomerativeOptions&)`.
 - `benchmarks/streaming_mst.py`. Measured on an Apple M3 Max (14 CPUs, 36 GiB of memory), each path in its own process,
   with the 1-minute load average recorded before each row (6.4 to 7.4 for
-  5.20.0, 41.9 to 44.1 for the 5.19.0 baseline). Matrix single linkage's
-  process peak RSS fell from 5.19.0 to 5.20.0: 4.88 to 0.65 GB at 10,000
-  molecules with one thread, 5.85 to 0.65 GB at 10,000 with the default
-  threads, 8.91 to 2.09 GB at 20,000 with one thread, and 12.11 to 2.10 GB
-  at 20,000 with the default threads. Single linkage from a comparison at
-  20,000 molecules held 0.29 GB where the matrix path held 2.10 GB. The
-  clustering step of matrix single linkage measured 17.7x to 37.7x faster
-  than 5.19.0 on that contended machine; the load difference between the two
-  runs inflates this, so treat it as an upper bound (a core-share correction,
-  an estimate and not a measurement, suggests 6x to 11x). At 100,000
-  molecules, HDBSCAN and single linkage from a comparison peaked at 1.04 to
-  1.07 GB of process RSS, where the condensed matrix alone would need 40.0 GB
-  and is never allocated; those four runs were taken at loads of 7.26 to
-  66.90, so they carry no timing claim.
+  5.20.0 unless stated, 41.9 to 44.1 for the 5.19.0 baseline). Matrix single
+  linkage's process peak RSS fell from 5.19.0 to 5.20.0: 4.88 to 0.65 GB at
+  10,000 molecules with one thread, 5.85 to 0.65 GB at 10,000 with the
+  default threads, 8.91 to 2.09 GB at 20,000 with one thread, and 12.11 to
+  2.10 GB at 20,000 with the default threads. Single linkage from a
+  comparison at 20,000 molecules held 0.29 to 0.30 GB where the matrix path
+  held 2.10 GB. The clustering step of matrix single linkage measured 17.7x
+  to 37.7x faster than 5.19.0 on that contended machine; the load difference
+  between the two runs inflates this, so treat it as an upper bound (a
+  core-share correction, an estimate and not a measurement, suggests 6x to
+  11x). At 100,000 molecules, HDBSCAN and single linkage from a comparison
+  peaked at 1.04 to 1.07 GB of process RSS, where the condensed matrix alone
+  would need 40.0 GB and is never allocated; those four runs were taken at
+  loads of 7.26 to 66.90, so they carry no timing claim.
 
 ### Changed
 
@@ -52,8 +52,11 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   raises `RuntimeError` naming the two items; a distance whose quotient by
   `alpha` is not finite raises `RuntimeError` naming `alpha`; and
   `hdbscan(alpha=nan)` raises `ValueError`. 5.19.0 returned undefined results
-  for the negative and alpha cases. A non-finite distance in a
-  matrix is unchanged: the metric gate refuses it with a `ValueError`.
+  for the negative and alpha cases. A non-finite distance in a matrix passed
+  to `hdbscan()` or `agglomerative()` is unchanged: the metric gate refuses it
+  with a `ValueError` before the native call. The native matrix overloads
+  `hdbscan_cluster` and single-linkage `agglomerative_cluster` have no such
+  gate and now raise `std::runtime_error` naming the pair.
 - A zero merge distance, or a zero core distance inside HDBSCAN, is +0.0
   even when the input held -0.0.
 - `oecluster algorithms` lists `items` as the input of `hdbscan` and

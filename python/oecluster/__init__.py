@@ -3177,8 +3177,10 @@ def hdbscan(items=_MISSING, *, distance_matrix=_MISSING, min_cluster_size=5,
         comparison form returns exactly what the matrix form returns over a
         matrix filled through the same ``Compare``, provided the comparison
         is repeatable: ``Compare(i, j)`` returns a bit-identical value on
-        every call and every clone. Every built-in comparison but ROCS is,
-        and ROCS is refused. Against :func:`pdist`, whose batched kernels
+        every call and every clone. The test suite checks every built-in
+        comparison family except ROCS, in one or two configurations each;
+        ROCS is not repeatable, because its overlay keeps state between
+        calls, and is refused. Against :func:`pdist`, whose batched kernels
         agree with ``Compare`` only to about 1e-12, distances that close can
         tie or order differently and change the tree.
     :raises TypeError: If both or neither of ``items`` and
@@ -3188,12 +3190,14 @@ def hdbscan(items=_MISSING, *, distance_matrix=_MISSING, min_cluster_size=5,
         ``allow_nonmetric`` is not a bool.
     :raises ValueError: If options are invalid, ``alpha`` included when it is
         NaN; ``min_samples`` exceeds the item count; the matrix uses sparse
-        storage or is not a metric, or the comparison's declared facts
-        refuse it; the input is a ROCS comparison; or normalizing the items
-        dropped one.
+        storage, holds a NaN or infinite distance, or is not a metric, or the
+        comparison's declared facts refuse it; the input is a ROCS
+        comparison; or normalizing the items dropped one.
     :raises MemoryError: If memory runs out while clustering.
-    :raises RuntimeError: If a distance is NaN, infinite or negative, naming
-        the two items, or a distance divided by ``alpha`` is not finite.
+    :raises RuntimeError: If a comparison returns a NaN or infinite distance,
+        if a distance from either input is negative, each naming the two
+        items, or if a distance divided by ``alpha`` is not finite. A
+        matrix's non-finite distances are refused earlier, as a ValueError.
     """
     if min_cluster_size < 2:
         raise ValueError("HDBSCAN min_cluster_size must be at least two")
@@ -3231,11 +3235,13 @@ def hdbscan(items=_MISSING, *, distance_matrix=_MISSING, min_cluster_size=5,
     if chunk_size_int < 0:
         raise ValueError("chunk_size must be non-negative")
 
+    min_cluster_size_int = int(min_cluster_size)
+    min_samples_int = 0 if min_samples is None else int(min_samples)
     # HDBSCAN bounds the min_samples it actually uses, which is min_cluster_size
     # when the caller leaves min_samples unset, so the mirror substitutes the
     # same way the native code does.
-    effective_min_samples = (int(min_cluster_size) if min_samples is None
-                             else int(min_samples))
+    effective_min_samples = (min_cluster_size_int if min_samples is None
+                             else min_samples_int)
     is_matrix = isinstance(items, SymmetricDistanceMatrix)
     if is_matrix:
         if effective_min_samples > items.num_samples:
@@ -3248,6 +3254,14 @@ def hdbscan(items=_MISSING, *, distance_matrix=_MISSING, min_cluster_size=5,
             raise ValueError(
                 "HDBSCAN requires complete pairwise "
                 "distances; SparseStorage is not supported")
+
+    # The options the gate does not look at are coerced here rather than in the
+    # block below, so that every local check is answered before a comparison the
+    # call will never reach is built.
+    cluster_selection_epsilon_float = float(cluster_selection_epsilon)
+    max_cluster_size_int = 0 if max_cluster_size is None else int(max_cluster_size)
+    alpha_float = float(alpha)
+    allow_single_cluster_flag = _flag(allow_single_cluster, "allow_single_cluster")
 
     # Local argument validation first: allow_nonmetric cannot rescue an unknown
     # cluster_selection_method, an out-of-range min_samples, or sparse storage,
@@ -3264,14 +3278,13 @@ def hdbscan(items=_MISSING, *, distance_matrix=_MISSING, min_cluster_size=5,
             f"the item count ({target.Size()})")
 
     options = HDBSCANOptions()
-    options.min_cluster_size = int(min_cluster_size)
-    options.min_samples = 0 if min_samples is None else int(min_samples)
-    options.cluster_selection_epsilon = float(cluster_selection_epsilon)
-    options.max_cluster_size = 0 if max_cluster_size is None else int(max_cluster_size)
-    options.alpha = float(alpha)
+    options.min_cluster_size = min_cluster_size_int
+    options.min_samples = min_samples_int
+    options.cluster_selection_epsilon = cluster_selection_epsilon_float
+    options.max_cluster_size = max_cluster_size_int
+    options.alpha = alpha_float
     options.cluster_selection_method = method_map[method_key]
-    options.allow_single_cluster = _flag(
-        allow_single_cluster, "allow_single_cluster")
+    options.allow_single_cluster = allow_single_cluster_flag
     options.num_threads = num_threads_int
     options.chunk_size = chunk_size_int
 
@@ -3327,8 +3340,10 @@ def agglomerative(items=_MISSING, *, distance_matrix=_MISSING, n_clusters=2,
         and cluster sizes. A comparison form returns exactly what the matrix
         form returns over a matrix filled through the same ``Compare``,
         provided the comparison is repeatable: ``Compare(i, j)`` returns a
-        bit-identical value on every call and every clone. Every built-in
-        comparison but ROCS is, and ROCS is refused. Against :func:`pdist`,
+        bit-identical value on every call and every clone. The test suite
+        checks every built-in comparison family except ROCS, in one or two
+        configurations each; ROCS is not repeatable, because its overlay
+        keeps state between calls, and is refused. Against :func:`pdist`,
         whose batched kernels agree with ``Compare`` only to about 1e-12,
         distances that close can tie or order differently.
     :raises TypeError: If both or neither of ``items`` and
@@ -3338,12 +3353,14 @@ def agglomerative(items=_MISSING, *, distance_matrix=_MISSING, n_clusters=2,
         ``allow_nonmetric`` is not a bool.
     :raises ValueError: If options are invalid; a comparison form asks for a
         linkage other than single; ``n_clusters`` exceeds the item count
-        without a ``distance_threshold``; the matrix uses sparse storage or
-        is not a metric, or the comparison's declared facts refuse it; the
-        input is a ROCS comparison; or normalizing the items dropped one.
+        without a ``distance_threshold``; the matrix uses sparse storage,
+        holds a NaN or infinite distance, or is not a metric, or the
+        comparison's declared facts refuse it; the input is a ROCS
+        comparison; or normalizing the items dropped one.
     :raises MemoryError: If memory runs out while clustering.
-    :raises RuntimeError: If single linkage reads a NaN or infinite distance,
-        naming the two items.
+    :raises RuntimeError: If single linkage reads a NaN or infinite distance
+        from a comparison, naming the two items. A matrix's non-finite
+        distances are refused earlier, as a ValueError.
     """
     items = _metric_input(items, distance_matrix, comparison, kwargs,
                           "agglomerative")
@@ -3409,6 +3426,14 @@ def agglomerative(items=_MISSING, *, distance_matrix=_MISSING, n_clusters=2,
             f"{linkage_key} linkage needs a matrix. Pass linkage='single', or "
             "compute the matrix with pdist() and pass that instead")
 
+    # The options the gate does not look at are coerced here rather than in the
+    # block below, so that every local check is answered before a comparison the
+    # call will never reach is built.
+    distance_threshold_float = (
+        -1.0 if distance_threshold is None else float(distance_threshold)
+    )
+    compute_full_tree_flag = _flag(compute_full_tree, "compute_full_tree")
+
     # Local argument validation first: allow_nonmetric cannot rescue a bad
     # n_clusters, distance_threshold, linkage, or sparse storage, so the gate
     # must not pre-empt those messages. The storage, chunk_size, and n_clusters
@@ -3424,11 +3449,9 @@ def agglomerative(items=_MISSING, *, distance_matrix=_MISSING, n_clusters=2,
 
     options = AgglomerativeOptions()
     options.n_clusters = n_clusters_int
-    options.distance_threshold = (
-        -1.0 if distance_threshold is None else float(distance_threshold)
-    )
+    options.distance_threshold = distance_threshold_float
     options.linkage = linkage_map[linkage_key]
-    options.compute_full_tree = _flag(compute_full_tree, "compute_full_tree")
+    options.compute_full_tree = compute_full_tree_flag
     options.num_threads = num_threads_int
     options.chunk_size = chunk_size_int
 

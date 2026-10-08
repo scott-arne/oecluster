@@ -148,6 +148,18 @@ TEST(PrimMSTTest, TheComparisonPathClonesOncePerParticipant) {
     EXPECT_EQ(comparison.NumClones(), 4u);
 }
 
+// Counting the clones does not say they were used: a pass that called one
+// clone from every participant would count the same. The hazard the serial
+// clone build exists to prevent is a shared instance, so the witness has to be
+// which instance served each call.
+TEST(PrimMSTTest, ParticipantsReadThroughDifferentClones) {
+    const Fixture fixture{150, Quantized(150, 5, 1000)};
+    CloneWitnessComparison comparison(fixture.n, fixture.condensed);
+    detail::prim_mst(comparison, detail::PrimWeights(), Options(4, ALL_TEAM));
+    EXPECT_GE(comparison.ServingClones(), 2u);
+    EXPECT_FALSE(comparison.PrototypeServed());
+}
+
 TEST(PrimMSTTest, SingleLinkageComparesEveryPairExactlyOnce) {
     const Fixture fixture{60, Quantized(60, 7, 6)};
     for (size_t threads : {1, 4}) {

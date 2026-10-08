@@ -237,16 +237,20 @@ can be faster.
 **Exactness.** The result equals the matrix form's over a matrix filled
 through the same `Compare`, for every `num_threads` and `chunk_size`,
 provided the comparison is repeatable: `Compare(i, j)` must return a
-bit-identical value on every call and every clone. Every built-in
-comparison but ROCS is, and these paths refuse ROCS. Against `pdist()` the
-agreement is per distance, to about 1e-12, so distances that close can tie
-or order differently and change the tree.
+bit-identical value on every call and every clone. The test suite checks
+every built-in comparison family except ROCS, in one or two configurations
+each, and each returns bit-identical values across calls and across clones.
+ROCS does not, because its overlay keeps state between calls, and these
+paths refuse it. Against `pdist()` the agreement is per distance, to about
+1e-12, so distances that close can tie or order differently and change the
+tree.
 
 **The distance domain.** Single linkage needs finite distances; HDBSCAN
 needs finite, non-negative distances whose quotient by `alpha` is finite.
 Every pair is read at least once on every path. A comparison reports a value
-outside the domain as `RuntimeError` naming the two items (for `alpha`,
-naming `alpha`). A matrix's non-finite values never get that far: the metric
+outside the domain as `RuntimeError` naming the two items. A distance whose
+quotient by `alpha` is not finite is a `RuntimeError` naming `alpha`, from
+either input. A matrix's non-finite values never get that far: the metric
 gate refuses them first with a `ValueError`, as before, though a negative
 value in `hdbscan()`'s matrix is a `RuntimeError` naming the two items.
 A zero distance is always reported as +0.0.
@@ -257,6 +261,10 @@ same spanning tree, so the two forms always agree. Merge heights and
 a tied height now come in the tree's order, so children and cluster-size
 order within a tie level can differ, and an `n_clusters` cut that falls
 inside a tie level can return a different, equally valid partition.
+
+Since 5.20.0 an allocation failure in `hdbscan()` or `agglomerative()` raises
+`MemoryError` on every path, the matrix path included, where it raised
+`RuntimeError`.
 
 **Measured.** `benchmarks/streaming_mst.py` runs each path in its own
 process, on an Apple M3 Max (14 CPUs, 36 GiB of memory), over seeded library molecules, with the machine's
@@ -271,8 +279,8 @@ timing.
   7.41), and 12.11 to 2.10 GB at 20,000 with the default threads (41.9,
   6.92). The 5.19.0 figures include the heap algorithm's cluster distances
   and heap. Peak RSS does not depend on load. From a comparison at 20,000
-  molecules, single linkage held 0.29 GB (load 6.48 at the default threads,
-  6.92 with one thread) where the matrix path held 2.10 GB.
+  molecules, single linkage held 0.29 to 0.30 GB (load 6.48 at the default
+  threads, 6.92 with one thread) where the matrix path held 2.10 GB.
 - *Speed of matrix single linkage, 5.19.0 against 5.20.0.* The clustering
   step alone (the matrix build excluded) took 4.75 s to 0.268 s at 10,000
   with one thread, 3.84 s to 0.131 s at 10,000 with the default threads,

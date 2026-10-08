@@ -81,6 +81,27 @@ TEST(StreamingCoreDistancesTest, TheScheduleCoversEveryPairOnceWithDisjointRound
     EXPECT_TRUE(detail::core_block_schedule(0, 4).rounds.empty());
 }
 
+// The streaming parity test and the legacy HDBSCAN oracle both take their core
+// distances from this function, so only literals worked out by hand can catch a
+// change common to all of them. Items on a line at 0, 1, 3, 7 and 15; a core
+// distance is the distance to the (min_samples - 1)-th nearest neighbor.
+TEST(StreamingCoreDistancesTest, TheMatrixPassReproducesHandComputedValues) {
+    const std::vector<double> condensed = Positions({0.0, 1.0, 3.0, 7.0, 15.0});
+    const DenseStorage storage = MakeStorage(5, condensed);
+    const std::vector<std::pair<size_t, std::vector<double>>> expected{
+        {1, {0.0, 0.0, 0.0, 0.0, 0.0}},
+        {2, {1.0, 1.0, 2.0, 4.0, 8.0}},
+        {3, {3.0, 2.0, 3.0, 6.0, 12.0}},
+        {5, {15.0, 14.0, 12.0, 8.0, 15.0}}};
+    for (const auto& [min_samples, values] : expected) {
+        const detail::CoreDistances core =
+            detail::matrix_core_distances(storage, min_samples, 1, 0, "test");
+        EXPECT_EQ(core.values, values) << "min_samples=" << min_samples;
+        EXPECT_EQ(core.max_distance, min_samples == 1 ? 0.0 : 15.0)
+            << "min_samples=" << min_samples;
+    }
+}
+
 TEST(StreamingCoreDistancesTest, MatchesTheMatrixPassBitForBit) {
     struct Case {
         size_t n;

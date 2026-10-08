@@ -115,7 +115,11 @@ std::vector<HDBSCANMSTEdge> prim_kernel(size_t n, const PrimWeights& weights,
     alignas(64) std::atomic<size_t> next_position{0};
     alignas(64) StepShape shape;
     std::function<void(size_t)> step_body;
-    if (participants > 1) {
+    // The largest candidate list a step ever sees is n - 1, so below the cutoff
+    // no step can take the team path and every thread started here would be
+    // joined without having scanned anything. Starting them costs more than the
+    // whole pass at small item counts.
+    if (participants > 1 && n - 1 >= cutoff) {
         team = std::make_unique<StepTeam>(participants);
         step_body = [&](size_t participant) {
             BestCandidate local;

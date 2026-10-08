@@ -202,6 +202,31 @@ TEST(StreamingHDBSCANTest, AnOverflowingAlphaIsRefusedOnBothFormsAndRegimes) {
     }
 }
 
+// Only the pre-check on the largest distance can refuse this input. Every core
+// distance is zero, so at the second Prim step the one pair big enough to
+// overflow, (1, 2), is pruned before it is read and the kernel's own quotient
+// check never sees it.
+TEST(StreamingHDBSCANTest, AnOverflowingAlphaIsRefusedOnAPairThePruningSkips) {
+    const std::vector<double> condensed{0.0, 0.0, 1e9};  // (0, 1), (0, 2), (1, 2)
+    HDBSCANOptions options = Hdbscan(2, 2);
+    options.alpha = 1e-300;
+    const char* expected =
+        "hdbscan alpha=1e-300 is too small: a distance divided by alpha is not finite";
+    TableComparison comparison(3, condensed);
+    try {
+        hdbscan_cluster(comparison, options);
+        ADD_FAILURE() << "the comparison form accepted the alpha";
+    } catch (const std::invalid_argument& error) {
+        EXPECT_STREQ(error.what(), expected);
+    }
+    try {
+        hdbscan_cluster(MakeStorage(3, condensed), options);
+        ADD_FAILURE() << "the matrix form accepted the alpha";
+    } catch (const std::invalid_argument& error) {
+        EXPECT_STREQ(error.what(), expected);
+    }
+}
+
 TEST(StreamingHDBSCANTest, ANanAlphaIsRefusedBeforeAnyPairIsRead) {
     for (size_t min_samples : {1, 3}) {
         HDBSCANOptions options = Hdbscan(2, min_samples);
