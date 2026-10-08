@@ -37,7 +37,7 @@ they are not recoveries of the original intent.
 | D3c | Consensus clustering over an ensemble of partitions | shipped 5.17.0 |
 | D3d | Clustering CLI over oepdist output | shipped 5.18.0 |
 | D4a | Streaming threshold-graph clustering: Butina, DBSCAN, neighbor-order sphere exclusion from a comparison | shipped 5.19.0 |
-| D4b | Streaming MST clustering: HDBSCAN, single-linkage agglomerative | planned |
+| D4b | Streaming MST clustering: HDBSCAN, single-linkage agglomerative | shipped 5.20.0 |
 | D4c | Algorithms that cannot stream exactly: k-medoids, complete/average/weighted linkage | planned |
 
 Sub-project A was originally scoped as one piece covering seven metric families
@@ -203,9 +203,12 @@ D4 is three slices:
   graph's exact size is known before it is allocated, so a too-dense run is
   refused rather than attempted. The clustering engines are unchanged, and
   the result equals the matrix path's over a matrix filled through `Compare`.
-- **D4b (planned).** MST streaming for `hdbscan` and single-linkage
-  `agglomerative`, which need a minimum spanning tree rather than a threshold
-  graph.
+- **D4b (shipped 5.20.0).** MST streaming. `hdbscan` and single-linkage
+  `agglomerative` build a minimum spanning tree with Prim's algorithm on a
+  persistent thread team, from a matrix or straight from a comparison.
+  HDBSCAN's core distances come from one pass over every pair on a schedule
+  whose concurrent tiles share no item. Matrix single linkage moved onto the
+  same tree, so its merges at a tied height now follow the tree's order.
 - **D4c (planned).** The algorithms that cannot stream exactly: `k_medoids`
   and complete, average and weighted linkage.
 

@@ -104,8 +104,8 @@ The available algorithms and their key parameters:
 | `butina(items, threshold, ...)` | `DistanceMatrix`, comparison, or items | `threshold`, `reordering`, `max_graph_bytes` |
 | `sphere_exclusion(items, threshold, ...)` | `DistanceMatrix`, comparison, or items | `threshold`, `order`, `assignment` |
 | `dbscan(items, eps, ...)` | `DistanceMatrix`, comparison, or items | `eps`, `min_samples`, `max_graph_bytes` |
-| `hdbscan(dm, ...)` | `DistanceMatrix` | `min_cluster_size`, `min_samples`, `cluster_selection_method` |
-| `agglomerative(dm, ...)` | `DistanceMatrix` | `n_clusters`, `distance_threshold`, `linkage` |
+| `hdbscan(items, ...)` | `DistanceMatrix`, comparison, or items | `min_cluster_size`, `min_samples`, `cluster_selection_method` |
+| `agglomerative(items, ...)` | `DistanceMatrix`; comparison or items with `linkage="single"` | `n_clusters`, `distance_threshold`, `linkage` |
 | `k_medoids(dm, ...)` | `DistanceMatrix` | `n_clusters`, `init`, `initial_medoids` |
 | `bitbirch(fingerprints, ...)` | `oefp.OEFPBatch` | `threshold`, `branching_factor`, `merge_criterion` |
 | `murcko(mols, ...)` | `list[OEMolBase]` | `scaffold` |
@@ -196,6 +196,99 @@ process peak RSS of 2.10 GB, so the comparison form took about 2.3 times as
 long for about a seventh of the peak memory. At 100,000 molecules Butina from
 a comparison took 51.8 s with a process peak RSS of 1.08 GB, and did not build
 the 40 GB matrix the matrix form would.
+
+### HDBSCAN and single linkage without a matrix
+
+`hdbscan()` and `agglomerative(..., linkage="single")` also cluster straight
+from a comparison, holding no N x N matrix. Their first argument, `items`,
+takes the same three forms as `butina()`: a `SymmetricDistanceMatrix` (dense
+or memory-mapped), a prebuilt comparison, or a sequence of items with
+`comparison=`. `distance_matrix=` remains a keyword alias that accepts only a
+matrix.
+
+```python
+result = oecluster.hdbscan(mols, comparison="fingerprint", min_cluster_size=5)
+result = oecluster.agglomerative(oecluster.FingerprintComparison(mols),
+                                 linkage="single", n_clusters=50)
+```
+
+Both build a minimum spanning tree with Prim's algorithm. Complete, average
+and weighted linkage need a matrix, and `agglomerative()` refuses a
+comparison with any of them. What the comparison forms compare and hold
+(P = N(N-1)/2 pairs, q = `min_samples` - 1):
+
+| Path | `Compare` calls | Memory beyond the result |
+|---|---|---|
+| `hdbscan`, `min_samples` >= 2 | exactly P for the core distances, then at most P for the tree | N x q x 8 bytes during the core pass, a few numbers per item after |
+| `hdbscan`, `min_samples` = 1 | exactly P | a few numbers per item |
+| single linkage, comparison | exactly P | a few numbers per item |
+| single linkage, matrix | none | a few numbers per item, where 5.19.0 held about 12 GB at 20,000 items |
+
+The comparison forms also hold one clone of the comparison per worker
+thread, whose size depends on its family: a fingerprint clone is small, an
+MCS clone holds about 10.4 KB per molecule.
+
+**Threads.** `num_threads=0` uses every core for the core-distance pass and
+at most 8 threads for the spanning tree. That pass re-reads every remaining
+item at every step, so it is bound by memory traffic, and every step waits
+for its slowest thread: on a busy machine a smaller explicit `num_threads`
+can be faster.
+
+**Exactness.** The result equals the matrix form's over a matrix filled
+through the same `Compare`, for every `num_threads` and `chunk_size`,
+provided the comparison is repeatable: `Compare(i, j)` must return a
+bit-identical value on every call and every clone. Every built-in
+comparison but ROCS is, and these paths refuse ROCS. Against `pdist()` the
+agreement is per distance, to about 1e-12, so distances that close can tie
+or order differently and change the tree.
+
+**The distance domain.** Single linkage needs finite distances; HDBSCAN
+needs finite, non-negative distances whose quotient by `alpha` is finite.
+Every pair is read at least once on every path. A comparison reports a value
+outside the domain as `RuntimeError` naming the two items (for `alpha`,
+naming `alpha`). A matrix's non-finite values never get that far: the metric
+gate refuses them first with a `ValueError`, as before, though a negative
+value in `hdbscan()`'s matrix is a `RuntimeError` naming the two items.
+A zero distance is always reported as +0.0.
+
+**Single linkage at ties.** Since 5.20.0 the matrix form is built from the
+same spanning tree, so the two forms always agree. Merge heights and
+`distance_threshold` cuts are unchanged from earlier releases, but merges at
+a tied height now come in the tree's order, so children and cluster-size
+order within a tie level can differ, and an `n_clusters` cut that falls
+inside a tie level can return a different, equally valid partition.
+
+**Measured.** `benchmarks/streaming_mst.py` runs each path in its own
+process, on an Apple M3 Max (14 CPUs, 36 GiB of memory), over seeded library molecules, with the machine's
+1-minute load average recorded before every row. Loads were 6.4 to 7.4
+unless stated, so the machine was busy, and no run is a quiet-machine
+timing.
+
+- *Memory.* Matrix single linkage's process peak RSS fell from 5.19.0 to
+  5.20.0: 4.88 to 0.65 GB at 10,000 molecules with one thread (load 43.2 for
+  5.19.0, 6.40 for 5.20.0), 5.85 to 0.65 GB at 10,000 with the default
+  threads (43.4, 6.61), 8.91 to 2.09 GB at 20,000 with one thread (44.1,
+  7.41), and 12.11 to 2.10 GB at 20,000 with the default threads (41.9,
+  6.92). The 5.19.0 figures include the heap algorithm's cluster distances
+  and heap. Peak RSS does not depend on load. From a comparison at 20,000
+  molecules, single linkage held 0.29 GB (load 6.48 at the default threads,
+  6.92 with one thread) where the matrix path held 2.10 GB.
+- *Speed of matrix single linkage, 5.19.0 against 5.20.0.* The clustering
+  step alone (the matrix build excluded) took 4.75 s to 0.268 s at 10,000
+  with one thread, 3.84 s to 0.131 s at 10,000 with the default threads,
+  27.9 s to 1.40 s at 20,000 with one thread, and 22.1 s to 0.588 s at
+  20,000 with the default threads: 17.7x, 29.3x, 19.9x and 37.7x. Treat
+  these as upper bounds. The 5.19.0 runs were taken at a load of 41.9 to
+  44.1 and the 5.20.0 runs at 6.4 to 7.4, so the older runs had far less of
+  the machine to themselves. Correcting for core share suggests a speedup
+  nearer 6x to 11x; that correction is an estimate, not a measurement.
+- *100,000 molecules.* HDBSCAN and single linkage from a comparison, at one
+  thread and at the default threads, peaked at 1.04 to 1.07 GB of process
+  RSS (loads 7.26, 16.88, 51.70 and 66.90), where the condensed matrix alone
+  would need 40.0 GB and is never allocated. These four runs are evidence
+  that the size is feasible and what it costs in memory. Their wall times
+  were taken under loads above the benchmark's validity limit of 7 and make
+  no timing or scaling claim.
 
 ### k-medoids
 
