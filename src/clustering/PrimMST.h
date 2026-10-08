@@ -25,7 +25,7 @@ namespace OECluster::detail {
  * A matrix read costs nanoseconds, so a team step only pays for its
  * synchronization on a long candidate list. Set from the plan's measurement.
  */
-constexpr size_t PRIM_SERIAL_CUTOFF_MATRIX = 8192;
+constexpr size_t PRIM_SERIAL_CUTOFF_MATRIX = 4096;
 
 /**
  * @brief The default participant cap for the Prim pass.
