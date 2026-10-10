@@ -16,7 +16,6 @@
 #include <thread>
 #include <utility>
 
-#include "DistanceAccess.h"
 #include "StepTeam.h"
 #include "ThresholdGraph.h"
 #include "oecluster/ThreadPool.h"

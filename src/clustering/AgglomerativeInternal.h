@@ -10,7 +10,10 @@
 #ifndef OECLUSTER_CLUSTERING_AGGLOMERATIVE_INTERNAL_H
 #define OECLUSTER_CLUSTERING_AGGLOMERATIVE_INTERNAL_H
 
+#include <algorithm>
 #include <cstddef>
+#include <iterator>
+#include <utility>
 #include <vector>
 
 #include "oecluster/clustering/Agglomerative.h"
@@ -119,9 +122,6 @@ inline std::vector<ClusterLabel> labels_from_cut(
 
     return labels;
 }
-
-// Single linkage's merges are the spanning tree's edges in ascending order.
-// Within a tied height they come in the tree's order, which can differ from
 
 }  // namespace OECluster::detail
 

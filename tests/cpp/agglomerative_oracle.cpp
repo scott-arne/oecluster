@@ -6,6 +6,7 @@
 #include "agglomerative_oracle.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <limits>
 #include <queue>
@@ -74,7 +75,7 @@ MergeCandidate make_candidate(double distance, size_t left, size_t right) {
 }
 
 // Average linkage weighs by cluster sizes; Weighted uses unweighted 0.5 factor
-
+// per the reference definition.
 double update_linkage_distance(
     AgglomerativeLinkageMethod linkage,
     double left_distance,
@@ -97,7 +98,7 @@ double update_linkage_distance(
     throw std::invalid_argument("Unknown agglomerative linkage method");
 }
 
-
+// The checks that need no item count, in the order 5.19.0 applied them.
 void validate_arguments(const AgglomerativeOptions& options) {
     if (options.chunk_size == 0) {
         throw std::invalid_argument("Agglomerative chunk_size must be at least one");

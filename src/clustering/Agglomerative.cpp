@@ -9,11 +9,9 @@
 #include <cmath>
 #include <limits>
 #include <optional>
-#include <queue>
 #include <stdexcept>
 #include <vector>
 
-#include "AgglomerativeHeap.h"
 #include "AgglomerativeInternal.h"
 #include "AgglomerativeRowCache.h"
 #include "DistanceAccess.h"
@@ -27,72 +25,6 @@ namespace OECluster {
 namespace {
 
 constexpr const char* AGGLOMERATIVE_NAME = "agglomerative";
-
-struct MergeCandidate {
-    double distance = 0.0;
-    size_t left = 0;
-    size_t right = 0;
-};
-
-struct MergeCandidateGreater {
-    bool operator()(const MergeCandidate& lhs, const MergeCandidate& rhs) const {
-        if (lhs.distance != rhs.distance) {
-            return lhs.distance > rhs.distance;
-        }
-        if (lhs.left != rhs.left) {
-            return lhs.left > rhs.left;
-        }
-        return lhs.right > rhs.right;
-    }
-};
-
-double& cluster_distance(
-    std::vector<double>& distances,
-    size_t max_nodes,
-    size_t left,
-    size_t right) {
-    return distances[detail::condensed_index(max_nodes, left, right)];
-}
-
-double cluster_distance(
-    const std::vector<double>& distances,
-    size_t max_nodes,
-    size_t left,
-    size_t right) {
-    return distances[detail::condensed_index(max_nodes, left, right)];
-}
-
-// Canonical ordering (left < right) ensures consistent heap key structure for the priority queue.
-MergeCandidate make_candidate(double distance, size_t left, size_t right) {
-    if (right < left) {
-        std::swap(left, right);
-    }
-    return MergeCandidate{distance, left, right};
-}
-
-// Average linkage weighs by cluster sizes; Weighted uses unweighted 0.5 factor
-// per the reference definition.
-double update_linkage_distance(
-    AgglomerativeLinkageMethod linkage,
-    double left_distance,
-    double right_distance,
-    size_t left_size,
-    size_t right_size) {
-    switch (linkage) {
-        case AgglomerativeLinkageMethod::Single:
-            return std::min(left_distance, right_distance);
-        case AgglomerativeLinkageMethod::Complete:
-            return std::max(left_distance, right_distance);
-        case AgglomerativeLinkageMethod::Average:
-            return ((static_cast<double>(left_size) * left_distance) +
-                    (static_cast<double>(right_size) * right_distance)) /
-                   static_cast<double>(left_size + right_size);
-        case AgglomerativeLinkageMethod::Weighted:
-            return 0.5 * (left_distance + right_distance);
-    }
-
-    throw std::invalid_argument("Unknown agglomerative linkage method");
-}
 
 // The checks that need no item count, in the order 5.19.0 applied them.
 void validate_arguments(const AgglomerativeOptions& options) {
@@ -131,29 +63,6 @@ AgglomerativeResult small_result(size_t n) {
     Clusters members = labels_to_clusters(labels);
     return AgglomerativeResult(std::move(labels), std::move(members),
                                {}, {}, {}, {});
-}
-
-std::vector<double> initialize_cluster_distances(
-    const StorageBackend& storage,
-    size_t max_nodes,
-    size_t num_threads,
-    size_t chunk_size) {
-    const size_t n = storage.NumSamples();
-    std::vector<double> distances(max_nodes * (max_nodes - 1) / 2,
-                                  std::numeric_limits<double>::infinity());
-    const double* data = storage.Data();
-
-    ThreadPool pool(num_threads);
-    pool.ParallelFor(0, n, chunk_size, [&](size_t begin, size_t end) {
-        for (size_t i = begin; i < end; ++i) {
-            for (size_t j = i + 1; j < n; ++j) {
-                cluster_distance(distances, max_nodes, i, j) =
-                    detail::dense_distance(data, n, i, j);
-            }
-        }
-    });
-
-    return distances;
 }
 
 // Single linkage's merges are the spanning tree's edges in ascending order.
@@ -206,7 +115,7 @@ AgglomerativeResult agglomerative_cluster(
     const StorageBackend& storage,
     const AgglomerativeOptions& options) {
     if (options.linkage != AgglomerativeLinkageMethod::Single) {
-        return detail::agglomerative_heap(storage, options);
+        return detail::row_cache_result(storage, options);
     }
     validate_options(storage, options);
     const size_t n = storage.NumSamples();
@@ -243,116 +152,6 @@ AgglomerativeResult agglomerative_cluster(
 }
 
 namespace detail {
-
-AgglomerativeResult agglomerative_heap(
-    const StorageBackend& storage,
-    const AgglomerativeOptions& options) {
-    validate_options(storage, options);
-
-    const size_t n = storage.NumSamples();
-    if (n < 2) {
-        return small_result(n);
-    }
-
-    const bool cut_by_threshold = options.distance_threshold >= 0.0;
-    const size_t target_merges =
-        (!options.compute_full_tree && !cut_by_threshold)
-            ? n - options.n_clusters
-            : n - 1;
-
-    const size_t max_nodes = max_node_count(n);
-    std::vector<double> distances = initialize_cluster_distances(
-        storage,
-        max_nodes,
-        options.num_threads,
-        options.chunk_size);
-
-    std::vector<size_t> cluster_sizes(max_nodes, 0);
-    std::vector<bool> active(max_nodes, false);
-    for (size_t i = 0; i < n; ++i) {
-        cluster_sizes[i] = 1;
-        active[i] = true;
-    }
-
-    std::vector<MergeCandidate> heap_storage;
-    heap_storage.reserve(storage.NumPairs() + (storage.NumPairs() / 2));
-    for (size_t i = 0; i < n; ++i) {
-        for (size_t j = i + 1; j < n; ++j) {
-            heap_storage.push_back(
-                make_candidate(cluster_distance(distances, max_nodes, i, j), i, j));
-        }
-    }
-    std::priority_queue<
-        MergeCandidate,
-        std::vector<MergeCandidate>,
-        MergeCandidateGreater>
-        heap(MergeCandidateGreater{}, std::move(heap_storage));
-
-    std::vector<size_t> children_left;
-    std::vector<size_t> children_right;
-    std::vector<double> distances_out;
-    std::vector<size_t> merge_cluster_sizes;
-    children_left.reserve(n - 1);
-    children_right.reserve(n - 1);
-    distances_out.reserve(n - 1);
-    merge_cluster_sizes.reserve(n - 1);
-
-    size_t next_node = n;
-    size_t active_count = n;
-    while (active_count > 1 && distances_out.size() < target_merges) {
-        MergeCandidate best;
-        bool found = false;
-        while (!heap.empty()) {
-            best = heap.top();
-            heap.pop();
-            if (active[best.left] && active[best.right]) {
-                found = true;
-                break;
-            }
-        }
-        if (!found) {
-            throw std::runtime_error("Agglomerative clustering heap was exhausted");
-        }
-
-        const size_t left = best.left;
-        const size_t right = best.right;
-        const size_t merged_node = next_node++;
-        const size_t merged_size = cluster_sizes[left] + cluster_sizes[right];
-
-        children_left.push_back(left);
-        children_right.push_back(right);
-        distances_out.push_back(best.distance);
-        merge_cluster_sizes.push_back(merged_size);
-
-        active[left] = false;
-        active[right] = false;
-        active[merged_node] = true;
-        cluster_sizes[merged_node] = merged_size;
-        --active_count;
-
-        for (size_t node = 0; node < merged_node; ++node) {
-            if (!active[node]) {
-                continue;
-            }
-
-            const double updated_distance = update_linkage_distance(
-                options.linkage,
-                cluster_distance(distances, max_nodes, left, node),
-                cluster_distance(distances, max_nodes, right, node),
-                cluster_sizes[left],
-                cluster_sizes[right]);
-            cluster_distance(distances, max_nodes, merged_node, node) = updated_distance;
-            heap.push(make_candidate(updated_distance, merged_node, node));
-        }
-    }
-
-    std::vector<ClusterLabel> labels =
-        detail::labels_from_cut(children_left, children_right, distances_out, n, options);
-    Clusters members = labels_to_clusters(labels);
-    return AgglomerativeResult(std::move(labels), std::move(members),
-                               std::move(children_left), std::move(children_right),
-                               std::move(distances_out), std::move(merge_cluster_sizes));
-}
 
 AgglomerativeResult row_cache_result(
     const StorageBackend& storage,

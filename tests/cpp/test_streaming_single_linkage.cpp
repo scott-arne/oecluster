@@ -21,7 +21,7 @@
 #include "oecluster/comparisons/DescriptorComparison.h"
 #include "oecluster/comparisons/FingerprintComparison.h"
 
-#include "../../src/clustering/AgglomerativeHeap.h"
+#include "agglomerative_oracle.h"
 #include "diversity_test_support.h"
 #include "mst_test_support.h"
 #include "streaming_test_support.h"
@@ -89,7 +89,7 @@ TEST(StreamingSingleLinkageTest, MatchesTheHeapWhenNoMergesTie) {
             for (bool full : {true, false}) {
                 AgglomerativeOptions options = Single(n_clusters);
                 options.compute_full_tree = full;
-                const AgglomerativeResult expected = detail::agglomerative_heap(storage, options);
+                const AgglomerativeResult expected = agglomerative_oracle::heap_cluster(storage, options);
                 for (size_t threads : {1, 4}) {
                     options.num_threads = threads;
                     ExpectSame(agglomerative_cluster(storage, options), expected);
@@ -97,19 +97,19 @@ TEST(StreamingSingleLinkageTest, MatchesTheHeapWhenNoMergesTie) {
             }
         }
         const AgglomerativeOptions cut = Single(1, 1.4);
-        ExpectSame(agglomerative_cluster(storage, cut), detail::agglomerative_heap(storage, cut));
+        ExpectSame(agglomerative_cluster(storage, cut), agglomerative_oracle::heap_cluster(storage, cut));
     }
 }
 
 TEST(StreamingSingleLinkageTest, KeepsTheHeapsHeightsAndThresholdCutsWhenMergesTie) {
     for (const Fixture& fixture : Fixtures()) {
         const DenseStorage storage = MakeStorage(fixture.n, fixture.condensed);
-        const AgglomerativeResult heap = detail::agglomerative_heap(storage, Single(1));
+        const AgglomerativeResult heap = agglomerative_oracle::heap_cluster(storage, Single(1));
         const AgglomerativeResult tree = agglomerative_cluster(storage, Single(1));
         EXPECT_EQ(tree.Distances(), heap.Distances()) << "n=" << fixture.n;
         for (double threshold : {0.0, 0.2, 0.5, 2.0, 3.5}) {
             EXPECT_EQ(agglomerative_cluster(storage, Single(1, threshold)).Labels(),
-                      detail::agglomerative_heap(storage, Single(1, threshold)).Labels())
+                      agglomerative_oracle::heap_cluster(storage, Single(1, threshold)).Labels())
                 << "n=" << fixture.n << " threshold=" << threshold;
         }
     }
@@ -119,7 +119,7 @@ TEST(StreamingSingleLinkageTest, KeepsTheHeapsHeightsAndThresholdCutsWhenMergesT
 TEST(StreamingSingleLinkageTest, MergesAtATiedHeightComeInTheTreesOrder) {
     const std::vector<double> condensed{1.0, 2.0, 2.0, 1.0, 2.0, 1.0};
     const DenseStorage storage = MakeStorage(4, condensed);
-    const AgglomerativeResult heap = detail::agglomerative_heap(storage, Single(2));
+    const AgglomerativeResult heap = agglomerative_oracle::heap_cluster(storage, Single(2));
     EXPECT_EQ(heap.Members(), Clusters({{0, 1}, {2, 3}}));
     const AgglomerativeResult tree = agglomerative_cluster(storage, Single(2));
     EXPECT_EQ(tree.ChildrenLeft(), std::vector<size_t>({0, 2, 3}));
