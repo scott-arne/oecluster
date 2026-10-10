@@ -406,13 +406,21 @@ hundred items up, and the regression grows with N. A duplicate-heavy
 library is a different case and stays 2.6x to 11x faster than 5.20.0 at
 every size measured.
 
-What drives the cost is ties among the distances, not duplicate items: the
-all-equal fixture above holds no identical items at all, only items that are
-mutually equidistant. Deduplicating identical items removes one common source
-of ties and is worth doing for the partition as much as for the cost, but it
-does not rule the shape out. The reliable signal is the distance
-distribution: a matrix in which one value dominates is the case to avoid, and
-a continuous metric over distinct items will not produce it.
+What drives the cost is how often a merge invalidates the cached nearest
+neighbours. Each row remembers its nearest cluster; a merge forces a rescan
+of every row whose remembered cluster was one of the two just merged. When
+the cluster being built stays the nearest neighbour of most rows, nearly
+every row rescans at every step and the total becomes cubic.
+
+A matrix dominated by one distance value does that, which is what the
+all-equal row above measures -- and note it holds no identical items, only
+mutually equidistant ones, so deduplicating identical items does not rule the
+shape out. It is not the only arrangement that does: a geometry in which one
+growing cluster remains everyone's nearest neighbour has the same effect even
+with entirely distinct distances. There is no cheap test on the distance
+distribution that separates the two cases, so treat a large run whose
+distances are heavily concentrated, or whose structure is one growing core,
+as the case to watch, and measure before committing to a size.
 
 ### k-medoids
 

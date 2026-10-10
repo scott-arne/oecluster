@@ -32,11 +32,14 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   4,000 items, while a duplicate-heavy library stayed 2.6x to 11x faster.
   Those degenerate timings are indicative only, several having been taken
   at a 1-minute load above the benchmark's validity limit of 7.
-  What drives it is ties among the distances rather than duplicate items:
-  the all-equal fixture holds no identical items, only mutually equidistant
-  ones. Deduplicating identical items removes one common source of ties but
-  does not rule the shape out; a matrix in which one distance value
-  dominates is the case to avoid.
+  What drives it is how often a merge invalidates the cached nearest
+  neighbours: when the cluster being built stays the nearest neighbour of
+  most rows, nearly every row rescans at every step. A matrix dominated by
+  one distance value does that, and so can a geometry with entirely
+  distinct distances in which one growing cluster remains everyone's
+  nearest. Deduplicating identical items does not rule the shape out -- the
+  all-equal fixture holds no identical items, only mutually equidistant
+  ones.
 - A non-finite distance in the input matrix raises `std::runtime_error`
   naming the two items from complete, average and weighted linkage, where
   5.20.0 produced an unspecified result. Single linkage has behaved this
