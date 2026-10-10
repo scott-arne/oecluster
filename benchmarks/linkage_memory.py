@@ -190,8 +190,12 @@ def benchmark(args: argparse.Namespace) -> list[dict[str, Any]]:
                     # The heaviest run's load, not the first run's. Consumers
                     # gate timing validity on this, and a median drawn partly
                     # from a busy run must not be stamped with a quiet one.
-                    row["load_average"] = max(
-                        (r["load_average"] for r in runs), key=lambda la: la[0])
+                    # load_average() is None where os.getloadavg is absent, so
+                    # keep None rather than indexing it.
+                    loads = [r["load_average"] for r in runs
+                             if r["load_average"] is not None]
+                    row["load_average"] = (max(loads, key=lambda la: la[0])
+                                           if loads else None)
                     rows.append(row)
     return rows
 
