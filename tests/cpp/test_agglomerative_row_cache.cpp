@@ -472,7 +472,13 @@ TEST(AgglomerativeRowCacheTest, DISABLED_MeasureMergeStepSerialCutoff) {
         }
         // One row in every `rescan_period` rescans, so a whole step rescans
         // RESCANS_PER_STEP rows whatever R is -- the shape the counters show.
-        const size_t rescan_period = std::max<size_t>(1, r / RESCANS_PER_STEP);
+        // Round the period UP. Rounding down makes it smaller than
+        // r / RESCANS_PER_STEP, so the step rescans six rows rather than five
+        // at every R. The table recorded in the plan was taken before this
+        // correction; since the rescan is the parallelisable part, those six
+        // biased the measurement slightly toward the team path.
+        const size_t rescan_period =
+            std::max<size_t>(1, (r + RESCANS_PER_STEP - 1) / RESCANS_PER_STEP);
         auto run = [&](size_t begin, size_t end, double& best) {
             for (size_t p = begin; p < end; ++p) {
                 const size_t x = live[p];
