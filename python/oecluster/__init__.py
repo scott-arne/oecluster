@@ -3324,11 +3324,12 @@ def agglomerative(items=_MISSING, *, distance_matrix=_MISSING, n_clusters=2,
     :param compute_full_tree: Whether to request full-tree computation.
     :param comparison: Comparison name, such as ``"fingerprint"``, when
         ``items`` is a sequence of items. Its options go in ``**kwargs``.
-    :param num_threads: Worker threads. 0 selects every core for complete,
-        average and weighted linkage, and at most 8 for single linkage's
-        spanning-tree pass, which is bound by memory traffic and waits for
-        its slowest thread at every step, so on a busy machine a smaller
-        explicit value can be faster.
+    :param num_threads: Worker threads. 0 selects at most 8 for every
+        linkage: both the merge loop and single linkage's spanning-tree pass
+        are bound by memory traffic and wait for their slowest thread at
+        every step, so a wider team mostly adds barrier cost. A larger
+        explicit value is honored, and on a busy machine a smaller one can be
+        faster.
     :param chunk_size: Rows per work unit when complete, average and weighted
         linkage materialize their distances; single linkage does not read it.
     :param allow_nonmetric: Cluster anyway when the distances are known not to

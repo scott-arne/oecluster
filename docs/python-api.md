@@ -323,7 +323,8 @@ contracts differently could differ in the last bit.
 **Memory, measured in C++ alone.** A standalone harness built from this
 branch calls both paths from one binary, under one compiler and one
 allocator, on a Red Hat Enterprise Linux 8.10 server (128 cores, 1.5 TB) at
-`num_threads=16`, which is not what a default call resolves to. Peak RSS
+`num_threads=16`, which is not what a default call resolves to: `0` gives at
+most 8 threads, and a larger explicit value like this one is honored. Peak RSS
 does not depend on machine load, so these figures stand regardless of what
 else was running; for the record the 1-minute load was 19.4 to 24.8 against
 128 cores. Each cell is the process peak RSS and its multiple of the input
