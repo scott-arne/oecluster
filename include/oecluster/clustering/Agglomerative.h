@@ -36,7 +36,7 @@ struct AgglomerativeOptions {
     double distance_threshold = -1.0;             ///< Stop merging above this distance; negative means use n_clusters instead.
     AgglomerativeLinkageMethod linkage = AgglomerativeLinkageMethod::Average;  ///< Linkage update method.
     bool compute_full_tree = true;                ///< Build full dendrogram even when stopping early.
-    size_t num_threads = 0;                       ///< Worker threads; 0 resolves to at most 8, which a larger explicit value overrides.
+    size_t num_threads = 0;                       ///< Worker threads; 0 gives every core to the passes over the input and at most 8 to the step loop.
     size_t chunk_size = 4096;                     ///< Rows per chunk of the initial passes over the distances; clamped to the row count.
 };
 

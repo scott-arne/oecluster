@@ -323,8 +323,9 @@ contracts differently could differ in the last bit.
 **Memory, measured in C++ alone.** A standalone harness built from this
 branch calls both paths from one binary, under one compiler and one
 allocator, on a Red Hat Enterprise Linux 8.10 server (128 cores, 1.5 TB) at
-`num_threads=16`, which is not what a default call resolves to: `0` gives at
-most 8 threads, and a larger explicit value like this one is honored. Peak RSS
+`num_threads=16`, which is not what a default call resolves to: `0` gives the
+merge loop at most 8 threads. A larger explicit value like this one is
+honored. Peak RSS
 does not depend on machine load, so these figures stand regardless of what
 else was running; for the record the 1-minute load was 19.4 to 24.8 against
 128 cores. Each cell is the process peak RSS and its multiple of the input
@@ -403,9 +404,15 @@ several of them above the benchmark's validity limit of 7. A synthetic
 all-equal matrix is the only fixture that regresses, it does so from a few
 hundred items up, and the regression grows with N. A duplicate-heavy
 library is a different case and stays 2.6x to 11x faster than 5.20.0 at
-every size measured. Deduplicating identical items before clustering avoids
-the degenerate shape altogether, and is worth doing for the partition as
-much as for the cost.
+every size measured.
+
+What drives the cost is ties among the distances, not duplicate items: the
+all-equal fixture above holds no identical items at all, only items that are
+mutually equidistant. Deduplicating identical items removes one common source
+of ties and is worth doing for the partition as much as for the cost, but it
+does not rule the shape out. The reliable signal is the distance
+distribution: a matrix in which one value dominates is the case to avoid, and
+a continuous metric over distinct items will not produce it.
 
 ### k-medoids
 

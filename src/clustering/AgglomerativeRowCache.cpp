@@ -301,8 +301,16 @@ LinkageTree agglomerative_row_cache(const StorageBackend& storage,
                 best[x] = RowBest{row_distance, row_partner};
                 ++out.rescans;
                 out.rescanned_slots += live_size - 1;
+            // A rescan that accepts no candidate leaves the row with NO_SLOT,
+            // because row_precedes rejects a NaN and a derived NaN is
+            // reachable from finite mixed-sign extremes: one average update of
+            // +DBL_MAX against -DBL_MAX is inf + (-inf). Such input is outside
+            // the bit-identity contract, but it must not index slot_node out
+            // of bounds. NO_NODE loses every comparison, so the merged
+            // candidate is judged on its distance alone.
             } else if (row_precedes(merged, kept_node, best[x].distance,
-                                    slot_node[cached])) {
+                                    cached == NO_SLOT ? NO_NODE
+                                                      : slot_node[cached])) {
                 // The cached partner survived, so the cache is still valid for
                 // every old candidate and only the merged cluster can beat it.
                 best[x] = RowBest{merged, kept};

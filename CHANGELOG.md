@@ -32,7 +32,11 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   4,000 items, while a duplicate-heavy library stayed 2.6x to 11x faster.
   Those degenerate timings are indicative only, several having been taken
   at a 1-minute load above the benchmark's validity limit of 7.
-  Deduplicating identical items avoids the degenerate shape.
+  What drives it is ties among the distances rather than duplicate items:
+  the all-equal fixture holds no identical items, only mutually equidistant
+  ones. Deduplicating identical items removes one common source of ties but
+  does not rule the shape out; a matrix in which one distance value
+  dominates is the case to avoid.
 - A non-finite distance in the input matrix raises `std::runtime_error`
   naming the two items from complete, average and weighted linkage, where
   5.20.0 produced an unspecified result. Single linkage has behaved this
