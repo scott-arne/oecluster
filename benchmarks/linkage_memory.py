@@ -118,13 +118,18 @@ def measure(spec: dict[str, Any]) -> dict[str, Any]:
     :param spec: ``linkage``, ``n_items``, ``fixture``, ``seed``,
         ``num_threads`` and ``n_clusters``.
     :returns: The spec plus ``seconds`` (the clustering call only),
-        ``rss_peak_bytes``, ``matrix_bytes``, ``n_clusters_found`` and
+        ``rss_inputs_bytes`` (peak before the call), ``rss_peak_bytes``,
+        ``matrix_bytes``, ``n_clusters_found`` and
         ``load_average``.
     """
     import oecluster
 
     dm = build_matrix(spec["fixture"], spec["n_items"], spec["seed"])
     gc.collect()
+    # Read before the timed call: peak RSS is a high-water mark, and building
+    # the matrix already peaks at the source array plus the native storage, so
+    # the end-to-end peak alone cannot show what the kernel itself adds.
+    rss_inputs = peak_rss_bytes()
     load = load_average()
 
     started = time.perf_counter()
@@ -133,6 +138,7 @@ def measure(spec: dict[str, Any]) -> dict[str, Any]:
         num_threads=spec["num_threads"])
     seconds = time.perf_counter() - started
     return {**spec, "seconds": seconds,
+            "rss_inputs_bytes": rss_inputs,
             "rss_peak_bytes": peak_rss_bytes(),
             "matrix_bytes": matrix_bytes(spec["n_items"]),
             "n_clusters_found": result.num_clusters,
@@ -171,8 +177,21 @@ def benchmark(args: argparse.Namespace) -> list[dict[str, Any]]:
                     row = dict(runs[0])
                     row["seconds"] = statistics.median(
                         r["seconds"] for r in runs)
-                    row["rss_peak_bytes"] = max(
-                        r["rss_peak_bytes"] for r in runs)
+                    # Both readings come from the same run, the one whose
+                    # growth past the build peak is largest. Maxing them
+                    # separately would pair a peak from one run with a larger
+                    # inputs reading from another and report a difference no
+                    # run measured -- always an understatement, in a number
+                    # the memory criterion is graded on.
+                    worst = max(runs, key=lambda r: r["rss_peak_bytes"]
+                                - r["rss_inputs_bytes"])
+                    row["rss_peak_bytes"] = worst["rss_peak_bytes"]
+                    row["rss_inputs_bytes"] = worst["rss_inputs_bytes"]
+                    # The heaviest run's load, not the first run's. Consumers
+                    # gate timing validity on this, and a median drawn partly
+                    # from a busy run must not be stamped with a quiet one.
+                    row["load_average"] = max(
+                        (r["load_average"] for r in runs), key=lambda la: la[0])
                     rows.append(row)
     return rows
 
