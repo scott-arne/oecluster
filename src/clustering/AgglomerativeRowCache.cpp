@@ -85,6 +85,26 @@ Candidate make_candidate(double distance, size_t slot_a, size_t node_a,
     return Candidate{distance, node_a, node_b, slot_a, slot_b};
 }
 
+/**
+ * @brief The node id in a slot, or NO_NODE when the slot is the empty sentinel.
+ *
+ * A rescan that accepts no candidate leaves the row's partner at NO_SLOT,
+ * because row_precedes() rejects a NaN and a derived NaN is reachable from
+ * finite mixed-sign extremes: one average-linkage update of +DBL_MAX against
+ * -DBL_MAX is inf + (-inf). Such input is outside the bit-identity contract,
+ * but the sentinel must never index slot_node. Every read of that table by a
+ * cached partner goes through here, so the hazard is closed once rather than
+ * at each call site. NO_NODE loses every comparison, so an emptied row cannot
+ * win one.
+ *
+ * :param slot_node: Slot-to-node table.
+ * :param slot: A slot index, possibly NO_SLOT.
+ * :returns: The node id, or NO_NODE for NO_SLOT.
+ */
+size_t node_of_slot(const std::vector<size_t>& slot_node, size_t slot) {
+    return slot == NO_SLOT ? NO_NODE : slot_node[slot];
+}
+
 // Within one row the canonical key collapses to (distance, partner node id).
 // Row x compares (min(nx, ny), max(nx, ny)) across partners y with nx fixed:
 // a partner below nx wins on the left element, a partner above nx loses on it,
@@ -242,7 +262,7 @@ LinkageTree agglomerative_row_cache(const StorageBackend& storage,
     for (size_t x = 0; x < n; ++x) {
         const Candidate candidate =
             make_candidate(best[x].distance, x, slot_node[x], best[x].partner_slot,
-                           slot_node[best[x].partner_slot]);
+                           node_of_slot(slot_node, best[x].partner_slot));
         if (precedes(candidate, current)) {
             current = candidate;
         }
@@ -301,16 +321,8 @@ LinkageTree agglomerative_row_cache(const StorageBackend& storage,
                 best[x] = RowBest{row_distance, row_partner};
                 ++out.rescans;
                 out.rescanned_slots += live_size - 1;
-            // A rescan that accepts no candidate leaves the row with NO_SLOT,
-            // because row_precedes rejects a NaN and a derived NaN is
-            // reachable from finite mixed-sign extremes: one average update of
-            // +DBL_MAX against -DBL_MAX is inf + (-inf). Such input is outside
-            // the bit-identity contract, but it must not index slot_node out
-            // of bounds. NO_NODE loses every comparison, so the merged
-            // candidate is judged on its distance alone.
             } else if (row_precedes(merged, kept_node, best[x].distance,
-                                    cached == NO_SLOT ? NO_NODE
-                                                      : slot_node[cached])) {
+                                    node_of_slot(slot_node, cached))) {
                 // The cached partner survived, so the cache is still valid for
                 // every old candidate and only the merged cluster can beat it.
                 best[x] = RowBest{merged, kept};
@@ -324,7 +336,7 @@ LinkageTree agglomerative_row_cache(const StorageBackend& storage,
             }
             const Candidate candidate =
                 make_candidate(best[x].distance, x, node, best[x].partner_slot,
-                               slot_node[best[x].partner_slot]);
+                               node_of_slot(slot_node, best[x].partner_slot));
             if (precedes(candidate, out.global)) {
                 out.global = candidate;
             }
@@ -371,6 +383,16 @@ LinkageTree agglomerative_row_cache(const StorageBackend& storage,
         // Snapshot both children before anything is mutated: the update of the
         // kept row weighs by the sizes they had, and the kept slot is about to
         // take a new id and the combined size.
+        // Every live row can be emptied at once only if a derived NaN has
+        // reached all of them, which needs an input outside the contract
+        // (see node_of_slot). Fail with a sentence rather than merging a
+        // sentinel slot, which is the one path the helper cannot close.
+        if (current.left_slot == NO_SLOT || current.right_slot == NO_SLOT) {
+            throw std::runtime_error(
+                "agglomerative: no pair of clusters has a comparable distance, "
+                "which a derived NaN can cause on an input mixing distances "
+                "near the magnitude limits of its type");
+        }
         slot_of_low_node = current.left_slot;
         slot_of_high_node = current.right_slot;
         size_low = cluster_size[slot_of_low_node];
@@ -431,7 +453,7 @@ LinkageTree agglomerative_row_cache(const StorageBackend& storage,
         if (combined.kept_partner != NO_SLOT) {
             const Candidate kept_candidate = make_candidate(
                 combined.kept_distance, kept, kept_node, combined.kept_partner,
-                slot_node[combined.kept_partner]);
+                node_of_slot(slot_node, combined.kept_partner));
             if (precedes(kept_candidate, current)) {
                 current = kept_candidate;
             }
