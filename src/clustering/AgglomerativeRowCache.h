@@ -23,6 +23,15 @@ namespace OECluster::detail {
  *
  * A step touches one row of the condensed workspace per active slot, so a team
  * only pays for its barrier on a long row list. Set from the plan's measurement.
+ *
+ * Measured at ROW_CACHE_DEFAULT_PARTICIPANTS participants, which is what a
+ * default call resolves to, and treat it as a floor rather than a crossover
+ * that holds everywhere: barrier cost grows with the participant count, so a
+ * wider team's true crossover is higher. The guards compare the row count
+ * against this constant alone, so an explicit large num_threads takes the team
+ * path at row counts where it has not been shown to pay. The stake is
+ * sub-millisecond -- at most a few hundred steps differing by around a
+ * microsecond -- which is why it is recorded rather than scaled.
  */
 constexpr size_t ROW_CACHE_SERIAL_CUTOFF = 256;
 
