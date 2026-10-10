@@ -64,6 +64,8 @@ add_executable(oecluster_tests
     cpp/test_streaming_core_distances.cpp
     cpp/test_streaming_hdbscan.cpp
     cpp/test_streaming_single_linkage.cpp
+    cpp/agglomerative_oracle.cpp
+    cpp/test_agglomerative_row_cache.cpp
 )
 
 target_link_libraries(oecluster_tests

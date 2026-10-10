@@ -1,32 +1,42 @@
 /**
- * @file Agglomerative.cpp
- * @brief Hierarchical agglomerative clustering implementation.
+ * @file agglomerative_oracle.cpp
+ * @brief The 5.20.0 heap linkage algorithm, frozen as a differential oracle.
  */
 
-#include "oecluster/clustering/Agglomerative.h"
+#include "agglomerative_oracle.h"
 
 #include <algorithm>
-#include <cmath>
+#include <cstddef>
 #include <limits>
-#include <optional>
 #include <queue>
 #include <stdexcept>
+#include <string>
+#include <utility>
 #include <vector>
 
-#include "AgglomerativeHeap.h"
-#include "AgglomerativeInternal.h"
-#include "AgglomerativeRowCache.h"
-#include "DistanceAccess.h"
-#include "DiversityValidation.h"
-#include "HDBSCANLinkage.h"
-#include "PrimMST.h"
 #include "oecluster/ThreadPool.h"
 
-namespace OECluster {
+#include "../../src/clustering/AgglomerativeInternal.h"
+#include "../../src/clustering/DistanceAccess.h"
 
+namespace agglomerative_oracle {
 namespace {
 
-constexpr const char* AGGLOMERATIVE_NAME = "agglomerative";
+using OECluster::AgglomerativeLinkageMethod;
+using OECluster::AgglomerativeOptions;
+using OECluster::AgglomerativeResult;
+using OECluster::ClusterLabel;
+using OECluster::Clusters;
+using OECluster::labels_to_clusters;
+using OECluster::StorageBackend;
+using OECluster::ThreadPool;
+using OECluster::detail::labels_from_cut;
+using OECluster::detail::max_node_count;
+
+// The frozen code below is a verbatim lift from OECluster's anonymous
+// namespace, where `detail::` resolved to OECluster::detail. The alias keeps
+// it verbatim rather than rewriting every call site.
+namespace detail = OECluster::detail;
 
 struct MergeCandidate {
     double distance = 0.0;
@@ -46,16 +56,9 @@ struct MergeCandidateGreater {
     }
 };
 
+
 double& cluster_distance(
     std::vector<double>& distances,
-    size_t max_nodes,
-    size_t left,
-    size_t right) {
-    return distances[detail::condensed_index(max_nodes, left, right)];
-}
-
-double cluster_distance(
-    const std::vector<double>& distances,
     size_t max_nodes,
     size_t left,
     size_t right) {
@@ -71,7 +74,7 @@ MergeCandidate make_candidate(double distance, size_t left, size_t right) {
 }
 
 // Average linkage weighs by cluster sizes; Weighted uses unweighted 0.5 factor
-// per the reference definition.
+
 double update_linkage_distance(
     AgglomerativeLinkageMethod linkage,
     double left_distance,
@@ -94,7 +97,7 @@ double update_linkage_distance(
     throw std::invalid_argument("Unknown agglomerative linkage method");
 }
 
-// The checks that need no item count, in the order 5.19.0 applied them.
+
 void validate_arguments(const AgglomerativeOptions& options) {
     if (options.chunk_size == 0) {
         throw std::invalid_argument("Agglomerative chunk_size must be at least one");
@@ -156,95 +159,9 @@ std::vector<double> initialize_cluster_distances(
     return distances;
 }
 
-// Single linkage's merges are the spanning tree's edges in ascending order.
-// Within a tied height they come in the tree's order, which can differ from
-// the heap's; the heights, and so every distance_threshold cut, cannot.
-AgglomerativeResult single_linkage_result(std::vector<detail::HDBSCANMSTEdge> mst,
-                                          size_t n,
-                                          const AgglomerativeOptions& options) {
-    const std::vector<detail::HDBSCANLinkageNode> linkage =
-        detail::make_hdbscan_single_linkage(std::move(mst), n);
-    const bool cut_by_threshold = options.distance_threshold >= 0.0;
-    const size_t merges =
-        (!options.compute_full_tree && !cut_by_threshold) ? n - options.n_clusters
-                                                          : n - 1;
-
-    std::vector<size_t> children_left;
-    std::vector<size_t> children_right;
-    std::vector<double> distances;
-    std::vector<size_t> cluster_sizes;
-    children_left.reserve(merges);
-    children_right.reserve(merges);
-    distances.reserve(merges);
-    cluster_sizes.reserve(merges);
-    for (size_t merge = 0; merge < merges; ++merge) {
-        const detail::HDBSCANLinkageNode& node = linkage[merge];
-        children_left.push_back(std::min(node.left_node, node.right_node));
-        children_right.push_back(std::max(node.left_node, node.right_node));
-        distances.push_back(node.value);
-        cluster_sizes.push_back(node.cluster_size);
-    }
-
-    std::vector<ClusterLabel> labels =
-        detail::labels_from_cut(children_left, children_right, distances, n, options);
-    Clusters members = labels_to_clusters(labels);
-    return AgglomerativeResult(std::move(labels), std::move(members),
-                               std::move(children_left), std::move(children_right),
-                               std::move(distances), std::move(cluster_sizes));
-}
-
-detail::PrimOptions prim_options(const AgglomerativeOptions& options) {
-    detail::PrimOptions prim;
-    prim.num_threads = options.num_threads;
-    prim.caller = AGGLOMERATIVE_NAME;
-    return prim;
-}
-
 }  // namespace
 
-AgglomerativeResult agglomerative_cluster(
-    const StorageBackend& storage,
-    const AgglomerativeOptions& options) {
-    if (options.linkage != AgglomerativeLinkageMethod::Single) {
-        return detail::agglomerative_heap(storage, options);
-    }
-    validate_options(storage, options);
-    const size_t n = storage.NumSamples();
-    if (n < 2) {
-        return small_result(n);
-    }
-    return single_linkage_result(
-        detail::prim_mst(storage, detail::PrimWeights(), prim_options(options)), n,
-        options);
-}
-
-AgglomerativeResult agglomerative_cluster(
-    PairwiseComparison& comparison,
-    const AgglomerativeOptions& options) {
-    validate_arguments(options);
-    if (options.linkage != AgglomerativeLinkageMethod::Single) {
-        throw std::invalid_argument(
-            "Agglomerative clustering from a comparison supports only single "
-            "linkage; complete, average and weighted linkage need a matrix from "
-            "pdist()");
-    }
-    detail::refuse_unrepeatable(comparison, AGGLOMERATIVE_NAME, "cluster",
-                                "the tree would depend on the order the pairs "
-                                "are scored");
-    detail::validate_distance_facts(comparison, AGGLOMERATIVE_NAME);
-    const size_t n = comparison.Size();
-    validate_cluster_bound(options, n);
-    if (n < 2) {
-        return small_result(n);
-    }
-    return single_linkage_result(
-        detail::prim_mst(comparison, detail::PrimWeights(), prim_options(options)), n,
-        options);
-}
-
-namespace detail {
-
-AgglomerativeResult agglomerative_heap(
+AgglomerativeResult heap_cluster(
     const StorageBackend& storage,
     const AgglomerativeOptions& options) {
     validate_options(storage, options);
@@ -347,47 +264,11 @@ AgglomerativeResult agglomerative_heap(
     }
 
     std::vector<ClusterLabel> labels =
-        detail::labels_from_cut(children_left, children_right, distances_out, n, options);
+        labels_from_cut(children_left, children_right, distances_out, n, options);
     Clusters members = labels_to_clusters(labels);
     return AgglomerativeResult(std::move(labels), std::move(members),
                                std::move(children_left), std::move(children_right),
                                std::move(distances_out), std::move(merge_cluster_sizes));
 }
 
-AgglomerativeResult row_cache_result(
-    const StorageBackend& storage,
-    const AgglomerativeOptions& options,
-    std::optional<size_t> serial_cutoff,
-    RowCacheStats* stats) {
-    validate_options(storage, options);
-    const size_t n = storage.NumSamples();
-    if (n < 2) {
-        return small_result(n);
-    }
-
-    const bool cut_by_threshold = options.distance_threshold >= 0.0;
-    RowCacheOptions kernel;
-    kernel.linkage = options.linkage;
-    kernel.target_merges = (!options.compute_full_tree && !cut_by_threshold)
-                               ? n - options.n_clusters
-                               : n - 1;
-    kernel.num_threads = options.num_threads;
-    kernel.chunk_size = options.chunk_size;
-    kernel.serial_cutoff = serial_cutoff;
-    kernel.stats = stats;
-
-    LinkageTree tree = agglomerative_row_cache(storage, kernel);
-    std::vector<ClusterLabel> labels =
-        labels_from_cut(tree.children_left, tree.children_right, tree.distances, n,
-                        options);
-    Clusters members = labels_to_clusters(labels);
-    return AgglomerativeResult(std::move(labels), std::move(members),
-                               std::move(tree.children_left),
-                               std::move(tree.children_right),
-                               std::move(tree.distances),
-                               std::move(tree.cluster_sizes));
-}
-
-}  // namespace detail
-
-}  // namespace OECluster
+}  // namespace agglomerative_oracle
