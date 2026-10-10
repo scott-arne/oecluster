@@ -296,6 +296,9 @@ TEST(AgglomerativeRowCacheTest, MatchesTheHeapBitwise) {
     for (const std::string& mismatch : gMismatches) {
         ADD_FAILURE() << mismatch;
     }
+    // The accumulator is shared with the next test, which would otherwise
+    // re-report every failure this one just reported and look broken too.
+    gMismatches.clear();
     std::printf("[default config] matched %zu of %zu\n", gMatched, gTotal);
 }
 
@@ -335,6 +338,7 @@ TEST(AgglomerativeRowCacheTest, MatchesTheHeapUnderEveryConfiguration) {
     for (size_t k = 0; k < gMismatches.size(); ++k) {
         ADD_FAILURE() << gMismatches[k];
     }
+    gMismatches.clear();
     std::printf("[config matrix] matched %zu of %zu\n", gMatched - matched_before,
                 gTotal - before);
 }

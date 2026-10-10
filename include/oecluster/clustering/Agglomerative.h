@@ -37,7 +37,7 @@ struct AgglomerativeOptions {
     AgglomerativeLinkageMethod linkage = AgglomerativeLinkageMethod::Average;  ///< Linkage update method.
     bool compute_full_tree = true;                ///< Build full dendrogram even when stopping early.
     size_t num_threads = 0;                       ///< Worker threads; 0 auto-detects hardware concurrency.
-    size_t chunk_size = 4096;                     ///< Rows per chunk of the initial distance copy; clamped to the row count.
+    size_t chunk_size = 4096;                     ///< Rows per chunk of the initial passes over the distances; clamped to the row count.
 };
 
 /**
@@ -82,8 +82,10 @@ private:
  * the matrix; its merges at a tied height come in the tree's order. Complete,
  * average and weighted linkage are built from one condensed matrix over the
  * live clusters, about one copy of the input beyond it. Every linkage requires
- * finite input distances; a zero is read as +0.0. A derived cluster distance
- * that overflows to +inf is clustered normally, not refused.
+ * finite input distances; for single linkage a zero is read as +0.0, while the
+ * other three copy the input's zero through, so a -0.0 input can reach
+ * Distances(). A derived cluster distance that overflows to +inf is clustered
+ * normally, not refused.
  *
  * :param storage: Complete pairwise distance storage.
  * :param options: Agglomerative clustering options; single linkage does not

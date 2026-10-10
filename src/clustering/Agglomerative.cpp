@@ -7,7 +7,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <vector>
@@ -18,7 +17,6 @@
 #include "DiversityValidation.h"
 #include "HDBSCANLinkage.h"
 #include "PrimMST.h"
-#include "oecluster/ThreadPool.h"
 
 namespace OECluster {
 
@@ -67,7 +65,7 @@ AgglomerativeResult small_result(size_t n) {
 
 // Single linkage's merges are the spanning tree's edges in ascending order.
 // Within a tied height they come in the tree's order, which can differ from
-// the heap's; the heights, and so every distance_threshold cut, cannot.
+// 5.20.0's heap; the heights, and so every distance_threshold cut, cannot.
 AgglomerativeResult single_linkage_result(std::vector<detail::HDBSCANMSTEdge> mst,
                                           size_t n,
                                           const AgglomerativeOptions& options) {

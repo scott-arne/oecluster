@@ -254,8 +254,8 @@ LinkageTree agglomerative_row_cache(const StorageBackend& storage,
     tree.cluster_sizes.reserve(n - 1);
 
     // Captured by the step body and rewritten before each Run().
-    size_t slot_low = 0;
-    size_t slot_high = 0;
+    size_t slot_of_low_node = 0;
+    size_t slot_of_high_node = 0;
     size_t size_low = 0;
     size_t size_high = 0;
     size_t kept = 0;
@@ -266,14 +266,14 @@ LinkageTree agglomerative_row_cache(const StorageBackend& storage,
     auto step = [&](size_t begin, size_t end, StepResult& out) {
         for (size_t p = begin; p < end; ++p) {
             const size_t x = live[p];
-            const double distance_low = work[index(x, slot_low)];
-            const double distance_high = work[index(x, slot_high)];
+            const double distance_low = work[index(x, slot_of_low_node)];
+            const double distance_high = work[index(x, slot_of_high_node)];
             const double merged = update_linkage_distance(
                 linkage, distance_low, distance_high, size_low, size_high);
             work[index(x, kept)] = merged;
 
             const size_t cached = best[x].partner_slot;
-            if (cached == slot_low || cached == slot_high) {
+            if (cached == slot_of_low_node || cached == slot_of_high_node) {
                 // The cached minimum left with a child. Every update returns a
                 // value in [min(d_low, d_high), max(d_low, d_high)], so the
                 // exact merged distance is at least the old row minimum and
@@ -363,13 +363,13 @@ LinkageTree agglomerative_row_cache(const StorageBackend& storage,
         // Snapshot both children before anything is mutated: the update of the
         // kept row weighs by the sizes they had, and the kept slot is about to
         // take a new id and the combined size.
-        slot_low = current.left_slot;
-        slot_high = current.right_slot;
-        size_low = cluster_size[slot_low];
-        size_high = cluster_size[slot_high];
+        slot_of_low_node = current.left_slot;
+        slot_of_high_node = current.right_slot;
+        size_low = cluster_size[slot_of_low_node];
+        size_high = cluster_size[slot_of_high_node];
         const size_t merged_size = size_low + size_high;
-        kept = std::min(slot_low, slot_high);
-        const size_t retired = std::max(slot_low, slot_high);
+        kept = std::min(slot_of_low_node, slot_of_high_node);
+        const size_t retired = std::max(slot_of_low_node, slot_of_high_node);
 
         tree.children_left.push_back(current.left);
         tree.children_right.push_back(current.right);

@@ -2,6 +2,50 @@
 
 This file starts at 5.0.0; earlier releases are not recorded here.
 
+## [5.21.0] - 2026-10-10
+
+### Changed
+
+- Complete, average and weighted linkage are built from one condensed
+  matrix over the live clusters, in place of the `2N-1` node distance table
+  and the all-pairs heap. Peak memory falls from about 14x the input matrix
+  to about 2x for the algorithm itself, and from about 15x to about 2.4x
+  end to end through Python, with the results unchanged for a finite,
+  non-negative input. Measured in C++ alone on a Red Hat Enterprise Linux
+  8.10 server (128 cores, 1.5 TB of memory) at `num_threads=16`, which is
+  not what a default call resolves to, with both paths in one binary: at
+  20,000 items process peak RSS falls from 22,402 MB (14.00x the matrix)
+  to 3,205 MB (2.00x), and at 10,000 items from 5,603 MB (14.01x) to
+  804 MB (2.01x). What the algorithm itself allocates is 1.00x the input
+  matrix against the heap's 13.00x. End to end through Python on an Apple
+  M3 Max (14 CPUs, 36 GiB of memory), where the interpreter, numpy and a
+  different allocator add to the total, 10,000 items fall from
+  6,137-6,142 MB (15.35-15.36x) to 947-950 MB (2.37x). Peak RSS does not
+  depend on machine load. Wall time at 20,000 items on that server falls
+  from 316 / 271 / 248 s to 5.57 / 5.34 / 5.12 s for complete / average /
+  weighted; both sides ran at 16 threads and the old path's merge loop is
+  serial where the new one's is not, so part of that ratio is parallelism
+  rather than algorithm. A matrix whose distances are largely equal is the
+  one case that regresses, because every merge then invalidates every row's
+  cached nearest neighbour and the cost becomes cubic: a synthetic
+  all-equal matrix measured 1.98x to 5.31x slower than 5.20.0 from 500 to
+  4,000 items, while a duplicate-heavy library stayed 2.6x to 11x faster.
+  Those degenerate timings are indicative only, several having been taken
+  at a 1-minute load above the benchmark's validity limit of 7.
+  Deduplicating identical items avoids the degenerate shape.
+- A non-finite distance in the input matrix raises `std::runtime_error`
+  naming the two items from complete, average and weighted linkage, where
+  5.20.0 produced an unspecified result. Single linkage has behaved this
+  way since 5.20.0. This is a C++ API change only: Python callers are
+  unaffected, because the metric gate refuses a non-finite matrix with a
+  `ValueError` before the native call, as it already did.
+
+### Fixed
+
+- A `chunk_size` large enough to overflow the chunk-count arithmetic no
+  longer skips the initial copy. In 5.20.0 `chunk_size = SIZE_MAX` returned
+  a tree built from an all-infinity table.
+
 ## [5.20.0] - 2026-10-08
 
 ### Added

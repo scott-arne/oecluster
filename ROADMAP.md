@@ -38,7 +38,8 @@ they are not recoveries of the original intent.
 | D3d | Clustering CLI over oepdist output | shipped 5.18.0 |
 | D4a | Streaming threshold-graph clustering: Butina, DBSCAN, neighbor-order sphere exclusion from a comparison | shipped 5.19.0 |
 | D4b | Streaming MST clustering: HDBSCAN, single-linkage agglomerative | shipped 5.20.0 |
-| D4c | Algorithms that cannot stream exactly: k-medoids, complete/average/weighted linkage | planned |
+| D4c-1 | Row-cache complete/average/weighted linkage: the same dendrogram at about 2x the matrix | shipped 5.21.0 |
+| D4c-2 | `k_medoids` from a comparison | planned |
 
 Sub-project A was originally scoped as one piece covering seven metric families
 across five input shapes. It was decomposed into A1, A2 and A3 during
@@ -194,7 +195,8 @@ began: sphere exclusion's input and permutation orders, `jarvis_patrick` and
 since `pdist(..., output=path)` writes a memory-mapped matrix that every
 algorithm taking a matrix accepts. What remained was never materializing the
 matrix at all. The remaining algorithms divide by the structure they need, so
-D4 is three slices:
+D4 is three slices, the last of which split in two once it was clear that the
+linkage half was a memory problem rather than a streaming one:
 
 - **D4a (shipped 5.19.0).** Threshold-graph streaming. `butina`, `dbscan` and
   `sphere_exclusion(order="neighbors")` need no pairwise structure beyond the
@@ -209,8 +211,18 @@ D4 is three slices:
   HDBSCAN's core distances come from one pass over every pair on a schedule
   whose concurrent tiles share no item. Matrix single linkage moved onto the
   same tree, so its merges at a tied height now follow the tree's order.
-- **D4c (planned).** The algorithms that cannot stream exactly: `k_medoids`
-  and complete, average and weighted linkage.
+- **D4c-1 (shipped 5.21.0).** Complete, average and weighted linkage cannot
+  stream -- every merge rewrites a whole row of cluster distances, so the
+  structure has to persist -- but they do not need the structure 5.20.0 kept.
+  They are now built from one condensed workspace over the clusters still
+  alive, in place of the `2N-1` node distance table and the all-pairs heap,
+  which holds about 2x the input matrix where the old path held about 14x.
+  Each row caches its nearest neighbour and is rescanned only when that
+  partner is merged away. The dendrogram is unchanged for a finite,
+  non-negative input, verified bitwise against the 5.20.0 heap kept as a test
+  oracle.
+- **D4c-2 (planned).** `k_medoids` from a comparison, the one algorithm left
+  that cannot stream exactly.
 
 ## Deferred defect backlog
 

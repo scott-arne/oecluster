@@ -214,7 +214,9 @@ result = oecluster.agglomerative(oecluster.FingerprintComparison(mols),
 
 Both build a minimum spanning tree with Prim's algorithm. Complete, average
 and weighted linkage need a matrix, and `agglomerative()` refuses a
-comparison with any of them. What the comparison forms compare and hold
+comparison with any of them; what they cost from a matrix is in
+[Complete, average and weighted linkage](#complete-average-and-weighted-linkage)
+below. What the comparison forms compare and hold
 (P = N(N-1)/2 pairs, q = `min_samples` - 1):
 
 | Path | `Compare` calls | Memory beyond the result |
@@ -245,15 +247,20 @@ paths refuse it. Against `pdist()` the agreement is per distance, to about
 1e-12, so distances that close can tie or order differently and change the
 tree.
 
-**The distance domain.** Single linkage needs finite distances; HDBSCAN
-needs finite, non-negative distances whose quotient by `alpha` is finite.
-Every pair is read at least once on every path. A comparison reports a value
-outside the domain as `RuntimeError` naming the two items. A distance whose
-quotient by `alpha` is not finite is a `RuntimeError` naming `alpha`, from
-either input. A matrix's non-finite values never get that far: the metric
-gate refuses them first with a `ValueError`, as before, though a negative
-value in `hdbscan()`'s matrix is a `RuntimeError` naming the two items.
-A zero distance is always reported as +0.0.
+**The distance domain.** Every linkage needs finite distances -- since
+5.21.0 complete, average and weighted linkage do too, not single linkage
+alone -- and HDBSCAN needs finite, non-negative distances whose quotient by
+`alpha` is finite. Every pair is read at least once on every path. A
+comparison reports a value outside the domain as `RuntimeError` naming the
+two items. A distance whose quotient by `alpha` is not finite is a
+`RuntimeError` naming `alpha`, from either input. A matrix's non-finite
+values never get that far: the metric gate refuses them first with a
+`ValueError`, as before, though a negative value in `hdbscan()`'s matrix is
+a `RuntimeError` naming the two items.
+
+Single linkage and HDBSCAN report a zero distance as +0.0. Complete, average
+and weighted linkage copy the input's zero through unchanged, as in 5.20.0,
+so a -0.0 in the matrix can reach `distances`.
 
 **Single linkage at ties.** Since 5.20.0 the matrix form is built from the
 same spanning tree, so the two forms always agree. Merge heights and
@@ -297,6 +304,107 @@ timing.
   that the size is feasible and what it costs in memory. Their wall times
   were taken under loads above the benchmark's validity limit of 7 and make
   no timing or scaling claim.
+
+### Complete, average and weighted linkage
+
+These three need a matrix. Since 5.21.0 they are built from one condensed
+workspace over the clusters still alive, where 5.20.0 held a `2N-1` node
+distance table and an all-pairs heap beside it. The dendrogram is unchanged
+for a finite, non-negative input: across 20,304 differential cases spanning
+fixtures, linkages, cut modes, thread counts and chunk sizes, 18,792 match
+the 5.20.0 heap -- kept as the test oracle in
+`tests/cpp/agglomerative_oracle.cpp` -- bit for bit in children, merge
+heights and cluster sizes, and the remaining 1,512 pin the overflowing
+`chunk_size` that 5.20.0 itself got wrong. That identity holds for a given
+build and is not a cross-compiler guarantee: average linkage's
+`(nl*dl + nr*dr)` can contract to a fused multiply-add, and a build that
+contracts differently could differ in the last bit.
+
+**Memory, measured in C++ alone.** A standalone harness built from this
+branch calls both paths from one binary, under one compiler and one
+allocator, on a Red Hat Enterprise Linux 8.10 server (128 cores, 1.5 TB) at
+`num_threads=16`, which is not what a default call resolves to. Peak RSS
+does not depend on machine load, so these figures stand regardless of what
+else was running; for the record the 1-minute load was 19.4 to 24.8 against
+128 cores. Each cell is the process peak RSS and its multiple of the input
+condensed matrix, over a random fixture; all three linkages agree to the
+digits shown.
+
+| N | 5.20.0 heap | 5.21.0 row cache | vs 5.20.0 |
+|---:|---|---|---:|
+| 2,000 | 227 MB, 14.18x matrix | 35 MB, 2.22x | 0.156x |
+| 5,000 | 1,403 MB, 14.03x | 204 MB, 2.04x | 0.145x |
+| 10,000 | 5,603 MB, 14.01x | 804 MB, 2.01x | 0.144x |
+| 20,000 | 22,402 MB, 14.00x | 3,205 MB, 2.00x | 0.143x |
+
+Subtracting the reading taken immediately before the clustering call, where
+the input storage is all that is resident, gives what the algorithm itself
+allocates: **1.00x the input matrix for the row cache against 13.00x for
+the heap**, which is the single working copy the design calls for. Size a
+container from the resident totals in the table -- 2.00x against 14.00x --
+not from the difference between the two columns.
+
+**Memory, end to end through Python.** `benchmarks/linkage_memory.py` on an
+Apple M3 Max (14 CPUs, 36 GiB of memory), each measurement in its own
+process. At 10,000 items the process peak RSS falls from 6,137-6,142 MB
+(15.35-15.36x the matrix) to 947-950 MB (2.37x). Those are larger than the
+C++ figures for the same size -- by about 535 MB on the 5.20.0 side and
+about 145 MB on the 5.21.0 side -- and the excess is the interpreter and
+numpy (66 MB before any matrix exists), a different allocator, and the
+harness's own matrix-build phase. It is not the algorithm. Quote the C++
+figures for what the algorithm costs and these for what a Python caller
+observes, and do not mix the two.
+
+At 20,000 items the end-to-end peak is 3,496-3,498 MB, 2.19x rather than
+2.00x, and the extra is the build phase rather than the clustering. A
+staged probe read 66 MB at baseline, 1,680 MB once the condensed numpy
+source existed, and 3,496.5 MB while `from_condensed` held the native
+storage beside that source -- which is already the high-water mark.
+Releasing the source leaves the mark where it is, and clustering then adds
+0.3 MB. Building the matrix without a transient second copy of it is
+therefore what sets the ceiling for a 5.21.0 caller.
+
+**A memory-mapped input now helps these linkages.** The input is read once,
+in index order, into the workspace, after which its pages are clean and the
+kernel is free to evict them. 5.20.0's node table and heap were dirty
+anonymous memory no matter how the input was stored. No figure is published
+for that path: both tables above were measured over dense storage.
+
+**Speed.** On the same Linux server, wall time at 20,000 items falls from
+316 / 271 / 248 s to 5.57 / 5.34 / 5.12 s for complete / average /
+weighted. Read that as measured under those settings rather than as an
+unconditional speedup: both sides ran at `num_threads=16`, and the 5.20.0
+oracle's merge loop is serial where the row cache's is not, so part of the
+ratio is parallelism rather than algorithm. End to end through Python on
+the M3 Max, at 10,000 items, the clustering call falls from 24.93 / 35.20 /
+29.55 s to 0.80 / 0.78 / 0.73 s for average / complete / weighted, every
+one of those six runs taken at a 1-minute load of 3.07 to 5.26.
+
+**The degenerate class.** The row cache keeps each row's nearest neighbour
+and rescans only the rows whose cached partner has just been merged away.
+When the distances are largely equal every row names the same cluster, so
+each merge invalidates every row and the cost becomes cubic: over an
+all-equal matrix an instrumented count of rescanned slots holds at
+0.333 x N^3 from N = 200 to 8,000, and being a count rather than a timing
+it is immune to machine load.
+Measured against 5.20.0 on the real build, with average linkage on the
+Apple M3 Max, where below 1.0 the row cache is the faster of the two:
+
+| fixture | N=500 | N=2,000 | N=4,000 |
+|---|---:|---:|---:|
+| random (control) | 0.127x | 0.069x | 0.032x |
+| duplicates | 0.384x | 0.085x | 0.088x |
+| blocked, 20 blocks | 0.330x | 0.572x | 0.881x |
+| all-equal | 1.98x | 3.23x | 5.31x |
+
+Indicative only: the 1-minute loads behind these rows run from 4.2 to 18.8,
+several of them above the benchmark's validity limit of 7. A synthetic
+all-equal matrix is the only fixture that regresses, it does so from a few
+hundred items up, and the regression grows with N. A duplicate-heavy
+library is a different case and stays 2.6x to 11x faster than 5.20.0 at
+every size measured. Deduplicating identical items before clustering avoids
+the degenerate shape altogether, and is worth doing for the partition as
+much as for the cost.
 
 ### k-medoids
 

@@ -27,8 +27,8 @@ from typing import Any, ClassVar, NamedTuple
 
 import numpy as np
 
-__version__ = "5.20.0"
-__version_info__ = (5, 20, 0)
+__version__ = "5.21.0"
+__version_info__ = (5, 21, 0)
 
 
 _OPENEYE_COMPAT_PRELOAD_PATHS: list[str] = []
@@ -3358,9 +3358,12 @@ def agglomerative(items=_MISSING, *, distance_matrix=_MISSING, n_clusters=2,
         comparison's declared facts refuse it; the input is a ROCS
         comparison; or normalizing the items dropped one.
     :raises MemoryError: If memory runs out while clustering.
-    :raises RuntimeError: If single linkage reads a NaN or infinite distance
-        from a comparison, naming the two items. A matrix's non-finite
-        distances are refused earlier, as a ValueError.
+    :raises RuntimeError: If a NaN or infinite distance is read from a
+        comparison, naming the two items; single linkage is the only linkage
+        a comparison reaches. A matrix's non-finite distances are refused
+        earlier, as a ValueError, on every linkage. Since 5.21.0 the native
+        matrix overload raises for them in complete, average and weighted
+        linkage too, but no Python caller gets past the gate to see it.
     """
     items = _metric_input(items, distance_matrix, comparison, kwargs,
                           "agglomerative")
