@@ -24,7 +24,7 @@ namespace OECluster::detail {
  * A step touches one row of the condensed workspace per active slot, so a team
  * only pays for its barrier on a long row list. Set from the plan's measurement.
  */
-constexpr size_t ROW_CACHE_SERIAL_CUTOFF = 512;
+constexpr size_t ROW_CACHE_SERIAL_CUTOFF = 256;
 
 /**
  * @brief The default participant cap for a merge step.
