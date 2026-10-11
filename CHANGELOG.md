@@ -25,21 +25,24 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   from 316 / 271 / 248 s to 5.57 / 5.34 / 5.12 s for complete / average /
   weighted; both sides ran at 16 threads and the old path's merge loop is
   serial where the new one's is not, so part of that ratio is parallelism
-  rather than algorithm. A matrix whose distances are largely equal is the
-  one case that regresses, because every merge then invalidates every row's
-  cached nearest neighbour and the cost becomes cubic: a synthetic
-  all-equal matrix measured 1.98x to 5.31x slower than 5.20.0 from 500 to
-  4,000 items, while a duplicate-heavy library stayed 2.6x to 11x faster.
-  Those degenerate timings are indicative only, several having been taken
-  at a 1-minute load above the benchmark's validity limit of 7.
-  What drives it is how often a merge invalidates the cached nearest
-  neighbours: when the cluster being built stays the nearest neighbour of
-  most rows, nearly every row rescans at every step. A matrix dominated by
-  one distance value does that, and so can a geometry with entirely
-  distinct distances in which one growing cluster remains everyone's
-  nearest. Deduplicating identical items does not rule the shape out -- the
-  all-equal fixture holds no identical items, only mutually equidistant
-  ones.
+  rather than algorithm. One shape regresses, and the cost there is cubic:
+  a synthetic all-equal matrix measured 1.98x to 5.31x slower than 5.20.0
+  from 500 to 4,000 items, while a duplicate-heavy library stayed 2.6x to
+  11x faster. Those degenerate timings are indicative only, several having
+  been taken at a 1-minute load above the benchmark's validity limit of 7.
+  What governs the cost is how often a merge invalidates the cached nearest
+  neighbours: each row remembers its nearest cluster and must rescan when
+  that cluster is merged away, so when the cluster being built stays the
+  nearest neighbour of most rows, nearly every row rescans at every step.
+  No simple property of the distances decides this. Equal distances can
+  produce it, as the all-equal fixture does, but concentration alone does
+  not: a few tight, well-separated groups share one inter-group distance
+  across most of the matrix and stay fast, because each row's nearest stays
+  inside its own group. A geometry with entirely distinct distances in
+  which one growing cluster remains everyone's nearest produces it without
+  any repeated value at all. Deduplicating identical items does not rule
+  the shape out either -- the all-equal fixture holds no identical items,
+  only mutually equidistant ones. Measure before committing to a large run.
 - A non-finite distance in the input matrix raises `std::runtime_error`
   naming the two items from complete, average and weighted linkage, where
   5.20.0 produced an unspecified result. Single linkage has behaved this
