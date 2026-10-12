@@ -61,7 +61,15 @@ public:
     double Cost() const { return cost_; }
     /** @brief Swap iterations performed. */
     size_t NumIterations() const { return num_iterations_; }
-    /** @brief False when the iteration cap was reached before convergence. */
+    /**
+     * @brief False when the iteration cap was reached, or a comparison form
+     * spent its ``max_comparisons`` budget, before convergence.
+     *
+     * The two are told apart by the iteration count: a budget stop returns
+     * ``NumIterations() < max_iterations`` where the cap returns the two
+     * equal. The storage overload has no budget, so there it is always the
+     * cap.
+     */
     bool Converged() const { return converged_; }
 
     std::string Method() const override { return "k_medoids"; }
@@ -128,9 +136,10 @@ KMedoidsResult k_medoids_cluster(const StorageBackend& storage,
  * Scores pairs on demand instead of reading a matrix, which trades memory for
  * repeated work: the result is bit-identical to clustering a matrix filled
  * through the same ``Compare``, but a run costs one pass over every pair per
- * BUILD step and per swap iteration, plus about ``n_clusters`` passes for the
- * verification that ends it, where the storage overload pays one pass in
- * total. Peak auxiliary memory is ``O(n_clusters * item count)``.
+ * BUILD step and per swap iteration -- including the final scan that finds
+ * no improving swap and ends the loop -- plus about ``n_clusters`` passes for
+ * the verification, where the storage overload pays one pass in total. Peak
+ * auxiliary memory is ``O(n_clusters * item count)``.
  *
  * ``options.max_comparisons`` bounds that work. The unavoidable part -- the
  * initializer, the medoid column cache, and one verification pass, or

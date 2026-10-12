@@ -39,7 +39,7 @@ they are not recoveries of the original intent.
 | D4a | Streaming threshold-graph clustering: Butina, DBSCAN, neighbor-order sphere exclusion from a comparison | shipped 5.19.0 |
 | D4b | Streaming MST clustering: HDBSCAN, single-linkage agglomerative | shipped 5.20.0 |
 | D4c-1 | Row-cache complete/average/weighted linkage: the same dendrogram at about 2x the matrix | shipped 5.21.0 |
-| D4c-2 | `k_medoids` from a comparison | planned |
+| D4c-2 | `k_medoids` from a comparison | shipped 5.22.0 |
 
 Sub-project A was originally scoped as one piece covering seven metric families
 across five input shapes. It was decomposed into A1, A2 and A3 during
@@ -221,8 +221,20 @@ linkage half was a memory problem rather than a streaming one:
   partner is merged away. The dendrogram is unchanged for a finite,
   non-negative input, verified bitwise against the 5.20.0 heap kept as a test
   oracle.
-- **D4c-2 (planned).** `k_medoids` from a comparison, the one algorithm left
-  that cannot stream exactly.
+- **D4c-2 (shipped 5.22.0).** `k_medoids` from a comparison. PAM streams
+  exactly: a comparison form returns what the matrix form returns over a
+  matrix filled through the same `Compare`, verified bitwise on labels,
+  medoids, cost and iteration count. What streaming costs is passes rather
+  than exactness -- one over every pair per BUILD step, one per swap
+  iteration including the final scan that finds no improving swap, and
+  `n_clusters` more for the verification, where the matrix form reads each of
+  those pairs from storage instead.
+  `max_comparisons` prices the passes no run can avoid before any pair is
+  scored, refuses a run that cannot afford them, and stops the swap loop
+  between passes once the budget is spent. With that, every clustering entry
+  point in the library runs without a materialized matrix except complete,
+  average and weighted linkage, which rewrite a whole row of cluster
+  distances at every merge and so keep the structure D4c-1 shrank.
 
 ## Deferred defect backlog
 

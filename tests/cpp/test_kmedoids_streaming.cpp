@@ -89,7 +89,9 @@ TEST(KMedoidsBudgetTest, UnavoidableWorkSaturatesOnEitherProduct) {
 
     // Sweeps product: one init sweep plus one verification sweep is twice a
     // sweep that already fills most of the range. Unguarded it would wrap to
-    // roughly 2^64 - 2^33 and read as a run worth attempting.
+    // roughly 2^64 - 2^33, which is still far past any budget and so would
+    // still be refused -- but on a figure the refusal message would quote
+    // wrongly. The Explicit case below is the one that wraps into free work.
     EXPECT_EQ(detail::unavoidable_comparisons(widest, 1, KMedoidsInit::FarthestFirst),
               LIMIT);
 

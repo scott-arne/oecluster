@@ -430,7 +430,9 @@ distribution separates these, measure before committing to a large run.
 member of the input rather than a synthetic average, and chooses them by
 minimizing the sum of every item's distance to its assigned center. It is the
 algorithm to reach for when the cluster count is a requirement and the centers
-have to be orderable compounds.
+have to be orderable compounds. This section describes the matrix form; since
+5.22.0 it also clusters straight from a comparison, which is in
+[k-medoids without a matrix](#k-medoids-without-a-matrix) below.
 
 ```python
 result = oecluster.k_medoids(dm, n_clusters=10)
@@ -472,6 +474,181 @@ minimizes the distance sum within its own cluster, so
 cluster tie on within-cluster distance sum, both are minimizers and the two
 functions may name different ones; the medoid the result reports is still a
 minimizer.
+
+### k-medoids without a matrix
+
+Since 5.22.0 `k_medoids()` also clusters straight from a comparison, holding
+no N x N matrix. Its first argument, `items`, takes the same three forms as
+`butina()`: a `SymmetricDistanceMatrix` (dense or memory-mapped), a prebuilt
+comparison, or a sequence of items with `comparison=`. `distance_matrix=`
+remains a keyword alias that accepts only a matrix, so `k_medoids(dm, ...)`
+and `k_medoids(distance_matrix=dm, ...)` behave as before.
+
+```python
+result = oecluster.k_medoids(mols, comparison="fingerprint", n_clusters=20)
+result = oecluster.k_medoids(oecluster.FingerprintComparison(mols),
+                             n_clusters=20, init="farthest_first")
+```
+
+**Exactness.** The result equals the matrix form's over a matrix filled
+through the same `Compare`, for every `num_threads` and `chunk_size`,
+provided the comparison is repeatable: the test suite checks the two forms
+bitwise on labels, medoids, cost and iteration count. ROCS is refused here as
+on the other comparison paths, because its overlay keeps state between calls;
+cluster a ROCS matrix from `pdist()` instead. Against `pdist()`, whose
+batched kernels agree with `Compare` only to about 1e-12, a cost that close
+to a tie can be decided differently.
+
+**What it costs: passes, not exactness.** A converged run makes
+`init passes + (iterations + 1) + n_clusters` passes over every pair, each of
+`N * (N - 1)` comparisons, plus `N * n_clusters` for the one-off medoid
+column fill. `init="build"` spends `n_clusters` passes initializing where
+`init="farthest_first"` spends one, and the trailing `n_clusters` passes are
+the verification that makes `converged` a guarantee. The matrix form reads
+each of those pairs from storage instead, which is why streaming is slower in
+time and far smaller in memory -- it is not a speedup, and it is not meant to
+be one.
+
+**Memory, measured.** `benchmarks/kmedoids_streaming.py` at
+`--n-clusters 20`, one subprocess per cell, on an Apple M3 Max (14 CPUs,
+36 GiB of memory) over seeded library molecules. Both paths returned the same
+cost, the same iteration count and the same medoids in all six pairs. Peak
+RSS does not depend on machine load, so these figures stand as measured; each
+row is a single measurement.
+
+| Items | `init` | Streamed peak RSS | Matrix peak RSS | Ratio | Condensed matrix |
+| ---: | --- | ---: | ---: | ---: | ---: |
+| 2,000 | `build` | 125 MB | 141 MB | 1.13x | 16 MB |
+| 2,000 | `farthest_first` | 125 MB | 143 MB | 1.15x | 16 MB |
+| 5,000 | `build` | 155 MB | 267 MB | 1.72x | 100 MB |
+| 5,000 | `farthest_first` | 154 MB | 267 MB | 1.73x | 100 MB |
+| 10,000 | `build` | 198 MB | 651 MB | 3.28x | 400 MB |
+| 10,000 | `farthest_first` | 203 MB | 645 MB | 3.17x | 400 MB |
+
+That ratio is a *process* ratio, not a data-structure ratio, and it
+understates the difference. Both paths carry about 110 MB of interpreter,
+oecluster and OpenEye plus an n-dependent cost of building the molecules
+(about 88 MB at 10,000 items) that is already spent before clustering starts.
+What the clustering call itself adds is 0.0 to 4.6 MB streamed against 2.4 to
+52.7 MB from a matrix, and the structure the streamed path keeps in place of
+the matrix is a medoid column cache of `N * n_clusters * 8` bytes: 1.6 MB at
+10,000 items and `n_clusters=20`, against the condensed matrix's 400 MB. Both
+paths build that cache, so it sits beside the matrix on the matrix form and in
+place of it when streaming: a matrix run holds `N * n_clusters * 8` bytes more
+than it did before 5.22.0, 16 MB at 100,000 items with `n_clusters=20`, which
+is 0.04% of the condensed matrix at that size.
+
+**Speed.** Across that grid a streamed run took 11.3x to 24.2x the matrix
+path's clustering time, narrowing as the item count grows. Both sides were
+timed in one window at a 1-minute load average of 12.1 to 30.2, against the
+benchmark's validity limit of 7, so the ratio is indicative and neither
+side's absolute time is published. A streamed fingerprint comparison costs
+roughly 20 to 25 times a matrix read.
+
+**What a pass costs.** A single-threaded in-kernel `Compare` on a 2048-bit
+fingerprint was measured at **0.0356 microseconds**, flat to within 2% over a
+4x range of item count. Multiplying a comparison count by that rate gives
+*comparison work*, which is not elapsed time: the default chunking spreads a
+pass over several workers, so a run finishes in a fraction of its work
+figure.
+
+| Case | Comparisons | Comparison work | Predicted wall time, default chunking |
+| --- | ---: | ---: | ---: |
+| 10,000 items, `n_clusters=20`, `init="build"` | 4.0e9 | about 2.4 minutes | about 1 minute (work / 2.44) |
+| 45,000 items, `n_clusters=20`, `init="farthest_first"` | 4.2e10 | about 25 minutes | about 2.3 minutes (work / 10.99) |
+| 45,000 items, `n_clusters=20`, `init="build"` | 8.1e10 | about 48 minutes | about 4.4 minutes (work / 10.99) |
+
+Read the third column as work and the fourth as a prediction. **No figure in
+this table is a measured wall clock.** The fourth column divides the work by
+the parallelism the default `chunk_size` delivers at that size (below); that
+model reproduces every row of the measured grid to within 3.3% and the
+10,000-item row to 0.7%, which is why it is quoted, but it remains a model.
+At 45,000 items the work figure is about 11x the predicted elapsed time, so
+"48 minutes" describes the work and not the clock. These three are also
+*floors* -- the initializer, the column fill, and the verification pass, which
+costs `n_clusters` passes of its own rather than one -- and a real run adds a
+pass per swap iteration on top, plus the final scan that finds no improving
+swap and ends the loop, which is the `+ 1` in the formula above. With `init="build"` that floor is about
+`2 * n_clusters` passes: `n_clusters` to initialize and `n_clusters` to
+verify.
+
+So: exact streaming PAM is a tens-of-minutes-of-*work* operation at the sizes
+this feature exists for, which the default chunking is predicted to run in
+single-digit minutes of wall time at 45,000 items.
+
+**`max_comparisons`.** It bounds that work, counting one pass over every pair
+as `N * (N - 1)`. `None` applies the native default of 300,000,000,000, which
+is about 2.97 hours of single-threaded comparison work at the measured rate.
+That rate is a property of the comparison, not of k-medoids: a SiteHopper
+`Compare` costs around 0.9 s, where the same count is geological, so a caller
+whose comparison is far dearer or far cheaper should set a value rather than
+inherit this one. `max_comparisons` is refused with a matrix, which leaves no
+pair to score.
+
+The passes no run can avoid -- the initializer, the column fill and one
+verification pass -- are priced before any pair is scored, and a call that
+cannot afford them is refused with a `ValueError` that prices both the
+initializer asked for and, under `init="build"`, the farthest-first floor
+beside it:
+
+```
+k_medoids needs at least 399998000000 pair comparisons before any swap, over
+the max_comparisons limit of 300000000000. init=farthest_first would need
+209999900000 instead, which fits within this limit. Raise max_comparisons, or
+cluster a matrix from pdist() instead
+```
+
+That is the default budget at 100,000 items with `n_clusters=20`, where the
+floors are 4.0e11 for `build` and 2.1e11 for `farthest_first`.
+`init="farthest_first"` is the lever the message names: it spends one
+initializing pass against BUILD's `n_clusters`, so the floors are
+`n_clusters + 1` passes against `2 * n_clusters`, and switching therefore
+saves under half however large `n_clusters` grows -- the verification pass
+underneath is what neither initializer can shed.
+
+Within the budget the swap loop stops between passes once it is spent, which
+reads as `converged=False` with `n_iterations` *below* `max_iterations`; the
+iteration cap gives `converged=False` with `n_iterations` equal to it. Either
+way the partition and its medoids are valid and no optimality claim is made.
+
+The bound is a brake, not a hard ceiling: it is accurate to within an
+additive `O(n_clusters * N)`, the per-pass row bookkeeping each initializer
+does being left unpriced. That remainder is 0.045% of a pass at 45,000 items
+with `n_clusters=20` and cannot grow into a multiple of the limit, but a
+caller who needs a guarantee rather than a brake should leave that slack when
+choosing a value.
+
+**`chunk_size` is the tuning lever.** `effective_chunk_size()` is
+`min(chunk_size, N)`, so the default `chunk_size=4096` divides a pass into
+`ceil(N / 4096)` work units. The binding quantity is the largest unit rather
+than their number, because a short tail unit finishes early while one worker
+carries a full 4096: the parallelism a pass achieves is about
+`N / max(unit size)`, which is 1.00x at 2,000 items, 1.22x at 5,000, 2.44x at
+10,000, 10.99x at 45,000, and saturates at the core count of a 14-core
+machine at 57,344 items. The whole measured grid sits in the worst part of
+that curve, so it understates how well a large run parallelizes.
+
+Set `chunk_size = ceil(N / num_threads)` to use the machine. The gain depends
+entirely on where the default leaves you: at 2,000 items, where the default
+runs a pass serially, a 14-unit chunk measured 6.4x the default's
+single-threaded per-comparison rate on a loaded 14-core machine, while at
+10,000 items the default already delivers 2.44x and the same tuning buys
+roughly 2.6x more. This behaviour is not new and not specific to streaming --
+`effective_chunk_size()` is unchanged and the matrix path has always chunked
+the same way -- but it costs more here, because a streamed pass is bound by
+`Compare` calls where a matrix pass reads memory.
+
+**Non-finite distances.** A streamed run checks each distance as it scores
+it and raises `RuntimeError` naming the two items, where the matrix form
+relies on the metric gate having refused a non-finite matrix with a
+`ValueError` before the native call. That divergence is not new in 5.22.0:
+the streamed MST paths of 5.20.0 report a non-finite distance the same way,
+because a path with no stored matrix for the gate to scan has to check what it
+scores. 5.21.0 extended the same named-pair `RuntimeError` to complete,
+average and weighted linkage, but those are matrix-only paths and that change
+was a C++ one: Python refuses a comparison for them outright, and the metric
+gate still catches a non-finite matrix with a `ValueError` first, so a Python
+caller does not see the named-pair error there.
 
 ### Murcko scaffolds
 

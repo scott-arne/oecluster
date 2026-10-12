@@ -27,8 +27,8 @@ from typing import Any, ClassVar, NamedTuple
 
 import numpy as np
 
-__version__ = "5.21.0"
-__version_info__ = (5, 21, 0)
+__version__ = "5.22.0"
+__version_info__ = (5, 22, 0)
 
 
 _OPENEYE_COMPAT_PRELOAD_PATHS: list[str] = []
@@ -1979,7 +1979,9 @@ class KMedoidsResult(ClusteringResult):
 
         False means ``max_iterations`` was reached, or a comparison form spent
         its ``max_comparisons`` budget; the partition is valid but no
-        local-optimality claim is made about it.
+        local-optimality claim is made about it. A budget stop leaves
+        ``n_iterations`` below ``max_iterations``, where the cap leaves the
+        two equal.
         """
         return self._converged
 
@@ -3543,9 +3545,10 @@ def k_medoids(items=_MISSING, *, distance_matrix=_MISSING, n_clusters=2,
     The comparison forms hold no matrix and so need no ``O(N^2)`` memory;
     their auxiliary arrays are ``O(n_clusters * item count)``. They pay for
     that in repeated work, scoring every pair again on each pass: one pass
-    per BUILD step, one per swap iteration, and ``n_clusters`` more for the
-    verification that ends a converged run, where the matrix form reads each
-    pair from storage once. ``max_comparisons`` bounds that work.
+    per BUILD step, one per swap iteration -- including the final scan that
+    finds no improving swap and ends the loop -- and ``n_clusters`` more for
+    the verification, where the matrix form reads each pair from storage
+    once. ``max_comparisons`` bounds that work.
 
     Unlike :func:`butina`, :func:`dbscan`, :func:`hdbscan` and
     :func:`agglomerative`, this function does **not** require a metric and takes
