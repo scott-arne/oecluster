@@ -45,15 +45,106 @@ inline void refresh_slot_map(std::vector<size_t>& slot_of,
 }
 
 /**
+ * @brief Distances from every item to every medoid, indexed [slot * n + item].
+ *
+ * The streaming path pays a comparison for each of these, and an accepted swap
+ * changes one medoid, so holding them turns a rebuild from ``n * k``
+ * comparisons into ``n``. The matrix path builds one too rather than
+ * branching: reading it is no dearer than reading the matrix, and one code
+ * path is worth more than the bytes.
+ *
+ * ``local(medoids[slot], item)`` canonicalises internally, so this reads the
+ * same value as ``local(item, medoids[slot])``; one spelling is kept here and
+ * in refresh_medoid_column so a reader does not have to re-derive that.
+ *
+ * :param distances: Distance source; see MatrixDistanceRunner.
+ * :param medoids: Current medoid item indices, one per slot.
+ * :returns: A k * n table of distances to each medoid.
+ */
+template <typename Runner>
+inline std::vector<double> build_medoid_columns(
+    Runner& distances, const std::vector<size_t>& medoids) {
+    const size_t n = distances.Size();
+    const size_t k = medoids.size();
+    std::vector<double> columns(k * n);
+    distances.Run(n, [&](const auto& local, size_t begin, size_t end) {
+        for (size_t item = begin; item < end; ++item) {
+            for (size_t slot = 0; slot < k; ++slot) {
+                columns[slot * n + item] = local(medoids[slot], item);
+            }
+        }
+    });
+    return columns;
+}
+
+/**
+ * @brief Refill one slot's column after its medoid changed.
+ *
+ * :param distances: Distance source; see MatrixDistanceRunner.
+ * :param columns: Table from build_medoid_columns, one slot overwritten.
+ * :param slot: Slot whose medoid changed.
+ * :param medoid: Item index now occupying that slot.
+ */
+template <typename Runner>
+inline void refresh_medoid_column(Runner& distances,
+                                  std::vector<double>& columns, size_t slot,
+                                  size_t medoid) {
+    const size_t n = distances.Size();
+    distances.Run(n, [&](const auto& local, size_t begin, size_t end) {
+        for (size_t item = begin; item < end; ++item) {
+            columns[slot * n + item] = local(medoid, item);
+        }
+    });
+}
+
+/**
+ * @brief Sort the medoids ascending, carrying their cached columns with them.
+ *
+ * Permuted rather than refilled: sorting renames slots without changing a
+ * single distance, so a streamed caller would be paying ``n * k`` comparisons
+ * for values it already holds.
+ *
+ * :param medoids: Medoid item indices, sorted in place; must be distinct.
+ * :param columns: Table from build_medoid_columns, permuted to match.
+ */
+inline void sort_medoids_with_columns(std::vector<size_t>& medoids,
+                                      std::vector<double>& columns) {
+    const size_t k = medoids.size();
+    const size_t n = k == 0 ? 0 : columns.size() / k;
+
+    std::vector<size_t> order(k);
+    for (size_t slot = 0; slot < k; ++slot) {
+        order[slot] = slot;
+    }
+    std::sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+        return medoids[a] < medoids[b];
+    });
+
+    std::vector<size_t> sorted(k);
+    std::vector<double> permuted(columns.size());
+    for (size_t slot = 0; slot < k; ++slot) {
+        const size_t source = order[slot];
+        sorted[slot] = medoids[source];
+        std::copy(columns.begin() + static_cast<std::ptrdiff_t>(source * n),
+                  columns.begin() + static_cast<std::ptrdiff_t>((source + 1) * n),
+                  permuted.begin() + static_cast<std::ptrdiff_t>(slot * n));
+    }
+    medoids = std::move(sorted);
+    columns = std::move(permuted);
+}
+
+/**
  * @brief Build the nearest and second-nearest cache for every item.
  *
  * :param distances: Distance source; see MatrixDistanceRunner.
  * :param medoids: Current medoid item indices, one per slot; must be distinct.
+ * :param columns: Table from build_medoid_columns for exactly those medoids.
  * :returns: One Assignment per item, indexed by item.
  */
 template <typename Runner>
 inline std::vector<Assignment> build_assignments(
-    Runner& distances, const std::vector<size_t>& medoids) {
+    Runner& distances, const std::vector<size_t>& medoids,
+    const std::vector<double>& columns) {
     const size_t n = distances.Size();
     const size_t k = medoids.size();
     const double infinity = std::numeric_limits<double>::infinity();
@@ -62,7 +153,7 @@ inline std::vector<Assignment> build_assignments(
     refresh_slot_map(slot_of, medoids);
 
     std::vector<Assignment> assignments(n);
-    distances.Run(n, [&](const auto& local, size_t begin, size_t end) {
+    distances.Run(n, [&](const auto&, size_t begin, size_t end) {
         for (size_t j = begin; j < end; ++j) {
             Assignment entry;
 
@@ -78,7 +169,7 @@ inline std::vector<Assignment> build_assignments(
                     if (slot == entry.nearest_slot) {
                         continue;
                     }
-                    const double distance = local(j, medoids[slot]);
+                    const double distance = columns[slot * n + j];
                     if (distance < entry.second_nearest_distance) {
                         entry.second_nearest_distance = distance;
                     }
@@ -88,7 +179,7 @@ inline std::vector<Assignment> build_assignments(
                 entry.nearest_distance = infinity;
                 entry.second_nearest_distance = infinity;
                 for (size_t slot = 0; slot < k; ++slot) {
-                    const double distance = local(j, medoids[slot]);
+                    const double distance = columns[slot * n + j];
                     // Slots are visited in slot order, but the tie rule ranks
                     // on the medoid's item index, so an equal distance only
                     // displaces the incumbent when its item index is smaller.
@@ -111,6 +202,25 @@ inline std::vector<Assignment> build_assignments(
     });
 
     return assignments;
+}
+
+/**
+ * @brief Build the assignment cache for callers that hold no column cache.
+ *
+ * Fills the columns and discards them, which is what the swap loop did before
+ * it started carrying one. A caller inside the loop holds the table instead:
+ * refilling it per call would cost ``n * k`` comparisons an accepted swap only
+ * invalidates ``n`` of.
+ *
+ * :param distances: Distance source; see MatrixDistanceRunner.
+ * :param medoids: Current medoid item indices, one per slot; must be distinct.
+ * :returns: One Assignment per item, indexed by item.
+ */
+template <typename Runner>
+inline std::vector<Assignment> build_assignments(
+    Runner& distances, const std::vector<size_t>& medoids) {
+    return build_assignments(distances, medoids,
+                             build_medoid_columns(distances, medoids));
 }
 
 /**

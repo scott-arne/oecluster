@@ -39,11 +39,32 @@ inline size_t sweep_comparisons(size_t n) {
 }
 
 /**
+ * @brief Comparisons in one verification pass.
+ *
+ * The pass scores every (candidate, slot) pair and rescans every item for
+ * each, so it costs ``k`` sweeps where the predicted-delta scan costs one.
+ * Pricing it as a single sweep is what let a budgeted run overrun its limit
+ * by a factor of ``k``.
+ *
+ * :param n: Item count.
+ * :param k: Medoid count.
+ * :returns: k sweeps, saturating rather than wrapping.
+ */
+inline size_t verification_comparisons(size_t n, size_t k) {
+    const size_t sweep = sweep_comparisons(n);
+    const size_t limit = static_cast<size_t>(-1);
+    if (sweep != 0 && k > limit / sweep) {
+        return limit;
+    }
+    return k * sweep;
+}
+
+/**
  * @brief Comparisons a run must make whatever the swap loop does.
  *
- * The initializer, the one-off medoid column cache fill, and the final
- * verification sweep. Nothing here depends on the iteration count, which is
- * what makes refusing on it honest.
+ * The initializer, the one-off medoid column cache fill, and one verification
+ * pass: ``(init sweeps + k) * n * (n - 1) + n * k``. Nothing here depends on
+ * the iteration count, which is what makes refusing on it honest.
  *
  * :param n: Item count.
  * :param k: Medoid count.
@@ -55,7 +76,9 @@ inline size_t unavoidable_comparisons(size_t n, size_t k, KMedoidsInit init) {
     size_t init_sweeps = 0;
     switch (init) {
         case KMedoidsInit::Build:
-            init_sweeps = k > 0 ? k - 1 : 0;
+            // k, not k - 1: build_initialize() opens with a global-medoid
+            // pass to pick the first seed and only then loops k - 1 times.
+            init_sweeps = k;
             break;
         case KMedoidsInit::FarthestFirst:
             init_sweeps = 1;
@@ -65,12 +88,19 @@ inline size_t unavoidable_comparisons(size_t n, size_t k, KMedoidsInit init) {
             break;
     }
     // Saturate: these products reach 1e10 at n = 100000 and the caller
-    // compares against a budget, so a wrap would read as cheap work.
+    // compares against a budget, so a wrap would read as cheap work. The
+    // sweep count is summed before it is multiplied, so it is guarded too --
+    // Build's total is 2k, which wraps from k = 2^63 up, and this fires at
+    // exactly that boundary.
     const size_t limit = static_cast<size_t>(-1);
-    if (sweep != 0 && init_sweeps + 1 > limit / sweep) {
+    if (init_sweeps > limit - k) {
         return limit;
     }
-    const size_t sweeps_total = (init_sweeps + 1) * sweep;
+    const size_t sweeps = init_sweeps + k;
+    if (sweep != 0 && sweeps > limit / sweep) {
+        return limit;
+    }
+    const size_t sweeps_total = sweeps * sweep;
     if (n != 0 && k > (limit - sweeps_total) / n) {
         return limit;
     }
