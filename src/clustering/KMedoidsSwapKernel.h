@@ -12,7 +12,8 @@
 #include <vector>
 
 #include "DistanceAccess.h"
-#include "oecluster/ThreadPool.h"
+// Owns the pool and the partition these kernels used to build for themselves.
+#include "KMedoidsDistanceSource.h"
 
 namespace OECluster::detail {
 
@@ -44,39 +45,16 @@ inline void refresh_slot_map(std::vector<size_t>& slot_of,
 }
 
 /**
- * @brief Clamp a chunk size to the item count.
- *
- * ThreadPool derives its chunk count as ``(range + chunk_size - 1) /
- * chunk_size``, which wraps to zero for a chunk size near SIZE_MAX and then
- * runs no chunk at all: every scan below would return its default-initialized
- * output and the call would report a zero-cost single cluster as converged.
- * Clamping to the item count is observationally free -- a chunk at least as
- * wide as the range is one chunk either way -- and keeps both this header's own
- * ceiling arithmetic and the pool's below the overflow. Validation guarantees
- * ``chunk_size >= 1``, and every call site has ``n >= n_clusters >= 1``, so the
- * result is never zero.
- *
- * :param n: Number of items.
- * :param chunk_size: Caller-requested chunk size; at least one.
- * :returns: The chunk size to hand ThreadPool, never zero and never above n.
- */
-inline size_t effective_chunk_size(size_t n, size_t chunk_size) {
-    return std::min(chunk_size, n);
-}
-
-/**
  * @brief Build the nearest and second-nearest cache for every item.
  *
- * :param data: Condensed distance array from ``StorageBackend::Data()``.
- * :param n: Number of items.
+ * :param distances: Distance source; see MatrixDistanceRunner.
  * :param medoids: Current medoid item indices, one per slot; must be distinct.
- * :param num_threads: Worker threads; 0 auto-detects hardware concurrency.
- * :param chunk_size: Chunk size for the parallel scan; at least one.
  * :returns: One Assignment per item, indexed by item.
  */
+template <typename Runner>
 inline std::vector<Assignment> build_assignments(
-    const double* data, size_t n, const std::vector<size_t>& medoids,
-    size_t num_threads, size_t chunk_size) {
+    Runner& distances, const std::vector<size_t>& medoids) {
+    const size_t n = distances.Size();
     const size_t k = medoids.size();
     const double infinity = std::numeric_limits<double>::infinity();
 
@@ -84,9 +62,7 @@ inline std::vector<Assignment> build_assignments(
     refresh_slot_map(slot_of, medoids);
 
     std::vector<Assignment> assignments(n);
-    ThreadPool pool(num_threads);
-    pool.ParallelFor(0, n, effective_chunk_size(n, chunk_size),
-                     [&](size_t begin, size_t end) {
+    distances.Run(n, [&](const auto& local, size_t begin, size_t end) {
         for (size_t j = begin; j < end; ++j) {
             Assignment entry;
 
@@ -102,8 +78,7 @@ inline std::vector<Assignment> build_assignments(
                     if (slot == entry.nearest_slot) {
                         continue;
                     }
-                    const double distance =
-                        dense_distance(data, n, j, medoids[slot]);
+                    const double distance = local(j, medoids[slot]);
                     if (distance < entry.second_nearest_distance) {
                         entry.second_nearest_distance = distance;
                     }
@@ -113,8 +88,7 @@ inline std::vector<Assignment> build_assignments(
                 entry.nearest_distance = infinity;
                 entry.second_nearest_distance = infinity;
                 for (size_t slot = 0; slot < k; ++slot) {
-                    const double distance =
-                        dense_distance(data, n, j, medoids[slot]);
+                    const double distance = local(j, medoids[slot]);
                     // Slots are visited in slot order, but the tie rule ranks
                     // on the medoid's item index, so an equal distance only
                     // displaces the incumbent when its item index is smaller.
@@ -213,27 +187,24 @@ inline bool is_better(const SwapCandidate& candidate,
  * dissimilarities are free to violate it, and every candidate that is not
  * already a medoid is evaluated.
  *
- * :param data: Condensed distance array from ``StorageBackend::Data()``.
- * :param n: Number of items.
+ * :param distances: Distance source; see MatrixDistanceRunner.
  * :param medoids: Current medoid item indices, one per slot.
  * :param assignments: Cache from ``build_assignments`` for those medoids.
  * :param slot_of: Slot map from ``refresh_slot_map`` for those medoids.
- * :param num_threads: Worker threads; 0 auto-detects hardware concurrency.
- * :param chunk_size: Chunk size for the parallel scan; at least one.
  * :returns: The best candidate, or an invalid candidate when none exists.
  */
+template <typename Runner>
 inline SwapCandidate best_predicted_swap(
-    const double* data, size_t n, const std::vector<size_t>& medoids,
+    Runner& distances, const std::vector<size_t>& medoids,
     const std::vector<Assignment>& assignments,
-    const std::vector<size_t>& slot_of, size_t num_threads,
-    size_t chunk_size) {
+    const std::vector<size_t>& slot_of) {
+    const size_t n = distances.Size();
     const size_t k = medoids.size();
-    const size_t chunk = effective_chunk_size(n, chunk_size);
+    const size_t chunk = distances.ChunkSize(n);
     const size_t total_chunks = (n + chunk - 1) / chunk;
     std::vector<SwapCandidate> chunk_best(total_chunks);
 
-    ThreadPool pool(num_threads);
-    pool.ParallelFor(0, n, chunk, [&](size_t begin, size_t end) {
+    distances.Run(n, [&](const auto& distance_of, size_t begin, size_t end) {
         std::vector<double> correction(k, 0.0);
         SwapCandidate local;
 
@@ -249,7 +220,7 @@ inline SwapCandidate best_predicted_swap(
             // than by the schedule and every delta is bit-identical whatever
             // num_threads and chunk_size are.
             for (size_t j = 0; j < n; ++j) {
-                const double d_hj = dense_distance(data, n, h, j);
+                const double d_hj = distance_of(h, j);
                 const Assignment& entry = assignments[j];
                 const double surviving =
                     std::min(d_hj - entry.nearest_distance, 0.0);
@@ -295,14 +266,19 @@ inline SwapCandidate best_predicted_swap(
  * item's nearest surviving medoid distance: for an item whose medoid survives
  * that is d1, and for an item whose medoid leaves it is d2 by definition.
  *
- * :param data: Condensed distance array from ``StorageBackend::Data()``.
+ * Takes an accessor rather than a runner: it is the inner computation of one
+ * verification candidate, so it runs on whatever worker already holds the
+ * chunk, and giving it a runner would invite a nested pass per candidate.
+ *
+ * :param distance: Distance accessor; see MatrixDistances.
  * :param n: Number of items.
  * :param assignments: Cache from ``build_assignments`` for the current medoids.
  * :param leaving_slot: Slot whose medoid is replaced.
  * :param entering_item: Item index taking that slot.
  * :returns: The objective of the resulting configuration.
  */
-inline double recomputed_total(const double* data, size_t n,
+template <typename Accessor>
+inline double recomputed_total(const Accessor& distance, size_t n,
                                const std::vector<Assignment>& assignments,
                                size_t leaving_slot, size_t entering_item) {
     double total = 0.0;
@@ -311,7 +287,7 @@ inline double recomputed_total(const double* data, size_t n,
         const double surviving = entry.nearest_slot == leaving_slot
                                      ? entry.second_nearest_distance
                                      : entry.nearest_distance;
-        total += std::min(surviving, dense_distance(data, n, j, entering_item));
+        total += std::min(surviving, distance(j, entering_item));
     }
     return total;
 }
@@ -326,29 +302,26 @@ inline double recomputed_total(const double* data, size_t n,
  * Note that the returned ``score`` is a **total**, not a delta, unlike
  * ``best_predicted_swap``'s.
  *
- * :param data: Condensed distance array from ``StorageBackend::Data()``.
- * :param n: Number of items.
+ * :param distances: Distance source; see MatrixDistanceRunner.
  * :param medoids: Current medoid item indices, one per slot.
  * :param assignments: Cache from ``build_assignments`` for those medoids.
  * :param slot_of: Slot map from ``refresh_slot_map`` for those medoids.
  * :param current_cost: Objective to beat; only strict improvements qualify.
- * :param num_threads: Worker threads; 0 auto-detects hardware concurrency.
- * :param chunk_size: Chunk size for the parallel scan; at least one.
  * :returns: The improving candidate with the smallest total, or an invalid
  *     candidate when the configuration is a verified local optimum.
  */
+template <typename Runner>
 inline SwapCandidate verification_pass(
-    const double* data, size_t n, const std::vector<size_t>& medoids,
+    Runner& distances, const std::vector<size_t>& medoids,
     const std::vector<Assignment>& assignments,
-    const std::vector<size_t>& slot_of, double current_cost,
-    size_t num_threads, size_t chunk_size) {
+    const std::vector<size_t>& slot_of, double current_cost) {
+    const size_t n = distances.Size();
     const size_t k = medoids.size();
-    const size_t chunk = effective_chunk_size(n, chunk_size);
+    const size_t chunk = distances.ChunkSize(n);
     const size_t total_chunks = (n + chunk - 1) / chunk;
     std::vector<SwapCandidate> chunk_best(total_chunks);
 
-    ThreadPool pool(num_threads);
-    pool.ParallelFor(0, n, chunk, [&](size_t begin, size_t end) {
+    distances.Run(n, [&](const auto& distance_of, size_t begin, size_t end) {
         SwapCandidate local;
 
         for (size_t h = begin; h < end; ++h) {
@@ -357,7 +330,7 @@ inline SwapCandidate verification_pass(
             }
             for (size_t slot = 0; slot < k; ++slot) {
                 const double total =
-                    recomputed_total(data, n, assignments, slot, h);
+                    recomputed_total(distance_of, n, assignments, slot, h);
                 if (!(total < current_cost)) {
                     continue;
                 }

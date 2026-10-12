@@ -13,6 +13,7 @@
 #include "oecluster/clustering/ClusterTypes.h"
 #include "oecluster/clustering/KMedoids.h"
 
+#include "../../src/clustering/KMedoidsDistanceSource.h"
 #include "../../src/clustering/KMedoidsSwapKernel.h"
 #include "../../src/clustering/MaxMinKernel.h"
 
@@ -554,6 +555,22 @@ DenseStorage MakeMissedImprovementStorage() {
     return MakeCancellingSwapStorage(TWO_POW_53, 3.0);
 }
 
+// The distance seam k_medoids_cluster builds for itself, so a white-box call
+// reaches the kernels the way the production path does. The runner owns the
+// schedule, so a test that varies the chunking varies it here.
+detail::MatrixDistanceRunner Rows(const DenseStorage& storage,
+                                  size_t num_threads = KERNEL_THREADS,
+                                  size_t chunk_size = KERNEL_CHUNK) {
+    return detail::MatrixDistanceRunner(storage.Data(), storage.NumSamples(),
+                                        num_threads, chunk_size);
+}
+
+// The accessor the runner hands a worker, for the serial helpers that take one
+// directly rather than running a pass.
+detail::MatrixDistances Reads(const DenseStorage& storage) {
+    return detail::MatrixDistances(storage.Data(), storage.NumSamples());
+}
+
 // The three inputs the swap kernels take together, bundled so a white-box test
 // states its starting configuration once instead of repeating the build ritual.
 struct KernelState {
@@ -574,8 +591,8 @@ KernelState MakeKernelState(const DenseStorage& storage,
     state.medoids = std::move(medoids);
     state.slot_of.assign(n, n);
     detail::refresh_slot_map(state.slot_of, state.medoids);
-    state.assignments = detail::build_assignments(
-        storage.Data(), n, state.medoids, KERNEL_THREADS, KERNEL_CHUNK);
+    detail::MatrixDistanceRunner distances = Rows(storage);
+    state.assignments = detail::build_assignments(distances, state.medoids);
     state.cost = detail::total_cost(state.assignments);
     return state;
 }
@@ -588,18 +605,18 @@ KernelState MakeKernelState(const DenseStorage& storage,
 void ExpectPredictedDeltaMatchesRecomputation(
     const DenseStorage& storage, const std::vector<size_t>& medoids) {
     const size_t n = storage.NumSamples();
-    const double* data = storage.Data();
+    detail::MatrixDistanceRunner distances = Rows(storage);
 
     SCOPED_TRACE(testing::Message() << "n = " << n << ", k = " << medoids.size());
 
     const KernelState state = MakeKernelState(storage, medoids);
     const detail::SwapCandidate winner = detail::best_predicted_swap(
-        data, n, state.medoids, state.assignments, state.slot_of, KERNEL_THREADS,
-        KERNEL_CHUNK);
+        distances, state.medoids, state.assignments, state.slot_of);
     ASSERT_TRUE(winner.valid);
 
-    const double winning_total = detail::recomputed_total(
-        data, n, state.assignments, winner.leaving_slot, winner.entering_item);
+    const double winning_total =
+        detail::recomputed_total(Reads(storage), n, state.assignments,
+                                 winner.leaving_slot, winner.entering_item);
     EXPECT_EQ(winner.score, winning_total - state.cost);
 
     for (size_t slot = 0; slot < state.medoids.size(); ++slot) {
@@ -609,7 +626,8 @@ void ExpectPredictedDeltaMatchesRecomputation(
             }
             SCOPED_TRACE(testing::Message()
                          << "leaving slot = " << slot << ", entering item = " << h);
-            EXPECT_GE(detail::recomputed_total(data, n, state.assignments, slot, h),
+            EXPECT_GE(detail::recomputed_total(Reads(storage), n,
+                                               state.assignments, slot, h),
                       winning_total);
         }
     }
@@ -624,14 +642,13 @@ void ExpectPredictedDeltaMatchesRecomputation(
 void ExpectSelectedPairIsAnExhaustiveMinimum(
     const DenseStorage& storage, const std::vector<size_t>& medoids) {
     const size_t n = storage.NumSamples();
-    const double* data = storage.Data();
+    detail::MatrixDistanceRunner distances = Rows(storage);
 
     SCOPED_TRACE(testing::Message() << "n = " << n << ", k = " << medoids.size());
 
     const KernelState state = MakeKernelState(storage, medoids);
     const detail::SwapCandidate winner = detail::best_predicted_swap(
-        data, n, state.medoids, state.assignments, state.slot_of, KERNEL_THREADS,
-        KERNEL_CHUNK);
+        distances, state.medoids, state.assignments, state.slot_of);
     ASSERT_TRUE(winner.valid);
 
     double exhaustive = std::numeric_limits<double>::infinity();
@@ -640,15 +657,16 @@ void ExpectSelectedPairIsAnExhaustiveMinimum(
             if (state.slot_of[h] != n) {
                 continue;
             }
-            exhaustive = std::min(
-                exhaustive,
-                detail::recomputed_total(data, n, state.assignments, slot, h));
+            exhaustive = std::min(exhaustive,
+                                  detail::recomputed_total(
+                                      Reads(storage), n, state.assignments,
+                                      slot, h));
         }
     }
 
     EXPECT_DOUBLE_EQ(
-        detail::recomputed_total(data, n, state.assignments, winner.leaving_slot,
-                                 winner.entering_item),
+        detail::recomputed_total(Reads(storage), n, state.assignments,
+                                 winner.leaving_slot, winner.entering_item),
         exhaustive);
 }
 
@@ -657,7 +675,7 @@ void ExpectSelectedPairIsAnExhaustiveMinimum(
 void ExpectRecomputedTotalMatchesARebuild(const DenseStorage& storage,
                                           const std::vector<size_t>& medoids) {
     const size_t n = storage.NumSamples();
-    const double* data = storage.Data();
+    detail::MatrixDistanceRunner distances = Rows(storage);
 
     SCOPED_TRACE(testing::Message() << "n = " << n << ", k = " << medoids.size());
 
@@ -676,10 +694,11 @@ void ExpectRecomputedTotalMatchesARebuild(const DenseStorage& storage,
 
             std::vector<size_t> trial = state.medoids;
             trial[slot] = h;
-            const double rebuilt = detail::total_cost(detail::build_assignments(
-                data, n, trial, KERNEL_THREADS, KERNEL_CHUNK));
+            const double rebuilt = detail::total_cost(
+                detail::build_assignments(distances, trial));
 
-            EXPECT_EQ(detail::recomputed_total(data, n, state.assignments, slot, h),
+            EXPECT_EQ(detail::recomputed_total(Reads(storage), n,
+                                               state.assignments, slot, h),
                       rebuilt);
         }
     }
@@ -1339,9 +1358,9 @@ TEST(KMedoidsSwapKernelTest, PredictsTheExactDeltaForTheWinningSwap) {
     // 0 + 1 + 2 + 0 + 1 = 4.
     EXPECT_EQ(state.cost, 4.0);
 
+    detail::MatrixDistanceRunner distances = Rows(storage);
     const detail::SwapCandidate candidate = detail::best_predicted_swap(
-        storage.Data(), 5, state.medoids, state.assignments, state.slot_of,
-        KERNEL_THREADS, KERNEL_CHUNK);
+        distances, state.medoids, state.assignments, state.slot_of);
 
     ASSERT_TRUE(candidate.valid);
     EXPECT_EQ(candidate.entering_item, 1u);
@@ -1390,9 +1409,10 @@ TEST(KMedoidsSwapKernelTest, ScoresEveryNonMedoidCandidate) {
     // has to survive the serial reduction over chunk winners.
     for (const size_t chunk : {size_t{1}, size_t{2}, KERNEL_CHUNK}) {
         SCOPED_TRACE(testing::Message() << "chunk_size = " << chunk);
+        detail::MatrixDistanceRunner distances =
+            Rows(storage, KERNEL_THREADS, chunk);
         const detail::SwapCandidate candidate = detail::best_predicted_swap(
-            storage.Data(), 5, state.medoids, state.assignments, state.slot_of,
-            KERNEL_THREADS, chunk);
+            distances, state.medoids, state.assignments, state.slot_of);
 
         ASSERT_TRUE(candidate.valid);
         EXPECT_EQ(candidate.entering_item, 4u);
@@ -1405,9 +1425,9 @@ TEST(KMedoidsSwapKernelTest, ScoresEveryNonMedoidCandidate) {
     const std::vector<size_t> seeds =
         detail::maxmin_select_from(integers.Data(), 20, 4, 0);
     const KernelState wide = MakeKernelState(integers, seeds);
+    detail::MatrixDistanceRunner wide_distances = Rows(integers);
     const detail::SwapCandidate candidate = detail::best_predicted_swap(
-        integers.Data(), 20, wide.medoids, wide.assignments, wide.slot_of,
-        KERNEL_THREADS, KERNEL_CHUNK);
+        wide_distances, wide.medoids, wide.assignments, wide.slot_of);
 
     ASSERT_TRUE(candidate.valid);
     EXPECT_EQ(wide.slot_of[candidate.entering_item], 20u);
@@ -1420,14 +1440,14 @@ TEST(KMedoidsSwapKernelTest, ResolvesTiedDeltasToTheSmallestEnteringThenLeavingI
         // the smaller entering item has to win.
         const DenseStorage storage = MakeTwoTriplesStorage();
         const KernelState state = MakeKernelState(storage, {0, 3});
-        const double* data = storage.Data();
+        detail::MatrixDistanceRunner distances = Rows(storage);
 
-        EXPECT_EQ(detail::recomputed_total(data, 6, state.assignments, 0, 1),
-                  detail::recomputed_total(data, 6, state.assignments, 1, 4));
+        EXPECT_EQ(
+            detail::recomputed_total(Reads(storage), 6, state.assignments, 0, 1),
+            detail::recomputed_total(Reads(storage), 6, state.assignments, 1, 4));
 
         const detail::SwapCandidate candidate = detail::best_predicted_swap(
-            data, 6, state.medoids, state.assignments, state.slot_of,
-            KERNEL_THREADS, KERNEL_CHUNK);
+            distances, state.medoids, state.assignments, state.slot_of);
 
         ASSERT_TRUE(candidate.valid);
         EXPECT_EQ(candidate.score, -0.25);
@@ -1443,14 +1463,14 @@ TEST(KMedoidsSwapKernelTest, ResolvesTiedDeltasToTheSmallestEnteringThenLeavingI
         // slot 0 while the required item rule answers slot 1.
         const DenseStorage storage = MakeFarMedianStorage();
         const KernelState state = MakeKernelState(storage, {1, 0});
-        const double* data = storage.Data();
+        detail::MatrixDistanceRunner distances = Rows(storage);
 
-        EXPECT_EQ(detail::recomputed_total(data, 5, state.assignments, 0, 4),
-                  detail::recomputed_total(data, 5, state.assignments, 1, 4));
+        EXPECT_EQ(
+            detail::recomputed_total(Reads(storage), 5, state.assignments, 0, 4),
+            detail::recomputed_total(Reads(storage), 5, state.assignments, 1, 4));
 
         const detail::SwapCandidate candidate = detail::best_predicted_swap(
-            data, 5, state.medoids, state.assignments, state.slot_of,
-            KERNEL_THREADS, KERNEL_CHUNK);
+            distances, state.medoids, state.assignments, state.slot_of);
 
         ASSERT_TRUE(candidate.valid);
         EXPECT_EQ(candidate.entering_item, 4u);
@@ -1470,9 +1490,10 @@ TEST(KMedoidsSwapKernelTest, VerificationPassSelectsTheExhaustiveMinimumTotal) {
         // the starting total is 0 + 0 + 99 + 105 + 102 = 306.
         EXPECT_EQ(state.cost, 306.0);
 
+        detail::MatrixDistanceRunner distances = Rows(storage);
         const detail::SwapCandidate verified = detail::verification_pass(
-            storage.Data(), 5, state.medoids, state.assignments, state.slot_of,
-            state.cost, KERNEL_THREADS, KERNEL_CHUNK);
+            distances, state.medoids, state.assignments, state.slot_of,
+            state.cost);
 
         ASSERT_TRUE(verified.valid);
         EXPECT_EQ(verified.entering_item, 4u);
@@ -1501,9 +1522,10 @@ TEST(KMedoidsSwapKernelTest, VerificationPassSelectsTheExhaustiveMinimumTotal) {
 
         EXPECT_EQ(state.cost, 306.0);
 
+        detail::MatrixDistanceRunner distances = Rows(storage);
         const detail::SwapCandidate verified = detail::verification_pass(
-            storage.Data(), 5, state.medoids, state.assignments, state.slot_of,
-            state.cost, KERNEL_THREADS, KERNEL_CHUNK);
+            distances, state.medoids, state.assignments, state.slot_of,
+            state.cost);
 
         ASSERT_TRUE(verified.valid);
         EXPECT_EQ(verified.entering_item, 4u);
@@ -1521,9 +1543,9 @@ TEST(KMedoidsSwapKernelTest, VerificationPassConsidersTheLowestIndexedItemAsAnEn
 
     EXPECT_EQ(state.cost, 298.0);
 
+    detail::MatrixDistanceRunner distances = Rows(storage);
     const detail::SwapCandidate verified = detail::verification_pass(
-        storage.Data(), 5, state.medoids, state.assignments, state.slot_of,
-        state.cost, KERNEL_THREADS, KERNEL_CHUNK);
+        distances, state.medoids, state.assignments, state.slot_of, state.cost);
 
     // Item 0 is the unique best entrant, and it is item zero on purpose: a
     // candidate loop that began one past the start of its chunk would skip it,
@@ -1564,9 +1586,10 @@ TEST(KMedoidsSwapKernelTest, VerificationPassConsidersAnOddIndexedEntrantInEvery
     for (const size_t chunk : {size_t{1}, size_t{2}, KERNEL_CHUNK}) {
         SCOPED_TRACE(testing::Message() << "chunk_size = " << chunk);
 
+        detail::MatrixDistanceRunner distances = Rows(storage, 1, chunk);
         const detail::SwapCandidate verified = detail::verification_pass(
-            storage.Data(), 5, state.medoids, state.assignments, state.slot_of,
-            state.cost, 1, chunk);
+            distances, state.medoids, state.assignments, state.slot_of,
+            state.cost);
 
         // Item 3 is the unique best entrant, and its index is odd on purpose:
         // both other median fixtures put their winner at an even index, so a
@@ -1583,7 +1606,7 @@ TEST(KMedoidsSwapKernelTest, VerificationPassConsidersAnOddIndexedEntrantInEvery
 TEST(KMedoidsSwapKernelTest, VerificationPassReturnsNoCandidateAtALocalOptimum) {
     const DenseStorage storage = MakeFarMedianStorage();
     const KernelState state = MakeKernelState(storage, {0, 4});
-    const double* data = storage.Data();
+    detail::MatrixDistanceRunner distances = Rows(storage);
 
     // {0, 4} is the exhaustive optimum over all ten pairs of these five items.
     EXPECT_EQ(state.cost, 7.0);
@@ -1591,11 +1614,12 @@ TEST(KMedoidsSwapKernelTest, VerificationPassReturnsNoCandidateAtALocalOptimum) 
     // {1, 4} recomputes to exactly 7 as well, which is what makes the strict
     // inequality observable: accepting an equal-cost swap here would send the
     // loop between two configurations of the same cost forever.
-    EXPECT_EQ(detail::recomputed_total(data, 5, state.assignments, 0, 1), 7.0);
+    EXPECT_EQ(
+        detail::recomputed_total(Reads(storage), 5, state.assignments, 0, 1),
+        7.0);
 
     const detail::SwapCandidate verified = detail::verification_pass(
-        data, 5, state.medoids, state.assignments, state.slot_of, state.cost,
-        KERNEL_THREADS, KERNEL_CHUNK);
+        distances, state.medoids, state.assignments, state.slot_of, state.cost);
 
     EXPECT_FALSE(verified.valid);
 }
@@ -1919,9 +1943,9 @@ TEST(KMedoidsDynamicRangeTest, HoldsParityWhenAPredictedImprovementIsUndone) {
     const std::vector<size_t> seeds = {0, 6};
 
     const KernelState state = MakeKernelState(storage, seeds);
+    detail::MatrixDistanceRunner distances = Rows(storage);
     const detail::SwapCandidate predicted = detail::best_predicted_swap(
-        storage.Data(), storage.NumSamples(), state.medoids, state.assignments,
-        state.slot_of, KERNEL_THREADS, KERNEL_CHUNK);
+        distances, state.medoids, state.assignments, state.slot_of);
     ASSERT_TRUE(predicted.valid);
     // The precondition for the branch under test: the fast path is entered
     // because the prediction is negative, and the rebuild then declines it.
@@ -1938,7 +1962,7 @@ TEST(KMedoidsDynamicRangeTest, HoldsParityWhenAPredictedImprovementIsUndone) {
     // loop itself performs. The two agree on this matrix, and
     // RecomputedTotalIsBitIdenticalToARebuiltAssignmentCost pins that agreement
     // on this exact fixture rather than leaving it to the general claim.
-    EXPECT_EQ(detail::recomputed_total(storage.Data(), storage.NumSamples(),
+    EXPECT_EQ(detail::recomputed_total(Reads(storage), storage.NumSamples(),
                                        state.assignments,
                                        predicted.leaving_slot,
                                        predicted.entering_item),
@@ -1968,16 +1992,16 @@ TEST(KMedoidsDynamicRangeTest, HoldsParityWhenTheVerificationPassAppliesTheSwap)
     const std::vector<size_t> seeds = {0, 6};
 
     const KernelState state = MakeKernelState(storage, seeds);
+    detail::MatrixDistanceRunner distances = Rows(storage);
     const detail::SwapCandidate predicted = detail::best_predicted_swap(
-        storage.Data(), storage.NumSamples(), state.medoids, state.assignments,
-        state.slot_of, KERNEL_THREADS, KERNEL_CHUNK);
+        distances, state.medoids, state.assignments, state.slot_of);
     ASSERT_TRUE(predicted.valid);
     // The counterpart of the score assertion in the row above, and the other
     // half of what pins best_predicted_swap's accumulation order: reversing that
     // inner loop turns this 0.0 into -2.0, and outside these two rows nothing in
     // the suite notices.
     EXPECT_EQ(predicted.score, 0.0);
-    EXPECT_EQ(detail::recomputed_total(storage.Data(), storage.NumSamples(),
+    EXPECT_EQ(detail::recomputed_total(Reads(storage), storage.NumSamples(),
                                        state.assignments, 1, 5),
               TWO_POW_53 + 8.0);
 

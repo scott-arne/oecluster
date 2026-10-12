@@ -10,9 +10,9 @@
 #include <vector>
 
 #include "DistanceAccess.h"
+#include "KMedoidsDistanceSource.h"
 #include "KMedoidsSwapKernel.h"
 #include "MaxMinKernel.h"
-#include "oecluster/ThreadPool.h"
 
 namespace OECluster {
 
@@ -75,32 +75,33 @@ void validate_options(const StorageBackend& storage,
     throw std::invalid_argument("Unknown k-medoids initialization method");
 }
 
-std::vector<size_t> build_initialize(const double* data, size_t n, size_t k,
-                                     size_t num_threads, size_t chunk_size) {
+template <typename Runner>
+std::vector<size_t> build_initialize(Runner& distances, size_t k) {
+    const size_t n = distances.Size();
+
     std::vector<size_t> medoids;
     medoids.reserve(k);
 
-    const size_t first = detail::global_medoid(data, n, num_threads, chunk_size);
+    const size_t first = detail::global_medoid(distances);
     medoids.push_back(first);
 
     std::vector<bool> selected(n, false);
     selected[first] = true;
 
     std::vector<double> nearest(n);
-    for (size_t j = 0; j < n; ++j) {
-        nearest[j] = detail::dense_distance(data, n, j, first);
-    }
+    distances.WithAccessor([&](const auto& distance) {
+        for (size_t j = 0; j < n; ++j) {
+            nearest[j] = distance(j, first);
+        }
+    });
 
     std::vector<double> gains(n, 0.0);
     while (medoids.size() < k) {
-        ThreadPool pool(num_threads);
-        pool.ParallelFor(0, n, detail::effective_chunk_size(n, chunk_size),
-                         [&](size_t begin, size_t end) {
+        distances.Run(n, [&](const auto& local, size_t begin, size_t end) {
             for (size_t candidate = begin; candidate < end; ++candidate) {
                 double gain = 0.0;
                 for (size_t j = 0; j < n; ++j) {
-                    const double distance =
-                        detail::dense_distance(data, n, j, candidate);
+                    const double distance = local(j, candidate);
                     if (distance < nearest[j]) {
                         gain += nearest[j] - distance;
                     }
@@ -125,37 +126,40 @@ std::vector<size_t> build_initialize(const double* data, size_t n, size_t k,
 
         selected[best] = true;
         medoids.push_back(best);
-        for (size_t j = 0; j < n; ++j) {
-            const double distance = detail::dense_distance(data, n, j, best);
-            if (distance < nearest[j]) {
-                nearest[j] = distance;
+        distances.WithAccessor([&](const auto& distance) {
+            for (size_t j = 0; j < n; ++j) {
+                const double to_best = distance(j, best);
+                if (to_best < nearest[j]) {
+                    nearest[j] = to_best;
+                }
             }
-        }
+        });
     }
 
     return medoids;
 }
 
-std::vector<size_t> farthest_first_initialize(const double* data, size_t n,
-                                              size_t k, size_t num_threads,
-                                              size_t chunk_size) {
+template <typename Runner>
+std::vector<size_t> farthest_first_initialize(Runner& distances, size_t k) {
     // Seeding at the global medoid rather than item 0 costs one O(n^2) pass and
     // buys permutation invariance: an item-0 seed makes the whole clustering
     // depend on input row order.
-    const size_t seed = detail::global_medoid(data, n, num_threads, chunk_size);
-    return detail::maxmin_select_from(data, n, k, seed);
+    const size_t seed = detail::global_medoid(distances);
+    return detail::maxmin_select_from(distances, k, seed);
 }
 
-KMedoidsResult assemble(const double* data, size_t n,
-                        std::vector<size_t> medoids, size_t iterations,
-                        bool converged, size_t num_threads, size_t chunk_size) {
+template <typename Runner>
+KMedoidsResult assemble(Runner& distances, std::vector<size_t> medoids,
+                        size_t iterations, bool converged) {
+    const size_t n = distances.Size();
+
     // Sorting makes the labeling canonical: label i always belongs to the i-th
     // smallest medoid index, so two results compare without a permutation in
     // between.
     std::sort(medoids.begin(), medoids.end());
 
     const std::vector<detail::Assignment> assignments =
-        detail::build_assignments(data, n, medoids, num_threads, chunk_size);
+        detail::build_assignments(distances, medoids);
 
     std::vector<ClusterLabel> labels(n);
     for (size_t j = 0; j < n; ++j) {
@@ -185,19 +189,18 @@ KMedoidsResult identity_partition(size_t n) {
                           std::move(medoids), 0.0, 0, true);
 }
 
-// Takes the worker count as an argument rather than reading
-// options.num_threads, so the cap applied in k_medoids_cluster cannot be
-// bypassed by the initializers underneath.
-std::vector<size_t> initialize_medoids(const double* data, size_t n,
-                                       const KMedoidsOptions& options,
-                                       size_t num_threads) {
+// Reads the worker count from the runner rather than from options.num_threads,
+// so the cap applied in k_medoids_cluster cannot be bypassed by the
+// initializers underneath: the runner is built with the capped count and is
+// the only thing here that starts a thread.
+template <typename Runner>
+std::vector<size_t> initialize_medoids(Runner& distances,
+                                       const KMedoidsOptions& options) {
     switch (options.init) {
         case KMedoidsInit::Build:
-            return build_initialize(data, n, options.n_clusters, num_threads,
-                                    options.chunk_size);
+            return build_initialize(distances, options.n_clusters);
         case KMedoidsInit::FarthestFirst:
-            return farthest_first_initialize(data, n, options.n_clusters,
-                                             num_threads, options.chunk_size);
+            return farthest_first_initialize(distances, options.n_clusters);
         case KMedoidsInit::Explicit:
             return options.initial_medoids;
     }
@@ -212,7 +215,6 @@ KMedoidsResult k_medoids_cluster(const StorageBackend& storage,
     validate_options(storage, options);
 
     const size_t n = storage.NumSamples();
-    const double* data = storage.Data();
 
     // Capped at the item count once here and then passed to every helper
     // below, so no path from this entry point can hand ThreadPool the raw
@@ -243,13 +245,17 @@ KMedoidsResult k_medoids_cluster(const StorageBackend& storage,
         return identity_partition(n);
     }
 
-    std::vector<size_t> medoids =
-        initialize_medoids(data, n, options, num_threads);
+    // Built once with the capped worker count, so every pass below is
+    // partitioned and scheduled the same way whichever kernel asks for it.
+    detail::MatrixDistanceRunner distances(storage.Data(), n, num_threads,
+                                           options.chunk_size);
+
+    std::vector<size_t> medoids = initialize_medoids(distances, options);
 
     std::vector<size_t> slot_of(n, n);
     detail::refresh_slot_map(slot_of, medoids);
-    std::vector<detail::Assignment> assignments = detail::build_assignments(
-        data, n, medoids, num_threads, options.chunk_size);
+    std::vector<detail::Assignment> assignments =
+        detail::build_assignments(distances, medoids);
     double cost = detail::total_cost(assignments);
 
     size_t iterations = 0;
@@ -257,8 +263,7 @@ KMedoidsResult k_medoids_cluster(const StorageBackend& storage,
 
     while (iterations < options.max_iterations) {
         const detail::SwapCandidate predicted = detail::best_predicted_swap(
-            data, n, medoids, assignments, slot_of, num_threads,
-            options.chunk_size);
+            distances, medoids, assignments, slot_of);
 
         bool advanced = false;
         if (predicted.valid && predicted.score < 0.0) {
@@ -266,8 +271,8 @@ KMedoidsResult k_medoids_cluster(const StorageBackend& storage,
             const size_t displaced = medoids[predicted.leaving_slot];
             medoids[predicted.leaving_slot] = predicted.entering_item;
             detail::refresh_slot_map(slot_of, medoids);
-            std::vector<detail::Assignment> trial = detail::build_assignments(
-                data, n, medoids, num_threads, options.chunk_size);
+            std::vector<detail::Assignment> trial =
+                detail::build_assignments(distances, medoids);
             const double trial_cost = detail::total_cost(trial);
 
             if (trial_cost < cost) {
@@ -293,8 +298,7 @@ KMedoidsResult k_medoids_cluster(const StorageBackend& storage,
         }
 
         const detail::SwapCandidate verified = detail::verification_pass(
-            data, n, medoids, assignments, slot_of, cost, num_threads,
-            options.chunk_size);
+            distances, medoids, assignments, slot_of, cost);
         if (!verified.valid) {
             converged = true;
             break;
@@ -302,8 +306,7 @@ KMedoidsResult k_medoids_cluster(const StorageBackend& storage,
 
         medoids[verified.leaving_slot] = verified.entering_item;
         detail::refresh_slot_map(slot_of, medoids);
-        assignments = detail::build_assignments(data, n, medoids, num_threads,
-                                                options.chunk_size);
+        assignments = detail::build_assignments(distances, medoids);
         cost = detail::total_cost(assignments);
         ++iterations;
     }
@@ -311,8 +314,7 @@ KMedoidsResult k_medoids_cluster(const StorageBackend& storage,
     // Reaching the cap skips the verification pass deliberately: the pass
     // exists to substantiate a local-optimality claim, and a capped run makes
     // no such claim.
-    return assemble(data, n, medoids, iterations, converged, num_threads,
-                    options.chunk_size);
+    return assemble(distances, medoids, iterations, converged);
 }
 
 }  // namespace OECluster
