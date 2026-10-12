@@ -6,6 +6,42 @@ import inspect
 import numpy as np
 import pytest
 
+#: Copied from tests/python/test_streaming_clustering.py:14, where the other
+#: comparison forms are tested against the same sixteen molecules.
+FP_SMILES = ["CCO", "CCCO", "CCCCO", "c1ccccc1", "Cc1ccccc1", "CCc1ccccc1",
+             "CC(=O)O", "CC(=O)OC", "CCN", "CCCN", "C1CCCCC1", "c1ccncc1",
+             "CCCCCO", "c1ccc2ccccc2c1", "CC(C)O", "OCCO"]
+
+
+def _fp_mols(smiles_list):
+    """The ``_mols`` of test_streaming_clustering.py:22, renamed.
+
+    This file already has a no-argument ``_mols()`` further down, and the
+    later definition would shadow whichever came first.
+    """
+    from openeye import oechem
+
+    mols = []
+    for idx, smi in enumerate(smiles_list):
+        mol = oechem.OEGraphMol()
+        oechem.OESmilesToMol(mol, smi)
+        mol.SetTitle(f"mol{idx}")
+        mols.append(mol)
+    return mols
+
+
+def _compare_matrix(comparison):
+    """The matrix a comparison form must reproduce: every pair via Compare."""
+    import oecluster
+
+    n = comparison.Size()
+    storage = oecluster.DenseStorage(n)
+    for i in range(n):
+        for j in range(i + 1, n):
+            storage.Set(i, j, comparison.Compare(i, j))
+    return oecluster.SymmetricDistanceMatrix(
+        storage, "test", [f"item_{i}" for i in range(n)], {})
+
 
 def _dense_distance_matrix(square):
     """Build a dense DistanceMatrix from a square distance matrix."""
@@ -458,23 +494,31 @@ def test_the_signature_is_pinned():
     params = sig.parameters
 
     assert list(params.keys()) == [
-        "distance_matrix", "n_clusters", "init", "initial_medoids",
-        "max_iterations", "num_threads", "chunk_size"
+        "items", "distance_matrix", "n_clusters", "init", "initial_medoids",
+        "max_iterations", "comparison", "num_threads", "chunk_size",
+        "max_comparisons", "kwargs"
     ]
 
-    # distance_matrix is positional-or-keyword; all others are keyword-only.
-    assert params["distance_matrix"].kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
-    for name in ["n_clusters", "init", "initial_medoids", "max_iterations",
-                 "num_threads", "chunk_size"]:
+    # items is positional-or-keyword, which is what keeps a matrix passing
+    # positionally as it did when the parameter was named distance_matrix.
+    assert params["items"].kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
+    for name in ["distance_matrix", "n_clusters", "init", "initial_medoids",
+                 "max_iterations", "comparison", "num_threads", "chunk_size",
+                 "max_comparisons"]:
         assert params[name].kind == inspect.Parameter.KEYWORD_ONLY
+    assert params["kwargs"].kind == inspect.Parameter.VAR_KEYWORD
 
     # Defaults
+    assert params["items"].default is oecluster._MISSING
+    assert params["distance_matrix"].default is oecluster._MISSING
     assert params["n_clusters"].default == 2
     assert params["init"].default == "build"
     assert params["initial_medoids"].default is None
     assert params["max_iterations"].default == 100
+    assert params["comparison"].default is None
     assert params["num_threads"].default == 0
     assert params["chunk_size"].default == 4096
+    assert params["max_comparisons"].default is None
 
 
 def test_default_arguments_produce_expected_behavior():
@@ -713,3 +757,81 @@ def test_cluster_report_accepts_a_metric_k_medoids_result():
     report = oecluster.cluster_report(result, dm)
 
     assert report.num_clusters == 2
+
+
+# The comparison forms: clustering without a materialized matrix.
+
+
+@pytest.mark.parametrize("init", ["build", "farthest_first", "explicit"])
+def test_k_medoids_three_inputs_match_a_compare_filled_matrix(init):
+    """Exactness is defined against a matrix filled through the same Compare.
+
+    Every field compared, iteration count and convergence included: those two
+    are what tell a run that stopped early from one that converged, and a
+    comparison of labels, medoids and cost alone would pass against a path
+    that reached them without running the swap loop at all.
+
+    Which is why the init modes are parametrized rather than left at the
+    default. BUILD seeds this fixture at its own optimum and converges in
+    zero swap iterations, so on its own this test differences the
+    initializer and one verification pass and never reaches the loop that is
+    likeliest to diverge between a stored matrix and a streamed one.
+    """
+    import oecluster
+
+    mols = _fp_mols(FP_SMILES)
+    prebuilt = oecluster.FingerprintComparison(mols)
+    matrix = _compare_matrix(prebuilt)
+    for n_clusters in (2, 3):
+        seeds = ({"initial_medoids": list(range(n_clusters))}
+                 if init == "explicit" else {})
+        expected = oecluster.k_medoids(matrix, n_clusters=n_clusters,
+                                       init=init, **seeds)
+        # The guard under the paragraph above: should a fixture change ever
+        # seed these two at the optimum as well, this fails rather than
+        # quietly going back to differencing nothing.
+        if init != "build":
+            assert expected.n_iterations > 0
+        for items, extra in ((prebuilt, {}),
+                             (mols, {"comparison": "fingerprint"})):
+            result = oecluster.k_medoids(items, n_clusters=n_clusters,
+                                         init=init, **seeds, **extra)
+            assert result.labels.tolist() == expected.labels.tolist()
+            assert list(result.medoids) == list(expected.medoids)
+            assert result.cost == expected.cost
+            assert result.n_iterations == expected.n_iterations
+            assert result.converged == expected.converged
+
+
+def test_k_medoids_max_comparisons_is_refused_on_the_matrix_path():
+    """It names work a matrix path does not do, so it is an error there.
+
+    Matched on the refusal's own wording rather than on the parameter name:
+    an interpreter rejecting a keyword the signature never had raises a
+    TypeError naming it too, so the looser match would pass against a
+    k_medoids that does not take the parameter at all.
+    """
+    import oecluster
+
+    matrix = _two_triples()
+    with pytest.raises(TypeError, match="takes max_comparisons only when it "
+                                        "clusters from a comparison"):
+        oecluster.k_medoids(matrix, n_clusters=2, max_comparisons=10**9)
+
+
+def test_k_medoids_refuses_a_budget_it_cannot_meet():
+    """The refusal names the lever, so a refused caller can act on it."""
+    import oecluster
+
+    prebuilt = oecluster.FingerprintComparison(_fp_mols(FP_SMILES))
+    with pytest.raises(ValueError, match="farthest_first"):
+        oecluster.k_medoids(prebuilt, n_clusters=3, init="build",
+                            max_comparisons=1)
+
+
+def test_k_medoids_still_takes_the_matrix_positionally():
+    """The old call shape keeps working after the signature gains items."""
+    import oecluster
+
+    result = oecluster.k_medoids(_two_triples(), n_clusters=2)
+    assert len(result.labels) == 6

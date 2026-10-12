@@ -106,7 +106,7 @@ The available algorithms and their key parameters:
 | `dbscan(items, eps, ...)` | `DistanceMatrix`, comparison, or items | `eps`, `min_samples`, `max_graph_bytes` |
 | `hdbscan(items, ...)` | `DistanceMatrix`, comparison, or items | `min_cluster_size`, `min_samples`, `cluster_selection_method` |
 | `agglomerative(items, ...)` | `DistanceMatrix`; comparison or items with `linkage="single"` | `n_clusters`, `distance_threshold`, `linkage` |
-| `k_medoids(dm, ...)` | `DistanceMatrix` | `n_clusters`, `init`, `initial_medoids` |
+| `k_medoids(items, ...)` | `DistanceMatrix`, comparison, or items | `n_clusters`, `init`, `initial_medoids`, `max_comparisons` |
 | `bitbirch(fingerprints, ...)` | `oefp.OEFPBatch` | `threshold`, `branching_factor`, `merge_criterion` |
 | `murcko(mols, ...)` | `list[OEMolBase]` | `scaffold` |
 
@@ -1660,10 +1660,10 @@ The table is the `--set` surface, not the whole signature. `algorithms
 k_medoids` lists `init`, `max_iterations` and `n_clusters`; `initial_medoids`
 is not on it. These names are left off and are refused by `--set`:
 `num_threads` and `allow_nonmetric`, which have their own flags; `chunk_size`;
-`comparison`, `similarity`, `distance_matrix` and `max_graph_bytes`, on the
-entries that take items; and `initial_medoids`. The command line always loads
-a matrix, so those four, which build a comparison, alias the matrix, or bound
-a graph built from a comparison, do not apply.
+`comparison`, `similarity`, `distance_matrix`, `max_graph_bytes` and
+`max_comparisons`, on the entries that take items; and `initial_medoids`. The
+command line always loads a matrix, so those five, which build a comparison,
+alias the matrix, or bound the work done against a comparison, do not apply.
 
 Naming an ineligible one prints the reason instead: `murcko takes mols, not a
 distance matrix`.

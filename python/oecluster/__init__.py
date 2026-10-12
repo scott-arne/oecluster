@@ -1977,8 +1977,9 @@ class KMedoidsResult(ClusteringResult):
     def converged(self):
         """True when no single medoid swap lowers the reported cost.
 
-        False means ``max_iterations`` was reached; the partition is valid but
-        no local-optimality claim is made about it.
+        False means ``max_iterations`` was reached, or a comparison form spent
+        its ``max_comparisons`` budget; the partition is valid but no
+        local-optimality claim is made about it.
         """
         return self._converged
 
@@ -2511,6 +2512,52 @@ def _graph_budget(max_graph_bytes, caller, *, refusal=None):
     return value
 
 
+_MATRIX_COMPARISON_REFUSAL = (
+    "a distance matrix is read as it is, with no pair left to score")
+
+
+def _comparison_budget(max_comparisons, caller, *, refusal=None):
+    """
+    Validate a streamed-comparison work budget and return its native value.
+
+    The counterpart of :func:`_graph_budget` for the entry points that bound
+    pair comparisons rather than graph memory, checked in the same fixed
+    order and for the same reason: a call that streams nothing first,
+    whatever the value; then a bool; then the type and the sign.
+
+    :param max_comparisons: Caller value; None applies the native default.
+    :param caller: Entry point name for the messages.
+    :param refusal: Why this call scores no pair, or None when it does.
+    :returns: The comparison budget, or 0 for the native default.
+    :raises TypeError: If the call scores no pair, or the value is a bool or
+        not an integer.
+    :raises ValueError: If the value is not positive or exceeds a size_t.
+    """
+    if max_comparisons is None:
+        return 0
+    if refusal is not None:
+        raise TypeError(
+            f"{caller}() takes max_comparisons only when it clusters from a "
+            f"comparison; {refusal}")
+    # bool is an int subclass, and True would read as a one-comparison budget,
+    # which no call can meet.
+    if isinstance(max_comparisons, bool):
+        raise TypeError(
+            "max_comparisons must be an integer number of comparisons, not a "
+            "bool")
+    try:
+        value = operator.index(max_comparisons)
+    except TypeError:
+        raise TypeError(
+            "max_comparisons must be an integer number of comparisons or "
+            f"None, not {type(max_comparisons).__name__}") from None
+    if value <= 0:
+        raise ValueError(f"max_comparisons must be positive, got {value}")
+    if value > _SIZE_T_MAX:
+        raise ValueError("max_comparisons exceeds size_t maximum")
+    return value
+
+
 #: Why the threshold-graph paths need a repeatable comparison.
 _THRESHOLD_GRAPH_REASON = "the threshold graph compares every pair twice"
 
@@ -2520,6 +2567,16 @@ _HDBSCAN_REASON = "HDBSCAN compares pairs in two passes that must agree"
 #: Why single linkage from a comparison needs a repeatable comparison.
 _SINGLE_LINKAGE_REASON = (
     "the spanning tree would depend on the order the pairs are scored")
+
+#: Why k-medoids from a comparison needs a repeatable comparison. Worded as
+#: the native refusal words it, so the two layers say the same thing.
+_KMEDOIDS_REASON = ("the same pair would score differently on each of the "
+                    "many passes k-medoids makes over it")
+
+#: The phrase k_medoids_cluster() composes when the comparisons a run cannot
+#: avoid exceed max_comparisons, by which that refusal is told apart from
+#: every other native error and given its proper type.
+_KMEDOIDS_BUDGET_REFUSAL = "over the max_comparisons limit of"
 
 
 def _refuse_unrepeatable(items, comparison, caller, reason=_THRESHOLD_GRAPH_REASON):
@@ -3472,15 +3529,23 @@ def agglomerative(items=_MISSING, *, distance_matrix=_MISSING, n_clusters=2,
     )
 
 
-def k_medoids(distance_matrix, *, n_clusters=2, init="build",
-              initial_medoids=None, max_iterations=100,
-              num_threads=0, chunk_size=4096):
+def k_medoids(items=_MISSING, *, distance_matrix=_MISSING, n_clusters=2,
+              init="build", initial_medoids=None, max_iterations=100,
+              comparison=None, num_threads=0, chunk_size=4096,
+              max_comparisons=None, **kwargs):
     """
-    Cluster a precomputed distance matrix with k-medoids (PAM).
+    Cluster with k-medoids (PAM), from a distance matrix or a comparison.
 
     Places exactly ``n_clusters`` medoids, each a real member of the input,
     minimizing the sum of every item's distance to its assigned medoid. Every
     item receives a label; ``-1`` is never emitted.
+
+    The comparison forms hold no matrix and so need no ``O(N^2)`` memory;
+    their auxiliary arrays are ``O(n_clusters * item count)``. They pay for
+    that in repeated work, scoring every pair again on each pass: one pass
+    per BUILD step, one per swap iteration, and ``n_clusters`` more for the
+    verification that ends a converged run, where the matrix form reads each
+    pair from storage once. ``max_comparisons`` bounds that work.
 
     Unlike :func:`butina`, :func:`dbscan`, :func:`hdbscan` and
     :func:`agglomerative`, this function does **not** require a metric and takes
@@ -3494,7 +3559,12 @@ def k_medoids(distance_matrix, *, n_clusters=2, init="build",
     accepted may be refused by the report unless you pass
     ``allow_nonmetric=True`` there.
 
-    :param distance_matrix: SymmetricDistanceMatrix returned by :func:`pdist`.
+    :param items: What the distances come from: a SymmetricDistanceMatrix
+        returned by :func:`pdist`; a prebuilt comparison such as
+        :class:`FingerprintComparison`; or a sequence of items with
+        ``comparison=``.
+    :param distance_matrix: Keyword alias for ``items`` that accepts only a
+        SymmetricDistanceMatrix. Passing both is a TypeError.
     :param n_clusters: Number of medoids to place; must be in [1, item count].
     :param init: Initialization strategy: "build" (greedy PAM BUILD),
         "farthest_first" (deterministic MaxMin), or "explicit"
@@ -3503,16 +3573,51 @@ def k_medoids(distance_matrix, *, n_clusters=2, init="build",
         required when ``init="explicit"`` and refused otherwise.
     :param max_iterations: Swap iterations before giving up. Reaching the cap
         is not an error: the result is valid and ``converged`` is False.
+    :param comparison: Comparison name, such as ``"fingerprint"``, when
+        ``items`` is a sequence of items. Its options go in ``**kwargs``.
     :param num_threads: Worker threads; 0 auto-detects hardware concurrency.
     :param chunk_size: Items per work unit in the parallelized swap scan.
+    :param max_comparisons: The comparison forms only: the most pair
+        comparisons a streamed run may make, counting one pass over every
+        pair as ``N * (N - 1)``. None applies the native default. The work no
+        run can avoid -- the initializer, the medoid column cache and one
+        verification pass -- is priced before any pair is scored and the call
+        refused if it exceeds the budget: ``init="build"`` spends
+        ``n_clusters`` passes initializing where ``init="farthest_first"``
+        spends one, and both then pay the verification's ``n_clusters``, so
+        the floors are ``2 * n_clusters`` passes against ``n_clusters + 1``.
+        A refusal prices the floor for the ``n_clusters`` asked for, and one
+        under ``init="build"`` prices farthest-first's floor beside it, that
+        being the one switch a caller can make without supplying medoids --
+        unless the two come out equal, as they do at ``n_clusters == 1``.
+        Within the budget the swap loop stops between passes once it is
+        spent, reporting ``converged=False`` with ``n_iterations`` below
+        ``max_iterations``.
+        The bound is a brake rather than a ceiling: it is accurate to within
+        an additive ``O(n_clusters * item count)``, the per-pass row
+        bookkeeping being left unpriced.
+    :param kwargs: Comparison options, with ``comparison=`` only.
     :returns: KMedoidsResult with labels, clusters, medoids, cost, iteration
-        count, and convergence.
-    :raises TypeError: If distance_matrix is not a SymmetricDistanceMatrix, or
-        an integer argument is not an integer.
+        count, and convergence. A comparison form returns exactly what the
+        matrix form returns over a matrix filled through the same ``Compare``.
+        Against :func:`pdist`, whose batched kernels agree with ``Compare``
+        only to about 1e-12, a cost that close to a tie can be decided
+        differently.
+    :raises TypeError: If both or neither of ``items`` and
+        ``distance_matrix`` are given; the arguments fit none of the three
+        forms, or ``comparison`` or a keyword this function does not take
+        accompanies a matrix or a prebuilt comparison; an integer argument is
+        not an integer; or ``max_comparisons`` accompanies a matrix, or is a
+        bool or not an integer.
     :raises ValueError: If options are invalid (including negative or oversized
         integers for max_iterations/num_threads/chunk_size), the matrix uses
-        sparse storage, or the matrix is not comparable.
-    :raises IndexError: If an explicit medoid index is outside the matrix.
+        sparse storage, the matrix is not comparable or the comparison's
+        declared facts refuse it, normalizing the items dropped one,
+        ``max_comparisons`` is not positive, or the comparisons no run can
+        avoid exceed it.
+    :raises IndexError: If an explicit medoid index is outside the input.
+    :raises RuntimeError: If a streamed comparison returns a distance that is
+        not finite.
 
     Example::
 
@@ -3521,8 +3626,9 @@ def k_medoids(distance_matrix, *, n_clusters=2, init="build",
         for label, medoid in enumerate(result.medoids):
             print(label, mols[medoid].GetTitle())
     """
-    if not isinstance(distance_matrix, SymmetricDistanceMatrix):
-        raise TypeError("k_medoids() expects a SymmetricDistanceMatrix")
+    items = _metric_input(items, distance_matrix, comparison, kwargs,
+                          "k_medoids")
+    is_matrix = isinstance(items, SymmetricDistanceMatrix)
 
     # An unrecognized init is deliberately NOT rejected here. Its row is the
     # last one in the native table, so rejecting it first would make
@@ -3580,6 +3686,14 @@ def k_medoids(distance_matrix, *, n_clusters=2, init="build",
     if any(index < 0 for index in seeds):
         raise ValueError("K-medoids initial_medoids must be non-negative")
 
+    # With the other argument-shape checks rather than in the mirror below:
+    # the native storage overload ignores the field instead of refusing it, so
+    # there is no native row to mirror and nothing but this call would ever
+    # tell a caller that the budget they set does not apply.
+    budget = _comparison_budget(
+        max_comparisons, "k_medoids",
+        refusal=_MATRIX_COMPARISON_REFUSAL if is_matrix else None)
+
     # Every native check below is mirrored here, in the order
     # k_medoids_cluster() applies them, and before the gate, except the
     # null-data guard (no Python-reachable way to construct storage with null
@@ -3591,8 +3705,8 @@ def k_medoids(distance_matrix, *, n_clusters=2, init="build",
     # except clause for "you passed me something invalid".
 
     # ValueError, not TypeError: the argument's type is right, its storage is not.
-    if isinstance(distance_matrix.storage, SparseStorage):
-        raise ValueError(  # noqa: TRY004
+    if is_matrix and isinstance(items.storage, SparseStorage):
+        raise ValueError(
             "K-medoids clustering requires complete pairwise "
             "distances; SparseStorage is not supported")
     if chunk_size_int == 0:
@@ -3601,10 +3715,21 @@ def k_medoids(distance_matrix, *, n_clusters=2, init="build",
         raise ValueError("K-medoids max_iterations must be at least one")
     if n_clusters_int == 0:
         raise ValueError("K-medoids n_clusters must be at least one")
-    if n_clusters_int > distance_matrix.num_samples:
+
+    # Here, between the item-count-free rows of the mirror and the rows that
+    # need the count: a named comparison has no count until it is built, and
+    # building it any earlier would charge a bad chunk_size for a comparison
+    # the call will never use. allow_sparse: the matrix path refuses sparse
+    # storage above, earlier and with its own message. refuse_dropped: medoids
+    # are reported as caller positions, which a dropped item would shift.
+    _refuse_unrepeatable(items, comparison, "k_medoids", _KMEDOIDS_REASON)
+    source = _diversity_source(items, comparison, kwargs, "k_medoids",
+                               allow_sparse=True, refuse_dropped=True)
+
+    if n_clusters_int > source.size:
         raise ValueError(
             "K-medoids n_clusters must be at most "
-            f"the item count ({distance_matrix.num_samples})")
+            f"the item count ({source.size})")
     if init_key != "explicit":
         if seeds:
             raise ValueError(
@@ -3614,7 +3739,7 @@ def k_medoids(distance_matrix, *, n_clusters=2, init="build",
             raise ValueError(
                 "K-medoids initial_medoids must hold exactly n_clusters indices")
         for index in seeds:
-            if index >= distance_matrix.num_samples:
+            if index >= source.size:
                 raise IndexError(
                     "K-medoids initial_medoids index is outside "
                     "the storage range")
@@ -3630,7 +3755,10 @@ def k_medoids(distance_matrix, *, n_clusters=2, init="build",
     # inequality, so refusing a matrix for violating it would be over-refusal.
     # The subset_scored refusal it keeps matters more here than for the ranking
     # metrics that motivated it, because PAM adds the incomparable numbers up.
-    _gate.require_comparable(distance_matrix, "k_medoids")
+    # A comparison is judged on its declared facts instead, inside the dispatch
+    # above, because there is no stored data to scan.
+    if source.matrix is not None:
+        _gate.require_comparable(source.matrix, "k_medoids")
 
     options = KMedoidsOptions()
     options.n_clusters = n_clusters_int
@@ -3643,8 +3771,21 @@ def k_medoids(distance_matrix, *, n_clusters=2, init="build",
     options.max_iterations = max_iterations_int
     options.num_threads = num_threads_int
     options.chunk_size = chunk_size_int
+    options.max_comparisons = budget
 
-    result = _k_medoids_cluster(distance_matrix.storage, options)
+    try:
+        result = _k_medoids_cluster(source.target, options)
+    except RuntimeError as error:
+        # The one native refusal this layer cannot mirror. The SWIG ladder
+        # collapses every native exception to RuntimeError, which here would
+        # be the one type a caller cannot tell from a bug, so it is re-typed
+        # rather than reported as thrown. Re-typed and not recomputed: the
+        # message prices this call's two initializer floors, and a second copy
+        # of that arithmetic in Python is a copy that can drift from the
+        # kernel whose work it claims to predict.
+        if _KMEDOIDS_BUDGET_REFUSAL not in str(error):
+            raise
+        raise ValueError(str(error)) from None
     return KMedoidsResult(
         result.Labels(),
         result.Members(),

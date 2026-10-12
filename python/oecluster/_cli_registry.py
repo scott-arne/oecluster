@@ -33,10 +33,10 @@ _REQUIRED_TYPES = {
 }
 
 #: Meaningless when the input is already a matrix: they describe how to build
-#: one from raw items, or bound the graph built from a comparison.
+#: one from raw items, or bound the work done against a comparison.
 #: ``distance_matrix`` is the keyword alias for the matrix itself.
-_EXCLUDED_FOR_ITEMS = {"comparison", "distance_matrix", "max_graph_bytes",
-                       "similarity"}
+_EXCLUDED_FOR_ITEMS = {"comparison", "distance_matrix", "max_comparisons",
+                       "max_graph_bytes", "similarity"}
 
 #: The library coerces these with a bare ``int()`` (dbscan's
 #: ``options.min_samples = int(min_samples)``), so a float would be silently truncated rather than refused.

@@ -142,9 +142,14 @@ KMedoidsResult k_medoids_cluster(const StorageBackend& storage,
  * ``n_clusters + 1``. Switching therefore saves nothing at
  * ``n_clusters == 1``, a quarter at two, and under half however large
  * ``n_clusters`` grows; the verification pass underneath is what neither can
- * shed. A refusal prices both floors for the ``n_clusters`` actually asked
- * for and says whether the cheaper one would clear the limit, rather than
- * leaving a rule of thumb to be applied. The swap loop then stops
+ * shed. A refusal prices the floor for the ``n_clusters`` actually asked for
+ * rather than leaving a rule of thumb to be applied, and a refusal under
+ * ``KMedoidsInit::Build`` prices farthest-first's floor beside it and says
+ * whether that one would clear the limit. That second price appears under
+ * ``Build`` alone, it being the one initializer with a cheaper alternative
+ * that needs no new input from the caller, and is suppressed there when the
+ * two floors come out equal, as they do at ``n_clusters == 1``, where the
+ * advice would return this same refusal unchanged. The swap loop then stops
  * between passes once the budget is spent -- before the predicted-delta scan
  * or before the verification pass, each priced for what it costs -- returning
  * ``Converged() == false`` with ``NumIterations() < max_iterations``, which is
