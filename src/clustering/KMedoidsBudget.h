@@ -12,10 +12,32 @@
 
 namespace OECluster::detail {
 
-/// Default ceiling on comparisons for a streamed run: about three hours at a
-/// microsecond each. A caller whose comparison is far cheaper or far dearer
-/// than that sets max_comparisons rather than living with this number.
-constexpr size_t KMEDOIDS_DEFAULT_MAX_COMPARISONS = 10'000'000'000;
+/// Default ceiling on comparisons for a streamed run: about three hours of
+/// single-threaded comparison *work* at the measured rate of 0.0356
+/// microseconds per comparison -- which the default chunking runs in well under
+/// an hour of wall time at an item count in the tens of thousands, because a
+/// sweep is spread over ceil(n / chunk_size) workers. Work, not elapsed time,
+/// is what a count can honestly bound: the wall clock also depends on the
+/// chunking and on what else the machine is doing, and neither is this limit's
+/// to promise.
+///
+/// The rate is a single-threaded in-kernel Compare() on a 2048-bit
+/// fingerprint, measured by two in-kernel routes -- one differencing a single
+/// sweep out of two budgeted runs, one dividing a whole run by its closed-form
+/// comparison count -- agreeing to 3%. So it is what this limit is calibrated
+/// for and not a property of streamed k-medoids. A dearer comparison buys
+/// proportionally less time at the same count -- a SiteHopper Compare costs
+/// around 0.9 seconds, where this limit is geological -- so a caller whose
+/// comparison is far cheaper or far dearer sets max_comparisons rather than
+/// living with this number.
+///
+/// The three hours is the judgement; only the arithmetic under it is measured.
+/// An earlier 10'000'000'000 was derived from an assumed microsecond per
+/// comparison and bought about six minutes of work, which would have refused
+/// runs finishing well inside half an hour on the very problems too large to
+/// hold a matrix for. The KMedoidsStreamingTest case named for this constant
+/// pins that repair in behaviour rather than in digits.
+constexpr size_t KMEDOIDS_DEFAULT_MAX_COMPARISONS = 300'000'000'000;
 
 /**
  * @brief Comparisons in one pass over every pair.

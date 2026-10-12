@@ -18,14 +18,18 @@ carries what building the input peaked at, so the kernel's own growth is
 ``rss_peak_bytes - rss_inputs_bytes`` rather than a figure the matrix build
 dominates.
 
-Every record carries its own provenance -- host, thread count, chunk size,
-fixture, seed, ``n_clusters``, init mode and the load averages taken as the
-measurement started -- because a table assembled from rows that cannot say
-which machine produced them cannot be re-checked, only re-measured.
+Every record carries its own provenance -- host, OS release, core count,
+requested *and* resolved thread count, oecluster version, chunk size, fixture,
+seed, ``n_clusters``, init mode and the load averages taken as the measurement
+started -- because a table assembled from rows that cannot say which machine
+produced them cannot be re-checked, only re-measured.
 
 **Peak RSS does not depend on machine load; wall time does.** A row whose
 1-minute load average is at or above half the core count is still a valid
-memory figure and not a valid timing.
+memory figure and not a valid timing. Each record decides that for itself and
+reports it as ``timing_valid``, rather than leaving a reader to pair a load
+average with a core count the row does not carry; the printed table marks a
+failing row ``TAINTED``.
 
 ``--cooldown SECONDS`` sleeps in the parent before each child is spawned. The
 1-minute load average has roughly a 60-second time constant, so an all-core
@@ -65,11 +69,14 @@ from streaming_threshold import library_smiles, matrix_bytes, peak_rss_bytes
 PATHS = ("streaming", "matrix")
 INITS = ("build", "farthest_first")
 
-#: Budget handed to every streamed cell, far above anything the grid can spend.
-#: The native default is 1e10 comparisons, which a large cell can exhaust
-#: mid-run; the swap loop would then stop between passes and the row would
-#: time a truncated run while reporting the configuration asked for. Measuring
-#: the algorithm means taking the guard off, not measuring the guard.
+#: Budget handed to every streamed cell, far above anything a grid can spend.
+#: Set explicitly rather than left to the native default, which a large enough
+#: cell can exhaust mid-run: the swap loop would then stop between passes and
+#: the row would time a truncated run while reporting the configuration asked
+#: for. Measuring the algorithm means taking the guard off, not measuring the
+#: guard. The default is 3e11 comparisons, which the published sizes clear by
+#: two orders of magnitude -- but a benchmark that only happens to fit under a
+#: limit it never states is one size change away from measuring the limit.
 UNCONSTRAINED_COMPARISONS = 10**15
 
 
@@ -80,6 +87,47 @@ def load_average() -> list[float] | None:
     """
     getloadavg = getattr(os, "getloadavg", None)
     return list(getloadavg()) if getloadavg is not None else None
+
+
+def resolved_workers(num_threads: int, n_items: int) -> int | None:
+    """Return the worker count a run will actually get, or None if unknowable.
+
+    Recorded alongside the requested ``num_threads`` because the requested
+    value is usually 0, meaning "auto-detect", and a row carrying only the 0
+    cannot be graded: the timing-validity rule is a load average against half
+    the core count, and half of what is exactly the thing 0 withholds. Mirrors
+    the native cap ``min(num_threads, n)`` and ``hardware_concurrency()`` for
+    the auto case, for which ``os.cpu_count()`` is the usual answer.
+    """
+    cores = os.cpu_count()
+    if num_threads == 0:
+        return None if cores is None else min(cores, n_items)
+    return min(num_threads, n_items)
+
+
+def provenance(n_items: int, num_threads: int) -> dict[str, Any]:
+    """Return the machine and build facts a row needs to be re-checkable.
+
+    Emitted into every record rather than stated in the prose that quotes it.
+    Retrofitting provenance cost a whole re-measurement once already, and a
+    row merged into a table from another machine is indistinguishable without
+    these: a 1-minute load of 20 fails the validity rule on 14 cores and
+    passes it on 64.
+    """
+    import oecluster
+
+    cores = os.cpu_count()
+    load = load_average()
+    workers = resolved_workers(num_threads, n_items)
+    # None rather than False where either side is unknown: an unknowable gate
+    # is not a passed one, and False would read as a measured failure.
+    valid: bool | None = None
+    if load is not None and cores is not None:
+        valid = load[0] < cores / 2
+    return {"host": platform.node(), "platform": platform.platform(),
+            "cpu_count": cores, "resolved_workers": workers,
+            "oecluster_version": oecluster.__version__,
+            "load_average": load, "timing_valid": valid}
 
 
 def sweep_comparisons(n_items: int) -> int:
@@ -160,7 +208,7 @@ def measure(spec: dict[str, Any]) -> dict[str, Any]:
     :returns: The spec plus ``seconds`` (the clustering call only),
         ``rss_inputs_bytes`` (peak before the call), ``rss_peak_bytes``,
         ``matrix_bytes``, ``n_clusters_found``, ``n_iterations``,
-        ``converged``, ``cost``, ``host`` and ``load_average``.
+        ``converged``, ``cost`` and everything :func:`provenance` returns.
     """
     import oecluster
 
@@ -171,7 +219,7 @@ def measure(spec: dict[str, Any]) -> dict[str, Any]:
     # matrix path already peaks at the pdist fill, so the end-to-end peak
     # alone cannot show what the kernel itself adds.
     rss_inputs = peak_rss_bytes()
-    load = load_average()
+    facts = provenance(spec["n_items"], spec["num_threads"])
 
     options: dict[str, Any] = {}
     if spec["path"] == "streaming":
@@ -192,9 +240,7 @@ def measure(spec: dict[str, Any]) -> dict[str, Any]:
             "n_clusters_found": result.num_clusters,
             "n_iterations": result.n_iterations,
             "converged": result.converged,
-            "cost": result.cost,
-            "host": platform.node(),
-            "load_average": load, "attempted": True}
+            "cost": result.cost, **facts, "attempted": True}
 
 
 def probe(spec: dict[str, Any]) -> dict[str, Any]:
@@ -211,16 +257,28 @@ def probe(spec: dict[str, Any]) -> dict[str, Any]:
     unavoidable comparisons and one given a single sweep more. The first
     cannot afford a pass and stops at the top of the swap loop; the second
     affords exactly one predicted-delta scan, which is one sweep over every
-    pair. Everything else -- building the comparison, filling the medoid
-    columns, assembling the result -- is identical and cancels. What is left
-    in the difference beyond the sweep is the ``O(item count)`` column update
-    of an accepted swap, two parts in ten thousand at the default probe size.
+    pair. What the subtraction removes is the shared setup -- filling the
+    medoid columns and assembling the result -- and at the default probe size
+    that is 0.4 ms against a 141 ms sweep, so it is a tidiness rather than a
+    protection. It removes nothing that happens *inside* the one sweep: the
+    per-pass thread-pool construction and the first touch of the column cache
+    are charged to the sweep, which is the conservative direction. So is the
+    ``O(item count)`` column update of an accepted swap, two parts in ten
+    thousand here.
 
-    :param spec: ``n_items``, ``n_clusters``, ``seed``, ``num_threads``,
-        ``chunk_size``, ``pairs`` and ``repeats``.
+    The divisor is the **priced** sweep, ``n * (n - 1)``, which is what
+    ``max_comparisons`` counts. ``best_predicted_swap`` skips the
+    ``n_clusters`` items that are already medoids, so the kernel makes
+    slightly fewer calls than it is charged for and the figure is low by
+    ``n_clusters / n`` -- 0.1% at the default probe ``n_clusters`` of 2. Per
+    budget-counted comparison is the right unit for a number that exists to
+    price a budget, but it is not quite per ``Compare`` call.
+
+    :param spec: ``n_items``, ``n_clusters``, ``fixture``, ``seed``,
+        ``num_threads``, ``chunk_size``, ``pairs`` and ``repeats``.
     :returns: The spec plus ``python_compare_microseconds``,
-        ``kernel_compare_microseconds``, the two medians it came from,
-        ``sweep``, ``host`` and ``load_average``.
+        ``kernel_compare_microseconds``, the medians and the full spreads
+        behind it, ``sweep``, and everything :func:`provenance` returns.
     """
     import oecluster
 
@@ -228,7 +286,7 @@ def probe(spec: dict[str, Any]) -> dict[str, Any]:
     comparison = build_input("streaming", n_items, spec["seed"],
                              spec["num_threads"])
     gc.collect()
-    load = load_average()
+    facts = provenance(n_items, spec["num_threads"])
 
     # Strided so consecutive calls do not re-read one row, which would price a
     # warm cache the kernel's row scan does not get either.
@@ -265,7 +323,15 @@ def probe(spec: dict[str, Any]) -> dict[str, Any]:
             "kernel_compare_microseconds": delta / sweep * 1e6,
             "no_sweep_seconds": statistics.median(no_sweep),
             "one_sweep_seconds": statistics.median(one_sweep),
-            "host": platform.node(), "load_average": load}
+            # Every repeat, not just the medians. This is the keystone number
+            # of the measurement and a median alone cannot tell a stable
+            # difference from a lucky draw out of a drifting machine.
+            "no_sweep_seconds_all": no_sweep,
+            "one_sweep_seconds_all": one_sweep,
+            "kernel_compare_microseconds_range": [
+                (min(one_sweep) - max(no_sweep)) / sweep * 1e6,
+                (max(one_sweep) - min(no_sweep)) / sweep * 1e6],
+            **facts}
 
 
 def run_child(mode: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -289,10 +355,14 @@ def benchmark(args: argparse.Namespace) -> list[dict[str, Any]]:
         thing that has to move.
     """
     rows = []
+    # Only when a streamed cell will actually run: the matrix path never
+    # consults a comparison budget, so refusing --paths matrix over one would
+    # block a measurement on a limit it does not obey.
+    budgeted = "streaming" in args.paths
     for n_items in args.sizes:
         for init in args.inits:
             floor = unavoidable_comparisons(n_items, args.n_clusters, init)
-            if floor > args.max_comparisons:
+            if budgeted and floor > args.max_comparisons:
                 raise ValueError(
                     f"n_items={n_items} init={init} "
                     f"n_clusters={args.n_clusters} cannot run: its "
@@ -333,6 +403,12 @@ def summarize(runs: list[dict[str, Any]]) -> dict[str, Any]:
     # absent, so keep None rather than indexing it.
     loads = [r["load_average"] for r in runs if r["load_average"] is not None]
     row["load_average"] = max(loads, key=lambda la: la[0]) if loads else None
+    # Re-derived from the load that was just substituted in, not inherited
+    # from runs[0]: a row stamped with the busiest run's load and the
+    # quietest run's verdict would say the opposite of its own evidence.
+    cores = row["cpu_count"]
+    row["timing_valid"] = (None if row["load_average"] is None or cores is None
+                           else row["load_average"][0] < cores / 2)
     return row
 
 
@@ -381,17 +457,36 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def load_text(record: dict[str, Any]) -> str:
+    """Return the 1-minute load with its verdict, for a table cell.
+
+    The verdict travels with the number because the number alone does not
+    carry one: the rule is a load against half the core count, so the same
+    20 fails on 14 cores and passes on 64.
+    """
+    load = record["load_average"]
+    if load is None:
+        return "n/a"
+    mark = {True: "ok", False: "TAINTED", None: "?"}[record["timing_valid"]]
+    return f"{load[0]:.1f} {mark}"
+
+
 def print_probe(record: dict[str, Any]) -> None:
     """Print the probe record as text."""
-    load = record["load_average"]
-    load_text = f"{load[0]:.1f}" if load is not None else "n/a"
+    low, high = record["kernel_compare_microseconds_range"]
     print(f"host {record['host']}  n {record['n_items']}  "
-          f"threads {record['num_threads']}  chunk {record['chunk_size']}  "
-          f"load 1m {load_text}")
+          f"fixture {record['fixture']}  "
+          f"threads {record['num_threads']} "
+          f"(resolved {record['resolved_workers']} of "
+          f"{record['cpu_count']})  chunk {record['chunk_size']}  "
+          f"load 1m {load_text(record)}")
     print(f"python Compare: {record['python_compare_microseconds']:.4f} us "
           f"per call over {record['pairs']} calls")
     print(f"in-kernel:      {record['kernel_compare_microseconds']:.4f} us "
-          f"per comparison over a {record['sweep']}-comparison sweep")
+          f"per budget-counted comparison over a {record['sweep']}-comparison "
+          f"sweep")
+    print(f"                worst-case spread over {record['repeats']} "
+          f"repeats: {low:.4f} to {high:.4f} us")
 
 
 def print_rows(rows: list[dict[str, Any]]) -> None:
@@ -399,16 +494,19 @@ def print_rows(rows: list[dict[str, Any]]) -> None:
     print("| path | n | init | k | seconds | iters | clusters | peak RSS MB | "
           "inputs RSS MB | matrix MB | load 1m |")
     print("| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | "
-          "---: | ---: |")
+          "---: | --- |")
     for row in rows:
-        load = row["load_average"]
-        load_text = f"{load[0]:.1f}" if load is not None else "n/a"
         print(f"| {row['path']} | {row['n_items']} | {row['init']} | "
               f"{row['n_clusters']} | {row['seconds']:.2f} | "
               f"{row['n_iterations']} | {row['n_clusters_found']} | "
               f"{row['rss_peak_bytes'] / 1e6:.0f} | "
               f"{row['rss_inputs_bytes'] / 1e6:.0f} | "
-              f"{row['matrix_bytes'] / 1e6:.0f} | {load_text} |")
+              f"{row['matrix_bytes'] / 1e6:.0f} | {load_text(row)} |")
+    if any(row["timing_valid"] is not True for row in rows):
+        print()
+        print("TAINTED: the 1-minute load average was at or above half the "
+              "core count when this row ran. Its peak RSS stands; its "
+              "seconds are not a wall-clock claim.")
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -425,7 +523,8 @@ def main(argv: list[str] | None = None) -> None:
         time.sleep(args.cooldown)
         record = run_child("probe", {
             "n_items": args.probe_size, "n_clusters": args.probe_clusters,
-            "seed": args.seed, "num_threads": args.num_threads,
+            "fixture": "library", "seed": args.seed,
+            "num_threads": args.num_threads,
             "chunk_size": args.chunk_size, "pairs": args.probe_pairs,
             "repeats": args.probe_repeats})
         if args.as_json:

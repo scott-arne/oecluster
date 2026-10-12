@@ -318,6 +318,51 @@ TEST(KMedoidsStreamingTest, RefusesWhenUnavoidableWorkExceedsTheBudget) {
     EXPECT_NO_THROW(k_medoids_cluster(comparison, options));
 }
 
+// Every other budget test supplies its own limit, so until this one existed
+// nothing anywhere pinned the default: it could be rewritten, or lose a digit,
+// with the whole suite still green. What is pinned is the property rather than
+// the digits -- the item counts the default is meant to admit and refuse --
+// because the digits are an arithmetic consequence of a measured comparison
+// rate, and re-measuring on faster hardware should be free to move them.
+//
+// The bracket is also the regression that motivated the current value. The
+// default was once 10'000'000'000, derived from an assumed microsecond per
+// comparison; at the measured 0.0356 microseconds that bought six minutes of
+// work rather than the three hours it claimed, and it refused N = 45000 --
+// squarely inside the range this feature exists for, since a 45000-item matrix
+// is 8 GB. The first expectation below is that refusal, inverted.
+TEST(KMedoidsStreamingTest, TheDefaultBudgetAdmitsTheSizesItIsCalibratedFor) {
+    // 8.1e10 comparisons: admitted now, refused under the old default.
+    EXPECT_LE(detail::unavoidable_comparisons(45000, 20, KMedoidsInit::Build),
+              detail::KMEDOIDS_DEFAULT_MAX_COMPARISONS);
+    // 4.0e11: still refused, so the repair did not simply remove the brake.
+    EXPECT_GT(detail::unavoidable_comparisons(100000, 20, KMedoidsInit::Build),
+              detail::KMEDOIDS_DEFAULT_MAX_COMPARISONS);
+
+    // Through the entry point rather than the arithmetic alone, and at the
+    // one size where both halves of the bracket are observable in a single
+    // call: Build's 4.0e11 floor is refused while the advice reports
+    // farthest-first's 2.1e11 as fitting. Under the old default the same call
+    // ended "still over it", so this wording is what distinguishes the two
+    // constants. Costs nothing despite the item count -- the floor is priced
+    // and refused before any pair is scored.
+    ConstantComparison huge(100000, 1.0);
+    KMedoidsOptions defaulted;
+    defaulted.n_clusters = 20;
+    defaulted.init = KMedoidsInit::Build;
+    ASSERT_EQ(defaulted.max_comparisons, 0u) << "0 must still mean the default";
+    try {
+        k_medoids_cluster(huge, defaulted);
+        FAIL() << "the default budget admitted a 4.0e11-comparison floor";
+    } catch (const std::invalid_argument& error) {
+        EXPECT_NE(std::string(error.what()).find(
+                      "init=farthest_first would need 209999900000 instead, "
+                      "which fits within this limit."),
+                  std::string::npos)
+            << error.what();
+    }
+}
+
 // The refusal's advice is release-note text, and no rule of thumb about it is
 // true across the range: Build's floor is 2k passes over every pair against
 // farthest-first's k + 1, so switching saves nothing at k = 1, a quarter at
