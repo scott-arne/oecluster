@@ -225,11 +225,58 @@ def test_explicit_variances_bypass_the_pooled_fit():
     np.testing.assert_allclose(override.condensed, fitted.condensed, rtol=1e-9)
 
 
-def test_propagate_is_stamped_nan_present_and_refused():
+def test_a_finite_propagate_matrix_is_stamped_complete_and_clusters():
+    """The stamp describes the data, not the policy that permitted a NaN.
+
+    ``missing='propagate'`` used to stamp ``nan_present`` from the policy name
+    alone, so a matrix with no non-finite entry anywhere was refused with
+    "contains non-finite entries" -- a claim that was not true of it.
+    """
     dist = oecluster.pdist(_mols(), "descriptor", missing="propagate")
+    assert np.isfinite(dist.condensed).all()
+    assert dist.data_integrity == "complete"
+    oecluster.butina(dist, threshold=0.5)
+
+
+def test_a_propagate_matrix_that_really_holds_a_nan_is_still_refused():
+    """The half that proves the fix did not simply disable the refusal."""
+    dist = oecluster.pdist(_missingness_mols(), "descriptor",
+                           missing="propagate")
+    assert not np.isfinite(dist.condensed).all()
     assert dist.data_integrity == "nan_present"
-    with pytest.raises(ValueError, match="cannot be overridden"):
-        oecluster.butina(dist, 1.0, allow_nonmetric=True)
+    with pytest.raises(ValueError, match="non-finite entries"):
+        oecluster.butina(dist, threshold=0.5)
+
+
+def test_a_sparse_matrix_keeps_its_stamp_because_the_cutoff_hid_the_infinity():
+    """SparseStorage discards ``+inf``, so the data is not a witness.
+
+    ``Set`` is ``if (value > cutoff_) return;`` (src/StorageBackend.cpp:436)
+    and ``+inf`` exceeds every finite cutoff, so an infinite distance is
+    dropped rather than stored. The matrix then scans clean while the stamp is
+    truthful, and downgrading it would turn a true stamp into a false one.
+    """
+    dist = oecluster.pdist(_mols(), "descriptor", metric="minkowski",
+                           p=200.0, missing="propagate", cutoff=1.0)
+    assert dist.data_integrity == "nan_present"
+
+
+def test_an_mmap_matrix_with_a_cutoff_is_still_downgraded(tmp_path):
+    """mmap storage ignores the cutoff, so it stays a faithful record.
+
+    This is what distinguishes the correct condition from ``cutoff == 0.0``:
+    PDistOptions.cutoff is not read by pdist (include/oecluster/PDist.h:22-26).
+    """
+    dist = oecluster.pdist(_mols(), "descriptor", missing="propagate",
+                           cutoff=0.5, output=str(tmp_path / "m.dat"))
+    assert dist.data_integrity == "complete"
+
+
+def test_a_finite_propagate_cross_matrix_is_stamped_complete():
+    cross = oecluster.cdist(_mols()[:4], _mols()[4:], "descriptor",
+                            missing="propagate")
+    assert np.isfinite(cross.matrix).all()
+    assert cross.data_integrity == "complete"
 
 
 def test_ignore_is_stamped_subset_scored_and_overridable():

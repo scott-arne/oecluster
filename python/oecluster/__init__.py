@@ -2376,8 +2376,18 @@ def pdist(items,
     # non-finite distance while it scores pairs, so an earlier read would stamp
     # ``complete`` on a matrix that turned out to contain NaN.
     facts = _gate.facts_from_comparison(comparison_obj)
-    return SymmetricDistanceMatrix(storage, comparison_name, labels, params,
-                                   facts)
+    matrix = SymmetricDistanceMatrix(storage, comparison_name, labels, params,
+                                     facts)
+    # The comparison stamps ``nan_present`` from its missing-value policy when
+    # it has observed nothing, which is the only honest answer before a sweep
+    # but not after one, so the finished matrix gets the last word. Sparse
+    # storage is excluded because it discards values above the cutoff --
+    # ``+inf`` among them -- so its contents are not a witness to what was
+    # computed; dense and mmap storage retain everything.
+    if (facts['data_integrity'] == "nan_present" and not sparse
+            and not _gate._has_nonfinite(matrix)):
+        matrix._facts['data_integrity'] = "complete"
+    return matrix
 
 
 def cdist(items_a, items_b, comparison, *,
@@ -2481,6 +2491,16 @@ def cdist(items_a, items_b, comparison, *,
 
     _cpp_cdist_into_address(comparison_obj, n_a, output.ctypes.data, options)
     facts = _gate.facts_from_comparison(comparison_obj)
+    # As in pdist: a ``nan_present`` stamped from the missing-value policy
+    # alone is checked against the distances just computed. The cutoff test
+    # mirrors the native filter's own predicate (src/CDist.cpp:74 and
+    # src/comparisons/DescriptorComparison.cpp:520, both ``cutoff > 0.0``), so
+    # a filtered matrix -- which rewrites ``+inf`` rather than storing it, and
+    # is therefore no witness -- keeps its stamp, while a negative or NaN
+    # cutoff, which filters nothing, still downgrades.
+    if (facts['data_integrity'] == "nan_present" and not (cutoff > 0.0)
+            and bool(np.isfinite(output).all())):
+        facts = dict(facts, data_integrity="complete")
 
     return CrossDistanceMatrix(
         output, comparison_name,
