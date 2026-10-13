@@ -1313,9 +1313,12 @@ class SymmetricDistanceMatrix(DistanceMatrix):
             non-positive count skips it.
         :param seed: Seed for the probe sampler.
         :returns: SymmetricDistanceMatrix.
-        :raises TypeError: If check is not a bool or ``numpy.bool_``.
+        :raises TypeError: If check is not a bool or ``numpy.bool_``, if
+            ``probe_triples`` is not an integer, or if ``params`` is neither
+            a mapping nor an iterable of key/value pairs.
         :raises ValueError: If the shape, dtype, length, or values are
-            invalid.
+            invalid, or if ``params`` is an iterable whose elements are not
+            key/value pairs.
         """
         # Rejected before the input is even read: a malformed switch is a call
         # the caller must fix whatever the numbers look like. Truthiness would
@@ -1497,10 +1500,13 @@ class SymmetricDistanceMatrix(DistanceMatrix):
             try:
                 copied = dict(params)
             except (TypeError, ValueError) as error:
-                # Re-raised as its own class, not as TypeError: a malformed
-                # iterable -- dict([1, 2, 3]) -- raises ValueError today, and
-                # changing which exception a caller catches would be a
-                # behaviour change, not the message fix this is.
+                # Re-raised as its own class, because ``dict`` uses both and
+                # changing which one a caller catches would be a behaviour
+                # change rather than the message fix this is. ``dict(0)`` and
+                # ``dict([1, 2, 3])`` raise TypeError -- not iterable, and a
+                # non-sequence element -- while ``dict([(1, 2, 3)])`` raises
+                # ValueError for a sequence of the wrong length. Both arms are
+                # reachable; the suite pins one case of each.
                 raise type(error)(
                     f"from_condensed params= must be a mapping or an iterable "
                     f"of key/value pairs, got {type(params).__name__}") from error
@@ -3957,8 +3963,8 @@ def _murcko_options(mols, scaffold, num_threads, caller):
         raise ValueError(
             f"Unknown Murcko scaffold type: {scaffold!r}; "
             "expected 'framework' or 'generic'")
-    # The typemap is a strict PyList_Check, so anything else is rejected there
-    # anyway -- but both entry points are overloaded, and SWIG's overload
+    # The typemap below is a strict PyList_Check, so anything else is rejected
+    # there anyway -- but both entry points are overloaded, and SWIG's overload
     # dispatcher discards the typemap's message in favour of "Wrong number or
     # type of arguments for overloaded function 'murcko_cluster'", naming a
     # symbol murcko() never told the caller about. Mirroring the check exactly

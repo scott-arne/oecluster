@@ -419,6 +419,11 @@ def test_an_explicitly_falsy_params_is_not_treated_as_unspecified():
 
 
 def test_a_bad_params_names_the_parameter_and_the_entry_point():
+    """``dict(0)`` says "'int' object is not iterable" and names neither.
+
+    The test above pins that ``params=0`` is refused at all; this one pins
+    that the refusal says which argument and which call it came from.
+    """
     condensed, _ = _metric_condensed(n=3)
     with pytest.raises(TypeError, match=r"from_condensed params="):
         SymmetricDistanceMatrix.from_condensed(condensed, params=0)
