@@ -528,6 +528,36 @@ ASYMMETRIC = [
 ]
 
 
+def test_a_refusal_is_not_pre_empted_by_the_asymmetry_warning():
+    """An advisory must not stand in front of a real fault.
+
+    ``[[1, 3], [0, 1]]`` is asymmetric *and* its symmetric part is
+    indefinite, so it earns both the warning and the semidefinite refusal.
+    The refusal is the one the caller has to act on, and under ``-W error``
+    an advisory emitted first would replace it entirely. The constructor
+    substitutes the matrix up front but holds the warning until C++ has
+    accepted the options, which is the ordering the named paths get for
+    free by validating first.
+    """
+    bad = np.array([[1.0, 3.0], [0.0, 1.0]])
+    columns = _first_columns(2)
+
+    with (warnings.catch_warnings(),
+          pytest.raises(RuntimeError, match="positive semidefinite")):
+        warnings.simplefilter("error")
+        oecluster.DescriptorComparison(
+            _mols(), columns=columns, metric="mahalanobis",
+            inverse_covariance=bad.ravel().tolist())
+
+    # And with warnings merely shown, the refusal still wins.
+    with (warnings.catch_warnings(),
+          pytest.raises(RuntimeError, match="positive semidefinite")):
+        warnings.simplefilter("always")
+        oecluster.DescriptorComparison(
+            _mols(), columns=columns, metric="mahalanobis",
+            inverse_covariance=bad.ravel().tolist())
+
+
 @pytest.mark.parametrize(("matrix", "pair"), ASYMMETRIC,
                          ids=["transposed-pair", "triangular-fill", "mirrored-fill"])
 def test_an_asymmetric_inverse_covariance_warns_and_is_symmetrized(matrix, pair):

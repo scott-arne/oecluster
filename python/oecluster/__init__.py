@@ -8274,14 +8274,21 @@ class DescriptorComparison:
             _oecluster.validate_descriptor_options(opts)
             _comparisons.refuse_inapplicable_p(kwargs)
 
-        # Last, so a call about to be refused does not warn about a second
-        # thing first. The options were built before the matrix was replaced,
-        # so they are rebuilt here; only on the path that warned, which is the
-        # path that was going to be reinterpreted anyway.
-        if _comparisons.symmetrize_inverse_covariance(kwargs):
+        # Substitute the matrix now, but hold the warning until C++ has
+        # accepted the options. Unlike the named paths, nothing has validated
+        # them yet here, so emitting first would put an advisory ahead of a
+        # real refusal -- and under ``-W error`` it would replace it, hiding
+        # the fault the caller actually has to fix. The options were built
+        # before the matrix was replaced, so they are rebuilt; only on the
+        # path that substituted, which was going to be reinterpreted anyway.
+        asymmetry = _comparisons.symmetrize_inverse_covariance(kwargs, emit=False)
+        if asymmetry:
             opts, _ = _comparisons._descriptor_options_and_empties(kwargs)
 
-        return _DescriptorComparison(mols, opts)
+        comparison = _DescriptorComparison(mols, opts)
+        if asymmetry:
+            warnings.warn(asymmetry, UserWarning)
+        return comparison
 
 
 class RMSDComparison:

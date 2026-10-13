@@ -414,7 +414,7 @@ def _first_asymmetric_pair(matrix):
     return int(rows[0]), int(cols[0])
 
 
-def symmetrize_inverse_covariance(kwargs):
+def symmetrize_inverse_covariance(kwargs, *, emit=True):
     """Replace an asymmetric ``inverse_covariance`` with ``(A + A.T) / 2``.
 
     The metric scores ``(A + A.T) / 2`` whatever is supplied, so an asymmetric
@@ -461,16 +461,17 @@ def symmetrize_inverse_covariance(kwargs):
         return False
 
     row, col = pair
-    warnings.warn(
+    message = (
         f"inverse_covariance is not symmetric: entry [{row}][{col}] is "
         f"{float(matrix[row, col])!r} but [{col}][{row}] is "
         f"{float(matrix[col, row])!r}. The mahalanobis metric scores "
         f"(A + A.T) / 2, and that is what has been used here in place of the "
         f"matrix supplied. Pass (A + A.T) / 2 yourself if that is what you "
-        f"meant, or mirror the entries you filled if it is not.",
-        UserWarning)
+        f"meant, or mirror the entries you filled if it is not.")
     kwargs['inverse_covariance'] = (matrix + matrix.T) / 2.0
-    return True
+    if emit:
+        warnings.warn(message, UserWarning)
+    return message
 
 
 def canonical_fingerprint_family(fp_type):
