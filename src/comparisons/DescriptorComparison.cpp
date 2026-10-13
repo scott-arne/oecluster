@@ -38,12 +38,14 @@ namespace {
 // pair 0.50, and the dominant-diagonal case this rule exists for 0.010.
 //
 // 1e-3 is the gap between those populations: it accepts legitimate inverses
-// to roughly condition number 1e13, past which the inverse has no
-// significant digits left anyway, and still refuses every order-1 mistake
-// with at least a tenfold margin. Tightening it does not catch a new class
-// of error, it only starts rejecting real data. See the design note,
-// sections 7.3 and 7.3.1 -- an earlier 1e-8 came from a stress test that
-// scaled singular values along a fixed basis and so understated this.
+// to roughly condition number 1e13, which is where the measurements stop
+// rather than a proven cliff, and still refuses every order-1 mistake with
+// at least a tenfold margin. Tightening it does not catch a new class of
+// error, it only starts rejecting real data. Neither this rule nor the
+// structural one below is a symmetry proof: a partially or inconsistently
+// filled triangle can still pass both. See the design note, sections 7.3 to
+// 7.3.2 -- an earlier 1e-8 came from a stress test that scaled singular
+// values along a fixed basis and so understated the round-off here.
 constexpr double SYMMETRY_TOLERANCE = 1e-3;
 
 /// Resolve the missing-value policy, reporting complete_case separately because
