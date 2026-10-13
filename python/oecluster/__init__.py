@@ -1314,11 +1314,12 @@ class SymmetricDistanceMatrix(DistanceMatrix):
         :param seed: Seed for the probe sampler.
         :returns: SymmetricDistanceMatrix.
         :raises TypeError: If check is not a bool or ``numpy.bool_``, if
-            ``probe_triples`` is not an integer, or if ``params`` is neither
-            a mapping nor an iterable of key/value pairs.
+            ``probe_triples`` is not an integer, or if ``params`` is not
+            iterable or yields an element that is not a sequence.
         :raises ValueError: If the shape, dtype, length, or values are
-            invalid, or if ``params`` is an iterable whose elements are not
-            key/value pairs.
+            invalid, or if ``params`` yields a sequence that is not a pair.
+            Anything else raised while consuming ``params`` propagates as
+            it is, since it came from the caller's own iterator.
         """
         # Rejected before the input is even read: a malformed switch is a call
         # the caller must fix whatever the numbers look like. Truthiness would
@@ -1500,13 +1501,16 @@ class SymmetricDistanceMatrix(DistanceMatrix):
             try:
                 copied = dict(params)
             except (TypeError, ValueError) as error:
-                # Re-raised as its own class, because ``dict`` uses both and
-                # changing which one a caller catches would be a behaviour
-                # change rather than the message fix this is. ``dict(0)`` and
-                # ``dict([1, 2, 3])`` raise TypeError -- not iterable, and a
-                # non-sequence element -- while ``dict([(1, 2, 3)])`` raises
-                # ValueError for a sequence of the wrong length. Both arms are
-                # reachable; the suite pins one case of each.
+                # Only an exact TypeError or ValueError is reworded. A
+                # subclass is re-raised untouched: it comes from the caller's
+                # own iterator rather than from the shape of ``params``, its
+                # constructor may not take a single string -- rebuilding a
+                # UnicodeDecodeError that way raises "function takes exactly
+                # 5 arguments" -- and a caller catching that subclass must
+                # keep catching it. This is a message fix, so it must not
+                # change which exception reaches anyone.
+                if type(error) not in (TypeError, ValueError):
+                    raise
                 raise type(error)(
                     f"from_condensed params= must be a mapping or an iterable "
                     f"of key/value pairs, got {type(params).__name__}") from error

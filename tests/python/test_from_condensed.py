@@ -452,6 +452,38 @@ def test_a_malformed_params_iterable_keeps_raising_ValueError():
         SymmetricDistanceMatrix.from_condensed(condensed, params=[1, 2, 3])
 
 
+def test_an_exception_from_the_caller_s_own_iterator_is_untouched():
+    """A subclass is re-raised as it is, not rebuilt with one string.
+
+    Rewording is for faults in the *shape* of ``params``. Anything else
+    raised while consuming it came from the caller's code and must reach
+    them unchanged -- and a subclass may not even accept a single string:
+    rebuilding a ``UnicodeDecodeError`` that way raises "function takes
+    exactly 5 arguments (1 given)", replacing their error with ours.
+    """
+    boom = UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+
+    def pairs():
+        yield ("a", 1)
+        raise boom
+
+    condensed, _ = _metric_condensed(n=3)
+    with pytest.raises(UnicodeDecodeError) as caught:
+        SymmetricDistanceMatrix.from_condensed(condensed, params=pairs())
+    assert caught.value is boom
+
+    class Custom(ValueError):
+        def __init__(self, a, b):
+            super().__init__(a, b)
+
+    def worse():
+        yield ("a", 1)
+        raise Custom("x", "y")
+
+    with pytest.raises(Custom):
+        SymmetricDistanceMatrix.from_condensed(condensed, params=worse())
+
+
 @pytest.mark.parametrize("n", [2, 3])
 def test_a_bad_probe_triples_names_the_parameter_and_the_entry_point(n):
     """At n < 3 the guard never evaluated ``samples``, so a nonsense value did
