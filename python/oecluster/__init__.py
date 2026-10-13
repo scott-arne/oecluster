@@ -2627,8 +2627,8 @@ def _streaming_target(items, comparison, kwargs, caller, allow_nonmetric, *,
     :param reason: Why the comparison path needs repeatable scores, for the
         ROCS refusal.
     :returns: Native storage or a native comparison.
-    :raises TypeError: If allow_nonmetric is not a bool, or a comparison
-        option is unknown.
+    :raises TypeError: If allow_nonmetric is not a bool or ``numpy.bool_``,
+        or a comparison option is unknown.
     :raises ValueError: If the gate refuses the input, the input is a ROCS
         comparison, or normalizing the items dropped one.
     """
@@ -2701,7 +2701,7 @@ def butina(items=_MISSING, threshold=_MISSING, *, distance_matrix=_MISSING,
         ``distance_matrix`` are given, or ``threshold`` is missing; the
         arguments fit none of the three forms, or ``comparison`` or a keyword
         this function does not take accompanies a matrix or a prebuilt
-        comparison; ``allow_nonmetric`` is not a bool; or
+        comparison; ``allow_nonmetric`` is not a bool or ``numpy.bool_``; or
         ``max_graph_bytes`` accompanies a matrix, or is a bool or not an
         integer.
     :raises ValueError: If threshold or a size argument is negative;
@@ -3131,7 +3131,7 @@ def dbscan(items=_MISSING, eps=_MISSING, *, distance_matrix=_MISSING,
         ``distance_matrix`` are given, or ``eps`` is missing; the arguments
         fit none of the three forms, or ``comparison`` or a keyword this
         function does not take accompanies a matrix or a prebuilt
-        comparison; ``allow_nonmetric`` is not a bool; or
+        comparison; ``allow_nonmetric`` is not a bool or ``numpy.bool_``; or
         ``max_graph_bytes`` accompanies a matrix, or is a bool or not an
         integer.
     :raises ValueError: If eps, min_samples, or a size argument is invalid;
@@ -3246,7 +3246,7 @@ def hdbscan(items=_MISSING, *, distance_matrix=_MISSING, min_cluster_size=5,
         ``distance_matrix`` are given; the arguments fit none of the three
         forms, or ``comparison`` or a keyword this function does not take
         accompanies a matrix or a prebuilt comparison; or
-        ``allow_nonmetric`` is not a bool.
+        ``allow_nonmetric`` is not a bool or ``numpy.bool_``.
     :raises ValueError: If options are invalid, ``alpha`` included when it is
         NaN; ``min_samples`` exceeds the item count; the matrix uses sparse
         storage, holds a NaN or infinite distance, or is not a metric, or the
@@ -3412,7 +3412,7 @@ def agglomerative(items=_MISSING, *, distance_matrix=_MISSING, n_clusters=2,
         ``distance_matrix`` are given; the arguments fit none of the three
         forms, or ``comparison`` or a keyword this function does not take
         accompanies a matrix or a prebuilt comparison; or
-        ``allow_nonmetric`` is not a bool.
+        ``allow_nonmetric`` is not a bool or ``numpy.bool_``.
     :raises ValueError: If options are invalid; a comparison form asks for a
         linkage other than single; ``n_clusters`` exceeds the item count
         without a ``distance_threshold``; the matrix uses sparse storage,

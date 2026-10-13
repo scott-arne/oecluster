@@ -3452,10 +3452,18 @@ patch-score comparison.
 | `columns` | Explicit column names | every numeric column of the selected sources |
 | `groups` | Descriptor group names | none |
 | `metric` | `euclidean`, `manhattan`, `chebyshev`, `hamming`, `canberra`, `bray_curtis`, `minkowski`, `standardized_euclidean`, `seuclidean`, `mahalanobis` | `standardized_euclidean` |
-| `variances` | Explicit per-column variances | fitted from the input |
+| `variances` | Explicit per-column variances for `standardized_euclidean` | fitted from the input |
 | `inverse_covariance` | Explicit inverse covariance for `mahalanobis` | fitted from the input |
 | `missing` | `complete_case`, `propagate`, `ignore` | `complete_case` |
 | `p` | Minkowski order | `2.0` |
+
+`variances` and `inverse_covariance` are mutually exclusive, and each is
+refused on a metric it does not belong to -- `variances` outside
+`standardized_euclidean`/`seuclidean`, `inverse_covariance` outside
+`mahalanobis`. Any of `sources`, `columns`, `groups`, `variances` and
+`inverse_covariance` passed as an *empty* sequence is refused rather than
+silently read as "not supplied", because emptiness is how the native layer
+encodes an absent override; omit the keyword to take the default.
 
 `seuclidean` is an alias of `standardized_euclidean`. Non-numeric columns are
 dropped from any selection, on every metric. A zero-variance column is dropped
