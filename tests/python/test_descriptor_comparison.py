@@ -517,6 +517,25 @@ def test_an_ill_conditioned_numpy_inverse_covariance_is_accepted():
         inverse_covariance=a.ravel().tolist())
 
 
+def test_an_inverse_whose_roundoff_lands_on_exact_zero_is_accepted():
+    """Round-off does produce a one-sided exact zero, so the fill rule bands it.
+
+    This covariance is symmetric, positive definite and well conditioned
+    (13.9), yet ``np.linalg.inv`` returns -8.88e-16 against an exact 0.0 at
+    one mirrored pair. An unbanded "exactly one side zero" rule refused it --
+    the first version of the triangular-fill check did exactly that.
+    """
+    cov = np.array([[0.25, 0.125, 0.125],
+                    [0.125, 0.25, 0.125],
+                    [0.125, 0.125, 0.125]])
+    a = np.linalg.inv(cov)
+    assert (a[0, 1] == 0.0) != (a[1, 0] == 0.0)
+    stats = oecluster.descriptor_statistics(_mols())
+    oecluster.DescriptorComparison(
+        _mols(), columns=list(stats['columns'][:3]), metric="mahalanobis",
+        inverse_covariance=a.ravel().tolist())
+
+
 def test_a_dense_correlated_ill_conditioned_inverse_is_accepted():
     """The case that showed 1e-8 was too tight to ship.
 

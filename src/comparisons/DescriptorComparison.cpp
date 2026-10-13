@@ -239,20 +239,38 @@ void check_override_against_selection(const OEFP::DescriptorSchema& schema,
         // that rule at every size, while halving the correlations shifts
         // distances by 2% at 100 columns and 13% at 1000.
         //
-        // The signal is a pair where exactly one side is zero: a symmetric
-        // matrix has both or neither, and an inverse's round-off makes both
-        // sides nonzero and nearly equal, never one of them exactly zero.
-        // Checked per pair rather than per triangle so that a partial fill,
-        // or one contaminated by a single mirrored entry, is caught too --
-        // the all-or-nothing form missed both. Measured against 400
-        // legitimate inverses (dense, ill-conditioned to 1e9,
-        // float32-derived, mixed-scale) and an exactly block-diagonal
-        // precision matrix: none flagged.
+        // The signal is a pair where one side is zero and the other carries a
+        // real value. Checked per pair rather than per triangle, so that a
+        // partial fill or one contaminated by a single mirrored entry is
+        // caught too -- the all-or-nothing form missed both.
+        //
+        // A one-sided zero is not on its own enough: round-off does produce
+        // them. Inverting the well-conditioned covariance
+        // {{0.25,0.125,0.125},{0.125,0.25,0.125},{0.125,0.125,0.125}} yields
+        // -8.88e-16 against an exact 0.0 at one pair. So the nonzero side
+        // must also be large enough to be a value rather than noise, and the
+        // bound is divided by the dimension to stay strict as the matrix
+        // grows -- a fill spreads its error over every pair, so each entry
+        // matters less individually but the total matters more. Measured:
+        // 400 legitimate inverses (dense, ill-conditioned to 1e9,
+        // float32-derived, mixed-scale) and that covariance, none flagged;
+        // 9e-4 triangular fills flagged at 2, 3, 50 and 1000 dimensions.
+        const double fill_floor = SYMMETRY_TOLERANCE / static_cast<double>(dim);
         for (size_t row = 0; row < dim; ++row) {
             for (size_t col = row + 1; col < dim; ++col) {
-                const bool upper_zero = opts.inverse_covariance[row * dim + col] == 0.0;
-                const bool lower_zero = opts.inverse_covariance[col * dim + row] == 0.0;
+                const double upper = opts.inverse_covariance[row * dim + col];
+                const double lower = opts.inverse_covariance[col * dim + row];
+                const bool upper_zero = upper == 0.0;
+                const bool lower_zero = lower == 0.0;
                 if (upper_zero == lower_zero) {
+                    continue;
+                }
+                const double diag_row = std::abs(opts.inverse_covariance[row * dim + row]);
+                const double diag_col = std::abs(opts.inverse_covariance[col * dim + col]);
+                const double scale = (diag_row > 0.0 && diag_col > 0.0)
+                                         ? std::sqrt(diag_row) * std::sqrt(diag_col)
+                                         : std::max(std::abs(upper), std::abs(lower));
+                if (std::max(std::abs(upper), std::abs(lower)) <= fill_floor * scale) {
                     continue;
                 }
                 throw ComparisonError(

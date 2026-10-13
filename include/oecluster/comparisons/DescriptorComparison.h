@@ -32,10 +32,11 @@ struct DescriptorOptions {
     /// mahalanobis override, row-major square. Scored as (M + M^T) / 2, so a
     /// meaningfully asymmetric matrix would be silently reinterpreted; it is
     /// refused instead. Two rules: an entry pair differing by more than 1e-3
-    /// of its own Cauchy-Schwarz scale, and an entry pair with exactly one
-    /// side zero, which is a triangular fill whatever its magnitudes --
-    /// complete, partial or contaminated alike. Round-off from inverting a
-    /// covariance passes both; neither is a general symmetry proof.
+    /// of its own Cauchy-Schwarz scale, and an entry pair with one side
+    /// zero and the other above 1e-3/n of that scale, which is a triangular
+    /// fill -- complete, partial or contaminated alike. Round-off from
+    /// inverting a covariance passes both, including the one-sided exact
+    /// zeros it does sometimes produce; neither is a general symmetry proof.
     std::vector<double> inverse_covariance;
     std::string missing = "complete_case";  ///< complete_case | propagate | ignore.
     double p = 2.0;                         ///< Minkowski order.
