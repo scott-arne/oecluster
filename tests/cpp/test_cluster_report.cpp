@@ -1527,9 +1527,9 @@ TEST(ClusterReportTest, ClusteredSampleOmittedFromEveryMemberListIsRefused) {
     }
 }
 
-// The guard at ClusterReport.cpp:193 used to skip the pre-pass entirely when
-// members was empty, so this shape took the empty-clustering branch and
-// returned an all-NaN report instead of refusing.
+// The partition pre-pass used to be skipped entirely when members was empty,
+// so this shape took the empty-clustering branch and returned an all-NaN
+// report instead of refusing.
 TEST(ClusterReportTest, NonNoiseLabelNamingNoClusterIsRefused) {
     const DenseStorage storage = MakeTwoClusterStorage();
     const ClusteringResult result(
@@ -2919,7 +2919,7 @@ TEST(ClusterReportTest, RecordDiametersRecomputeP95) {
 
     // Also the only fixture that can catch a per-cluster median sourced from
     // the cumulative pool. intra_pairs accumulates across clusters while
-    // cluster_distances is cleared per cluster (ClusterReport.cpp:331), so the
+    // cluster_distances is cleared at the top of each cluster's pass, so the
     // two agree on the FIRST cluster and diverge afterwards -- every other
     // record-median assertion in this file reads records[0] or a singleton.
     // Reading B's median is what discriminates: its own single pair is 0.8,
@@ -2932,7 +2932,7 @@ TEST(ClusterReportTest, RecordDiametersRecomputeP95) {
     EXPECT_TRUE(std::isnan(r.records[2].median_intra_distance));
     // The same discrimination for the mean. A guard-preserving mutation --
     // replacing only the ternary's defined branch with report.mean_intra_distance
-    // -- keeps every singleton's NaN, so the isnan pin at :2359 cannot see it.
+    // -- keeps every singleton's NaN, so a singleton isnan pin cannot see it.
     // Only a populated cluster whose own mean differs from the global mean can:
     // here the locals are 0.2 and 0.8 while the pool means 0.5.
     EXPECT_DOUBLE_EQ(r.records[0].mean_intra_distance, 0.2);  // d(0,1)
@@ -2949,9 +2949,9 @@ TEST(ClusterReportTest, RecordDiametersRecomputeP95) {
 // Which count the record mean divides by, which the test above cannot see: its
 // two populated clusters are both single pairs, so cluster_intra_counts is
 // [1, 1, 0] and every fixed subscript into it reads the same 1. The scalar
-// sibling at ClusterReport.cpp:893 is pinned against exactly this by
-// HandComputedInternalIndicesOnUnequalClusterSizes -- the record path at :939
-// had no equivalent, and substituting cluster_intra_counts[0] there left the
+// report.mean_intra_distance is pinned against exactly this by
+// HandComputedInternalIndicesOnUnequalClusterSizes -- the per-record mean had
+// no equivalent, and substituting cluster_intra_counts[0] there left the
 // whole suite green while rescaling every record but the first.
 //
 // Pair counts 1, 3 and 6 are what make the subscript observable, and they are

@@ -1161,7 +1161,7 @@ def test_the_consensus_strength_members_are_read_only(native):
         # the read back is what proves nothing was written.
         assert list(getattr(strength, name)) == before
 
-    # The getters must survive the change: three fix rounds turned them into
-    # owned copies so that a member read off a temporary stays valid.
+    # The getters must survive the change: they return owned copies, so that a
+    # member read off a temporary stays valid.
     assert list(strength.item_consensus) == [1.0, 1.0, 1.0, 1.0]
     assert list(strength.cluster_consensus) == [1.0, 1.0]

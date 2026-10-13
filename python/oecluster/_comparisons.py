@@ -433,8 +433,9 @@ def _build_fingerprint(items, similarity, kwargs, symmetric):
     # validates every selector and every metric parameter it owns; anything it
     # rejects raises here, so no advisory rule below can pre-empt an
     # authoritative error by naming a remedy that cannot make the call valid.
-    # Seven fix rounds tried to get this right by having Python predict the
-    # verdict, and each one missed a case the next one found.
+    # Having Python predict the verdict instead does not work: the advisory
+    # rules below cannot enumerate every case the constructor refuses, so one
+    # placed ahead of it will eventually answer for a call it cannot judge.
     #
     # Construction is not free -- it computes the fingerprints, and the cost
     # scales with molecule size: roughly 10 ms for 400 molecules of 120 heavy

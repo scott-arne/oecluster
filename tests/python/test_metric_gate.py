@@ -594,8 +594,9 @@ def _write_sparse_file(path, *, num_samples=3, cutoff=0.5, rows=(0,),
     """Hand-build a sparse ``.npz``, bypassing ``to_file`` and its guards.
 
     The shapes these tests need cannot be produced by ``to_file`` any more,
-    which is the point of M1 -- but ``from_file`` still reads untrusted input,
-    so it has to keep refusing them. ``index_dtype`` and a sequence ``cutoff``
+    which is the point of its write-side guards -- but ``from_file`` still
+    reads untrusted input, so it has to keep refusing them. ``index_dtype``
+    and a sequence ``cutoff``
     vary three of the four sparse arrays ``to_file`` writes with a fixed dtype:
     the two index arrays by dtype, the cutoff by shape. The fourth,
     ``sparse_v``, this helper always writes as float64.
