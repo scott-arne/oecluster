@@ -100,10 +100,11 @@ inline void validate_size_and_chunk(size_t n, size_t chunk_size,
     validate_chunk_size(chunk_size, caller);
 }
 
-// Follows the k-medoids precedent (KMedoids.cpp): a huge explicit request can
-// terminate the process, so it is capped at the item count. Zero passes
-// through and keeps meaning hardware concurrency; n >= 1 here, so the minimum
-// never manufactures a zero from a nonzero request.
+// Follows the k-medoids precedent (KMedoids.cpp): a huge explicit request
+// costs what it asks for, so it is capped at the item count before the pool
+// sees it. Zero passes through and keeps meaning hardware concurrency;
+// n >= 1 here, so the minimum never manufactures a zero from a nonzero
+// request.
 inline size_t capped_threads(size_t num_threads, size_t n) {
     return std::min(num_threads, n);
 }

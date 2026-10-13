@@ -147,12 +147,13 @@ inline bool pool_is_thread_safe(unsigned int mode) {
 /**
  * @brief Clamp a requested worker count to what the work and machine support.
  *
- * ParallelFor reserves a thread vector of the requested size and then fills it,
- * so a failed thread creation partway unwinds a vector still holding joinable
- * threads and calls std::terminate. ``num_threads`` is an unbounded size_t on a
- * public options struct, so that path is reachable from Python; clamping by
- * item count alone does not close it, because that bound only binds when the
- * input is smaller than the request.
+ * ``num_threads`` is an unbounded size_t on a public options struct, so an
+ * oversized request arrives from Python intact. ParallelFor no longer breaks
+ * on one -- detail::launch_workers starts at most one worker per chunk and
+ * detail::launch_threads joins what it started before rethrowing -- but an
+ * extreme request still costs what it asks for. Clamping by item count alone
+ * does not bound it, because that bound only binds when the input is smaller
+ * than the request, so the machine's own concurrency bounds it here.
  */
 inline size_t effective_thread_count(size_t requested, size_t n) {
     if (requested == 0u) {

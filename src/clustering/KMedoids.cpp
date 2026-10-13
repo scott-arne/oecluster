@@ -375,21 +375,14 @@ KMedoidsResult k_medoids_cluster(const StorageBackend& storage,
 
     // Capped at the item count once here and then passed to every helper
     // below, so no path from this entry point can hand ThreadPool the raw
-    // field. num_threads is a size_t on a public options struct, and uncapped
-    // an oversized request is attempted rather than refused: ParallelFor
-    // reserves a vector of that many threads and then fills it, to run what may
-    // be a single chunk. Which way that goes wrong depends on the magnitude.
-    // Past the vector's max_size the reserve throws length_error before any
-    // thread exists, which is the benign case because the exception escapes
-    // normally. Below that the request is genuinely attempted, so a merely
-    // enormous count may consume extreme resources or fail to return promptly;
-    // measured here, 100000 threads for a six-item problem did complete, while
-    // 2^20 had not returned after ten minutes. Worst,
-    // a creation that fails partway unwinds a vector still holding joinable
-    // threads, and destroying a joinable thread calls std::terminate -- leaving
-    // no exception for a caller, or the Python layer above it, to report. Only
-    // the first of the three is what the regression tests observe; the cap
-    // exists for the other two. A num_threads of 0 means "use the hardware
+    // field. num_threads is a size_t on a public options struct, so an
+    // oversized request is attempted rather than refused. The pool itself now
+    // absorbs the two ways that used to go badly: detail::launch_workers
+    // starts at most one worker per chunk, and detail::launch_threads joins
+    // every thread it managed to start before rethrowing a spawn failure. What
+    // the cap still buys is that an extreme value never reaches the pool at
+    // all, which keeps the resource cost bounded by the problem rather than by
+    // what the caller typed. A num_threads of 0 means "use the hardware
     // concurrency" and has to keep meaning that; validation guarantees
     // n >= n_clusters >= 1, so the minimum passes that 0 through untouched and
     // can never manufacture one from a nonzero request.

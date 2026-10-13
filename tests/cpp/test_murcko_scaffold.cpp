@@ -476,8 +476,8 @@ TEST(MurckoThreadClampTest, ClampsByItemCountAndConcurrencyCeiling) {
     // Above the item count: clamped to the item count.
     EXPECT_EQ(effective_thread_count(1000u, 3u), 3u);
     // Above the concurrency ceiling on a large n. This is the case a clamp by
-    // item count alone cannot reach, and the one that closes the ParallelFor
-    // reserve-then-fill terminate path.
+    // item count alone cannot reach, and the one that keeps an extreme
+    // request from reaching the pool at its stated size.
     EXPECT_EQ(effective_thread_count(1000000u, 1000000u), ceiling);
     // An empty item count must not produce the auto-detect sentinel.
     EXPECT_EQ(effective_thread_count(4u, 0u), 1u);
