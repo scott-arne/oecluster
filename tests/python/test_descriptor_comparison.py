@@ -1204,5 +1204,5 @@ def test_a_bad_metric_is_named_before_p_is(build, metric, needle):
     natively but unavailable here, each with its own message. Python cannot
     tell these apart -- the metric table is private -- so it must not try.
     """
-    with pytest.raises(Exception, match=needle):
+    with pytest.raises(RuntimeError, match=needle):
         build(_mols(), metric=metric, p=3.0)

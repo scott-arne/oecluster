@@ -739,8 +739,8 @@ def _validate_descriptor(similarity, kwargs):
     refusal and then the emptiness refusal come last, after the C++ verdicts:
     each is this layer's own advisory rule, and a caller who also misspelled
     the metric must be told about the metric, which neither dropping ``p`` nor
-    editing the empty sequence would resolve. What
-    that ordering does not reach is a source, column or group name on a request
+    editing the empty sequence would resolve. What that ordering does not
+    reach is a source, column or group name on a request
     with no override, which the validator resolves no schema for and so leaves
     downstream; the guard therefore does precede *that* report.
 
