@@ -308,6 +308,67 @@ def test_a_cross_matrix_keeps_its_stamp_because_the_cutoff_hid_the_infinity():
     assert cross.data_integrity == "nan_present"
 
 
+def test_a_cross_cutoff_is_read_from_the_value_native_filtered_with():
+    """The stamp cannot rest on a second reading of the caller's cutoff.
+
+    cdist's counterpart to test_pdist_cutoff_positivity_is_decided_once. The
+    guard and the stamping test used to compare the caller's object
+    independently, so a float subclass answering positive to the first and
+    zero to the second cleared both: native received 1.0 and zeroed every
+    overflowed pair, and the all-zero result was then stamped ``complete``.
+    Converting once and reading the double back ties the decision to the
+    value native filtered with, so the caller's ``__gt__`` is never consulted.
+    """
+    class MirrorCutoff(float):
+        """Compares as positive once, then as zero."""
+
+        def __init__(self, _value):
+            self._comparisons = 0
+
+        def __gt__(self, other):
+            self._comparisons += 1
+            return self._comparisons == 1
+
+    a, b = _mols()[:4], _mols()[4:]
+    cutoff = MirrorCutoff(1.0)
+    cross = oecluster.cdist(a, b, "descriptor", metric="minkowski", p=200.0,
+                            missing="propagate", cutoff=cutoff)
+
+    assert cutoff._comparisons == 0
+    # Native filtered with 1.0, so the overflow is gone from the output and
+    # only the stamp still records it.
+    assert np.isfinite(cross.matrix).all()
+    assert cross.data_integrity == "nan_present"
+
+
+def test_an_infinite_cross_cutoff_downgrades_because_it_filters_nothing():
+    """Only a positive *finite* cutoff can hide a value.
+
+    Both filters drop ``distance > cutoff`` (src/CDist.cpp:74,
+    src/comparisons/DescriptorComparison.cpp:520-526) and no double exceeds
+    ``+inf``, so this matrix is a faithful record and the data decides. This
+    is not the residual spec section 5.3 accepts: that one is pdist's, where
+    an infinite cutoff selects sparse storage instead of feeding a filter.
+    """
+    cross = oecluster.cdist(_mols()[:4], _mols()[4:], "descriptor",
+                            missing="propagate", cutoff=float("inf"))
+    assert np.isfinite(cross.matrix).all()
+    assert cross.data_integrity == "complete"
+
+
+def test_a_subset_scored_cross_matrix_keeps_its_own_stamp():
+    """The downgrade acts on ``nan_present`` and on nothing else.
+
+    ``missing='ignore'`` scores each pair over the columns both items have,
+    which is a claim about coverage rather than about finiteness, so a finite
+    matrix is no reason to rewrite it.
+    """
+    cross = oecluster.cdist(_mols()[:4], _mols()[4:], "descriptor",
+                            metric="euclidean", missing="ignore")
+    assert np.isfinite(cross.matrix).all()
+    assert cross.data_integrity == "subset_scored"
+
+
 def test_ignore_is_stamped_subset_scored_and_overridable():
     dist = oecluster.pdist(_mols(), "descriptor", metric="euclidean",
                            missing="ignore")

@@ -2454,10 +2454,34 @@ def cdist(items_a, items_b, comparison, *,
     # makes ``pdist`` and ``cdist`` give one answer to one bad argument.
     _comparisons.validate_request(comparison, similarity, kwargs)
 
+    # The cutoff is converted to a C double once, here, and every later reader
+    # works from that double rather than from the caller's object -- the same
+    # hazard ``pdist`` answers by deciding ``cutoff > 0.0`` once (see the
+    # comment above its ``sparse`` binding). A float subclass whose ``__gt__``
+    # is not stable could otherwise answer one way to the guard below and
+    # another way to the stamping test at the end, while native cdist filters
+    # with a value neither of them saw. Reading the double back off the
+    # options object, rather than calling ``float``, is what ties the decision
+    # to the value ``cdist_into_address`` actually receives; it also keeps a
+    # non-numeric cutoff a TypeError instead of a parsed string, and raises it
+    # here rather than after the whole matrix has been computed. The rest of
+    # the options are filled in below, once the inputs are known good.
+    options = CDistOptions()
+    options.cutoff = cutoff
+    cutoff = options.cutoff
+
     if cutoff > 0.0 and similarity:
         raise ValueError(
             "cutoff > 0 is not supported with similarity=True: the cutoff zeroes "
             "values above the threshold, which would discard high similarities")
+
+    # Only a positive *finite* cutoff can hide a computed value. Both filters
+    # gate on ``cutoff > 0.0`` and then drop ``distance > cutoff``
+    # (src/CDist.cpp:74, src/comparisons/DescriptorComparison.cpp:520-526),
+    # and no double exceeds ``+inf``, so an infinite cutoff filters nothing
+    # and leaves the output a faithful record. Decided here, beside the one
+    # conversion, and read at the stamp below.
+    filtered = cutoff > 0.0 and math.isfinite(cutoff)
 
     # Materialize to lists (SWIG comparison constructors require Python lists) and
     # validate non-empty before allocating or calling into C++.
@@ -2492,23 +2516,21 @@ def cdist(items_a, items_b, comparison, *,
 
     output = np.empty((n_a, n_b), dtype=np.float64)
 
-    options = CDistOptions()
     options.num_threads = num_threads
     options.chunk_size = chunk_size
-    options.cutoff = cutoff
     if progress is not None:
         options.progress = progress
 
     _cpp_cdist_into_address(comparison_obj, n_a, output.ctypes.data, options)
     facts = _gate.facts_from_comparison(comparison_obj)
     # As in pdist: a ``nan_present`` stamped from the missing-value policy
-    # alone is checked against the distances just computed. The cutoff test
-    # mirrors the native filter's own predicate (src/CDist.cpp:74 and
-    # src/comparisons/DescriptorComparison.cpp:520, both ``cutoff > 0.0``), so
-    # a filtered matrix -- which rewrites ``+inf`` rather than storing it, and
-    # is therefore no witness -- keeps its stamp, while a negative or NaN
-    # cutoff, which filters nothing, still downgrades.
-    if (facts['data_integrity'] == "nan_present" and not (cutoff > 0.0)
+    # alone is checked against the distances just computed, and only a stamp
+    # reading ``nan_present`` is ever rewritten -- ``subset_scored`` answers a
+    # different question and is left alone. A filtered run rewrites ``+inf``
+    # to 0.0 rather than returning it, so its output is no witness to what was
+    # computed and keeps its stamp; an unfiltered one -- cutoff absent,
+    # negative, NaN or infinite -- is faithful and the data decides.
+    if (facts['data_integrity'] == "nan_present" and not filtered
             and bool(np.isfinite(output).all())):
         facts = dict(facts, data_integrity="complete")
 
