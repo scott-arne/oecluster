@@ -8219,8 +8219,10 @@ class DescriptorComparison:
             "mahalanobis", bypassing the pooled fit.
         :param missing: Missing-value policy: "complete_case" (default),
             "propagate", or "ignore".
-        :param p: Minkowski order.
+        :param p: Minkowski order, accepted only with metric="minkowski".
         :returns: C++ DescriptorComparison object.
+        :raises TypeError: If ``p`` is passed with any other metric, where it
+            would be silently ignored.
         :raises ValueError: If ``sources``, ``columns``, ``groups``,
             ``variances`` or ``inverse_covariance`` is passed as an empty
             sequence, which C++ cannot tell apart from an omitted option.
@@ -8252,6 +8254,13 @@ class DescriptorComparison:
             # for a validation the constructor is about to repeat.
             _oecluster.validate_descriptor_options(opts)
             raise _comparisons._empty_option_error(empty[0])
+
+        if p is not None:
+            # Only when p is passed. The validation is what lets C++ name a bad
+            # metric first, as on the named path, and a call that passes p is
+            # not the common case the comment above protects from paying for it.
+            _oecluster.validate_descriptor_options(opts)
+            _comparisons.refuse_inapplicable_p(kwargs)
 
         return _DescriptorComparison(mols, opts)
 

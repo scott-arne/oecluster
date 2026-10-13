@@ -304,6 +304,35 @@ _METRIC_ONLY_KEYS = {
 }
 
 
+def refuse_inapplicable_p(kwargs):
+    """Refuse ``p`` on a descriptor metric that does not take it.
+
+    The rule is the fingerprint path's, reused rather than copied: a second
+    copy is how the two surfaces came to disagree about ``p`` in the first
+    place. It never predicates on whether the metric is *valid* -- the metric
+    table is private (see the comment in :func:`_validate_descriptor`) and
+    distinguishes unknown metrics from ones unavailable on this surface, which
+    Python cannot reproduce without becoming a second source of truth. Both
+    call sites let C++ rule on the metric first.
+
+    A ``None`` value counts as absent: the constructor passes every option key
+    with ``None`` for the ones not supplied, where the named path omits them.
+
+    :param kwargs: Descriptor keyword options, read but never consumed.
+    :raises TypeError: If ``p`` is supplied and the metric is not minkowski.
+    """
+    if kwargs.get('p') is None:
+        return
+    spelling = kwargs.get('metric') or 'standardized_euclidean'
+    owner = _METRIC_ONLY_KEYS['p']
+    # Lower-cased to match native resolution (MetricTable.cpp:18), but the
+    # caller's own spelling is what the message echoes back.
+    if spelling.lower() != owner:
+        raise TypeError(
+            f"p does not apply to metric={spelling!r}; it belongs to "
+            f"{owner!r}. Drop p, or select metric={owner!r}.")
+
+
 def canonical_fingerprint_family(fp_type):
     """Return the canonical family for a spelling, or ``None`` if unrecognized.
 
@@ -699,17 +728,18 @@ def _normalize_descriptor(items, kwargs):
 def _validate_descriptor(similarity, kwargs):
     """Reject descriptor arguments before any molecule is read.
 
-    Three of the rules are this layer's own -- no similarity form, no unknown
-    keyword, no empty sequence option. The option values go to
-    ``validate_descriptor_options``, which does not answer for every mistake
-    C++ can decide without molecules; the comment on that call says which it
-    leaves downstream.
+    Four of the rules are this layer's own -- no similarity form, no unknown
+    keyword, no inapplicable ``p``, no empty sequence option. The option values
+    go to ``validate_descriptor_options``, which does not answer for every
+    mistake C++ can decide without molecules; the comment on that call says
+    which it leaves downstream.
 
     The rules run in the order the caller has to fix them. The two names come
-    first because neither depends on a value being readable at all. The
-    emptiness refusal comes last, after the C++ verdicts: it is this layer's
-    own advisory rule, and a caller who also misspelled the metric must be told
-    about the metric, which no edit to the empty sequence would resolve. What
+    first because neither depends on a value being readable at all. The ``p``
+    refusal and then the emptiness refusal come last, after the C++ verdicts:
+    each is this layer's own advisory rule, and a caller who also misspelled
+    the metric must be told about the metric, which neither dropping ``p`` nor
+    editing the empty sequence would resolve. What
     that ordering does not reach is a source, column or group name on a request
     with no override, which the validator resolves no schema for and so leaves
     downstream; the guard therefore does precede *that* report.
@@ -724,7 +754,8 @@ def _validate_descriptor(similarity, kwargs):
     :param kwargs: Comparison keyword options, read but never consumed.
     :raises ValueError: If similarities were requested, or if a sequence-valued
         option was passed as an empty sequence.
-    :raises TypeError: If any keyword option is not a descriptor option.
+    :raises TypeError: If any keyword option is not a descriptor option, or if
+        ``p`` is supplied with a metric other than "minkowski".
     :raises RuntimeError: If C++ refuses an option value outright.
     """
     if similarity:
@@ -755,6 +786,11 @@ def _validate_descriptor(similarity, kwargs):
     # constant. None of it can be decided here.
     opts, empty = _descriptor_options_and_empties(kwargs)
     _oecluster.validate_descriptor_options(opts)
+
+    # After the C++ verdicts, so a caller who also misspelled the metric is
+    # told about the metric; before the emptiness refusal, which keeps the
+    # last position its comment below claims.
+    refuse_inapplicable_p(kwargs)
 
     # Last in the band, so none of the verdicts above is pre-empted. Building
     # the options is what discovers the emptiness, which is why the refusal is

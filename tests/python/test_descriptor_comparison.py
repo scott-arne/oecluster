@@ -842,10 +842,13 @@ def test_validate_request_does_not_consume_kwargs():
     missing="propagate")`` restores the default complete-case policy and
     returns four molecules instead of five -- water dropped under a policy the
     caller explicitly declined.
+
+    The metric is "minkowski" because ``p`` now requires it; the subject here
+    is keyword consumption, not applicability.
     """
-    kwargs = {'metric': "euclidean", 'missing': "propagate", 'p': 3.0}
+    kwargs = {'metric': "minkowski", 'missing': "propagate", 'p': 3.0}
     _comparisons.validate_request("descriptor", False, kwargs)
-    assert kwargs == {'metric': "euclidean", 'missing': "propagate", 'p': 3.0}
+    assert kwargs == {'metric': "minkowski", 'missing': "propagate", 'p': 3.0}
 
 
 def test_the_factory_class_builds_a_usable_comparison():
@@ -1143,3 +1146,63 @@ def test_descriptor_statistics_refuses_an_empty_sequence_option(option):
     with pytest.raises(ValueError,
                        match=rf"{option}= was given as an empty sequence"):
         oecluster.descriptor_statistics(_mols(), **{option: []})
+
+
+# The two public ways to reach the descriptor options. The rule lives in one
+# shared helper but is called from two places, and only a test over both
+# catches a call site that was missed.
+_DESCRIPTOR_SURFACES = [
+    pytest.param(lambda mols, **kw: oecluster.pdist(mols, "descriptor", **kw),
+                 id="pdist"),
+    pytest.param(lambda mols, **kw: oecluster.cdist(mols[:4], mols[4:],
+                                                    "descriptor", **kw),
+                 id="cdist"),
+    pytest.param(lambda mols, **kw: oecluster.DescriptorComparison(mols, **kw),
+                 id="constructor"),
+]
+
+
+@pytest.mark.parametrize("build", _DESCRIPTOR_SURFACES)
+@pytest.mark.parametrize("metric", ["euclidean", "standardized_euclidean",
+                                    "seuclidean"])
+def test_p_is_refused_on_a_metric_it_does_not_apply_to(build, metric):
+    """``p`` reached the descriptor path and was silently inert.
+
+    Measured before the fix: the condensed values were bit-identical with and
+    without it. ``seuclidean`` is included because it is an alias, and an
+    alias must not route around the rule.
+    """
+    with pytest.raises(TypeError, match=r"p does not apply to metric="):
+        build(_mols(), metric=metric, p=3.0)
+
+
+@pytest.mark.parametrize("build", _DESCRIPTOR_SURFACES)
+def test_p_is_refused_by_default_because_the_default_is_not_minkowski(build):
+    with pytest.raises(TypeError, match=r"p does not apply to metric="):
+        build(_mols(), p=3.0)
+
+
+@pytest.mark.parametrize("build", _DESCRIPTOR_SURFACES)
+@pytest.mark.parametrize("metric", ["minkowski", "MINKOWSKI", "Minkowski"])
+def test_p_is_accepted_on_minkowski_whatever_its_case(build, metric):
+    """Native metric resolution lower-cases (MetricTable.cpp:18), so a rule
+    that compares the raw spelling would refuse a valid call."""
+    build(_mols(), metric=metric, p=3.0)
+
+
+@pytest.mark.parametrize("build", _DESCRIPTOR_SURFACES)
+@pytest.mark.parametrize("metric,needle", [
+    ("bogus", r"Unknown metric 'bogus'"),
+    ("tanimoto", r"is a fingerprint bit-set metric"),
+    ("haversine", r"great-circle distance over exactly two columns"),
+])
+def test_a_bad_metric_is_named_before_p_is(build, metric, needle):
+    """C++ speaks first on every surface.
+
+    A message about ``p`` not applying to ``metric='bogus'`` would name a
+    metric that does not exist, and ``tanimoto``/``haversine`` are recognised
+    natively but unavailable here, each with its own message. Python cannot
+    tell these apart -- the metric table is private -- so it must not try.
+    """
+    with pytest.raises(Exception, match=needle):
+        build(_mols(), metric=metric, p=3.0)
