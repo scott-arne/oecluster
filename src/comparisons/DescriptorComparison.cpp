@@ -27,27 +27,6 @@ namespace OECluster {
 
 namespace {
 
-// Relative tolerance for the inverse-covariance symmetry check, against the
-// pair's own Cauchy-Schwarz scale.
-//
-// Inverting a symmetric matrix does not return an exactly symmetric one, and
-// the round-off grows with the conditioning: measured over dense correlated
-// samples, a legitimate inv(cov(X)) scores about cond * 1e-17, reaching
-// 1.8e-8 at condition number 1e9 and 2.0e-5 at 1e12. A caller's actual
-// mistake is orders larger -- one triangle filled scores 0.39, a transposed
-// pair 0.50, and the dominant-diagonal case this rule exists for 0.010.
-//
-// 1e-3 is the gap between those populations: it accepts legitimate inverses
-// to roughly condition number 1e13, which is where the measurements stop
-// rather than a proven cliff, and still refuses every order-1 mistake with
-// at least a tenfold margin. Tightening it does not catch a new class of
-// error, it only starts rejecting real data. Neither this rule nor the
-// structural one below is a symmetry proof: a partially or inconsistently
-// filled triangle can still pass both. See the design note, sections 7.3 to
-// 7.3.2 -- an earlier 1e-8 came from a stress test that scaled singular
-// values along a fixed basis and so understated the round-off here.
-constexpr double SYMMETRY_TOLERANCE = 1e-3;
-
 /// Resolve the missing-value policy, reporting complete_case separately because
 /// it uses OEFP's Propagate kernel over an input the constructor has verified.
 OEFP::DescriptorMissingPolicy normalize_missing(const std::string& missing,
@@ -193,93 +172,6 @@ void check_override_against_selection(const OEFP::DescriptorSchema& schema,
             throw ComparisonError("inverse_covariance[" + std::to_string(k) +
                                   "] must be finite, got " +
                                   std::to_string(opts.inverse_covariance[k]));
-        }
-    }
-
-    // OEFP scores with (M + M^T) / 2 and never reports the substitution, so an
-    // asymmetric matrix is accepted and quietly reinterpreted as a different
-    // one. Each pair is judged against sqrt(|Aii|) * sqrt(|Ajj|), the
-    // Cauchy-Schwarz bound on |Aij| for a semidefinite matrix: an inverse's
-    // round-off scales with its diagonal, so a fixed per-element tolerance
-    // refuses legitimate ill-conditioned inverses, while a whole-matrix norm
-    // lets a dominant diagonal elsewhere conceal a real asymmetry. The two
-    // square roots are taken separately because the product overflows past
-    // about 1e154.
-    if (metric_name == "mahalanobis") {
-        const size_t dim = selection.size();
-        for (size_t row = 0; row < dim; ++row) {
-            for (size_t col = row + 1; col < dim; ++col) {
-                const double upper = opts.inverse_covariance[row * dim + col];
-                const double lower = opts.inverse_covariance[col * dim + row];
-                const double diag_row = std::abs(opts.inverse_covariance[row * dim + row]);
-                const double diag_col = std::abs(opts.inverse_covariance[col * dim + col]);
-                // A semidefinite matrix with a zero diagonal entry has an
-                // all-zero row, so judge such a pair against itself rather
-                // than against an absolute scale that would excuse it.
-                const double scale = (diag_row > 0.0 && diag_col > 0.0)
-                                         ? std::sqrt(diag_row) * std::sqrt(diag_col)
-                                         : std::max(std::abs(upper), std::abs(lower));
-                if (std::abs(upper - lower) > SYMMETRY_TOLERANCE * scale) {
-                    throw ComparisonError(
-                        "inverse_covariance is not symmetric: entry [" + std::to_string(row) +
-                        "][" + std::to_string(col) + "] is " + std::to_string(upper) +
-                        " but [" + std::to_string(col) + "][" + std::to_string(row) + "] is " +
-                        std::to_string(lower) +
-                        ". An inverse covariance is symmetric by construction; pass "
-                        "(A + A.T) / 2, which is what the metric uses either way");
-                }
-            }
-        }
-
-        // A triangular fill is a structural mistake, not a small one, and the
-        // magnitude rule above cannot see it: the Cauchy-Schwarz scale is the
-        // diagonal, so a weakly correlated precision matrix carries all its
-        // off-diagonal information below the tolerance. Measured, unit
-        // diagonal with 9e-4 off-diagonals supplied as one triangle passes
-        // that rule at every size, while halving the correlations shifts
-        // distances by 2% at 100 columns and 13% at 1000.
-        //
-        // The signal is a pair where one side is zero and the other carries a
-        // real value. Checked per pair rather than per triangle, so that a
-        // partial fill or one contaminated by a single mirrored entry is
-        // caught too -- the all-or-nothing form missed both.
-        //
-        // A one-sided zero is not on its own enough: round-off does produce
-        // them. Inverting the well-conditioned covariance
-        // {{0.25,0.125,0.125},{0.125,0.25,0.125},{0.125,0.125,0.125}} yields
-        // -8.88e-16 against an exact 0.0 at one pair. So the nonzero side
-        // must also be large enough to be a value rather than noise, and the
-        // bound is divided by the dimension to stay strict as the matrix
-        // grows -- a fill spreads its error over every pair, so each entry
-        // matters less individually but the total matters more. Measured:
-        // 400 legitimate inverses (dense, ill-conditioned to 1e9,
-        // float32-derived, mixed-scale) and that covariance, none flagged;
-        // 9e-4 triangular fills flagged at 2, 3, 50 and 1000 dimensions.
-        const double fill_floor = SYMMETRY_TOLERANCE / static_cast<double>(dim);
-        for (size_t row = 0; row < dim; ++row) {
-            for (size_t col = row + 1; col < dim; ++col) {
-                const double upper = opts.inverse_covariance[row * dim + col];
-                const double lower = opts.inverse_covariance[col * dim + row];
-                const bool upper_zero = upper == 0.0;
-                const bool lower_zero = lower == 0.0;
-                if (upper_zero == lower_zero) {
-                    continue;
-                }
-                const double diag_row = std::abs(opts.inverse_covariance[row * dim + row]);
-                const double diag_col = std::abs(opts.inverse_covariance[col * dim + col]);
-                const double scale = (diag_row > 0.0 && diag_col > 0.0)
-                                         ? std::sqrt(diag_row) * std::sqrt(diag_col)
-                                         : std::max(std::abs(upper), std::abs(lower));
-                if (std::max(std::abs(upper), std::abs(lower)) <= fill_floor * scale) {
-                    continue;
-                }
-                throw ComparisonError(
-                    "inverse_covariance entry [" + std::to_string(row) + "][" +
-                    std::to_string(col) + "] has exactly one side zero, so the matrix is "
-                    "partly a triangle rather than a symmetric one. The metric would "
-                    "score (A + A.T) / 2 and halve that term. Mirror the filled side, or "
-                    "pass (A + A.T) / 2 if that is what you meant");
-            }
         }
     }
 

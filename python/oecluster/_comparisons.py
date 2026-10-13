@@ -10,6 +10,8 @@ step (conformer expansion, complete-case filtering) without ``pdist`` and
 ``cdist`` growing a branch per comparison.
 """
 
+import math
+import warnings
 from collections.abc import Callable
 from typing import Any
 
@@ -336,6 +338,123 @@ def refuse_inapplicable_p(kwargs):
         raise TypeError(
             f"p does not apply to metric={spelling!r}; it belongs to "
             f"{owner!r}. Drop p, or select metric={owner!r}.")
+
+
+# Relative band on an ``inverse_covariance`` entry pair, measured against the
+# pair's own Cauchy-Schwarz scale. Inverting a symmetric matrix does not return
+# an exactly symmetric one, and the round-off grows with the conditioning: a
+# legitimate inv(cov(X)) over dense correlated samples scores about cond * 1e-17,
+# reaching 1.8e-8 at condition number 1e9 and 2.0e-5 at 1e12, while a caller's
+# mistake is orders larger -- one triangle filled scores 0.39 and a transposed
+# pair 0.50. Nothing here is a symmetry proof, and none is possible: a
+# perturbation under any band can still move a distance arbitrarily far in
+# relative terms. The band only decides when to speak, so a false positive
+# costs a spurious warning and nothing else.
+_SYMMETRY_TOLERANCE = 1e-3
+
+
+def _first_asymmetric_pair(matrix):
+    """Return the first ``(i, j)``, ``i < j``, whose two sides disagree.
+
+    Two signals, either sufficient. The first is magnitude: the pair differs by
+    more than :data:`_SYMMETRY_TOLERANCE` of ``sqrt(|Aii|) * sqrt(|Ajj|)``, the
+    Cauchy-Schwarz bound on ``|Aij|`` for a semidefinite matrix. The two square
+    roots are taken separately because their product overflows past about
+    1e154, which would make the scale infinite and the comparison vacuous. An
+    inverse's round-off scales with its diagonal, so this is the normalization
+    that holds across conditioning where a fixed per-element one does not.
+
+    The second is a triangular fill: one side exactly zero and the other large
+    enough to be a value rather than noise. The magnitude rule provably cannot
+    see it -- for a weakly correlated precision matrix every off-diagonal sits
+    far below the diagonal that scales it, so a half-filled 9e-4 matrix passes
+    at every size. A one-sided exact zero alone is not enough either, since
+    round-off produces them: inverting the well-conditioned (13.9) covariance
+    ``[[.25,.125,.125],[.125,.25,.125],[.125,.125,.125]]`` yields -8.88e-16
+    against an exact 0.0. The nonzero side is therefore banded too, divided by
+    the dimension because a fill spreads its error over every pair.
+
+    :param matrix: Square float64 array, finite.
+    :returns: The first offending ``(i, j)`` in row-major order, or ``None``.
+    """
+    dim = matrix.shape[0]
+    diagonal = np.abs(np.diag(matrix))
+    roots = np.sqrt(diagonal)
+    # Where either diagonal entry is zero the Cauchy-Schwarz scale collapses,
+    # which for a genuine inverse covariance cannot happen: a semidefinite
+    # matrix with a zero diagonal entry has an all-zero row. Judge such a pair
+    # against itself rather than against an absolute scale that would excuse it.
+    largest = np.maximum(np.abs(matrix), np.abs(matrix.T))
+    scale = np.where(np.outer(diagonal > 0.0, diagonal > 0.0),
+                     np.outer(roots, roots), largest)
+
+    magnitude = np.abs(matrix - matrix.T) > _SYMMETRY_TOLERANCE * scale
+    one_side_zero = (matrix == 0.0) != (matrix.T == 0.0)
+    fill = one_side_zero & (largest > (_SYMMETRY_TOLERANCE / dim) * scale)
+
+    rows, cols = np.nonzero(np.triu(magnitude | fill, 1))
+    if rows.size == 0:
+        return None
+    return int(rows[0]), int(cols[0])
+
+
+def symmetrize_inverse_covariance(kwargs):
+    """Replace an asymmetric ``inverse_covariance`` with ``(A + A.T) / 2``.
+
+    The metric scores ``(A + A.T) / 2`` whatever is supplied, so an asymmetric
+    matrix used to be reinterpreted in silence -- a caller's ``[[2,1],[0,2]]``,
+    its transpose, and the symmetrization all returned bit-identical distances.
+    Refusing it instead is not available: no tolerance separates a mistake from
+    the round-off of a real inverse, because a sub-tolerance perturbation still
+    moves a distance arbitrarily far in relative terms along a weakly
+    constrained direction. So the substitution is reported and then made here,
+    which leaves the caller informed rather than blocked.
+
+    Shared by both descriptor surfaces rather than copied into each, as the
+    ``p`` rule is: a second copy is how the two came to disagree before.
+    Mutates ``kwargs`` so the symmetrized matrix is what reaches C++, and is
+    idempotent, so a surface that validates twice warns once.
+
+    :param kwargs: Descriptor keyword options; ``inverse_covariance`` is
+        replaced in place when it is asymmetric.
+    :returns: ``True`` when the matrix was replaced, which is also when the
+        warning was issued.
+    :warns UserWarning: When the supplied matrix is asymmetric beyond
+        round-off, naming one offending pair with both of its values.
+    """
+    value = kwargs.get('inverse_covariance')
+    if value is None:
+        return False
+    # Mirrors the native rule this replaces: the override belongs to one
+    # metric, and on any other the layers below refuse it outright.
+    spelling = kwargs.get('metric') or 'standardized_euclidean'
+    if spelling.lower() != 'mahalanobis':
+        return False
+
+    flat = np.asarray(value, dtype=np.float64).ravel()
+    dim = math.isqrt(flat.size)
+    # A non-square length and a non-finite entry are both refused downstream,
+    # with a message about the fault the caller has to fix first. Standing
+    # aside keeps this advisory out of the way of that refusal.
+    if dim < 2 or dim * dim != flat.size or not np.all(np.isfinite(flat)):
+        return False
+
+    matrix = flat.reshape(dim, dim)
+    pair = _first_asymmetric_pair(matrix)
+    if pair is None:
+        return False
+
+    row, col = pair
+    warnings.warn(
+        f"inverse_covariance is not symmetric: entry [{row}][{col}] is "
+        f"{float(matrix[row, col])!r} but [{col}][{row}] is "
+        f"{float(matrix[col, row])!r}. The mahalanobis metric scores "
+        f"(A + A.T) / 2, and that is what has been used here in place of the "
+        f"matrix supplied. Pass (A + A.T) / 2 yourself if that is what you "
+        f"meant, or mirror the entries you filled if it is not.",
+        UserWarning)
+    kwargs['inverse_covariance'] = (matrix + matrix.T) / 2.0
+    return True
 
 
 def canonical_fingerprint_family(fp_type):
@@ -804,6 +923,13 @@ def _validate_descriptor(similarity, kwargs):
     # told about the metric; before the emptiness refusal, which keeps the
     # last position its comment below claims.
     refuse_inapplicable_p(kwargs)
+
+    # Beside the ``p`` rule for the same reason: a call about to be refused
+    # should not warn about a second thing first. ``kwargs`` is the dict
+    # ``pdist`` and ``cdist`` carry through normalization and building, so the
+    # symmetrized matrix is the one every later step sees -- including the
+    # builder's second call here, which then finds nothing left to report.
+    symmetrize_inverse_covariance(kwargs)
 
     # Last in the band, so none of the verdicts above is pre-empted. Building
     # the options is what discovers the emptiness, which is why the refusal is

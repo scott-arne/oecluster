@@ -1,3 +1,6 @@
+import re
+import warnings
+
 import numpy as np
 import oecluster
 import pytest
@@ -496,29 +499,110 @@ def test_an_unusable_option_value_outranks_the_emptied_input(kwargs, expected):
             oecluster.cdist(a, b, "descriptor", **kwargs)
 
 
-def test_an_ill_conditioned_numpy_inverse_covariance_is_accepted():
-    """A real inv(cov(X)) is never exactly symmetric, and must not be refused.
+def _mahalanobis(matrix, columns):
+    """Score the fixture molecules under an explicit inverse covariance."""
+    return oecluster.pdist(_mols(), "descriptor", metric="mahalanobis",
+                           columns=columns,
+                           inverse_covariance=matrix.ravel().tolist()).condensed
+
+
+def _first_columns(count):
+    stats = oecluster.descriptor_statistics(_mols())
+    assert len(stats['columns']) >= count
+    return list(stats['columns'][:count])
+
+
+# The three matrices that are reported rather than refused, one per failure
+# mode a refusal rule was tried against and lost to.
+ASYMMETRIC = [
+    # The item's own example: a transposed pair, asymmetric by order 1.
+    (np.array([[2.0, 1.0], [0.0, 2.0]]), r"\[0\]\[1\] is 1\.0 but \[1\]\[0\] is 0\.0"),
+    # A triangular fill so weakly correlated that every off-diagonal sits far
+    # below the diagonal scaling it, which the magnitude signal cannot see.
+    (np.array([[1.0, 9e-4], [0.0, 1.0]]), r"\[0\]\[1\] is 0\.0009 but \[1\]\[0\] is 0\.0"),
+    # And the mirror image, which an upper-triangle-only test would miss.
+    (np.array([[1.0, 0.0], [9e-4, 1.0]]), r"\[0\]\[1\] is 0\.0 but \[1\]\[0\] is 0\.0009"),
+]
+
+
+@pytest.mark.parametrize(("matrix", "pair"), ASYMMETRIC,
+                         ids=["transposed-pair", "triangular-fill", "mirrored-fill"])
+def test_an_asymmetric_inverse_covariance_warns_and_is_symmetrized(matrix, pair):
+    """Reported, not refused, because no tolerance can tell the two apart.
+
+    Five successive refusal rules each fell to a reproduced counterexample,
+    and the last one is why there is no sixth: a 3-D matrix asymmetric by
+    3.3e-4 passes every band yet scores a distance 99.99% away from the one
+    the caller's matrix describes, because ``v.T @ A @ v`` can be arbitrarily
+    small along a weakly constrained direction. A sub-tolerance perturbation
+    is therefore unbounded in relative terms. The defect was never the
+    asymmetry, it was the silence, so the substitution is announced instead.
+    """
+    columns = _first_columns(2)
+    with pytest.warns(UserWarning, match="inverse_covariance is not symmetric") as caught:
+        warned = _mahalanobis(matrix, columns)
+    assert len(caught) == 1
+    message = str(caught[0].message)
+    # The offending pair and both of its values, so a caller holding a large
+    # matrix knows which entry to check.
+    assert re.search(pair, message), message
+    assert "(A + A.T) / 2" in message
+
+    # What was scored is the symmetrization, and nothing else: the matrix the
+    # caller would have had to build themselves.
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        explicit = _mahalanobis((matrix + matrix.T) / 2.0, columns)
+    np.testing.assert_array_equal(warned, explicit)
+
+
+def test_the_warning_reaches_the_prebuilt_constructor_too():
+    """Both descriptor surfaces warn, because both share one helper.
+
+    ``p`` diverged between these two before, which is why the rule lives in
+    one place. The constructor builds its options before the substitution, so
+    this also pins that it rebuilds them -- a comparison holding the original
+    matrix would warn and then score it anyway.
+    """
+    matrix = np.array([[2.0, 1.0], [0.0, 2.0]])
+    columns = _first_columns(2)
+    with pytest.warns(UserWarning, match="inverse_covariance is not symmetric"):
+        warned = oecluster.DescriptorComparison(
+            _mols(), columns=columns, metric="mahalanobis",
+            inverse_covariance=matrix.ravel().tolist())
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        explicit = oecluster.DescriptorComparison(
+            _mols(), columns=columns, metric="mahalanobis",
+            inverse_covariance=((matrix + matrix.T) / 2.0).ravel().tolist())
+    np.testing.assert_array_equal(oecluster.pdist(_mols(), warned).condensed,
+                                  oecluster.pdist(_mols(), explicit).condensed)
+
+
+def test_an_ill_conditioned_numpy_inverse_covariance_is_silent():
+    """A real inv(cov(X)) is never exactly symmetric, and must not be reported.
 
     At condition number 5.2e9 this matrix has entries -24294.14521055912 and
     -24294.14521062444, a per-element relative asymmetry of 2.7e-12, which a
-    per-element tolerance tight enough to catch a real mistake would reject.
-    The symmetry rule judges each pair against sqrt(|Aii|) * sqrt(|Ajj|)
-    instead, under which this matrix scores 8.5e-17.
+    per-element tolerance tight enough to catch a real mistake would flag.
+    The detector judges each pair against sqrt(|Aii|) * sqrt(|Ajj|) instead,
+    under which this matrix scores 8.5e-17.
     """
     rng = np.random.default_rng(3238)
     q = np.linalg.qr(rng.normal(size=(5, 5)))[0]
     x = rng.normal(size=(15, 5)) @ q @ np.diag(np.geomspace(1, 1e-5, 5))
     a = np.linalg.inv(np.cov(x, rowvar=False))
     assert not np.array_equal(a, a.T)
-    stats = oecluster.descriptor_statistics(_mols())
-    assert len(stats['columns']) >= 5
-    oecluster.DescriptorComparison(
-        _mols(), columns=list(stats['columns'][:5]), metric="mahalanobis",
-        inverse_covariance=a.ravel().tolist())
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        oecluster.DescriptorComparison(
+            _mols(), columns=_first_columns(5), metric="mahalanobis",
+            inverse_covariance=a.ravel().tolist())
 
 
-def test_an_inverse_whose_roundoff_lands_on_exact_zero_is_accepted():
-    """Round-off does produce a one-sided exact zero, so the fill rule bands it.
+def test_an_inverse_whose_roundoff_lands_on_exact_zero_is_silent():
+    """Round-off does produce a one-sided exact zero, so the fill signal bands it.
 
     This covariance is symmetric, positive definite and well conditioned
     (13.9), yet ``np.linalg.inv`` returns -8.88e-16 against an exact 0.0 at
@@ -530,21 +614,40 @@ def test_an_inverse_whose_roundoff_lands_on_exact_zero_is_accepted():
                     [0.125, 0.125, 0.125]])
     a = np.linalg.inv(cov)
     assert (a[0, 1] == 0.0) != (a[1, 0] == 0.0)
-    stats = oecluster.descriptor_statistics(_mols())
-    oecluster.DescriptorComparison(
-        _mols(), columns=list(stats['columns'][:3]), metric="mahalanobis",
-        inverse_covariance=a.ravel().tolist())
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        oecluster.DescriptorComparison(
+            _mols(), columns=_first_columns(3), metric="mahalanobis",
+            inverse_covariance=a.ravel().tolist())
 
 
-def test_a_dense_correlated_ill_conditioned_inverse_is_accepted():
+def test_the_librarys_own_inverse_covariance_round_trips_silently():
+    """A library must not warn about what it just handed the caller.
+
+    ``descriptor_statistics(inverse_covariance=True)`` is the documented
+    source for this override, so its own output passed straight back in is
+    the one input that can never be a caller's mistake.
+    """
+    stats = oecluster.descriptor_statistics(_mols(), inverse_covariance=True)
+    a = stats['inverse_covariance']
+    assert a is not None
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        oecluster.pdist(_mols(), "descriptor", metric="mahalanobis",
+                        columns=list(stats['columns']),
+                        inverse_covariance=a)
+
+
+def test_a_dense_correlated_ill_conditioned_inverse_is_silent():
     """The case that showed 1e-8 was too tight to ship.
 
-    The first stress test behind this tolerance scaled singular values along
-    a fixed orthonormal basis, which does not mix eigenvectors the way real
+    The first stress test behind this band scaled singular values along a
+    fixed orthonormal basis, which does not mix eigenvectors the way real
     correlated data does, and so understated the round-off in an inverse by
     several orders. With dense mixing a legitimate inv(cov(X)) scores about
     cond * 1e-17 -- 1.8e-8 at condition number 1e9 -- so the original
-    threshold refused usable input. This fixture reproduces that regime.
+    threshold would have reported usable input. This fixture reproduces that
+    regime.
     """
     rng = np.random.default_rng(1)
     q = np.linalg.qr(rng.normal(size=(5, 5)))[0]
@@ -555,16 +658,17 @@ def test_a_dense_correlated_ill_conditioned_inverse_is_accepted():
     assert np.linalg.cond(cov) > 1e8
     assert not np.array_equal(a, a.T)
     # Assert the fixture reaches the regime rather than assuming it: the
-    # first attempt at this test scored 3.9e-9 and so would have passed the
+    # first attempt at this test scored 3.9e-9 and so would have cleared the
     # old 1e-8 threshold too, pinning nothing.
     scale = np.sqrt(np.abs(np.outer(np.diag(a), np.diag(a))))
     skew = np.abs(a - a.T) / np.where(scale > 0, scale, 1.0)
     np.fill_diagonal(skew, 0.0)
     assert skew.max() > 1e-8
-    stats = oecluster.descriptor_statistics(_mols())
-    oecluster.DescriptorComparison(
-        _mols(), columns=list(stats['columns'][:5]), metric="mahalanobis",
-        inverse_covariance=a.ravel().tolist())
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        oecluster.DescriptorComparison(
+            _mols(), columns=_first_columns(5), metric="mahalanobis",
+            inverse_covariance=a.ravel().tolist())
 
 
 def test_the_option_check_reaches_python_without_molecules():

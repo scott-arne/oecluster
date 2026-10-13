@@ -582,16 +582,13 @@ TEST(DescriptorOptionValidationTest, ANonSemidefiniteInverseCovarianceIsRefusedW
                   .find("positive semidefinite"),
               std::string::npos);
 
-    // An asymmetric matrix whose symmetric part is semidefinite used to be
-    // accepted, because OEFP scores (M + M^T) / 2 and the decomposition only
-    // ever sees that part. Accepting it meant scoring a matrix the caller never
-    // supplied, without saying so; the symmetry rule now refuses it ahead of
-    // the decomposition, and names the free remedy -- (A + A.T) / 2 is what the
-    // metric uses either way.
+    // An asymmetric matrix is read as (M + M^T) / 2 rather than refused, so it
+    // is accepted whenever that symmetric part qualifies. The asymmetry is
+    // reported from Python, which warns and substitutes the symmetrization,
+    // rather than refused here: no tolerance separates a caller's mistake from
+    // the round-off of a real inverse.
     opts.inverse_covariance = {1.0, 0.5, -0.5, 1.0};
-    EXPECT_NE(refusal_message([&] { validate_descriptor_options(opts); })
-                  .find("is not symmetric"),
-              std::string::npos);
+    EXPECT_NO_THROW(validate_descriptor_options(opts));
 
     // A cheaper rule still outranks it. The decomposition is the most expensive
     // check here, and a caller whose matrix is also the wrong shape has to fix
@@ -601,43 +598,32 @@ TEST(DescriptorOptionValidationTest, ANonSemidefiniteInverseCovarianceIsRefusedW
               std::string::npos);
 }
 
-TEST(DescriptorOptionValidationTest, AnAsymmetricInverseCovarianceIsRefused) {
-    // OEFP symmetrizes to (M + M^T) / 2 and says nothing, so an input that is
-    // not an inverse covariance was accepted and quietly reinterpreted.
+TEST(DescriptorOptionValidationTest, AnAsymmetricInverseCovarianceIsAccepted) {
+    // These four defeated four successive refusal rules, and the last pair is
+    // why there is no fifth: a matrix can pass any band and still be scored
+    // 99.99% away from what was supplied, because v^T A v can be arbitrarily
+    // small along a weakly constrained direction. C++ therefore takes the
+    // matrix as given and the Python layer reports the substitution instead.
     DescriptorOptions opts;
     opts.metric = "mahalanobis";
     opts.columns = {"MolecularWeight", "XLogP"};
+
+    // A transposed pair, the item's own example.
     opts.inverse_covariance = {2.0, 1.0, 0.0, 2.0};
-    const std::string message = refusal_message([&] { validate_descriptor_options(opts); });
-    EXPECT_NE(message.find("is not symmetric"), std::string::npos) << message;
-    // The message must name the offending pair and both values, so a caller
-    // with a large matrix knows which entry to fix. std::to_string renders a
-    // double with six decimals, so match what it actually produces.
-    EXPECT_NE(message.find("[0][1]"), std::string::npos) << message;
-    EXPECT_NE(message.find("1.000000"), std::string::npos) << message;
-    EXPECT_NE(message.find("0.000000"), std::string::npos) << message;
-}
+    EXPECT_NO_THROW(validate_descriptor_options(opts));
 
-TEST(DescriptorOptionValidationTest, ADominantDiagonalCannotConcealAnAsymmetry) {
-    // Scores 1.0e-2 under the per-pair rule and 7.1e-9 under a whole-matrix
-    // norm, which is why the pair's own diagonal entries are the scale.
-    DescriptorOptions opts;
-    opts.metric = "mahalanobis";
-    opts.columns = {"MolecularWeight", "XLogP"};
+    // A dominant diagonal concealing an asymmetry of a whole entry.
     opts.inverse_covariance = {1e12, 1e4, 0.0, 1.0};
-    EXPECT_NE(refusal_message([&] { validate_descriptor_options(opts); }).find("is not symmetric"),
-              std::string::npos);
-}
+    EXPECT_NO_THROW(validate_descriptor_options(opts));
 
-TEST(DescriptorOptionValidationTest, AHugeDiagonalDoesNotOverflowTheSymmetryScale) {
-    // sqrt(|Aii * Ajj|) overflows to infinity past ~1e154 and would accept
-    // this; sqrt(|Aii|) * sqrt(|Ajj|) does not.
-    DescriptorOptions opts;
-    opts.metric = "mahalanobis";
-    opts.columns = {"MolecularWeight", "XLogP"};
-    opts.inverse_covariance = {1e200, 1e200, 0.0, 1e200};
-    EXPECT_NE(refusal_message([&] { validate_descriptor_options(opts); }).find("is not symmetric"),
-              std::string::npos);
+    // A half-filled triangle, weakly correlated so that every off-diagonal
+    // sits far below the diagonal that would scale it.
+    opts.inverse_covariance = {1.0, 9e-4, 0.0, 1.0};
+    EXPECT_NO_THROW(validate_descriptor_options(opts));
+
+    // And the mirror image, on the same terms.
+    opts.inverse_covariance = {1.0, 0.0, 9e-4, 1.0};
+    EXPECT_NO_THROW(validate_descriptor_options(opts));
 }
 
 TEST(DescriptorOptionValidationTest, ASymmetricInverseCovarianceIsStillAccepted) {
@@ -646,53 +632,9 @@ TEST(DescriptorOptionValidationTest, ASymmetricInverseCovarianceIsStillAccepted)
     opts.columns = {"MolecularWeight", "XLogP"};
     opts.inverse_covariance = {2.0, 0.5, 0.5, 2.0};
     EXPECT_NO_THROW(validate_descriptor_options(opts));
-}
 
-TEST(DescriptorOptionValidationTest, AHalfFilledInverseCovarianceIsRefused) {
-    // The magnitude rule cannot catch this one: the pair scale is the
-    // diagonal, so a weakly correlated precision matrix keeps every
-    // off-diagonal below the tolerance. Measured at 9e-4 off-diagonals,
-    // halving them shifts distances by 2% at 100 columns and 13% at 1000,
-    // so the omission matters even though each entry looks negligible.
-    DescriptorOptions opts;
-    opts.metric = "mahalanobis";
-    opts.columns = {"MolecularWeight", "XLogP"};
-    opts.inverse_covariance = {1.0, 9e-4, 0.0, 1.0};
-    const std::string message =
-        refusal_message([&] { validate_descriptor_options(opts); });
-    EXPECT_NE(message.find("exactly one side zero"), std::string::npos) << message;
-    EXPECT_NE(message.find("[0][1]"), std::string::npos) << message;
-
-    // The mirror image is refused on the same terms.
-    opts.inverse_covariance = {1.0, 0.0, 9e-4, 1.0};
-    EXPECT_NE(refusal_message([&] { validate_descriptor_options(opts); })
-                  .find("exactly one side zero"),
-              std::string::npos);
-}
-
-TEST(DescriptorOptionValidationTest, APartiallyFilledTriangleIsRefusedToo) {
-    // The all-or-nothing form of this rule missed both of these: a fill that
-    // covers only some pairs, and one contaminated by a single mirrored
-    // entry so that neither triangle is entirely zero.
-    DescriptorOptions opts;
-    opts.metric = "mahalanobis";
-    // Ascending schema order, which an override requires.
-    opts.columns = {"MolecularWeight", "HeavyAtomCount", "XLogP"};
-
-    // Pair (0,1) is mirrored correctly; pair (0,2) is filled one side only.
-    opts.inverse_covariance = {1.0, 5e-4, 5e-4,
-                               5e-4, 1.0, 0.0,
-                               0.0,  0.0, 1.0};
-    EXPECT_NE(refusal_message([&] { validate_descriptor_options(opts); })
-                  .find("exactly one side zero"),
-              std::string::npos);
-}
-
-TEST(DescriptorOptionValidationTest, ADiagonalInverseCovarianceIsNotHalfFilled) {
-    // Both triangles are zero, which is a complete matrix, not half of one.
-    DescriptorOptions opts;
-    opts.metric = "mahalanobis";
-    opts.columns = {"MolecularWeight", "XLogP"};
+    // A diagonal matrix: both triangles zero, which is a complete matrix
+    // rather than half of one, and never was a candidate for a fill rule.
     opts.inverse_covariance = {4.0, 0.0, 0.0, 9.0};
     EXPECT_NO_THROW(validate_descriptor_options(opts));
 }

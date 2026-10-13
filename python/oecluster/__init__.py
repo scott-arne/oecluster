@@ -8216,7 +8216,13 @@ class DescriptorComparison:
             ``columns`` list passed alongside must already be in ascending
             schema order, which is the order ``descriptor_statistics`` returns.
         :param inverse_covariance: Explicit inverse covariance for
-            "mahalanobis", bypassing the pooled fit.
+            "mahalanobis", bypassing the pooled fit. The metric scores
+            ``(A + A.T) / 2``, so a matrix that is asymmetric beyond the
+            round-off of a real inverse is replaced by its symmetrization and
+            a ``UserWarning`` names one offending pair. It is not refused: no
+            tolerance can separate a mistake from round-off, since a
+            perturbation under any band still moves a distance arbitrarily far
+            in relative terms.
         :param missing: Missing-value policy: "complete_case" (default),
             "propagate", or "ignore".
         :param p: Minkowski order, accepted only with metric="minkowski".
@@ -8267,6 +8273,13 @@ class DescriptorComparison:
             # not the common case the comment above protects from paying for it.
             _oecluster.validate_descriptor_options(opts)
             _comparisons.refuse_inapplicable_p(kwargs)
+
+        # Last, so a call about to be refused does not warn about a second
+        # thing first. The options were built before the matrix was replaced,
+        # so they are rebuilt here; only on the path that warned, which is the
+        # path that was going to be reinterpreted anyway.
+        if _comparisons.symmetrize_inverse_covariance(kwargs):
+            opts, _ = _comparisons._descriptor_options_and_empties(kwargs)
 
         return _DescriptorComparison(mols, opts)
 

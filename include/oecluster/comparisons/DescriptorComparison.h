@@ -29,14 +29,15 @@ struct DescriptorOptions {
     std::vector<std::string> groups;   ///< Group names, unioned with ``columns``.
     std::string metric = "standardized_euclidean";
     std::vector<double> variances;          ///< standardized_euclidean override.
-    /// mahalanobis override, row-major square. Scored as (M + M^T) / 2, so a
-    /// meaningfully asymmetric matrix would be silently reinterpreted; it is
-    /// refused instead. Two rules: an entry pair differing by more than 1e-3
-    /// of its own Cauchy-Schwarz scale, and an entry pair with one side
-    /// zero and the other above 1e-3/n of that scale, which is a triangular
-    /// fill -- complete, partial or contaminated alike. Round-off from
-    /// inverting a covariance passes both, including the one-sided exact
-    /// zeros it does sometimes produce; neither is a general symmetry proof.
+    /// mahalanobis override, row-major square. Scored as (M + M^T) / 2, so an
+    /// asymmetric matrix is reinterpreted rather than refused. No tolerance can
+    /// separate a caller's mistake from the round-off of a real inverse: a
+    /// perturbation below any threshold still moves a distance arbitrarily far
+    /// in relative terms, because v^T M v can be arbitrarily small along a
+    /// weakly constrained direction. C++ therefore takes the matrix as given;
+    /// the Python layer reports the substitution and performs it, so a caller
+    /// is told rather than refused. A C++ caller who needs the same must
+    /// compare against (M + M^T) / 2 itself.
     std::vector<double> inverse_covariance;
     std::string missing = "complete_case";  ///< complete_case | propagate | ignore.
     double p = 2.0;                         ///< Minkowski order.
