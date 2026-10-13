@@ -27,10 +27,17 @@ namespace OECluster {
 
 namespace {
 
-// Relative tolerance for the inverse-covariance symmetry check. Measured over
-// 400 random ill-conditioned inv(cov(X)) draws (3-40 variables, condition
-// numbers to 1.6e27): the worst legitimate asymmetry was 6.9e-15, so this sits
-// a factor of 1.5 million clear of it. See the design note, section 7.3.
+// Relative tolerance for the inverse-covariance symmetry check, against the
+// pair's own Cauchy-Schwarz scale. Chosen from measurement: over 400 random
+// ill-conditioned inv(cov(X)) draws (3-40 variables, condition numbers to
+// 1.6e27) the worst legitimate asymmetry was 6.9e-15. That headroom is not
+// uniform -- near-collinear columns shrink it to a few multiples of this
+// value around condition number 1e14, and a legitimate inverse first trips
+// the rule near 1e15, where it has no significant digits left and the
+// semidefinite probe below generally refuses it anyway. So the margin is
+// ample for any usable matrix but is not the reason to tighten this: a
+// smaller value would start refusing real input well before it caught
+// anything new. See the design note, section 7.3.
 constexpr double SYMMETRY_TOLERANCE = 1e-8;
 
 /// Resolve the missing-value policy, reporting complete_case separately because
