@@ -257,6 +257,63 @@ def test_pdist_prebuilt_similarity_without_sparse_storage_is_accepted(
     assert np.asarray(mapped.condensed) == pytest.approx([6.0 / 7.0])
 
 
+def _titled_mols(smiles_list):
+    from openeye import oechem
+
+    mols = []
+    for idx, smi in enumerate(smiles_list):
+        mol = oechem.OEGraphMol()
+        oechem.OESmilesToMol(mol, smi)
+        mol.SetTitle(f"mol{idx}")
+        mols.append(mol)
+    return mols
+
+
+_THREE = ["c1ccccc1", "Cc1ccccc1", "CCO"]
+_FIVE = _THREE + ["CCC", "CCCC"]
+
+
+def test_a_prebuilt_comparison_refuses_comparison_options():
+    """Options cannot reach a comparison that is already built.
+
+    The prebuilt branch never read ``kwargs``, so every option was dropped in
+    silence while the docstring promised a TypeError.
+    """
+    import oecluster
+
+    mols = _titled_mols(_THREE)
+    prebuilt = oecluster.FingerprintComparison(mols)
+    with pytest.raises(TypeError, match=r"does not take comparison options"):
+        oecluster.pdist(mols, prebuilt, fp_type="atom_pair")
+
+
+def test_a_prebuilt_comparison_refuses_a_different_item_count():
+    """Measured before the fix: 5 items in, a 3-sample matrix out, no error."""
+    import oecluster
+
+    prebuilt = oecluster.FingerprintComparison(_titled_mols(_THREE))
+    with pytest.raises(ValueError,
+                       match=r"5 items and a prebuilt comparison over 3"):
+        oecluster.pdist(_titled_mols(_FIVE), prebuilt)
+
+
+def test_a_prebuilt_comparison_refuses_items_without_a_length():
+    import oecluster
+
+    mols = _titled_mols(_THREE)
+    with pytest.raises(TypeError, match=r"items"):
+        oecluster.pdist(iter(mols), oecluster.FingerprintComparison(mols))
+
+
+def test_a_prebuilt_comparison_accepts_the_matching_item_count():
+    """Regression shield: passes before the fix, must keep passing after."""
+    import oecluster
+
+    mols = _titled_mols(_THREE)
+    assert oecluster.pdist(
+        mols, oecluster.FingerprintComparison(mols)).num_samples == 3
+
+
 def test_raw_pdist_refuses_similarity_into_sparse_storage():
     """The native driver refuses what the wrapper refuses, for raw callers.
 

@@ -2252,10 +2252,14 @@ def pdist(items,
     :param progress: Optional callback(completed, total).
     :param kwargs: Comparison-specific options.
     :returns: SymmetricDistanceMatrix with computed distances/similarities.
-    :raises TypeError: If unknown kwargs are passed.
+    :raises TypeError: If unknown kwargs are passed, if any comparison option
+        accompanies a prebuilt comparison, or if ``items`` has no length
+        alongside one.
     :raises ValueError: If cutoff > 0 with no ``output`` and either
         similarity=True on a named comparison or a prebuilt comparison that
-        reports similarities, or if normalizing the inputs leaves no items.
+        reports similarities, if normalizing the inputs leaves no items, or if
+        ``items`` and a prebuilt comparison describe different numbers of
+        items.
     """
     if isinstance(comparison, str):
         # Before normalization: filtering can empty the list, and the refusal
@@ -2303,6 +2307,28 @@ def pdist(items,
         if excluded:
             params['excluded_items'] = excluded
     else:
+        # A prebuilt comparison carries its own items and its own options, so
+        # anything passed beside it was silently dropped before this refusal
+        # existed. Keywords are refused first: no change to ``items`` makes a
+        # dropped option take effect.
+        if kwargs:
+            raise TypeError(
+                f"pdist does not take comparison options alongside a prebuilt "
+                f"comparison, but got {sorted(kwargs)}: a prebuilt comparison "
+                f"already carries the options it was built with. Drop them, or "
+                f"pass a comparison name instead.")
+        try:
+            item_count = len(items)
+        except TypeError:
+            raise TypeError(
+                "pdist requires items to be a sized sequence when a prebuilt "
+                "comparison is passed, so the two can be checked against each "
+                "other") from None
+        if item_count != comparison.Size():
+            raise ValueError(
+                f"pdist was given {item_count} items and a prebuilt comparison "
+                f"over {comparison.Size()}: a prebuilt comparison supplies its "
+                f"own items, so the two must describe the same set.")
         comparison_obj = comparison
         comparison_name = comparison_obj.ComparisonName()
         labels = []
