@@ -2308,15 +2308,15 @@ def pdist(items,
             params['excluded_items'] = excluded
     else:
         # A prebuilt comparison carries its own items and its own options, so
-        # anything passed beside it was silently dropped before this refusal
-        # existed. Keywords are refused first: no change to ``items`` makes a
-        # dropped option take effect.
+        # anything passed beside it would otherwise be dropped in silence.
+        # Keywords are refused first: no change to ``items`` makes a dropped
+        # option take effect.
         if kwargs:
             raise TypeError(
-                f"pdist does not take comparison options alongside a prebuilt "
+                "pdist does not take comparison options alongside a prebuilt "
                 f"comparison, but got {sorted(kwargs)}: a prebuilt comparison "
-                f"already carries the options it was built with. Drop them, or "
-                f"pass a comparison name instead.")
+                "already carries the options it was built with. Drop them, or "
+                "pass a comparison name instead.")
         try:
             item_count = len(items)
         except TypeError:
@@ -2328,7 +2328,7 @@ def pdist(items,
             raise ValueError(
                 f"pdist was given {item_count} items and a prebuilt comparison "
                 f"over {comparison.Size()}: a prebuilt comparison supplies its "
-                f"own items, so the two must describe the same set.")
+                "own items, so the two must describe the same set.")
         comparison_obj = comparison
         comparison_name = comparison_obj.ComparisonName()
         labels = []

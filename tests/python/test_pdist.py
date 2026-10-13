@@ -301,7 +301,7 @@ def test_a_prebuilt_comparison_refuses_items_without_a_length():
     import oecluster
 
     mols = _titled_mols(_THREE)
-    with pytest.raises(TypeError, match=r"items"):
+    with pytest.raises(TypeError, match=r"items to be a sized sequence"):
         oecluster.pdist(iter(mols), oecluster.FingerprintComparison(mols))
 
 
