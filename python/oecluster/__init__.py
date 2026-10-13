@@ -2250,11 +2250,15 @@ def pdist(items,
     :param cutoff: Distance cutoff for sparse storage (0 = store all).
     :param output: Optional file path for memory-mapped storage.
     :param progress: Optional callback(completed, total).
-    :param kwargs: Comparison-specific options.
+    :param kwargs: Comparison-specific options. A prebuilt comparison takes
+        none of them -- it already carries the options it was built with --
+        and passing one is refused. ``similarity`` is the exception: it is a
+        named parameter rather than a comparison option, and a prebuilt
+        comparison ignores it, reading its own orientation instead.
     :returns: SymmetricDistanceMatrix with computed distances/similarities.
     :raises TypeError: If unknown kwargs are passed, if any comparison option
-        accompanies a prebuilt comparison, or if ``items`` has no length
-        alongside one.
+        in ``kwargs`` accompanies a prebuilt comparison, or if ``items`` has
+        no length alongside one.
     :raises ValueError: If cutoff > 0 with no ``output`` and either
         similarity=True on a named comparison or a prebuilt comparison that
         reports similarities, if normalizing the inputs leaves no items, or if
