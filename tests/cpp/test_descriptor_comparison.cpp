@@ -582,11 +582,16 @@ TEST(DescriptorOptionValidationTest, ANonSemidefiniteInverseCovarianceIsRefusedW
                   .find("positive semidefinite"),
               std::string::npos);
 
-    // An asymmetric matrix is read as (M + M^T) / 2 rather than refused, so it
-    // is accepted whenever that symmetric part qualifies. Refusing here would
-    // reject a matrix OEFP goes on to score.
+    // An asymmetric matrix whose symmetric part is semidefinite used to be
+    // accepted, because OEFP scores (M + M^T) / 2 and the decomposition only
+    // ever sees that part. Accepting it meant scoring a matrix the caller never
+    // supplied, without saying so; the symmetry rule now refuses it ahead of
+    // the decomposition, and names the free remedy -- (A + A.T) / 2 is what the
+    // metric uses either way.
     opts.inverse_covariance = {1.0, 0.5, -0.5, 1.0};
-    EXPECT_NO_THROW(validate_descriptor_options(opts));
+    EXPECT_NE(refusal_message([&] { validate_descriptor_options(opts); })
+                  .find("is not symmetric"),
+              std::string::npos);
 
     // A cheaper rule still outranks it. The decomposition is the most expensive
     // check here, and a caller whose matrix is also the wrong shape has to fix
@@ -594,6 +599,53 @@ TEST(DescriptorOptionValidationTest, ANonSemidefiniteInverseCovarianceIsRefusedW
     opts.inverse_covariance = {-1.0, 0.0, 0.0};
     EXPECT_NE(refusal_message([&] { validate_descriptor_options(opts); }).find("square 2x2"),
               std::string::npos);
+}
+
+TEST(DescriptorOptionValidationTest, AnAsymmetricInverseCovarianceIsRefused) {
+    // OEFP symmetrizes to (M + M^T) / 2 and says nothing, so an input that is
+    // not an inverse covariance was accepted and quietly reinterpreted.
+    DescriptorOptions opts;
+    opts.metric = "mahalanobis";
+    opts.columns = {"MolecularWeight", "XLogP"};
+    opts.inverse_covariance = {2.0, 1.0, 0.0, 2.0};
+    const std::string message = refusal_message([&] { validate_descriptor_options(opts); });
+    EXPECT_NE(message.find("is not symmetric"), std::string::npos) << message;
+    // The message must name the offending pair and both values, so a caller
+    // with a large matrix knows which entry to fix. std::to_string renders a
+    // double with six decimals, so match what it actually produces.
+    EXPECT_NE(message.find("[0][1]"), std::string::npos) << message;
+    EXPECT_NE(message.find("1.000000"), std::string::npos) << message;
+    EXPECT_NE(message.find("0.000000"), std::string::npos) << message;
+}
+
+TEST(DescriptorOptionValidationTest, ADominantDiagonalCannotConcealAnAsymmetry) {
+    // Scores 1.0e-2 under the per-pair rule and 7.1e-9 under a whole-matrix
+    // norm, which is why the pair's own diagonal entries are the scale.
+    DescriptorOptions opts;
+    opts.metric = "mahalanobis";
+    opts.columns = {"MolecularWeight", "XLogP"};
+    opts.inverse_covariance = {1e12, 1e4, 0.0, 1.0};
+    EXPECT_NE(refusal_message([&] { validate_descriptor_options(opts); }).find("is not symmetric"),
+              std::string::npos);
+}
+
+TEST(DescriptorOptionValidationTest, AHugeDiagonalDoesNotOverflowTheSymmetryScale) {
+    // sqrt(|Aii * Ajj|) overflows to infinity past ~1e154 and would accept
+    // this; sqrt(|Aii|) * sqrt(|Ajj|) does not.
+    DescriptorOptions opts;
+    opts.metric = "mahalanobis";
+    opts.columns = {"MolecularWeight", "XLogP"};
+    opts.inverse_covariance = {1e200, 1e200, 0.0, 1e200};
+    EXPECT_NE(refusal_message([&] { validate_descriptor_options(opts); }).find("is not symmetric"),
+              std::string::npos);
+}
+
+TEST(DescriptorOptionValidationTest, ASymmetricInverseCovarianceIsStillAccepted) {
+    DescriptorOptions opts;
+    opts.metric = "mahalanobis";
+    opts.columns = {"MolecularWeight", "XLogP"};
+    opts.inverse_covariance = {2.0, 0.5, 0.5, 2.0};
+    EXPECT_NO_THROW(validate_descriptor_options(opts));
 }
 
 TEST(DescriptorOptionValidationTest, TheInputSizeRuleIsLeftToTheConstructor) {

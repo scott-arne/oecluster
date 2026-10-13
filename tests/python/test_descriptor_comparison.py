@@ -496,6 +496,27 @@ def test_an_unusable_option_value_outranks_the_emptied_input(kwargs, expected):
             oecluster.cdist(a, b, "descriptor", **kwargs)
 
 
+def test_an_ill_conditioned_numpy_inverse_covariance_is_accepted():
+    """A real inv(cov(X)) is never exactly symmetric, and must not be refused.
+
+    At condition number 5.2e9 this matrix has entries -24294.14521055912 and
+    -24294.14521062444, a per-element relative asymmetry of 2.7e-12, which a
+    per-element tolerance tight enough to catch a real mistake would reject.
+    The symmetry rule judges each pair against sqrt(|Aii|) * sqrt(|Ajj|)
+    instead, under which this matrix scores 8.5e-17.
+    """
+    rng = np.random.default_rng(3238)
+    q = np.linalg.qr(rng.normal(size=(5, 5)))[0]
+    x = rng.normal(size=(15, 5)) @ q @ np.diag(np.geomspace(1, 1e-5, 5))
+    a = np.linalg.inv(np.cov(x, rowvar=False))
+    assert not np.array_equal(a, a.T)
+    stats = oecluster.descriptor_statistics(_mols())
+    assert len(stats['columns']) >= 5
+    oecluster.DescriptorComparison(
+        _mols(), columns=list(stats['columns'][:5]), metric="mahalanobis",
+        inverse_covariance=a.ravel().tolist())
+
+
 def test_the_option_check_reaches_python_without_molecules():
     """The pre-filter check is the C++ one, reached through SWIG.
 

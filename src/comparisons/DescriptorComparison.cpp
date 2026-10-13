@@ -27,6 +27,12 @@ namespace OECluster {
 
 namespace {
 
+// Relative tolerance for the inverse-covariance symmetry check. Measured over
+// 400 random ill-conditioned inv(cov(X)) draws (3-40 variables, condition
+// numbers to 1.6e27): the worst legitimate asymmetry was 6.9e-15, so this sits
+// a factor of 1.5 million clear of it. See the design note, section 7.3.
+constexpr double SYMMETRY_TOLERANCE = 1e-8;
+
 /// Resolve the missing-value policy, reporting complete_case separately because
 /// it uses OEFP's Propagate kernel over an input the constructor has verified.
 OEFP::DescriptorMissingPolicy normalize_missing(const std::string& missing,
@@ -172,6 +178,42 @@ void check_override_against_selection(const OEFP::DescriptorSchema& schema,
             throw ComparisonError("inverse_covariance[" + std::to_string(k) +
                                   "] must be finite, got " +
                                   std::to_string(opts.inverse_covariance[k]));
+        }
+    }
+
+    // OEFP scores with (M + M^T) / 2 and never reports the substitution, so an
+    // asymmetric matrix is accepted and quietly reinterpreted as a different
+    // one. Each pair is judged against sqrt(|Aii|) * sqrt(|Ajj|), the
+    // Cauchy-Schwarz bound on |Aij| for a semidefinite matrix: an inverse's
+    // round-off scales with its diagonal, so a fixed per-element tolerance
+    // refuses legitimate ill-conditioned inverses, while a whole-matrix norm
+    // lets a dominant diagonal elsewhere conceal a real asymmetry. The two
+    // square roots are taken separately because the product overflows past
+    // about 1e154.
+    if (metric_name == "mahalanobis") {
+        const size_t dim = selection.size();
+        for (size_t row = 0; row < dim; ++row) {
+            for (size_t col = row + 1; col < dim; ++col) {
+                const double upper = opts.inverse_covariance[row * dim + col];
+                const double lower = opts.inverse_covariance[col * dim + row];
+                const double diag_row = std::abs(opts.inverse_covariance[row * dim + row]);
+                const double diag_col = std::abs(opts.inverse_covariance[col * dim + col]);
+                // A semidefinite matrix with a zero diagonal entry has an
+                // all-zero row, so judge such a pair against itself rather
+                // than against an absolute scale that would excuse it.
+                const double scale = (diag_row > 0.0 && diag_col > 0.0)
+                                         ? std::sqrt(diag_row) * std::sqrt(diag_col)
+                                         : std::max(std::abs(upper), std::abs(lower));
+                if (std::abs(upper - lower) > SYMMETRY_TOLERANCE * scale) {
+                    throw ComparisonError(
+                        "inverse_covariance is not symmetric: entry [" + std::to_string(row) +
+                        "][" + std::to_string(col) + "] is " + std::to_string(upper) +
+                        " but [" + std::to_string(col) + "][" + std::to_string(row) + "] is " +
+                        std::to_string(lower) +
+                        ". An inverse covariance is symmetric by construction; pass "
+                        "(A + A.T) / 2, which is what the metric uses either way");
+                }
+            }
         }
     }
 
