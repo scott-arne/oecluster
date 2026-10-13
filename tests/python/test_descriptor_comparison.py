@@ -1148,9 +1148,12 @@ def test_descriptor_statistics_refuses_an_empty_sequence_option(option):
         oecluster.descriptor_statistics(_mols(), **{option: []})
 
 
-# The two public ways to reach the descriptor options. The rule lives in one
-# shared helper but is called from two places, and only a test over both
-# catches a call site that was missed.
+# The descriptor surfaces the Python layer exposes. The rule lives in one
+# shared helper but is called from two places, and only a test over all three
+# catches a call site that was missed. These are not every route to the
+# descriptor options: the documented ``oecluster.oecluster`` bindings reach
+# them underneath this layer, and
+# ``test_the_raw_native_bindings_still_accept_an_inert_p`` pins that boundary.
 _DESCRIPTOR_SURFACES = [
     pytest.param(lambda mols, **kw: oecluster.pdist(mols, "descriptor", **kw),
                  id="pdist"),
@@ -1197,7 +1200,7 @@ def test_p_is_accepted_on_minkowski_whatever_its_case(build, metric):
     ("haversine", r"great-circle distance over exactly two columns"),
 ])
 def test_a_bad_metric_is_named_before_p_is(build, metric, needle):
-    """C++ speaks first on every surface.
+    """C++ speaks first on each of these surfaces.
 
     A message about ``p`` not applying to ``metric='bogus'`` would name a
     metric that does not exist, and ``tanimoto``/``haversine`` are recognised
@@ -1206,3 +1209,30 @@ def test_a_bad_metric_is_named_before_p_is(build, metric, needle):
     """
     with pytest.raises(RuntimeError, match=needle):
         build(_mols(), metric=metric, p=3.0)
+
+
+def test_the_raw_native_bindings_still_accept_an_inert_p():
+    """The documented escape hatch sits below this layer's contract.
+
+    ``docs/python-api.md`` publishes ``oecluster.oecluster`` for direct access
+    to the C++ options and classes, and a ``DescriptorOptions`` built there
+    reaches the comparison without passing any Python rule. ``p`` is inert on
+    that route rather than refused, which is measured here: under
+    ``metric='euclidean'`` the condensed values are bit-identical at ``p=2.0``
+    and ``p=3.0``.
+
+    C++ cannot apply the rule in Python's place. ``DescriptorOptions::p`` is a
+    plain ``double`` with a default, so the validator cannot tell "not
+    supplied" from "supplied as the default" without a presence flag on a
+    public struct -- a design change, and not the one this layer's fix is.
+    Pinned rather than closed, so the boundary stays a recorded fact instead
+    of an unstated gap behind a claim that the refusal is universal.
+    """
+    def condensed(p):
+        opts = _native.DescriptorOptions()
+        opts.metric = "euclidean"
+        opts.p = p
+        return oecluster.pdist(
+            _mols(), _native.DescriptorComparison(_mols(), opts)).condensed
+
+    assert np.array_equal(condensed(2.0), condensed(3.0))
