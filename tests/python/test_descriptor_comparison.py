@@ -1227,19 +1227,26 @@ def test_any_other_rejected_option_is_reported_before_p(build):
 
 
 @pytest.mark.parametrize("build", _DESCRIPTOR_SURFACES)
-def test_p_pre_empts_a_schema_dependent_fault(build):
-    """The other side of the precedence, pinned so the contract stays honest.
+def test_which_of_two_faults_is_reported_depends_on_the_override(build):
+    """There is no fixed precedence here, and the docstrings promise none.
 
-    A source, column or group name can only be resolved once a schema
-    exists, which is downstream of the ``p`` rule. So unlike a bad
-    ``missing`` policy, a bad ``sources`` name does NOT come first: the
-    caller is told about ``p``, and dropping it then exposes the source.
-    Documented rather than reordered -- moving the rule below schema
-    resolution would make every refusal pay for building a calculator.
+    A source, column or group name resolves only once a schema exists, so
+    where that check runs relative to the ``p`` rule is data-dependent:
+    supplying ``variances`` resolves the schema early and moves it ahead.
+    Both directions are pinned because four attempts to document a fixed
+    ordering were each falsified by a case the previous one missed --
+    the honest contract is that fixing one fault may expose another.
     """
+    # No override: the schema is not resolved yet, so p is reported.
     with pytest.raises(TypeError, match=r"p does not apply to metric="):
         build(_mols(), metric="euclidean", p=3.0, sources=["nope"])
 
+    # An override resolves the schema early, so the source is reported.
+    with pytest.raises(RuntimeError, match="[Ss]ource"):
+        build(_mols(), metric="standardized_euclidean", p=3.0,
+              sources=["nope"], variances=[1.0, 2.0])
+
+    # And with no p at all, the source is reported either way.
     with pytest.raises(RuntimeError, match="[Ss]ource"):
         build(_mols(), metric="euclidean", sources=["nope"])
 

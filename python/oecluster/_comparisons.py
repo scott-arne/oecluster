@@ -320,12 +320,11 @@ def refuse_inapplicable_p(kwargs):
 
     :param kwargs: Descriptor keyword options, read but never consumed.
     :raises TypeError: If ``p`` is supplied and the metric does not take it.
-        Both call sites run this after option conversion and after the
-        argument-level native validation, so a fault either of those can see
-        is reported instead. It is *not* after the schema-dependent checks --
-        a source, column or group name is resolved no schema here, exactly as
-        :func:`_validate_descriptor` describes -- so this refusal can
-        pre-empt one of those.
+        No precedence against another fault is promised, and none can be:
+        where each check runs is data-dependent, because an override resolves
+        the schema earlier and so moves the source, column and group checks
+        relative to this one. Both call sites place this rule where C++ has
+        already ruled on what it can see without molecules.
     """
     if kwargs.get('p') is None:
         return
@@ -763,9 +762,10 @@ def _validate_descriptor(similarity, kwargs):
     :raises TypeError: If any keyword option is not a descriptor option, or if
         ``p`` is supplied with a metric that does not take it. The ``p`` rule
         is the last in the band bar one, so it reports only on a request that
-        converted cleanly and that C++ accepted at argument level -- it still
-        precedes the schema-dependent source, column and group resolution
-        described above, and so can pre-empt a bad name there.
+        converted cleanly and that C++ accepted on what it can see without
+        molecules. Against the schema-dependent checks it has no fixed
+        order -- an override resolves the schema earlier and moves them --
+        so a request with two faults may report either.
     :raises RuntimeError: If C++ refuses an option value outright, which
         includes a metric that is unknown or unavailable on this surface --
         that verdict comes before the ``p`` rule, so it is what a caller who
