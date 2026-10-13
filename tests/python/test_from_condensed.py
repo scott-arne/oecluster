@@ -412,10 +412,48 @@ def test_an_explicitly_falsy_params_is_not_treated_as_unspecified():
     """
     condensed, _ = _metric_condensed(n=3)
     for bad in (0, False):
-        with pytest.raises(TypeError):
+        with pytest.raises(TypeError, match=r"from_condensed params="):
             SymmetricDistanceMatrix.from_condensed(condensed, params=bad)
     assert SymmetricDistanceMatrix.from_condensed(
         condensed, params=None).params == {}
+
+
+def test_a_bad_params_names_the_parameter_and_the_entry_point():
+    condensed, _ = _metric_condensed(n=3)
+    with pytest.raises(TypeError, match=r"from_condensed params="):
+        SymmetricDistanceMatrix.from_condensed(condensed, params=0)
+
+
+@pytest.mark.parametrize("empty", [[], "", ()])
+def test_an_empty_iterable_params_is_still_an_empty_mapping(empty):
+    """The contract item 59 must not break, now asserted rather than described."""
+    condensed, _ = _metric_condensed(n=3)
+    assert SymmetricDistanceMatrix.from_condensed(
+        condensed, params=empty).params == {}
+
+
+def test_a_malformed_params_iterable_keeps_raising_ValueError():
+    """Only the message changes; the exception class a caller catches does not.
+
+    ``dict([(1, 2, 3)])`` raises ``ValueError`` -- a pair of the wrong length,
+    not a non-iterable -- so re-raising everything as ``TypeError`` would
+    change what a caller has to catch.
+    """
+    condensed, _ = _metric_condensed(n=3)
+    with pytest.raises(ValueError, match=r"from_condensed params="):
+        SymmetricDistanceMatrix.from_condensed(condensed, params=[(1, 2, 3)])
+    # The same call with a non-iterable element stays a TypeError.
+    with pytest.raises(TypeError, match=r"from_condensed params="):
+        SymmetricDistanceMatrix.from_condensed(condensed, params=[1, 2, 3])
+
+
+@pytest.mark.parametrize("n", [2, 3])
+def test_a_bad_probe_triples_names_the_parameter_and_the_entry_point(n):
+    """At n < 3 the guard never evaluated ``samples``, so a nonsense value did
+    not even raise."""
+    condensed, _ = _metric_condensed(n=n)
+    with pytest.raises(TypeError, match=r"from_condensed probe_triples="):
+        SymmetricDistanceMatrix.from_condensed(condensed, probe_triples=None)
 
 
 def test_params_are_copied_from_the_callers_dict():

@@ -1460,6 +1460,16 @@ class SymmetricDistanceMatrix(DistanceMatrix):
         # the numbers, so it proves nothing durable -- and calling the
         # argument a "distance matrix" is not evidence that it is one.
         facts = _gate.default_facts()
+        # Unconditionally, rather than inside ``if check:``: the downstream
+        # guard only reaches ``samples`` at n >= 3, so a nonsense value passed
+        # with a two-item matrix was accepted in silence.
+        try:
+            probe_triples = operator.index(probe_triples)
+        except TypeError as error:
+            raise TypeError(
+                f"from_condensed probe_triples= must be an integer count of "
+                f"triples to sample, got {type(probe_triples).__name__}"
+            ) from error
         if check:
             # Only now, having measured it. Under check=False nothing looked
             # at the numbers, and ``to_file`` would write the claim into the
@@ -1475,7 +1485,25 @@ class SymmetricDistanceMatrix(DistanceMatrix):
         # ``DistanceMatrix.__init__``: an explicitly passed value must not be
         # silently equivalent to passing nothing. ``dict`` because this path
         # promises the caller a copy.
-        copied = dict(params) if params is not None else {}
+        #
+        # Whatever ``dict()`` accepts stays accepted -- ``params=[]`` and
+        # ``params=''`` are an empty mapping by design, pinned by
+        # test_an_explicitly_falsy_params_is_not_treated_as_unspecified. Only
+        # the diagnostic changes: ``dict(0)`` reports "'int' object is not
+        # iterable", which names neither the parameter nor this entry point.
+        if params is None:
+            copied = {}
+        else:
+            try:
+                copied = dict(params)
+            except (TypeError, ValueError) as error:
+                # Re-raised as its own class, not as TypeError: a malformed
+                # iterable -- dict([1, 2, 3]) -- raises ValueError today, and
+                # changing which exception a caller catches would be a
+                # behaviour change, not the message fix this is.
+                raise type(error)(
+                    f"from_condensed params= must be a mapping or an iterable "
+                    f"of key/value pairs, got {type(params).__name__}") from error
         return cls(storage, comparison_name, labels, copied, facts)
 
     @staticmethod
