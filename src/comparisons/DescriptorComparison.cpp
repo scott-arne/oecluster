@@ -228,6 +228,37 @@ void check_override_against_selection(const OEFP::DescriptorSchema& schema,
                 }
             }
         }
+
+        // A half-filled matrix is a structural mistake, not a small one, and
+        // the magnitude rule above cannot see it: the Cauchy-Schwarz scale is
+        // the diagonal, so a weakly correlated precision matrix carries all
+        // its off-diagonal information below the tolerance. Measured, a
+        // precision matrix with unit diagonal and 9e-4 off-diagonals supplied
+        // as one triangle passes that rule at every size, while halving the
+        // correlations shifts distances by 2% at 100 columns and 13% at 1000.
+        // Exactly one triangle being all zeros is unambiguous, needs no
+        // tolerance, and a genuinely diagonal matrix has both zero and so is
+        // untouched.
+        bool upper_all_zero = true;
+        bool lower_all_zero = true;
+        for (size_t row = 0; row < dim; ++row) {
+            for (size_t col = row + 1; col < dim; ++col) {
+                if (opts.inverse_covariance[row * dim + col] != 0.0) {
+                    upper_all_zero = false;
+                }
+                if (opts.inverse_covariance[col * dim + row] != 0.0) {
+                    lower_all_zero = false;
+                }
+            }
+        }
+        if (upper_all_zero != lower_all_zero) {
+            throw ComparisonError(
+                "inverse_covariance has one triangle filled and the other all "
+                "zero, so it is half a matrix rather than a symmetric one. The "
+                "metric would score (A + A.T) / 2 and halve every off-diagonal "
+                "term. Mirror the filled triangle, or pass (A + A.T) / 2 if "
+                "that is what you meant");
+        }
     }
 
     // The semidefinite verdict is read off an eigendecomposition inside OEFP's

@@ -529,12 +529,19 @@ def test_a_dense_correlated_ill_conditioned_inverse_is_accepted():
     """
     rng = np.random.default_rng(1)
     q = np.linalg.qr(rng.normal(size=(5, 5)))[0]
-    sv = np.geomspace(1, 1e-5, 5) * rng.uniform(0.5, 2.0, 5)
+    sv = np.geomspace(1, 1e-7, 5) * rng.uniform(0.5, 2.0, 5)
     x = rng.normal(size=(30, 5)) @ (q * sv) @ q.T
     cov = np.cov(x, rowvar=False)
     a = np.linalg.inv(cov)
     assert np.linalg.cond(cov) > 1e8
     assert not np.array_equal(a, a.T)
+    # Assert the fixture reaches the regime rather than assuming it: the
+    # first attempt at this test scored 3.9e-9 and so would have passed the
+    # old 1e-8 threshold too, pinning nothing.
+    scale = np.sqrt(np.abs(np.outer(np.diag(a), np.diag(a))))
+    skew = np.abs(a - a.T) / np.where(scale > 0, scale, 1.0)
+    np.fill_diagonal(skew, 0.0)
+    assert skew.max() > 1e-8
     stats = oecluster.descriptor_statistics(_mols())
     oecluster.DescriptorComparison(
         _mols(), columns=list(stats['columns'][:5]), metric="mahalanobis",

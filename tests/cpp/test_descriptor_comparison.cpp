@@ -648,6 +648,36 @@ TEST(DescriptorOptionValidationTest, ASymmetricInverseCovarianceIsStillAccepted)
     EXPECT_NO_THROW(validate_descriptor_options(opts));
 }
 
+TEST(DescriptorOptionValidationTest, AHalfFilledInverseCovarianceIsRefused) {
+    // The magnitude rule cannot catch this one: the pair scale is the
+    // diagonal, so a weakly correlated precision matrix keeps every
+    // off-diagonal below the tolerance. Measured at 9e-4 off-diagonals,
+    // halving them shifts distances by 2% at 100 columns and 13% at 1000,
+    // so the omission matters even though each entry looks negligible.
+    DescriptorOptions opts;
+    opts.metric = "mahalanobis";
+    opts.columns = {"MolecularWeight", "XLogP"};
+    opts.inverse_covariance = {1.0, 9e-4, 0.0, 1.0};
+    const std::string message =
+        refusal_message([&] { validate_descriptor_options(opts); });
+    EXPECT_NE(message.find("one triangle filled"), std::string::npos) << message;
+
+    // The mirror image is refused on the same terms.
+    opts.inverse_covariance = {1.0, 0.0, 9e-4, 1.0};
+    EXPECT_NE(refusal_message([&] { validate_descriptor_options(opts); })
+                  .find("one triangle filled"),
+              std::string::npos);
+}
+
+TEST(DescriptorOptionValidationTest, ADiagonalInverseCovarianceIsNotHalfFilled) {
+    // Both triangles are zero, which is a complete matrix, not half of one.
+    DescriptorOptions opts;
+    opts.metric = "mahalanobis";
+    opts.columns = {"MolecularWeight", "XLogP"};
+    opts.inverse_covariance = {4.0, 0.0, 0.0, 9.0};
+    EXPECT_NO_THROW(validate_descriptor_options(opts));
+}
+
 TEST(DescriptorOptionValidationTest, TheInputSizeRuleIsLeftToTheConstructor) {
     // A fitted metric over one molecule is a valid *option* set; only the
     // input makes it impossible. Refusing it here would refuse it for every

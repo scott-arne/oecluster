@@ -29,8 +29,13 @@ struct DescriptorOptions {
     std::vector<std::string> groups;   ///< Group names, unioned with ``columns``.
     std::string metric = "standardized_euclidean";
     std::vector<double> variances;          ///< standardized_euclidean override.
-    /// mahalanobis override, row-major square. Read as (M + M^T) / 2, so
-    /// asymmetry alone is not a refusal: the symmetric part is what is judged.
+    /// mahalanobis override, row-major square. Scored as (M + M^T) / 2, so a
+    /// meaningfully asymmetric matrix would be silently reinterpreted; it is
+    /// refused instead. Two rules: an entry pair differing by more than 1e-3
+    /// of its own Cauchy-Schwarz scale, and a matrix with one triangle
+    /// entirely zero while the other is not, which is a half-filled input
+    /// whatever its magnitudes. Round-off from inverting a covariance passes
+    /// both.
     std::vector<double> inverse_covariance;
     std::string missing = "complete_case";  ///< complete_case | propagate | ignore.
     double p = 2.0;                         ///< Minkowski order.
