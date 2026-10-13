@@ -517,6 +517,30 @@ def test_an_ill_conditioned_numpy_inverse_covariance_is_accepted():
         inverse_covariance=a.ravel().tolist())
 
 
+def test_a_dense_correlated_ill_conditioned_inverse_is_accepted():
+    """The case that showed 1e-8 was too tight to ship.
+
+    The first stress test behind this tolerance scaled singular values along
+    a fixed orthonormal basis, which does not mix eigenvectors the way real
+    correlated data does, and so understated the round-off in an inverse by
+    several orders. With dense mixing a legitimate inv(cov(X)) scores about
+    cond * 1e-17 -- 1.8e-8 at condition number 1e9 -- so the original
+    threshold refused usable input. This fixture reproduces that regime.
+    """
+    rng = np.random.default_rng(1)
+    q = np.linalg.qr(rng.normal(size=(5, 5)))[0]
+    sv = np.geomspace(1, 1e-5, 5) * rng.uniform(0.5, 2.0, 5)
+    x = rng.normal(size=(30, 5)) @ (q * sv) @ q.T
+    cov = np.cov(x, rowvar=False)
+    a = np.linalg.inv(cov)
+    assert np.linalg.cond(cov) > 1e8
+    assert not np.array_equal(a, a.T)
+    stats = oecluster.descriptor_statistics(_mols())
+    oecluster.DescriptorComparison(
+        _mols(), columns=list(stats['columns'][:5]), metric="mahalanobis",
+        inverse_covariance=a.ravel().tolist())
+
+
 def test_the_option_check_reaches_python_without_molecules():
     """The pre-filter check is the C++ one, reached through SWIG.
 

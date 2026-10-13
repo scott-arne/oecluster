@@ -28,17 +28,23 @@ namespace OECluster {
 namespace {
 
 // Relative tolerance for the inverse-covariance symmetry check, against the
-// pair's own Cauchy-Schwarz scale. Chosen from measurement: over 400 random
-// ill-conditioned inv(cov(X)) draws (3-40 variables, condition numbers to
-// 1.6e27) the worst legitimate asymmetry was 6.9e-15. That headroom is not
-// uniform -- near-collinear columns shrink it to a few multiples of this
-// value around condition number 1e14, and a legitimate inverse first trips
-// the rule near 1e15, where it has no significant digits left and the
-// semidefinite probe below generally refuses it anyway. So the margin is
-// ample for any usable matrix but is not the reason to tighten this: a
-// smaller value would start refusing real input well before it caught
-// anything new. See the design note, section 7.3.
-constexpr double SYMMETRY_TOLERANCE = 1e-8;
+// pair's own Cauchy-Schwarz scale.
+//
+// Inverting a symmetric matrix does not return an exactly symmetric one, and
+// the round-off grows with the conditioning: measured over dense correlated
+// samples, a legitimate inv(cov(X)) scores about cond * 1e-17, reaching
+// 1.8e-8 at condition number 1e9 and 2.0e-5 at 1e12. A caller's actual
+// mistake is orders larger -- one triangle filled scores 0.39, a transposed
+// pair 0.50, and the dominant-diagonal case this rule exists for 0.010.
+//
+// 1e-3 is the gap between those populations: it accepts legitimate inverses
+// to roughly condition number 1e13, past which the inverse has no
+// significant digits left anyway, and still refuses every order-1 mistake
+// with at least a tenfold margin. Tightening it does not catch a new class
+// of error, it only starts rejecting real data. See the design note,
+// sections 7.3 and 7.3.1 -- an earlier 1e-8 came from a stress test that
+// scaled singular values along a fixed basis and so understated this.
+constexpr double SYMMETRY_TOLERANCE = 1e-3;
 
 /// Resolve the missing-value policy, reporting complete_case separately because
 /// it uses OEFP's Propagate kernel over an input the constructor has verified.
