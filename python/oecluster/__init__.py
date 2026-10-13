@@ -8222,12 +8222,15 @@ class DescriptorComparison:
         :param p: Minkowski order, accepted only with metric="minkowski".
         :returns: C++ DescriptorComparison object.
         :raises TypeError: If ``p`` is passed with a metric that does not take
-            it, where it would be silently ignored. This rule runs **last**:
-            the options are converted and the native validator rules on every
-            value first, so any other fault -- an unknown or unavailable
-            metric, a bad ``missing`` policy, a ``p`` that is not a number --
-            is reported first and with its own exception type. Naming ``p``
-            ahead of them would name a configuration the caller cannot reach.
+            it, where it would be silently ignored. The rule runs after option
+            conversion and after the argument-level native validation, so a
+            fault either of those can see -- an unknown or unavailable metric,
+            a bad ``missing`` policy, a ``p`` that is not a number -- is
+            reported first and with its own exception type. It does **not**
+            run after the schema-dependent checks: an unknown ``sources``,
+            ``columns`` or ``groups`` name is resolved only once a schema
+            exists, which is downstream of here, so this refusal can pre-empt
+            one. Dropping ``p`` then exposes it.
         :raises ValueError: If ``sources``, ``columns``, ``groups``,
             ``variances`` or ``inverse_covariance`` is passed as an empty
             sequence, which C++ cannot tell apart from an omitted option.

@@ -1226,6 +1226,24 @@ def test_any_other_rejected_option_is_reported_before_p(build):
         build(_mols(), metric="euclidean", p=3.0, missing="bogus")
 
 
+@pytest.mark.parametrize("build", _DESCRIPTOR_SURFACES)
+def test_p_pre_empts_a_schema_dependent_fault(build):
+    """The other side of the precedence, pinned so the contract stays honest.
+
+    A source, column or group name can only be resolved once a schema
+    exists, which is downstream of the ``p`` rule. So unlike a bad
+    ``missing`` policy, a bad ``sources`` name does NOT come first: the
+    caller is told about ``p``, and dropping it then exposes the source.
+    Documented rather than reordered -- moving the rule below schema
+    resolution would make every refusal pay for building a calculator.
+    """
+    with pytest.raises(TypeError, match=r"p does not apply to metric="):
+        build(_mols(), metric="euclidean", p=3.0, sources=["nope"])
+
+    with pytest.raises(RuntimeError, match="[Ss]ource"):
+        build(_mols(), metric="euclidean", sources=["nope"])
+
+
 def test_the_raw_native_bindings_still_accept_an_inert_p():
     """The documented escape hatch sits below this layer's contract.
 

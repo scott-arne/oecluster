@@ -320,10 +320,12 @@ def refuse_inapplicable_p(kwargs):
 
     :param kwargs: Descriptor keyword options, read but never consumed.
     :raises TypeError: If ``p`` is supplied and the metric does not take it.
-        Both call sites run this last, after option conversion and native
-        validation have both succeeded, so a caller who got anything else
-        wrong as well sees that verdict instead -- this function is never
-        reached with an option the layers below it would reject.
+        Both call sites run this after option conversion and after the
+        argument-level native validation, so a fault either of those can see
+        is reported instead. It is *not* after the schema-dependent checks --
+        a source, column or group name is resolved no schema here, exactly as
+        :func:`_validate_descriptor` describes -- so this refusal can
+        pre-empt one of those.
     """
     if kwargs.get('p') is None:
         return
@@ -761,7 +763,9 @@ def _validate_descriptor(similarity, kwargs):
     :raises TypeError: If any keyword option is not a descriptor option, or if
         ``p`` is supplied with a metric that does not take it. The ``p`` rule
         is the last in the band bar one, so it reports only on a request that
-        converted cleanly and that C++ already accepted.
+        converted cleanly and that C++ accepted at argument level -- it still
+        precedes the schema-dependent source, column and group resolution
+        described above, and so can pre-empt a bad name there.
     :raises RuntimeError: If C++ refuses an option value outright, which
         includes a metric that is unknown or unavailable on this surface --
         that verdict comes before the ``p`` rule, so it is what a caller who
