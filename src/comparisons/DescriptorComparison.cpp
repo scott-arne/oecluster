@@ -231,35 +231,37 @@ void check_override_against_selection(const OEFP::DescriptorSchema& schema,
             }
         }
 
-        // A half-filled matrix is a structural mistake, not a small one, and
-        // the magnitude rule above cannot see it: the Cauchy-Schwarz scale is
-        // the diagonal, so a weakly correlated precision matrix carries all
-        // its off-diagonal information below the tolerance. Measured, a
-        // precision matrix with unit diagonal and 9e-4 off-diagonals supplied
-        // as one triangle passes that rule at every size, while halving the
-        // correlations shifts distances by 2% at 100 columns and 13% at 1000.
-        // Exactly one triangle being all zeros is unambiguous, needs no
-        // tolerance, and a genuinely diagonal matrix has both zero and so is
-        // untouched.
-        bool upper_all_zero = true;
-        bool lower_all_zero = true;
+        // A triangular fill is a structural mistake, not a small one, and the
+        // magnitude rule above cannot see it: the Cauchy-Schwarz scale is the
+        // diagonal, so a weakly correlated precision matrix carries all its
+        // off-diagonal information below the tolerance. Measured, unit
+        // diagonal with 9e-4 off-diagonals supplied as one triangle passes
+        // that rule at every size, while halving the correlations shifts
+        // distances by 2% at 100 columns and 13% at 1000.
+        //
+        // The signal is a pair where exactly one side is zero: a symmetric
+        // matrix has both or neither, and an inverse's round-off makes both
+        // sides nonzero and nearly equal, never one of them exactly zero.
+        // Checked per pair rather than per triangle so that a partial fill,
+        // or one contaminated by a single mirrored entry, is caught too --
+        // the all-or-nothing form missed both. Measured against 400
+        // legitimate inverses (dense, ill-conditioned to 1e9,
+        // float32-derived, mixed-scale) and an exactly block-diagonal
+        // precision matrix: none flagged.
         for (size_t row = 0; row < dim; ++row) {
             for (size_t col = row + 1; col < dim; ++col) {
-                if (opts.inverse_covariance[row * dim + col] != 0.0) {
-                    upper_all_zero = false;
+                const bool upper_zero = opts.inverse_covariance[row * dim + col] == 0.0;
+                const bool lower_zero = opts.inverse_covariance[col * dim + row] == 0.0;
+                if (upper_zero == lower_zero) {
+                    continue;
                 }
-                if (opts.inverse_covariance[col * dim + row] != 0.0) {
-                    lower_all_zero = false;
-                }
+                throw ComparisonError(
+                    "inverse_covariance entry [" + std::to_string(row) + "][" +
+                    std::to_string(col) + "] has exactly one side zero, so the matrix is "
+                    "partly a triangle rather than a symmetric one. The metric would "
+                    "score (A + A.T) / 2 and halve that term. Mirror the filled side, or "
+                    "pass (A + A.T) / 2 if that is what you meant");
             }
-        }
-        if (upper_all_zero != lower_all_zero) {
-            throw ComparisonError(
-                "inverse_covariance has one triangle filled and the other all "
-                "zero, so it is half a matrix rather than a symmetric one. The "
-                "metric would score (A + A.T) / 2 and halve every off-diagonal "
-                "term. Mirror the filled triangle, or pass (A + A.T) / 2 if "
-                "that is what you meant");
         }
     }
 

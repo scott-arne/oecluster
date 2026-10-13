@@ -660,12 +660,31 @@ TEST(DescriptorOptionValidationTest, AHalfFilledInverseCovarianceIsRefused) {
     opts.inverse_covariance = {1.0, 9e-4, 0.0, 1.0};
     const std::string message =
         refusal_message([&] { validate_descriptor_options(opts); });
-    EXPECT_NE(message.find("one triangle filled"), std::string::npos) << message;
+    EXPECT_NE(message.find("exactly one side zero"), std::string::npos) << message;
+    EXPECT_NE(message.find("[0][1]"), std::string::npos) << message;
 
     // The mirror image is refused on the same terms.
     opts.inverse_covariance = {1.0, 0.0, 9e-4, 1.0};
     EXPECT_NE(refusal_message([&] { validate_descriptor_options(opts); })
-                  .find("one triangle filled"),
+                  .find("exactly one side zero"),
+              std::string::npos);
+}
+
+TEST(DescriptorOptionValidationTest, APartiallyFilledTriangleIsRefusedToo) {
+    // The all-or-nothing form of this rule missed both of these: a fill that
+    // covers only some pairs, and one contaminated by a single mirrored
+    // entry so that neither triangle is entirely zero.
+    DescriptorOptions opts;
+    opts.metric = "mahalanobis";
+    // Ascending schema order, which an override requires.
+    opts.columns = {"MolecularWeight", "HeavyAtomCount", "XLogP"};
+
+    // Pair (0,1) is mirrored correctly; pair (0,2) is filled one side only.
+    opts.inverse_covariance = {1.0, 5e-4, 5e-4,
+                               5e-4, 1.0, 0.0,
+                               0.0,  0.0, 1.0};
+    EXPECT_NE(refusal_message([&] { validate_descriptor_options(opts); })
+                  .find("exactly one side zero"),
               std::string::npos);
 }
 
