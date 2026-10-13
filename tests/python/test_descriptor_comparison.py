@@ -517,8 +517,11 @@ def _first_columns(count):
 ASYMMETRIC = [
     # The item's own example: a transposed pair, asymmetric by order 1.
     (np.array([[2.0, 1.0], [0.0, 2.0]]), r"\[0\]\[1\] is 1\.0 but \[1\]\[0\] is 0\.0"),
-    # A triangular fill so weakly correlated that every off-diagonal sits far
-    # below the diagonal scaling it, which the magnitude signal cannot see.
+    # A triangular fill, weakly correlated enough that every off-diagonal sits
+    # far below the diagonal scaling it. The fill signal is what reaches the
+    # rest of that family: below the band an entry is caught only by it, and
+    # its own band narrows with the dimension, so a 1000-column fill is still
+    # reported where this one would also trip the magnitude signal.
     (np.array([[1.0, 9e-4], [0.0, 1.0]]), r"\[0\]\[1\] is 0\.0009 but \[1\]\[0\] is 0\.0"),
     # And the mirror image, which an upper-triangle-only test would miss.
     (np.array([[1.0, 0.0], [9e-4, 1.0]]), r"\[0\]\[1\] is 0\.0 but \[1\]\[0\] is 0\.0009"),
@@ -530,13 +533,13 @@ ASYMMETRIC = [
 def test_an_asymmetric_inverse_covariance_warns_and_is_symmetrized(matrix, pair):
     """Reported, not refused, because no tolerance can tell the two apart.
 
-    Five successive refusal rules each fell to a reproduced counterexample,
-    and the last one is why there is no sixth: a 3-D matrix asymmetric by
-    3.3e-4 passes every band yet scores a distance 99.99% away from the one
-    the caller's matrix describes, because ``v.T @ A @ v`` can be arbitrarily
-    small along a weakly constrained direction. A sub-tolerance perturbation
-    is therefore unbounded in relative terms. The defect was never the
-    asymmetry, it was the silence, so the substitution is announced instead.
+    Five successive refusal rules each fell to a reproduced counterexample.
+    What ended the search was that a sub-tolerance perturbation is unbounded
+    in relative terms -- ``v.T @ A @ v`` can be arbitrarily small along a
+    weakly constrained direction, so however tight a refusal band is set,
+    a matrix under it can still be scored arbitrarily far from what the
+    caller supplied. The defect was never the asymmetry, it was the silence,
+    so the substitution is announced instead of guarded against.
     """
     columns = _first_columns(2)
     with pytest.warns(UserWarning, match="inverse_covariance is not symmetric") as caught:
@@ -554,6 +557,42 @@ def test_an_asymmetric_inverse_covariance_warns_and_is_symmetrized(matrix, pair)
         warnings.simplefilter("error")
         explicit = _mahalanobis((matrix + matrix.T) / 2.0, columns)
     np.testing.assert_array_equal(warned, explicit)
+
+
+def test_the_case_no_refusal_band_could_have_caught_still_warns():
+    """The counterexample that ended the search for a refusal rule.
+
+    One triangle is filled: the caller wrote 3.33e-4 at ``[0][1]`` and left
+    ``[1][0]`` at zero, so they meant the mirrored matrix. What is scored is
+    ``(A + A.T) / 2``, which halves that entry instead. Along the direction
+    ``[0.499979, 0.499979, -0.707136]``, near the matrix's weakly constrained
+    subspace, the intended distance is 9.12e-3 and the scored one 2.90e-6 --
+    a change of 99.97% from a perturbation of 1.7e-4. ``v.T @ A @ v`` can be
+    arbitrarily small there, so the relative effect of a perturbation is
+    unbounded however small the perturbation is, and no refusal threshold
+    could have been set low enough. That is why this is a warning.
+
+    It is also what moved the band from 1e-3 to 1e-6: it scores 3.33e-4,
+    which the band the refusal era required let through in silence -- the
+    original defect, reproduced by the very case that caused the redesign.
+    """
+    a = 0.70716564537
+    matrix = np.array([[1.0, 3.33e-4, a],
+                       [0.0, 1.0, a],
+                       [a, a, 1.0]])
+    # Assert the consequence rather than assuming it, so the fixture cannot
+    # quietly stop being the case this test is named for.
+    intended = np.where(matrix != 0.0, matrix, matrix.T)
+    symmetrized = (matrix + matrix.T) / 2.0
+    v = np.array([0.499979, 0.499979, -0.707136])
+    np.testing.assert_allclose(np.sqrt(v @ intended @ v), 9.12e-3, rtol=1e-2)
+    np.testing.assert_allclose(np.sqrt(v @ symmetrized @ v), 2.90e-6, rtol=1e-2)
+
+    columns = _first_columns(3)
+    with pytest.warns(UserWarning, match="inverse_covariance is not symmetric"):
+        oecluster.DescriptorComparison(
+            _mols(), columns=columns, metric="mahalanobis",
+            inverse_covariance=matrix.ravel().tolist())
 
 
 def test_the_warning_reaches_the_prebuilt_constructor_too():
@@ -639,27 +678,28 @@ def test_the_librarys_own_inverse_covariance_round_trips_silently():
 
 
 def test_a_dense_correlated_ill_conditioned_inverse_is_silent():
-    """The case that showed 1e-8 was too tight to ship.
+    """The upper end of the regime the band promises to stay quiet over.
 
-    The first stress test behind this band scaled singular values along a
-    fixed orthonormal basis, which does not mix eigenvectors the way real
-    correlated data does, and so understated the round-off in an inverse by
-    several orders. With dense mixing a legitimate inv(cov(X)) scores about
-    cond * 1e-17 -- 1.8e-8 at condition number 1e9 -- so the original
-    threshold would have reported usable input. This fixture reproduces that
-    regime.
+    An earlier stress test scaled singular values along a fixed orthonormal
+    basis, which does not mix eigenvectors the way real correlated data does,
+    and so understated the round-off in an inverse by several orders. With
+    dense mixing a legitimate inv(cov(X)) scores about cond * 1e-17 -- 4.8e-8
+    here at condition number 6.5e10 -- which an earlier 1e-8 band would have
+    reported. Measured over 30 draws per decade, 1e-6 is the last band that
+    stays silent on real data: the worst legitimate asymmetry is 2.7e-7 at
+    condition number 1e10 and 1.8e-6 at 1e11, where warnings begin.
     """
-    rng = np.random.default_rng(1)
+    rng = np.random.default_rng(32)
     q = np.linalg.qr(rng.normal(size=(5, 5)))[0]
-    sv = np.geomspace(1, 1e-7, 5) * rng.uniform(0.5, 2.0, 5)
+    sv = np.geomspace(1, 1e-5, 5) * rng.uniform(0.5, 2.0, 5)
     x = rng.normal(size=(30, 5)) @ (q * sv) @ q.T
     cov = np.cov(x, rowvar=False)
     a = np.linalg.inv(cov)
-    assert np.linalg.cond(cov) > 1e8
+    assert np.linalg.cond(cov) > 1e10
     assert not np.array_equal(a, a.T)
-    # Assert the fixture reaches the regime rather than assuming it: the
-    # first attempt at this test scored 3.9e-9 and so would have cleared the
-    # old 1e-8 threshold too, pinning nothing.
+    # Assert the fixture reaches the regime rather than assuming it: an
+    # earlier attempt scored 3.9e-9, which pinned nothing against the 1e-8
+    # band of the time.
     scale = np.sqrt(np.abs(np.outer(np.diag(a), np.diag(a))))
     skew = np.abs(a - a.T) / np.where(scale > 0, scale, 1.0)
     np.fill_diagonal(skew, 0.0)

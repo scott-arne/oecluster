@@ -343,33 +343,49 @@ def refuse_inapplicable_p(kwargs):
 # Relative band on an ``inverse_covariance`` entry pair, measured against the
 # pair's own Cauchy-Schwarz scale. Inverting a symmetric matrix does not return
 # an exactly symmetric one, and the round-off grows with the conditioning: a
-# legitimate inv(cov(X)) over dense correlated samples scores about cond * 1e-17,
-# reaching 1.8e-8 at condition number 1e9 and 2.0e-5 at 1e12, while a caller's
-# mistake is orders larger -- one triangle filled scores 0.39 and a transposed
-# pair 0.50. Nothing here is a symmetry proof, and none is possible: a
-# perturbation under any band can still move a distance arbitrarily far in
-# relative terms. The band only decides when to speak, so a false positive
-# costs a spurious warning and nothing else.
-_SYMMETRY_TOLERANCE = 1e-3
+# legitimate inv(cov(X)) over dense correlated samples scores about
+# cond * 1e-17.
+#
+# This band gates a warning, not a refusal, and that is what sets its value.
+# While it gated a refusal it had to sit far above the round-off of even a
+# badly conditioned inverse, because a false positive broke a legitimate call;
+# 1e-3 was the price. The costs have since swapped. A false positive is now one
+# line of output, while a false negative is the original defect itself -- a
+# matrix silently reinterpreted -- so the band belongs as close to genuine
+# round-off as it can sit without becoming noise.
+#
+# Measured, 30 draws per decade over 3 to 20 variables: the worst legitimate
+# asymmetry is 2.7e-7 at condition number 1e10 and 1.8e-6 at 1e11, so 1e-6 is
+# the last decade that stays silent on real data. It clears the round-off floor
+# -- 1.1e-16 for the well-conditioned inverse whose round-off lands on an exact
+# zero -- by ten orders, and catches the 3.3e-4 adversarial case by 300x. Past
+# condition number 1e11 it does warn on a legitimate inverse, which is
+# acceptable and arguably useful: the message says the matrix was symmetrized,
+# not that it was wrong, and an inverse that ill-conditioned is worth a look.
+#
+# Nothing here is a symmetry proof, and none is possible: a perturbation under
+# any band can still move a distance arbitrarily far in relative terms.
+_ASYMMETRY_WARNING_BAND = 1e-6
 
 
 def _first_asymmetric_pair(matrix):
     """Return the first ``(i, j)``, ``i < j``, whose two sides disagree.
 
     Two signals, either sufficient. The first is magnitude: the pair differs by
-    more than :data:`_SYMMETRY_TOLERANCE` of ``sqrt(|Aii|) * sqrt(|Ajj|)``, the
-    Cauchy-Schwarz bound on ``|Aij|`` for a semidefinite matrix. The two square
-    roots are taken separately because their product overflows past about
-    1e154, which would make the scale infinite and the comparison vacuous. An
-    inverse's round-off scales with its diagonal, so this is the normalization
-    that holds across conditioning where a fixed per-element one does not.
+    more than :data:`_ASYMMETRY_WARNING_BAND` of ``sqrt(|Aii|) * sqrt(|Ajj|)``,
+    the Cauchy-Schwarz bound on ``|Aij|`` for a semidefinite matrix. The two
+    square roots are taken separately because their product overflows past
+    about 1e154, which would make the scale infinite and the comparison
+    vacuous. An inverse's round-off scales with its diagonal, so this is the
+    normalization that holds across conditioning where a fixed per-element one
+    does not.
 
     The second is a triangular fill: one side exactly zero and the other large
-    enough to be a value rather than noise. The magnitude rule provably cannot
-    see it -- for a weakly correlated precision matrix every off-diagonal sits
-    far below the diagonal that scales it, so a half-filled 9e-4 matrix passes
-    at every size. A one-sided exact zero alone is not enough either, since
-    round-off produces them: inverting the well-conditioned (13.9) covariance
+    enough to be a value rather than noise. The magnitude rule cannot be relied
+    on for it -- for a weakly correlated precision matrix every off-diagonal
+    sits far below the diagonal that scales it. A one-sided exact zero alone is
+    not enough either, since round-off produces them: inverting the
+    well-conditioned (13.9) covariance
     ``[[.25,.125,.125],[.125,.25,.125],[.125,.125,.125]]`` yields -8.88e-16
     against an exact 0.0. The nonzero side is therefore banded too, divided by
     the dimension because a fill spreads its error over every pair.
@@ -388,9 +404,9 @@ def _first_asymmetric_pair(matrix):
     scale = np.where(np.outer(diagonal > 0.0, diagonal > 0.0),
                      np.outer(roots, roots), largest)
 
-    magnitude = np.abs(matrix - matrix.T) > _SYMMETRY_TOLERANCE * scale
+    magnitude = np.abs(matrix - matrix.T) > _ASYMMETRY_WARNING_BAND * scale
     one_side_zero = (matrix == 0.0) != (matrix.T == 0.0)
-    fill = one_side_zero & (largest > (_SYMMETRY_TOLERANCE / dim) * scale)
+    fill = one_side_zero & (largest > (_ASYMMETRY_WARNING_BAND / dim) * scale)
 
     rows, cols = np.nonzero(np.triu(magnitude | fill, 1))
     if rows.size == 0:

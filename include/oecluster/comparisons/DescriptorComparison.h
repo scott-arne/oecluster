@@ -35,9 +35,13 @@ struct DescriptorOptions {
     /// perturbation below any threshold still moves a distance arbitrarily far
     /// in relative terms, because v^T M v can be arbitrarily small along a
     /// weakly constrained direction. C++ therefore takes the matrix as given;
-    /// the Python layer reports the substitution and performs it, so a caller
-    /// is told rather than refused. A C++ caller who needs the same must
-    /// compare against (M + M^T) / 2 itself.
+    /// the Python layer reports the substitution and performs it, warning when
+    /// an entry pair differs by more than 1e-6 of its own Cauchy-Schwarz scale,
+    /// or has one side zero and the other above 1e-6/n of it. That band gates a
+    /// warning rather than a refusal, so it sits close to genuine round-off:
+    /// measured, a legitimate inverse stays under it to about condition number
+    /// 1e10. A C++ caller who wants the same report must compare against
+    /// (M + M^T) / 2 itself.
     std::vector<double> inverse_covariance;
     std::string missing = "complete_case";  ///< complete_case | propagate | ignore.
     double p = 2.0;                         ///< Minkowski order.
