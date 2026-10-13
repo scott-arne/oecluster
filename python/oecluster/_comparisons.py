@@ -319,10 +319,11 @@ def refuse_inapplicable_p(kwargs):
     with ``None`` for the ones not supplied, where the named path omits them.
 
     :param kwargs: Descriptor keyword options, read but never consumed.
-    :raises TypeError: If ``p`` is supplied and the metric is a valid
-        descriptor metric other than minkowski. Both call sites let the
-        native validator rule on the metric first, so an unknown or
-        unavailable metric raises ``RuntimeError`` and never reaches here.
+    :raises TypeError: If ``p`` is supplied and the metric does not take it.
+        Both call sites run this last, after option conversion and native
+        validation have both succeeded, so a caller who got anything else
+        wrong as well sees that verdict instead -- this function is never
+        reached with an option the layers below it would reject.
     """
     if kwargs.get('p') is None:
         return
@@ -758,8 +759,9 @@ def _validate_descriptor(similarity, kwargs):
     :raises ValueError: If similarities were requested, or if a sequence-valued
         option was passed as an empty sequence.
     :raises TypeError: If any keyword option is not a descriptor option, or if
-        ``p`` is supplied with a valid descriptor metric other than
-        "minkowski".
+        ``p`` is supplied with a metric that does not take it. The ``p`` rule
+        is the last in the band bar one, so it reports only on a request that
+        converted cleanly and that C++ already accepted.
     :raises RuntimeError: If C++ refuses an option value outright, which
         includes a metric that is unknown or unavailable on this surface --
         that verdict comes before the ``p`` rule, so it is what a caller who

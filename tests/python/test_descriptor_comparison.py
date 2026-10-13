@@ -1211,6 +1211,21 @@ def test_a_bad_metric_is_named_before_p_is(build, metric, needle):
         build(_mols(), metric=metric, p=3.0)
 
 
+@pytest.mark.parametrize("build", _DESCRIPTOR_SURFACES)
+def test_any_other_rejected_option_is_reported_before_p(build):
+    """A valid metric is not enough to guarantee the ``p`` TypeError.
+
+    The ``p`` rule runs after option conversion and after the native
+    validator, so a request that is also wrong in some unrelated way is
+    answered by whichever layer refuses it first. Here the metric is valid
+    and not minkowski -- the exact case that otherwise raises TypeError --
+    but ``missing`` is nonsense, so C++ speaks and the caller gets
+    RuntimeError. Pinned because the docstrings promise this precedence.
+    """
+    with pytest.raises(RuntimeError, match="missing-value policy"):
+        build(_mols(), metric="euclidean", p=3.0, missing="bogus")
+
+
 def test_the_raw_native_bindings_still_accept_an_inert_p():
     """The documented escape hatch sits below this layer's contract.
 
