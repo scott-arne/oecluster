@@ -2384,6 +2384,16 @@ def pdist(items,
     # storage is excluded because it discards values above the cutoff --
     # ``+inf`` among them -- so its contents are not a witness to what was
     # computed; dense and mmap storage retain everything.
+    #
+    # A stamp can also originate from a value the storage never holds by
+    # construction, and the diagonal is the known case: ROCS stamps
+    # ``nan_present`` off a non-finite *self*-score
+    # (src/comparisons/ROCSComparison.cpp:346-347), which a condensed matrix
+    # has no room for. Downgrading there is correct rather than a loss: the
+    # stamp describes the matrix, and no algorithm can read a distance the
+    # matrix does not store. The separate fact that records that diagonal --
+    # ``zero_self`` -- is stamped ``No`` alongside it and is untouched here, so
+    # nothing the downgrade drops was the only record of anything.
     if (facts['data_integrity'] == "nan_present" and not sparse
             and not _gate._has_nonfinite(matrix)):
         matrix._facts['data_integrity'] = "complete"

@@ -256,6 +256,14 @@ def test_a_sparse_matrix_keeps_its_stamp_because_the_cutoff_hid_the_infinity():
     dropped rather than stored. The matrix then scans clean while the stamp is
     truthful, and downgrading it would turn a true stamp into a false one.
     """
+    # Pin the premise: without the cutoff the same call really does overflow.
+    # Were a fixture change to stop producing ``+inf``, the assertion below
+    # would still pass while testing nothing at all.
+    uncut = oecluster.pdist(_mols(), "descriptor", metric="minkowski",
+                            p=200.0, missing="propagate")
+    assert not np.isfinite(uncut.condensed).all()
+    assert uncut.data_integrity == "nan_present"
+
     dist = oecluster.pdist(_mols(), "descriptor", metric="minkowski",
                            p=200.0, missing="propagate", cutoff=1.0)
     assert dist.data_integrity == "nan_present"
@@ -277,6 +285,27 @@ def test_a_finite_propagate_cross_matrix_is_stamped_complete():
                             missing="propagate")
     assert np.isfinite(cross.matrix).all()
     assert cross.data_integrity == "complete"
+
+
+def test_a_cross_matrix_keeps_its_stamp_because_the_cutoff_hid_the_infinity():
+    """cdist's counterpart to the sparse shield, on its own condition.
+
+    The cutoff path rewrites a value above the threshold rather than storing
+    it (src/comparisons/DescriptorComparison.cpp:520), so the returned matrix
+    scans clean while the stamp is truthful. Without the ``cutoff > 0.0`` test
+    in cdist, this true ``nan_present`` would silently be downgraded.
+    """
+    a, b = _mols()[:4], _mols()[4:]
+    # Pin the premise, as the sparse test does: uncut, this call overflows.
+    uncut = oecluster.cdist(a, b, "descriptor", metric="minkowski", p=200.0,
+                            missing="propagate")
+    assert not np.isfinite(uncut.matrix).all()
+    assert uncut.data_integrity == "nan_present"
+
+    cross = oecluster.cdist(a, b, "descriptor", metric="minkowski", p=200.0,
+                            missing="propagate", cutoff=1.0)
+    assert np.isfinite(cross.matrix).all()
+    assert cross.data_integrity == "nan_present"
 
 
 def test_ignore_is_stamped_subset_scored_and_overridable():
