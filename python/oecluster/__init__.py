@@ -8221,8 +8221,12 @@ class DescriptorComparison:
             "propagate", or "ignore".
         :param p: Minkowski order, accepted only with metric="minkowski".
         :returns: C++ DescriptorComparison object.
-        :raises TypeError: If ``p`` is passed with any other metric, where it
-            would be silently ignored.
+        :raises TypeError: If ``p`` is passed with another *valid* descriptor
+            metric, where it would be silently ignored. A metric that is
+            unknown, or known but unavailable here such as "tanimoto" and
+            "haversine", is reported first as ``RuntimeError`` by the native
+            validator -- naming ``p`` before the metric would name a metric
+            that does not exist on this surface.
         :raises ValueError: If ``sources``, ``columns``, ``groups``,
             ``variances`` or ``inverse_covariance`` is passed as an empty
             sequence, which C++ cannot tell apart from an omitted option.
