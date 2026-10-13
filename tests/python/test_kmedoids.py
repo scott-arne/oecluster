@@ -277,6 +277,34 @@ def test_non_integer_seeds_raise_type_error():
             initial_medoids=[0.0, 1.0])
 
 
+def test_an_empty_initial_medoids_is_refused_rather_than_ignored():
+    """An empty list is falsy, so it was indistinguishable from omitting it."""
+    import oecluster
+
+    dm = _two_triples()
+    with pytest.raises(ValueError, match=r"initial_medoids="):
+        oecluster.k_medoids(dm, n_clusters=2, init="build", initial_medoids=[])
+
+
+def test_an_empty_initial_medoids_is_refused_under_explicit_too():
+    """The settled ordering: this message, not the count-mismatch one."""
+    import oecluster
+
+    dm = _two_triples()
+    with pytest.raises(ValueError, match=r"initial_medoids="):
+        oecluster.k_medoids(dm, n_clusters=2, init="explicit",
+                            initial_medoids=[])
+
+
+def test_a_generator_initial_medoids_is_still_accepted():
+    """Regression shield: the emptiness check must not require a length."""
+    import oecluster
+
+    dm = _two_triples()
+    oecluster.k_medoids(dm, n_clusters=2, init="explicit",
+                        initial_medoids=iter([0, 3]))
+
+
 @pytest.mark.parametrize("kwargs,message", [
     ({"n_clusters": -1}, "n_clusters must be non-negative"),
     ({"max_iterations": -1}, "max_iterations must be non-negative"),

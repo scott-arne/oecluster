@@ -447,7 +447,8 @@ result.converged      # True when no single swap lowers the cost
 `"farthest_first"` (deterministic MaxMin from the global medoid, for
 spread-out seeds), or `"explicit"` with `initial_medoids`. Passing a non-empty
 `initial_medoids` with any other `init` raises, rather than silently deciding
-which one you meant.
+which one you meant. An empty `initial_medoids` raises under every `init`: it
+cannot be told apart from never passing the option.
 
 Output is byte-identical across runs, `num_threads` values and `chunk_size`
 values; those two options change runtime and memory use but not the result.
@@ -3341,7 +3342,7 @@ that made it inapplicable -- rather than accepting a value that has no effect:
 ```python
 oecluster.pdist(mols, "fingerprint", max_distance=2)
 # TypeError: max_distance does not apply to fp_type='morgan'; it belongs to
-# 'atom_pair'. Use radius instead, or select one of those families.
+# 'atom_pair'. Use radius instead, or select that family.
 
 oecluster.pdist(mols, "fingerprint", p=3.0)
 # TypeError: p does not apply to metric='tanimoto'; it belongs to

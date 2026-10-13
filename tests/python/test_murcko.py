@@ -98,6 +98,21 @@ class TestValidationMirror:
                 match=r"murcko_scaffolds\(\) requires at least one molecule"):
             oecluster.murcko_scaffolds([])
 
+    def test_a_list_subclass_that_lies_about_its_length_is_refused_as_empty(self):
+        """The guard must read ob_size, as the typemap does.
+
+        ``not mols`` consults ``__bool__``/``__len__``, while the typemap reads
+        ``PyList_Size`` (swig/oecluster.i:529), so an empty subclass reporting 1
+        reached the native call and surfaced RuntimeError where ValueError is
+        documented.
+        """
+        class LyingList(list):
+            def __len__(self):
+                return 1
+
+        with pytest.raises(ValueError, match="at least one molecule"):
+            oecluster.murcko_scaffolds(LyingList())
+
     def test_an_empty_tuple_is_a_type_error_not_a_value_error(self):
         # "Empty container of the wrong type" is ambiguous between the two
         # verdicts, and the mirror resolves it the way the scaffold verdict is

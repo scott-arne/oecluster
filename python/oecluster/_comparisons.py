@@ -553,11 +553,16 @@ def reject_inapplicable_fingerprint_kwargs(named, *, fp_type, storage, metric):
     # Firing instead would reject a key against a family we cannot name.
     for key, families in (() if family is None else _FAMILY_ONLY_KEYS.items()):
         if key in named and family not in families:
+            # Every current entry names exactly one family, so the plural was
+            # always wrong; deriving it keeps the sentence correct if a tuple
+            # grows a second family.
+            tail = ("or select that family."
+                    if len(families) == 1
+                    else "or select one of those families.")
             raise TypeError(
                 f"{key} does not apply to fp_type={spelling!r}; it belongs "
                 f"to {' and '.join(repr(f) for f in families)}. Use "
-                f"{_FAMILY_REPLACEMENT[family]} instead, or select one of "
-                f"those families.")
+                f"{_FAMILY_REPLACEMENT[family]} instead, {tail}")
 
     for key, owner in _METRIC_ONLY_KEYS.items():
         if key in named and metric_name != owner:

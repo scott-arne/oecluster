@@ -3683,7 +3683,9 @@ def k_medoids(items=_MISSING, *, distance_matrix=_MISSING, n_clusters=2,
         "farthest_first" (deterministic MaxMin), or "explicit"
         (use ``initial_medoids``). Case-insensitive.
     :param initial_medoids: Starting medoid indices; a non-empty sequence is
-        required when ``init="explicit"`` and refused otherwise.
+        required when ``init="explicit"`` and refused otherwise. An empty
+        sequence is refused under every ``init``, being indistinguishable
+        from omitting the option.
     :param max_iterations: Swap iterations before giving up. Reaching the cap
         is not an error: the result is valid and ``converged`` is False.
     :param comparison: Comparison name, such as ``"fingerprint"``, when
@@ -3775,6 +3777,18 @@ def k_medoids(items=_MISSING, *, distance_matrix=_MISSING, n_clusters=2,
             raise TypeError(
                 "k_medoids() initial_medoids must be a sequence of ints"
             ) from error
+        # Tested after materializing, not with ``len(initial_medoids)``: the
+        # comprehension above accepts any iterable, and a generator has no
+        # length. Raising here, inside the ``else``, puts this ahead of both
+        # the init-mismatch branch and the count check, so an explicit
+        # initialization reports the empty sequence rather than a count that
+        # happens to disagree.
+        if not seeds:
+            raise ValueError(
+                "K-medoids initial_medoids= was given as an empty sequence, "
+                "which cannot be told apart from never passing it. Pass the "
+                "medoid indices you want, or omit initial_medoids= to let "
+                "init= choose.")
 
     # All four reach size_t option fields, where a negative value or an oversized
     # positive raises OverflowError below the gate. Zero stays legal for
@@ -3950,9 +3964,16 @@ def _murcko_options(mols, scaffold, num_threads, caller):
     # symbol murcko() never told the caller about. Mirroring the check exactly
     # keeps a tuple, which has a length and so used to slip through, from
     # reaching that dispatcher.
+    #
+    # ``list.__len__`` rather than ``not mols``: the typemap reads ``ob_size``
+    # through ``PyList_Size``, which an overridden ``__len__`` on a list
+    # subclass does not change. A subclass reporting a length it does not have
+    # was therefore passed through to the native call, which refuses it as
+    # RuntimeError where this function documents ValueError. The
+    # ``isinstance`` check above is what makes the unbound call applicable.
     if not isinstance(mols, list):
         raise TypeError(f"{caller}() requires a list of molecules")
-    if not mols:
+    if list.__len__(mols) == 0:
         raise ValueError(f"{caller}() requires at least one molecule")
 
     num_threads_int = operator.index(num_threads)

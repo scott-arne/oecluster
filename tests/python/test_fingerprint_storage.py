@@ -155,6 +155,12 @@ def test_max_distance_no_longer_aliases_the_morgan_radius():
         oecluster.pdist(_mols(), "fingerprint", max_distance=2)
 
 
+def test_the_family_refusal_is_singular_for_one_family():
+    """The trailing clause has to agree with how many families were named."""
+    with pytest.raises(TypeError, match=r"or select that family\."):
+        oecluster.pdist(_mols(), "fingerprint", max_distance=2)
+
+
 def test_the_factory_class_accepts_the_new_options():
     """Every option named here reaches the comparison the factory builds.
 
