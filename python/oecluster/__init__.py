@@ -1532,7 +1532,11 @@ class SymmetricDistanceMatrix(DistanceMatrix):
                         error,
                         "raised while reading from_condensed params=, which "
                         "must be a mapping or an iterable of key/value pairs")
-                except Exception:  # noqa: BLE001, S110 - see above
+                except BaseException:  # noqa: BLE001, S110 - see above
+                    # BaseException, not Exception: an annotation hook that
+                    # raises SystemExit or KeyboardInterrupt would otherwise
+                    # escape and still displace the caller's error, which is
+                    # the whole failure this guard exists to prevent.
                     pass
                 raise
         return cls(storage, comparison_name, labels, copied, facts)

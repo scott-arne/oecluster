@@ -501,6 +501,22 @@ def test_a_failure_to_annotate_cannot_replace_the_caller_s_exception():
         SymmetricDistanceMatrix.from_condensed(condensed, params=more())
     assert caught.value is broken
 
+    # And a hook raising a BaseException rather than an Exception, which an
+    # ``except Exception`` guard would let past to displace the original.
+    class Exiting(ValueError):
+        def add_note(self, note):
+            raise SystemExit(2)
+
+    exiting = Exiting("still theirs")
+
+    def worst():
+        yield ("a", 1)
+        raise exiting
+
+    with pytest.raises(Exiting) as caught:
+        SymmetricDistanceMatrix.from_condensed(condensed, params=worst())
+    assert caught.value is exiting
+
 
 def test_the_shapes_dict_accepts_without_being_iterable_still_work():
     """``dict`` takes two protocols an ``Iterable`` check would turn away.
