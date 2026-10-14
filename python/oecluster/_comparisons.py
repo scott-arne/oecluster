@@ -342,6 +342,8 @@ def refuse_inapplicable_p(kwargs):
     # as its text here. Reading the raw object instead both crashed on one
     # whose ``__str__`` returns 'minkowski' and waved through an asymmetric
     # covariance on one returning 'mahalanobis'.
+    # ``_descriptor_options_and_empties`` coerces ``metric`` to text and
+    # writes it back, so by here it is the same string C++ was given.
     metric = kwargs.get('metric')
     spelling = 'standardized_euclidean' if metric is None else str(metric)
     owner = _METRIC_ONLY_KEYS['p']
@@ -470,6 +472,8 @@ def symmetrize_inverse_covariance(kwargs, *, emit=True):
     # as its text here. Reading the raw object instead both crashed on one
     # whose ``__str__`` returns 'minkowski' and waved through an asymmetric
     # covariance on one returning 'mahalanobis'.
+    # ``_descriptor_options_and_empties`` coerces ``metric`` to text and
+    # writes it back, so by here it is the same string C++ was given.
     metric = kwargs.get('metric')
     spelling = 'standardized_euclidean' if metric is None else str(metric)
     if not isinstance(spelling, str) or spelling.lower() != 'mahalanobis':
@@ -835,7 +839,13 @@ def _descriptor_options_and_empties(kwargs):
     if kwargs.get('groups') is not None:
         opts.groups = _string_vector(kwargs['groups'])
     if kwargs.get('metric') is not None:
-        opts.metric = str(kwargs['metric'])
+        # Coerced once and written back, so every later reader -- the
+        # applicability rules, the asymmetry advisory, a second build on the
+        # constructor path -- judges the same text C++ was given. A
+        # ``__str__`` answering differently on successive calls would
+        # otherwise let them disagree, which is the hazard the cdist cutoff
+        # had and is resolved the same way: decide once, reuse the decision.
+        kwargs['metric'] = opts.metric = str(kwargs['metric'])
     if kwargs.get('variances') is not None:
         opts.variances = _double_vector(kwargs['variances'])
     if kwargs.get('inverse_covariance') is not None:

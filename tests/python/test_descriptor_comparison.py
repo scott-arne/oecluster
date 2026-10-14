@@ -1490,6 +1490,31 @@ def test_p_is_refused_on_a_metric_it_does_not_apply_to(build, metric):
 
 
 @pytest.mark.parametrize("build", _DESCRIPTOR_SURFACES)
+def test_a_metric_is_read_once_however_unstable_its_str_is(build):
+    """The rules and C++ must judge the same text.
+
+    ``metric`` is coerced with ``str`` when the options are built, so a
+    selector whose ``__str__`` answers differently on successive calls
+    could give C++ one metric and the Python rules another -- reading
+    "mahalanobis" into the options while the advisory saw "euclidean"
+    and stayed silent on an asymmetric matrix. It is coerced once and
+    written back, as the cdist cutoff is.
+    """
+    class Shifty:
+        def __init__(self):
+            self.calls = 0
+
+        def __str__(self):
+            self.calls += 1
+            return "mahalanobis" if self.calls == 1 else "euclidean"
+
+    asymmetric = np.array([[2.0, 1.0], [0.0, 2.0]])
+    with pytest.warns(UserWarning, match="inverse_covariance is not symmetric"):
+        build(_mols(), columns=_first_columns(2), metric=Shifty(),
+              inverse_covariance=asymmetric.ravel().tolist())
+
+
+@pytest.mark.parametrize("build", _DESCRIPTOR_SURFACES)
 def test_p_is_refused_by_default_because_the_default_is_not_minkowski(build):
     with pytest.raises(TypeError, match=r"p does not apply to metric="):
         build(_mols(), p=3.0)
