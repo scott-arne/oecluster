@@ -523,6 +523,23 @@ def test_a_failure_to_annotate_cannot_replace_the_caller_s_exception():
     assert not getattr(exiting, '__notes__', [])
     assert not getattr(hostile, '__notes__', [])
 
+    # An exact built-in with an instance-level shadow: the note is attached
+    # through the unbound BaseException.add_note, so the shadow never runs.
+    ran = []
+    shadowed = ValueError("exactly built-in")
+    shadowed.add_note = lambda note: ran.append(note)
+
+    def shadow():
+        yield ("a", 1)
+        raise shadowed
+
+    with pytest.raises(ValueError) as caught:
+        SymmetricDistanceMatrix.from_condensed(condensed, params=shadow())
+    assert caught.value is shadowed
+    assert ran == []
+    assert any("from_condensed params=" in note
+               for note in shadowed.__notes__)
+
 
 def test_the_shapes_dict_accepts_without_being_iterable_still_work():
     """``dict`` takes two protocols an ``Iterable`` check would turn away.

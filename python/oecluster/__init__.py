@@ -1534,7 +1534,11 @@ class SymmetricDistanceMatrix(DistanceMatrix):
                 # the exception dict raised must still be what propagates.
                 if type(error).__module__ == 'builtins':
                     try:
-                        error.add_note(
+                        # Unbound, because ``error.add_note`` is an ordinary
+                        # attribute lookup and would find an instance-level
+                        # shadow even on an exact built-in.
+                        BaseException.add_note(
+                            error,
                             "raised while reading from_condensed params=, "
                             "which must be a mapping or an iterable of "
                             "key/value pairs")
