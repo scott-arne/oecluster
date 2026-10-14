@@ -315,9 +315,10 @@ DescriptorComparison::DescriptorComparison(const std::vector<OEChem::OEMolBase*>
     impl->missing = normalize_missing(opts.missing, impl->complete_case);
 
     // A variance needs two observations. Without this the fit leaves every
-    // variance NaN, every column is dropped, and the constructor blames the
-    // descriptors for what is an input-size problem. descriptor_statistics
-    // guards the same failure the same way.
+    // variance NaN, every column is dropped, and the refusal reports
+    // insufficient data for the whole selection -- true, but a verdict on the
+    // descriptors where the input size is the one thing the caller can
+    // change. descriptor_statistics guards the same failure the same way.
     if (is_fitted_metric(metric_name) && !has_override && mols.size() < 2) {
         throw ComparisonError(
             "metric='" + metric_name + "' fits variances from the input and needs at least two "

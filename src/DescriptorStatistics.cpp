@@ -18,8 +18,10 @@ namespace OECluster {
 DescriptorStatisticsResult descriptor_statistics(const std::vector<OEChem::OEMolBase*>& mols,
                                                  const DescriptorStatisticsOptions& options) {
     // Variance needs two observations, so a shorter input cannot produce a
-    // single surviving column and would otherwise fail below as though every
-    // descriptor were constant.
+    // single surviving column. Without this guard it would fail below as a
+    // selection emptied by insufficient data, which is true of every column
+    // at once and so points at the descriptors rather than at the one count
+    // the caller can change.
     if (mols.size() < 2) {
         throw ComparisonError(
             "descriptor_statistics requires at least two molecules to fit variances, got " +
@@ -92,7 +94,9 @@ DescriptorStatisticsResult descriptor_statistics(const std::vector<OEChem::OEMol
     std::vector<size_t> surviving;
     // Collected as each column is dropped rather than re-derived from the
     // variances below, so the refusal and the per-column report can never
-    // name different causes for the same column.
+    // name different causes for the same column. Kept apart from
+    // result.dropped_reasons, which may already carry a "non-numeric" column
+    // dropped before statistics were asked for and so never a candidate here.
     std::vector<std::string> drop_reasons;
     for (size_t k = 0; k < numeric.size(); ++k) {
         const std::string& name = schema.Definition(numeric[k]).name;

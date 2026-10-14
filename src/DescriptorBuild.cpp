@@ -9,6 +9,7 @@
 #include <cctype>
 #include <cmath>
 #include <exception>
+#include <iterator>
 #include <string>
 #include <oechem.h>
 #include "oecluster/Error.h"

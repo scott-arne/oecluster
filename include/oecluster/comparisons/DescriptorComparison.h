@@ -102,9 +102,12 @@ public:
     const std::vector<std::string>& Columns() const;
     /// Columns removed before scoring.
     const std::vector<std::string>& DroppedColumns() const;
-    /// Parallel to DroppedColumns: "zero-variance" or "non-numeric".
-    /// "zero-variance" covers a column variance that is zero, negative, or
-    /// not finite -- a source that emits a present NaN yields the last case.
+    /// Parallel to DroppedColumns: "insufficient-data", "non-finite-variance",
+    /// "zero-variance", or "non-numeric". A column present in fewer than two
+    /// rows has no measured variance at all and is "insufficient-data"; a
+    /// source that emits a present NaN yields "non-finite-variance";
+    /// "zero-variance" is a variance that was measured and came out zero or
+    /// negative.
     const std::vector<std::string>& DroppedReasons() const;
     /// Fitted or supplied variances; empty unless the metric is standardized_euclidean.
     const std::vector<double>& Variances() const;

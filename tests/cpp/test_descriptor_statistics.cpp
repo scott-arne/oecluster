@@ -344,8 +344,13 @@ TEST(JoinDropReasonsTest, DeduplicatesAndOrdersCanonically) {
               "insufficient-data, zero-variance");
     EXPECT_EQ(join_drop_reasons({"zero-variance", "non-finite-variance", "insufficient-data"}),
               "insufficient-data, non-finite-variance, zero-variance");
-    // A reason from outside the canonical set keeps its collected position
-    // after the ones inside it rather than disappearing or sorting first.
+    // Neither call site can produce this input today: both collect only what
+    // variance_drop_reason returns. It is pinned because "non-numeric" is a
+    // real reason in the same vocabulary, sitting in the same dropped_reasons
+    // vectors, so joining one of those wholesale is the plausible next
+    // mistake -- and the failure worth excluding is the silent one, a reason
+    // the canonical order does not know being dropped from the message rather
+    // than placed last.
     EXPECT_EQ(join_drop_reasons({"non-numeric", "zero-variance"}),
               "zero-variance, non-numeric");
 }

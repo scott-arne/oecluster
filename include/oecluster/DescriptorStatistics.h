@@ -60,9 +60,12 @@ struct DescriptorStatisticsResult {
 /**
  * @brief Fit descriptor statistics over a set of molecules.
  *
- * Non-numeric columns and columns whose variance is zero or undefined are
- * discarded and reported: a zero-variance column contributes nothing to a
- * distance and makes standardized Euclidean divide by zero.
+ * Non-numeric columns are discarded, as are columns with too few values to
+ * measure a variance, with a non-finite variance, or with a variance of zero
+ * or less. Each is reported with its own reason, because the responses differ:
+ * a zero-variance column contributes nothing to a distance and makes
+ * standardized Euclidean divide by zero, while a column never measured needs
+ * more molecules where the descriptor is defined.
  *
  * :param mols: Molecules to describe. Must not contain null pointers.
  * :param options: Source, column, group, and inverse-covariance selection.
