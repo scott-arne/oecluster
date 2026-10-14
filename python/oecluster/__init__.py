@@ -1313,12 +1313,11 @@ class SymmetricDistanceMatrix(DistanceMatrix):
             non-positive count skips it.
         :param seed: Seed for the probe sampler.
         :returns: SymmetricDistanceMatrix.
-        :raises TypeError: If check is not a bool or ``numpy.bool_``, if
-            ``probe_triples`` is not an integer, or if ``params`` is neither
-            a mapping nor iterable. A fault *inside* ``params`` -- a bad
-            element, an unhashable key, an error from the caller's own
-            iterator -- is reported by ``dict`` and reaches the caller
-            exactly as it would have.
+        :raises TypeError: If check is not a bool or ``numpy.bool_``, or if
+            ``probe_triples`` is not an integer. Anything ``params`` itself
+            raises -- it is not iterable, an element is malformed, a key is
+            unhashable, the caller's own iterator failed -- comes back from
+            ``dict`` unaltered, with a note naming this parameter appended.
         :raises ValueError: If the shape, dtype, length, or values are
             invalid.
         """
@@ -1507,18 +1506,24 @@ class SymmetricDistanceMatrix(DistanceMatrix):
         if params is None:
             copied = {}
         else:
-            # The protocols ``dict`` itself consults, not an ABC proxy for
-            # them: it also takes a legacy sequence exposing only integer
-            # ``__getitem__``, and a duck mapping exposing ``keys`` with
-            # ``__getitem__``, and neither is a Mapping or an Iterable. An
-            # object with none of the three is one ``dict`` cannot consume
-            # by any route, which is exactly the case this names.
-            if not any(hasattr(params, name)
-                       for name in ('__iter__', '__getitem__', 'keys')):
-                raise TypeError(
-                    f"from_condensed params= must be a mapping or an iterable "
-                    f"of key/value pairs, got {type(params).__name__}")
-            copied = dict(params)
+            try:
+                copied = dict(params)
+            except Exception as error:
+                # A note, not a replacement. Four attempts to predict which
+                # inputs ``dict`` accepts, or to classify what it raises,
+                # each turned out to narrow or relabel something: its
+                # acceptance covers a legacy integer-``__getitem__``
+                # sequence and a duck mapping as well as any iterable, and
+                # an unhashable key raises an exact TypeError a caller's own
+                # iterator could equally have raised. ``add_note`` sidesteps
+                # all of it -- same exception object, same class, same args,
+                # same traceback, with the missing context appended. This is
+                # a diagnostic fix, and this is the only form of it that
+                # cannot change behaviour.
+                error.add_note(
+                    "raised while reading from_condensed params=, which must "
+                    "be a mapping or an iterable of key/value pairs")
+                raise
         return cls(storage, comparison_name, labels, copied, facts)
 
     @staticmethod

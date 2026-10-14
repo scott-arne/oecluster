@@ -412,8 +412,10 @@ def test_an_explicitly_falsy_params_is_not_treated_as_unspecified():
     """
     condensed, _ = _metric_condensed(n=3)
     for bad in (0, False):
-        with pytest.raises(TypeError, match=r"from_condensed params="):
+        with pytest.raises(TypeError) as caught:
             SymmetricDistanceMatrix.from_condensed(condensed, params=bad)
+        assert any("from_condensed params=" in note
+                   for note in caught.value.__notes__)
     assert SymmetricDistanceMatrix.from_condensed(
         condensed, params=None).params == {}
 
@@ -425,8 +427,13 @@ def test_a_bad_params_names_the_parameter_and_the_entry_point():
     that the refusal says which argument and which call it came from.
     """
     condensed, _ = _metric_condensed(n=3)
-    with pytest.raises(TypeError, match=r"from_condensed params="):
+    with pytest.raises(TypeError) as caught:
         SymmetricDistanceMatrix.from_condensed(condensed, params=0)
+    # dict's own message is untouched; the context arrives as a note, so
+    # nothing a caller matches on or catches has changed.
+    assert "not iterable" in str(caught.value)
+    assert any("from_condensed params=" in note
+               for note in caught.value.__notes__)
 
 
 @pytest.mark.parametrize("empty", [[], "", ()])
