@@ -460,6 +460,35 @@ def test_a_malformed_params_iterable_keeps_raising_ValueError():
         SymmetricDistanceMatrix.from_condensed(condensed, params=[([1], 2)])
 
 
+def test_the_shapes_dict_accepts_without_being_iterable_still_work():
+    """``dict`` takes two protocols an ``Iterable`` check would turn away.
+
+    A legacy sequence exposing only integer ``__getitem__``, and a duck
+    mapping exposing ``keys`` with ``__getitem__``, are both accepted by
+    ``dict`` and are neither ``Mapping`` nor ``Iterable``. An ABC-based
+    guard here rejected both, which narrowed what ``params`` accepts --
+    the one thing this message fix must not do.
+    """
+    class LegacySequence:
+        def __getitem__(self, index):
+            if index > 1:
+                raise IndexError(index)
+            return (("a", 1), ("b", 2))[index]
+
+    class DuckMapping:
+        def keys(self):
+            return ["a", "b"]
+
+        def __getitem__(self, key):
+            return {"a": 1, "b": 2}[key]
+
+    condensed, _ = _metric_condensed(n=3)
+    assert SymmetricDistanceMatrix.from_condensed(
+        condensed, params=LegacySequence()).params == {"a": 1, "b": 2}
+    assert SymmetricDistanceMatrix.from_condensed(
+        condensed, params=DuckMapping()).params == {"a": 1, "b": 2}
+
+
 def test_an_exception_from_the_caller_s_own_iterator_is_untouched():
     """A subclass is re-raised as it is, not rebuilt with one string.
 

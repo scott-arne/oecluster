@@ -1507,8 +1507,14 @@ class SymmetricDistanceMatrix(DistanceMatrix):
         if params is None:
             copied = {}
         else:
-            if not isinstance(params, (collections.abc.Mapping,
-                                       collections.abc.Iterable)):
+            # The protocols ``dict`` itself consults, not an ABC proxy for
+            # them: it also takes a legacy sequence exposing only integer
+            # ``__getitem__``, and a duck mapping exposing ``keys`` with
+            # ``__getitem__``, and neither is a Mapping or an Iterable. An
+            # object with none of the three is one ``dict`` cannot consume
+            # by any route, which is exactly the case this names.
+            if not any(hasattr(params, name)
+                       for name in ('__iter__', '__getitem__', 'keys')):
                 raise TypeError(
                     f"from_condensed params= must be a mapping or an iterable "
                     f"of key/value pairs, got {type(params).__name__}")
