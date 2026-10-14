@@ -1520,24 +1520,26 @@ class SymmetricDistanceMatrix(DistanceMatrix):
                 # same traceback, with the missing context appended. This is
                 # a diagnostic fix, and this is the only form of it that
                 # cannot change behaviour.
-                try:
-                    # ``BaseException.add_note`` rather than the bound
-                    # method, so a subclass that overrides it cannot run its
-                    # own code here, and guarded so that a failure to
-                    # annotate -- an overridden setter, a ``__notes__`` that
-                    # is not a list -- cannot replace the caller's exception
-                    # with ours. Annotating is strictly optional; propagating
-                    # what dict raised is not.
-                    BaseException.add_note(
-                        error,
-                        "raised while reading from_condensed params=, which "
-                        "must be a mapping or an iterable of key/value pairs")
-                except BaseException:  # noqa: BLE001, S110 - see above
-                    # BaseException, not Exception: an annotation hook that
-                    # raises SystemExit or KeyboardInterrupt would otherwise
-                    # escape and still displace the caller's error, which is
-                    # the whole failure this guard exists to prevent.
-                    pass
+                # Only a built-in exception is annotated. Any other class
+                # may reach user code on the way -- an overridden add_note, a
+                # __notes__ descriptor -- and that code can raise, or mutate
+                # the exception it is attached to, either of which would
+                # alter what the caller receives. A built-in's note handling
+                # is all C level, so nothing can run. Skipping the note
+                # elsewhere costs a line of context; getting it wrong costs
+                # the caller their own error, so the trade is not close.
+                #
+                # Guarded as well, because "cannot run user code" is an
+                # argument and this is a diagnostic: if it is ever wrong,
+                # the exception dict raised must still be what propagates.
+                if type(error).__module__ == 'builtins':
+                    try:
+                        error.add_note(
+                            "raised while reading from_condensed params=, "
+                            "which must be a mapping or an iterable of "
+                            "key/value pairs")
+                    except BaseException:  # noqa: BLE001, S110 - see above
+                        pass
                 raise
         return cls(storage, comparison_name, labels, copied, facts)
 

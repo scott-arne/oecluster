@@ -470,10 +470,12 @@ def test_a_malformed_params_iterable_keeps_raising_ValueError():
 def test_a_failure_to_annotate_cannot_replace_the_caller_s_exception():
     """Annotating is optional; propagating what ``dict`` raised is not.
 
-    A subclass can override ``add_note`` or carry a ``__notes__`` that is
-    not a list. Either would make the annotation itself raise, and an
-    unguarded ``add_note`` would then hand the caller that failure in
-    place of their own error.
+    Only a built-in exception is annotated, because any other class can
+    reach user code on the way -- an overridden ``add_note``, a
+    ``__notes__`` descriptor -- and that code can raise, or mutate the
+    exception it is attached to. Each subclass below would have had its
+    own hook run; none of them does, and each caller gets back exactly
+    the object they raised.
     """
     class Hostile(ValueError):
         def add_note(self, note):
@@ -516,6 +518,10 @@ def test_a_failure_to_annotate_cannot_replace_the_caller_s_exception():
     with pytest.raises(Exiting) as caught:
         SymmetricDistanceMatrix.from_condensed(condensed, params=worst())
     assert caught.value is exiting
+    # No note was attached to any of them, which is what kept their hooks
+    # from running at all.
+    assert not getattr(exiting, '__notes__', [])
+    assert not getattr(hostile, '__notes__', [])
 
 
 def test_the_shapes_dict_accepts_without_being_iterable_still_work():
