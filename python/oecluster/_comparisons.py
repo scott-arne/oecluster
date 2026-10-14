@@ -337,7 +337,13 @@ def refuse_inapplicable_p(kwargs):
     """
     if kwargs.get('p') is None:
         return
-    spelling = kwargs.get('metric') or 'standardized_euclidean'
+    # ``str`` because the descriptor options coerce it that way too, so a
+    # string-coercible selector reaches C++ as its text and must be judged
+    # as its text here. Reading the raw object instead both crashed on one
+    # whose ``__str__`` returns 'minkowski' and waved through an asymmetric
+    # covariance on one returning 'mahalanobis'.
+    metric = kwargs.get('metric')
+    spelling = 'standardized_euclidean' if metric is None else str(metric)
     owner = _METRIC_ONLY_KEYS['p']
     # Lower-cased to match native resolution (MetricTable.cpp:18), but the
     # caller's own spelling is what the message echoes back.
@@ -459,7 +465,13 @@ def symmetrize_inverse_covariance(kwargs, *, emit=True):
     # so reading it here would raise AttributeError in front of that refusal
     # -- which is how the constructor came to answer a non-string metric
     # differently from pdist. Stand aside and let the owner speak.
-    spelling = kwargs.get('metric') or 'standardized_euclidean'
+    # ``str`` because the descriptor options coerce it that way too, so a
+    # string-coercible selector reaches C++ as its text and must be judged
+    # as its text here. Reading the raw object instead both crashed on one
+    # whose ``__str__`` returns 'minkowski' and waved through an asymmetric
+    # covariance on one returning 'mahalanobis'.
+    metric = kwargs.get('metric')
+    spelling = 'standardized_euclidean' if metric is None else str(metric)
     if not isinstance(spelling, str) or spelling.lower() != 'mahalanobis':
         return False
 

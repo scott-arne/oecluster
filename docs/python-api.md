@@ -3559,7 +3559,11 @@ Inverting a well-conditioned covariance stays well under that band; past a
 condition number of about `1e11` a legitimate inverse does warn, which is
 harmless, since the message reports a substitution rather than an error. A
 non-square length or a non-finite entry is left to the refusal that owns it,
-and no warning is issued on a call that is about to raise.
+and the warning never displaces a refusal about the descriptor options it is
+itself describing. It is not ordered against validation that happens later in
+the calling entry point: under `-W error` a warning about `inverse_covariance`
+will stop a call that would otherwise have failed on, say, `num_threads`,
+because that filter makes the first warning fatal by design.
 
 `seuclidean` is an alias of `standardized_euclidean`. Non-numeric columns are
 dropped from any selection, on every metric. A zero-variance column is dropped
