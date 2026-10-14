@@ -364,9 +364,11 @@ DescriptorComparison::DescriptorComparison(const std::vector<OEChem::OEMolBase*>
             std::vector<double> variances;
             for (size_t k = 0; k < selection.size(); ++k) {
                 const double variance = stats.variance[k];
-                if (!std::isfinite(variance) || variance <= 0.0) {
+                const std::string reason = variance_drop_reason(
+                    variance, static_cast<size_t>(stats.present_count[k]));
+                if (!reason.empty()) {
                     impl->dropped_columns.push_back(schema.Definition(selection[k]).name);
-                    impl->dropped_reasons.push_back("zero-variance");
+                    impl->dropped_reasons.push_back(reason);
                     continue;
                 }
                 surviving.push_back(selection[k]);

@@ -60,6 +60,22 @@ std::vector<size_t> resolve_column_indices(const OEFP::DescriptorSchema& schema,
 bool is_numeric_kind(OEFP::DescriptorValueKind kind);
 
 /**
+ * @brief Name why a column's variance disqualifies it, or "" if it does not.
+ *
+ * The three causes need different responses from a caller, and one string
+ * for all of them told a caller their column was constant when in truth it
+ * had too few values to measure. Order is load-bearing: -inf is both
+ * non-finite and negative, so present_count is asked about first and
+ * finiteness second.
+ *
+ * :param variance: The column variance as OEFP reported it.
+ * :param present_count: Rows in which the column had a value.
+ * :returns: ``"insufficient-data"``, ``"non-finite-variance"``,
+ *     ``"zero-variance"``, or ``""`` when the column is usable.
+ */
+std::string variance_drop_reason(double variance, size_t present_count);
+
+/**
  * @brief Convert a string to lowercase for case-insensitive matching.
  *
  * :param value: Input string.

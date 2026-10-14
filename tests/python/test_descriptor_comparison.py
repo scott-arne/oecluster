@@ -86,14 +86,14 @@ def test_a_constant_column_is_dropped_as_zero_variance():
 
 
 def test_a_present_but_non_finite_value_drops_its_whole_column():
-    """One NaN value costs the column, under the constant-column label.
+    """One NaN value costs the column, under its own label.
 
-    OpenEye reports water's FractionCsp3 as present and NaN, and a non-finite
-    variance is dropped by the same branch as a zero one. The reason string is
-    therefore the one ``test_a_constant_column_is_dropped_as_zero_variance``
-    gets, even though this column varies perfectly well over the eight
-    organics on its own. A caller reading the drop report cannot tell the two
-    causes apart.
+    OpenEye reports water's FractionCsp3 as present and NaN, so the column is
+    present in all nine rows and its variance is not finite. That is a
+    different cause from the genuinely constant column
+    ``test_a_constant_column_is_dropped_as_zero_variance`` covers -- this one
+    varies perfectly well over the eight organics on its own -- and the drop
+    report now says so.
     """
     clean = oecluster.descriptor_statistics(_mols())
     clean_variance = dict(zip(clean['columns'], clean['variance']))
@@ -102,9 +102,46 @@ def test_a_present_but_non_finite_value_drops_its_whole_column():
     assert clean['dropped'] == []
     assert clean_variance["FractionCsp3"] > 0.0
 
-    assert stats['dropped'] == [("FractionCsp3", "zero-variance")]
+    assert stats['dropped'] == [("FractionCsp3", "non-finite-variance")]
     assert "FractionCsp3" not in stats['columns']
     assert all(v > 0.0 for v in stats['variance'])
+
+
+def test_a_column_present_in_one_row_is_not_called_constant():
+    """It had too few values to measure, which is a different problem.
+
+    XLogP is computable for CCO and for none of the ions, so its variance
+    was never computed -- OEFP leaves it at NaN. Reporting that as
+    "zero-variance" told the caller the column carries no signal, when the
+    remedy is more molecules where the descriptor is defined.
+    """
+    mols = _mols(["[Na+]", "[K+]", "[Li+]", "CCO"])
+    stats = oecluster.descriptor_statistics(mols)
+    assert ("XLogP", "insufficient-data") in stats['dropped']
+
+
+def test_a_genuinely_constant_column_still_says_zero_variance():
+    """Regression shield: the unchanged case keeps its unchanged reason."""
+    stats = oecluster.descriptor_statistics(_mols(["CCO", "CCC"]))
+    reasons = dict(stats['dropped'])
+    assert reasons["HeavyAtomCount"] == "zero-variance"
+
+
+def test_the_comparison_surface_names_the_same_three_causes():
+    # The two surfaces are separate code paths and must not disagree. They
+    # were independent copies of the rule, which is how they could.
+    mols = _mols(["[Na+]", "[K+]", "[Li+]", "CCO"])
+    comparison = oecluster.DescriptorComparison(
+        mols, missing="propagate", metric="standardized_euclidean")
+    dropped = dict(zip(list(comparison.DroppedColumns()),
+                       list(comparison.DroppedReasons())))
+    assert dropped["XLogP"] == "insufficient-data"
+
+    constant = oecluster.DescriptorComparison(
+        _mols(["CCO", "CCC"]), metric="standardized_euclidean")
+    reasons = dict(zip(list(constant.DroppedColumns()),
+                       list(constant.DroppedReasons())))
+    assert reasons["HeavyAtomCount"] == "zero-variance"
 
 
 def test_descriptor_statistics_can_return_an_inverse_covariance():
@@ -158,7 +195,7 @@ def test_reusing_variances_needs_the_columns_they_were_fitted_over():
     mols = _mols(["O"] + SMILES)
     stats = oecluster.descriptor_statistics(mols)
 
-    assert stats['dropped'] == [("FractionCsp3", "zero-variance")]
+    assert stats['dropped'] == [("FractionCsp3", "non-finite-variance")]
     assert len(stats['columns']) == 10
 
     with pytest.raises(RuntimeError, match="11 columns are selected"):

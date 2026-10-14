@@ -976,9 +976,10 @@ TEST_F(DescriptorPresentNaNTest, TheRetainedFiveKeepEveryColumn) {
 TEST(DescriptorComparisonNonFiniteTest, NonFiniteVarianceColumnsAreDropped) {
     // OEFP's RDKit source emits a *present* NaN for BCUT2D and partial-charge
     // descriptors on elements with no Gasteiger parameters, which makes those
-    // columns' variances NaN while they still count as present. That is the
-    // only route to the !isfinite half of the drop condition; a zero variance
-    // alone would not distinguish the two branches.
+    // columns' variances NaN while they still count as present. Present is
+    // what separates this from the insufficient-data reason: both rows have
+    // the column, so the layer can establish only that the variance is not
+    // finite.
     //
     // missing='propagate' is what makes the branch reachable at all. Under
     // the default complete_case the row check runs first and refuses this
@@ -1009,7 +1010,7 @@ TEST(DescriptorComparisonNonFiniteTest, NonFiniteVarianceColumnsAreDropped) {
                         comparison.DroppedColumns().end(), "BCUT2D_LOGPLOW"),
               comparison.DroppedColumns().end());
     for (const std::string& reason : comparison.DroppedReasons()) {
-        EXPECT_EQ(reason, "zero-variance") << reason;
+        EXPECT_EQ(reason, "non-finite-variance") << reason;
     }
     EXPECT_TRUE(std::isfinite(comparison.Compare(0, 1)));
 }

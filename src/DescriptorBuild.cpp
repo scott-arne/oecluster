@@ -7,7 +7,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <exception>
+#include <string>
 #include <oechem.h>
 #include "oecluster/Error.h"
 
@@ -111,6 +113,27 @@ std::vector<size_t> resolve_column_indices(const OEFP::DescriptorSchema& schema,
 bool is_numeric_kind(OEFP::DescriptorValueKind kind) {
     return kind == OEFP::DescriptorValueKind::Bool || kind == OEFP::DescriptorValueKind::Int ||
            kind == OEFP::DescriptorValueKind::Float;
+}
+
+std::string variance_drop_reason(double variance, size_t present_count) {
+    // OEFP leaves the variance at its NaN initialization when it never
+    // computed one, which is every column present in fewer than two rows.
+    // That is a different problem from a column that is genuinely constant:
+    // the remedy is more molecules where the descriptor is defined, not
+    // accepting that the column carries no signal.
+    if (present_count < 2u) {
+        return "insufficient-data";
+    }
+    // Present NaNs and an accumulation that overflowed both land here, and
+    // the variance alone cannot tell them apart -- so the name says the
+    // variance is not finite and claims nothing about the values.
+    if (!std::isfinite(variance)) {
+        return "non-finite-variance";
+    }
+    if (variance <= 0.0) {
+        return "zero-variance";
+    }
+    return {};
 }
 
 }  // namespace OECluster

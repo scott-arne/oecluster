@@ -5,7 +5,6 @@
 
 #include "oecluster/DescriptorStatistics.h"
 
-#include <cmath>
 #include <exception>
 #include <oechem.h>
 #include <oefp/descriptor_batch.h>
@@ -94,9 +93,11 @@ DescriptorStatisticsResult descriptor_statistics(const std::vector<OEChem::OEMol
     for (size_t k = 0; k < numeric.size(); ++k) {
         const std::string& name = schema.Definition(numeric[k]).name;
         const double variance = raw.variance[k];
-        if (!std::isfinite(variance) || variance <= 0.0) {
+        const size_t present = static_cast<size_t>(raw.present_count[k]);
+        const std::string reason = variance_drop_reason(variance, present);
+        if (!reason.empty()) {
             result.dropped_columns.push_back(name);
-            result.dropped_reasons.push_back("zero-variance");
+            result.dropped_reasons.push_back(reason);
             continue;
         }
         surviving.push_back(numeric[k]);
@@ -105,7 +106,7 @@ DescriptorStatisticsResult descriptor_statistics(const std::vector<OEChem::OEMol
         result.variance.push_back(variance);
         result.minimum.push_back(raw.minimum[k]);
         result.maximum.push_back(raw.maximum[k]);
-        result.present_count.push_back(static_cast<size_t>(raw.present_count[k]));
+        result.present_count.push_back(present);
     }
 
     if (surviving.empty()) {

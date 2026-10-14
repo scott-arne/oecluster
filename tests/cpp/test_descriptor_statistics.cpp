@@ -1,10 +1,12 @@
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <string>
 #include <gtest/gtest.h>
 #include <oechem.h>
 #include "oecluster/DescriptorStatistics.h"
 #include "oecluster/Error.h"
+#include "../../src/DescriptorBuild.h"
 
 using namespace OECluster;
 
@@ -230,10 +232,27 @@ TEST_F(DescriptorStatisticsTest, InverseCovarianceReportsItsRowCount) {
     EXPECT_EQ(skipped.inverse_covariance_rows, 0u);
 }
 
+TEST(VarianceDropReasonTest, DistinguishesTheThreeCauses) {
+    // Ordered, because -inf is both non-finite and negative: the predicates
+    // overlap unless present_count is asked about first and finiteness
+    // second. An earlier draft of this rule had them overlapping.
+    EXPECT_EQ(variance_drop_reason(std::numeric_limits<double>::quiet_NaN(), 0u),
+              "insufficient-data");
+    EXPECT_EQ(variance_drop_reason(std::numeric_limits<double>::quiet_NaN(), 1u),
+              "insufficient-data");
+    EXPECT_EQ(variance_drop_reason(std::numeric_limits<double>::quiet_NaN(), 2u),
+              "non-finite-variance");
+    EXPECT_EQ(variance_drop_reason(-std::numeric_limits<double>::infinity(), 2u),
+              "non-finite-variance");
+    EXPECT_EQ(variance_drop_reason(0.0, 2u), "zero-variance");
+    EXPECT_EQ(variance_drop_reason(-1.0, 2u), "zero-variance");
+    EXPECT_TRUE(variance_drop_reason(1.5, 2u).empty());
+}
+
 TEST(DescriptorStatisticsNonFiniteTest, NonFiniteVarianceColumnsAreDropped) {
     // Same present-NaN route as the comparison test: this pins the
-    // !isfinite(variance) half of the drop condition on the statistics
-    // surface, which until now was only covered for variance == 0.
+    // non-finite-variance reason on the statistics surface, which until now
+    // was only covered for variance == 0.
     std::vector<OEChem::OEGraphMol> graph_mols(2);
     OEChem::OESmilesToMol(graph_mols[0], "c1ccccc1");
     OEChem::OESmilesToMol(graph_mols[1], "[Na+]");
@@ -252,6 +271,9 @@ TEST(DescriptorStatisticsNonFiniteTest, NonFiniteVarianceColumnsAreDropped) {
     EXPECT_TRUE(std::isfinite(result.variance[0]));
     EXPECT_EQ(result.dropped_columns.size(), 2u);
     for (const std::string& reason : result.dropped_reasons) {
-        EXPECT_EQ(reason, "zero-variance") << reason;
+        // Both ions are present -- RDKit marks the value valid and writes a
+        // NaN -- so present_count is 2 and the cause the layer can establish
+        // is the variance, not a shortage of rows.
+        EXPECT_EQ(reason, "non-finite-variance") << reason;
     }
 }
