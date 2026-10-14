@@ -64,9 +64,13 @@ bool is_numeric_kind(OEFP::DescriptorValueKind kind);
  *
  * The three causes need different responses from a caller, and one string
  * for all of them told a caller their column was constant when in truth it
- * had too few values to measure. Order is load-bearing: -inf is both
- * non-finite and negative, so present_count is asked about first and
- * finiteness second.
+ * had too few values to measure.
+ *
+ * Order is load-bearing twice over. present_count comes first because a
+ * column never measured carries whatever the variance was initialised to,
+ * which says nothing about the data. Finiteness comes before the sign test
+ * because -inf is both non-finite and negative, and would otherwise be
+ * reported as a variance that was computed and came out negative.
  *
  * :param variance: The column variance as OEFP reported it.
  * :param present_count: Rows in which the column had a value.

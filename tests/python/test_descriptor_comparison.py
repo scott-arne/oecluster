@@ -127,7 +127,7 @@ def test_a_genuinely_constant_column_still_says_zero_variance():
     assert reasons["HeavyAtomCount"] == "zero-variance"
 
 
-def test_the_comparison_surface_names_the_same_three_causes():
+def test_the_comparison_surface_names_the_same_causes_as_statistics():
     # The two surfaces are separate code paths and must not disagree. They
     # were independent copies of the rule, which is how they could.
     mols = _mols(["[Na+]", "[K+]", "[Li+]", "CCO"])

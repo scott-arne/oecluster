@@ -954,7 +954,7 @@ TEST_F(DescriptorPresentNaNTest, TheConstructorRefusesItBeforeFittingDropsTheCol
     try {
         DescriptorComparison comparison(mols_, DescriptorOptions());
         FAIL() << "expected ComparisonError; the NaN column was dropped as "
-                  "zero-variance before the row check could see it";
+                  "non-finite-variance before the row check could see it";
     } catch (const ComparisonError& exc) {
         const std::string message(exc.what());
         EXPECT_NE(message.find("FractionCsp3"), std::string::npos) << message;
