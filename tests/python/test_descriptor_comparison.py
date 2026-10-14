@@ -778,11 +778,11 @@ def test_a_dense_correlated_ill_conditioned_inverse_is_silent():
     An earlier stress test scaled singular values along a fixed orthonormal
     basis, which does not mix eigenvectors the way real correlated data does,
     and so understated the round-off in an inverse by several orders. With
-    dense mixing a legitimate inv(cov(X)) scores about cond * 1e-17 -- 4.8e-8
-    here at condition number 6.5e10 -- which an earlier 1e-8 band would have
-    reported. Measured over 30 draws per decade, 1e-6 is the last band that
-    stays silent on real data: the worst legitimate asymmetry is 2.7e-7 at
-    condition number 1e10 and 1.8e-6 at 1e11, where warnings begin.
+    dense mixing a legitimate inv(cov(X)) scores about cond * 1e-17, which an
+    earlier 1e-8 band would have reported. Measured over 30 draws per decade,
+    1e-6 is the last band that stays silent on real data: the worst
+    legitimate asymmetry is 2.7e-7 at condition number 1e10 and 1.8e-6 at
+    1e11, where warnings begin.
     """
     rng = np.random.default_rng(32)
     q = np.linalg.qr(rng.normal(size=(5, 5)))[0]
@@ -792,13 +792,17 @@ def test_a_dense_correlated_ill_conditioned_inverse_is_silent():
     a = np.linalg.inv(cov)
     assert np.linalg.cond(cov) > 1e10
     assert not np.array_equal(a, a.T)
-    # Assert the fixture reaches the regime rather than assuming it: an
-    # earlier attempt scored 3.9e-9, which pinned nothing against the 1e-8
-    # band of the time.
+    # Bracket the fixture rather than pinning a magnitude. It has to be
+    # asymmetric by far more than pure round-off, or the silence proves
+    # nothing, and below the band, or the test is asserting the wrong
+    # outcome. The exact value is not ours to fix: it depends on the
+    # platform's LAPACK, and an earlier `> 1e-8` passed on macOS at 4.8e-8
+    # while failing on Linux at 8.1e-9 and on Windows -- the same inverse,
+    # a different library.
     scale = np.sqrt(np.abs(np.outer(np.diag(a), np.diag(a))))
     skew = np.abs(a - a.T) / np.where(scale > 0, scale, 1.0)
     np.fill_diagonal(skew, 0.0)
-    assert skew.max() > 1e-8
+    assert 1e-12 < skew.max() < 1e-6
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         oecluster.DescriptorComparison(
