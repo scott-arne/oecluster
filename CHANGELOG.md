@@ -2,6 +2,18 @@
 
 This file starts at 5.0.0; earlier releases are not recorded here.
 
+## [5.23.1] - 2026-10-14
+
+### Fixed
+
+- A test fixture added in 5.23.0 asserted that an ill-conditioned inverse's
+  asymmetry exceeded `1e-8`. That quantity is round-off, so it depends on the
+  platform's LAPACK -- 4.8e-8 on macOS, 8.1e-9 and 9.2e-9 on the two Linux
+  builds -- and the wheel build for 5.23.0 failed on Linux and Windows while
+  passing locally and on macOS. The fixture is now bracketed rather than
+  pinned: comfortably above pure round-off, and below the band it is proving
+  silence over. No library code changed; 5.23.0 was never published.
+
 ## [5.23.0] - 2026-10-13
 
 ### Changed
