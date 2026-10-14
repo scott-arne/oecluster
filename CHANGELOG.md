@@ -117,8 +117,12 @@ anyway, so a caller who relied on that silence sees new behaviour: a
   own exception propagates unaltered -- same class, same args, same object,
   same traceback -- with a note appended through `BaseException.add_note`, and
   only when the exception is a built-in type, so no user code can run on the
-  way. Anything a caller catches or matches on is byte-identical to 5.22.0;
-  `params=[]` and `params=""` remain an empty mapping. Only the diagnostic for
+  way. The class a caller catches, the `args` they read and the object's
+  identity are unchanged, and `params=[]` and `params=""` remain an empty
+  mapping. What does change is the rendered traceback and `__notes__`: a
+  note-aware matcher -- `pytest.raises(match=...)` from pytest 9 onward
+  searches notes -- can match text that only appears in the note, where in
+  5.22.0 it could not. Only the diagnostic for
   a case such as `params=0`, which reported `'int' object is not iterable` and
   named neither the parameter nor the entry point, gained context.
 - The fingerprint keyword refusal no longer says "select one of those
