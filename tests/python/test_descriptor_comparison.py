@@ -649,6 +649,71 @@ def test_the_warning_reaches_the_prebuilt_constructor_too():
                                   oecluster.pdist(_mols(), explicit).condensed)
 
 
+# Every surface that takes descriptor options directly. The asymmetry
+# advisory has to behave identically on all three, which is the property that
+# broke twice: once on the constructor against native validation, and once on
+# the named paths against the emptiness refusal.
+ASYMMETRY_SURFACES = [
+    ("pdist", lambda kwargs: oecluster.pdist(_mols(), "descriptor", **kwargs)),
+    ("cdist", lambda kwargs: oecluster.cdist(_mols(), _mols(), "descriptor", **kwargs)),
+    ("constructor", lambda kwargs: oecluster.DescriptorComparison(_mols(), **kwargs)),
+]
+
+
+@pytest.mark.parametrize(("surface", "call"), ASYMMETRY_SURFACES,
+                         ids=[case[0] for case in ASYMMETRY_SURFACES])
+def test_an_asymmetry_advisory_never_pre_empts_an_emptiness_refusal(surface, call):
+    """An advisory in front of a refusal is the same defect, a third time.
+
+    ``groups=[]`` is refused because C++ cannot tell it from an omitted
+    option, and that refusal is last in the argument band -- after the native
+    verdicts the warning used to wait for. Warning from there put the
+    advisory first, and under ``-W error`` the ``UserWarning`` replaced the
+    ``ValueError``, hiding the fault the caller actually has to fix. Measured
+    before the move on ``pdist`` and ``cdist``; the constructor already
+    raised first.
+    """
+    kwargs = {'metric': "mahalanobis", 'columns': _first_columns(2),
+              'inverse_covariance': [2.0, 1.0, 0.0, 2.0], 'groups': []}
+
+    # Under the default filters: the refusal, and not a warning beside it.
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        with pytest.raises(ValueError, match="groups= was given as an empty"):
+            call(kwargs)
+    assert [str(w.message) for w in caught] == []
+
+    # And under -W error, where an advisory raised first would be the only
+    # thing the caller ever sees.
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(ValueError, match="groups= was given as an empty"):
+            call(kwargs)
+
+
+@pytest.mark.parametrize(("surface", "call"), ASYMMETRY_SURFACES,
+                         ids=[case[0] for case in ASYMMETRY_SURFACES])
+def test_a_non_string_metric_is_refused_rather_than_read_by_the_advisory(surface, call):
+    """The helper must not read a metric only C++ can rule on.
+
+    It gated on ``metric`` to mirror the native rule that the override
+    belongs to ``mahalanobis`` alone, and called ``.lower()`` to do it. On
+    ``metric=5`` that raised ``AttributeError: 'int' object has no attribute
+    'lower'`` from the constructor, which validates after substituting, while
+    ``pdist`` gave ``RuntimeError`` for the same call -- a regression against
+    5.22.0 and a disagreement between two surfaces of one library. The helper
+    now stands aside for a metric it cannot read.
+    """
+    kwargs = {'metric': 5, 'inverse_covariance': [2.0, 1.0, 0.0, 2.0],
+              'columns': _first_columns(2)}
+    for filt in ("always", "error"):
+        with warnings.catch_warnings():
+            warnings.simplefilter(filt)
+            with pytest.raises(RuntimeError,
+                               match="inverse_covariance applies only to"):
+                call(kwargs)
+
+
 def test_an_ill_conditioned_numpy_inverse_covariance_is_silent():
     """A real inv(cov(X)) is never exactly symmetric, and must not be reported.
 

@@ -3508,8 +3508,14 @@ oecluster.pdist(mols, "descriptor", metric="euclidean", p=3.0)
 # 'minkowski'. Drop p, or select metric='minkowski'.
 ```
 
-The rule covers `pdist()`, `cdist()` and the `DescriptorComparison`
-constructor, and C++ still speaks first: a metric that is unknown or
+The rule covers every Python entry point that builds a descriptor
+comparison, not only `pdist()`, `cdist()` and the `DescriptorComparison`
+constructor. The clustering, selection and diversity entry points reach the
+same descriptor validation through `comparison="descriptor"`, so `butina()`,
+`k_medoids()`, `maxmin_select()`, `circles()`, `sphere_exclusion()`,
+`knn_graph()`, `jarvis_patrick()`, `leiden()`, `vendi_score()`,
+`logdet_diversity()`, `modelability()` and `activity_landscape()` refuse it
+too -- 15 measured in all. C++ still speaks first: a metric that is unknown or
 unavailable on this surface raises `RuntimeError` before the `p` rule runs,
 so the message names the fault that has to be fixed first. No precedence
 against the source, column and group checks is promised in either direction,

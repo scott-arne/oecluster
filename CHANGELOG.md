@@ -26,8 +26,14 @@ anyway, so a caller who relied on that silence sees new behaviour: a
   parameter rather than a comparison option, and a prebuilt comparison still
   ignores it and reads its own orientation.
 - `p` is refused with `TypeError` on any descriptor metric but `minkowski`,
-  across all three Python descriptor surfaces: `pdist()`, `cdist()` and the
-  `DescriptorComparison` constructor. It was accepted and inert before --
+  on every Python entry point that builds a descriptor comparison. That is
+  not only `pdist()`, `cdist()` and the `DescriptorComparison` constructor:
+  the clustering, selection and diversity entry points route through the same
+  descriptor validation, so the rule was measured reaching `butina()`,
+  `k_medoids()`, `maxmin_select()`, `circles()`, `sphere_exclusion()`,
+  `knn_graph()`, `jarvis_patrick()`, `leiden()`, `vendi_score()`,
+  `logdet_diversity()`, `modelability()` and `activity_landscape()` as well --
+  15 entry points in all. It was accepted and inert before --
   measured, the condensed values were bit-identical with and without it. The
   rule is case-insensitive and covers the `seuclidean` alias, and C++ still
   speaks first: a metric that is unknown or unavailable on this surface raises
@@ -47,9 +53,11 @@ anyway, so a caller who relied on that silence sees new behaviour: a
   C++ validator does not refuse for asymmetry at all: no tolerance separates a
   caller's mistake from the round-off of a real inverse, since a perturbation
   below any band still moves a distance arbitrarily far in relative terms.
-  Both the named paths and the constructor warn once per call, after C++ has
-  accepted the options, so an advisory never pre-empts a real refusal -- which
-  matters under `-W error`. The band is `1e-6` of an entry pair's own
+  Both the named paths and the constructor warn once per call, and only once
+  the comparison has been built -- after every argument refusal, after the
+  input normalization that can empty the item list, and after the C++
+  constructor's own verdicts. So an advisory never pre-empts a real refusal,
+  which matters under `-W error`, where it would replace it. The band is `1e-6` of an entry pair's own
   Cauchy-Schwarz scale, plus a triangular-fill rule for one side exactly zero
   and the other above `1e-6/n` of that scale. Measured over 30 draws per
   decade and 3 to 20 variables, a legitimate inverse stays silent to about
@@ -90,8 +98,13 @@ anyway, so a caller who relied on that silence sees new behaviour: a
   later reader works from that double rather than from the caller's object. A
   float subclass with an unstable `__gt__` could previously answer one way to
   the `similarity` guard and another to the stamping test while native
-  `cdist` filtered with a value neither saw. A non-numeric `cutoff` is now a
-  `TypeError` raised before the matrix is computed rather than after.
+  `cdist` filtered with a value neither saw. A non-numeric `cutoff` was
+  already a `TypeError` before the matrix was computed in 5.22.0, and still
+  is; what moved is how much runs first. The conversion now sits at the top of
+  the function, so the refusal precedes building the comparison, materializing
+  the inputs and allocating the output, where it used to follow all three. A
+  `cutoff` that is not even orderable against a float, such as a string, died
+  at the `similarity` guard in 5.22.0 and is unaffected.
 - `from_condensed()` names `params=` when it cannot build a mapping from it.
   **Nothing about what `params` accepts or raises has changed.** `dict()`'s
   own exception propagates unaltered -- same class, same args, same object,

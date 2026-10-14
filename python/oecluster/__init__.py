@@ -8377,7 +8377,8 @@ class DescriptorComparison:
 
         comparison = _DescriptorComparison(mols, opts)
         if asymmetry:
-            warnings.warn(asymmetry, UserWarning)
+            # Two frames out is the caller: this __new__, then them.
+            warnings.warn(asymmetry, UserWarning, stacklevel=2)
         return comparison
 
 

@@ -309,9 +309,16 @@ _METRIC_ONLY_KEYS = {
 def refuse_inapplicable_p(kwargs):
     """Refuse ``p`` on a descriptor metric that does not take it.
 
-    The rule is the fingerprint path's, reused rather than copied: a second
-    copy is how the two surfaces came to disagree about ``p`` in the first
-    place. It never predicates on whether the metric is *valid* -- the metric
+    The rule is modelled on the fingerprint path's, but only the ownership
+    table :data:`_METRIC_ONLY_KEYS` is literally shared with it; the predicate
+    and the message are this function's own. They have to be: the fingerprint
+    loop keys on whether an option was *named* and runs over every entry in
+    that table, while here a ``None`` counts as absent and only ``p`` is in
+    scope. What this function does serve is both *descriptor* surfaces, which
+    is the duplication that mattered -- a second copy is how those two came to
+    disagree about ``p`` in the first place.
+
+    It never predicates on whether the metric is *valid* -- the metric
     table is private (see the comment in :func:`_validate_descriptor`) and
     distinguishes unknown metrics from ones unavailable on this surface, which
     Python cannot reproduce without becoming a second source of truth. Both
@@ -433,18 +440,27 @@ def symmetrize_inverse_covariance(kwargs, *, emit=True):
 
     :param kwargs: Descriptor keyword options; ``inverse_covariance`` is
         replaced in place when it is asymmetric.
-    :returns: ``True`` when the matrix was replaced, which is also when the
-        warning was issued.
+    :param emit: Whether to issue the warning here. A caller with a refusal
+        still ahead of it passes ``False``, warns once the call has succeeded,
+        and so keeps this advisory from pre-empting that refusal.
+    :returns: The warning message when the matrix was replaced, and ``False``
+        when it was not. The message is returned whether or not ``emit`` was
+        set, so a deferring caller has something to raise it with later.
     :warns UserWarning: When the supplied matrix is asymmetric beyond
-        round-off, naming one offending pair with both of its values.
+        round-off, naming one offending pair with both of its values, unless
+        ``emit`` is ``False``.
     """
     value = kwargs.get('inverse_covariance')
     if value is None:
         return False
     # Mirrors the native rule this replaces: the override belongs to one
-    # metric, and on any other the layers below refuse it outright.
+    # metric, and on any other the layers below refuse it outright. A metric
+    # that is not a string is one of those: C++ owns the name and refuses it,
+    # so reading it here would raise AttributeError in front of that refusal
+    # -- which is how the constructor came to answer a non-string metric
+    # differently from pdist. Stand aside and let the owner speak.
     spelling = kwargs.get('metric') or 'standardized_euclidean'
-    if spelling.lower() != 'mahalanobis':
+    if not isinstance(spelling, str) or spelling.lower() != 'mahalanobis':
         return False
 
     flat = np.asarray(value, dtype=np.float64).ravel()
@@ -946,13 +962,6 @@ def _validate_descriptor(similarity, kwargs):
     # last position its comment below claims.
     refuse_inapplicable_p(kwargs)
 
-    # Beside the ``p`` rule for the same reason: a call about to be refused
-    # should not warn about a second thing first. ``kwargs`` is the dict
-    # ``pdist`` and ``cdist`` carry through normalization and building, so the
-    # symmetrized matrix is the one every later step sees -- including the
-    # builder's second call here, which then finds nothing left to report.
-    symmetrize_inverse_covariance(kwargs)
-
     # Last in the band, so none of the verdicts above is pre-empted. Building
     # the options is what discovers the emptiness, which is why the refusal is
     # carried this far rather than raised where it was found.
@@ -971,11 +980,25 @@ def _build_descriptor(items, similarity, kwargs, symmetric):
     # builder stays the enforcing copy.
     _validate_descriptor(similarity, kwargs)
 
+    # Substitute the matrix here and warn only once the comparison exists,
+    # which is the same shape the ``DescriptorComparison`` constructor uses.
+    # It lives in the builder rather than in the validator because the
+    # validator is not last: the emptiness refusal follows it, normalization
+    # can empty the item list after that, and the C++ constructor below gives
+    # verdicts of its own. Warning from there put an advisory in front of all
+    # three, and under ``-W error`` it replaced them.
+    asymmetry = symmetrize_inverse_covariance(kwargs, emit=False)
+
     opts = descriptor_options(kwargs)
     for key in _DESCRIPTOR_KEYS:
         kwargs.pop(key, None)
 
-    return _DescriptorComparison(items, opts), "descriptor"
+    comparison = _DescriptorComparison(items, opts)
+    if asymmetry:
+        # Four frames out is the caller of pdist, cdist or build_comparison:
+        # this function, build_comparison, the entry point, then them.
+        warnings.warn(asymmetry, UserWarning, stacklevel=4)
+    return comparison, "descriptor"
 
 
 # expand_conformers is a Python-only normalizer key, never reaching RMSDOptions.
