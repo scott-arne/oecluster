@@ -1520,19 +1520,20 @@ class SymmetricDistanceMatrix(DistanceMatrix):
                 # same traceback, with the missing context appended. This is
                 # a diagnostic fix, and this is the only form of it that
                 # cannot change behaviour.
-                # Only a built-in exception is annotated. Any other class
-                # may reach user code on the way -- an overridden add_note, a
+                # Only these exact classes are annotated. Any other may
+                # reach user code on the way -- an overridden add_note, a
                 # __notes__ descriptor -- and that code can raise, or mutate
-                # the exception it is attached to, either of which would
-                # alter what the caller receives. A built-in's note handling
-                # is all C level, so nothing can run. Skipping the note
-                # elsewhere costs a line of context; getting it wrong costs
-                # the caller their own error, so the trade is not close.
+                # the exception it is attached to, either of which alters
+                # what the caller receives. Identity against the real class
+                # objects, never ``__module__``: a subclass can simply
+                # declare ``__module__ = 'builtins'`` and a probe confirmed
+                # that such a class reached its hook and rewrote its own
+                # args. These three are what ``dict`` itself raises.
                 #
                 # Guarded as well, because "cannot run user code" is an
                 # argument and this is a diagnostic: if it is ever wrong,
                 # the exception dict raised must still be what propagates.
-                if type(error).__module__ == 'builtins':
+                if type(error) in (TypeError, ValueError, KeyError):
                     try:
                         # Unbound, because ``error.add_note`` is an ordinary
                         # attribute lookup and would find an instance-level

@@ -3514,8 +3514,10 @@ constructor. The clustering, selection and diversity entry points reach the
 same descriptor validation through `comparison="descriptor"`, so `butina()`,
 `k_medoids()`, `maxmin_select()`, `circles()`, `sphere_exclusion()`,
 `knn_graph()`, `jarvis_patrick()`, `leiden()`, `vendi_score()`,
-`logdet_diversity()`, `modelability()` and `activity_landscape()` refuse it
-too -- 15 measured in all. C++ still speaks first: a metric that is unknown or
+`logdet_diversity()`, `modelability()`, `activity_landscape()`, `dbscan()`,
+`hdbscan()`, `agglomerative()` and `cluster_report()` refuse it too. The
+list is given rather than a count, which would drift the moment another
+entry point takes descriptor options. C++ still speaks first: a metric that is unknown or
 unavailable on this surface raises `RuntimeError` before the `p` rule runs,
 so the message names the fault that has to be fixed first. No precedence
 against the source, column and group checks is promised in either direction,

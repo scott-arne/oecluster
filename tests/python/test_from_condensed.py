@@ -525,6 +525,27 @@ def test_a_failure_to_annotate_cannot_replace_the_caller_s_exception():
 
     # An exact built-in with an instance-level shadow: the note is attached
     # through the unbound BaseException.add_note, so the shadow never runs.
+    # A class that merely claims to be a built-in is still a subclass, and
+    # a __module__ test would have let its hook run and rewrite its args.
+    class Spoofed(ValueError):
+        __module__ = 'builtins'
+
+        @property
+        def __notes__(self):
+            self.args = ('mutated by hook',)
+            raise RuntimeError('hook ran')
+
+    spoofed = Spoofed("original caller failure")
+
+    def spoof():
+        yield ("a", 1)
+        raise spoofed
+
+    with pytest.raises(ValueError) as caught:
+        SymmetricDistanceMatrix.from_condensed(condensed, params=spoof())
+    assert caught.value is spoofed
+    assert spoofed.args == ('original caller failure',)
+
     ran = []
     shadowed = ValueError("exactly built-in")
     shadowed.add_note = lambda note: ran.append(note)

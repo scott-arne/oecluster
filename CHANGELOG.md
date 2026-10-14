@@ -32,8 +32,11 @@ anyway, so a caller who relied on that silence sees new behaviour: a
   descriptor validation, so the rule was measured reaching `butina()`,
   `k_medoids()`, `maxmin_select()`, `circles()`, `sphere_exclusion()`,
   `knn_graph()`, `jarvis_patrick()`, `leiden()`, `vendi_score()`,
-  `logdet_diversity()`, `modelability()` and `activity_landscape()` as well --
-  15 entry points in all. It was accepted and inert before --
+  `logdet_diversity()`, `modelability()` and `activity_landscape()`, and the
+  clustering entry points `dbscan()`, `hdbscan()`, `agglomerative()` and
+  `cluster_report()` as well. The list is given rather than a count, because
+  a count drifts the moment another entry point takes descriptor options.
+  It was accepted and inert before --
   measured, the condensed values were bit-identical with and without it. The
   rule is case-insensitive and covers the `seuclidean` alias, and C++ still
   speaks first: a metric that is unknown or unavailable on this surface raises
@@ -54,10 +57,14 @@ anyway, so a caller who relied on that silence sees new behaviour: a
   caller's mistake from the round-off of a real inverse, since a perturbation
   below any band still moves a distance arbitrarily far in relative terms.
   Both the named paths and the constructor warn once per call, and only once
-  the comparison has been built -- after every argument refusal, after the
-  input normalization that can empty the item list, and after the C++
-  constructor's own verdicts. So an advisory never pre-empts a real refusal,
-  which matters under `-W error`, where it would replace it. The band is `1e-6` of an entry pair's own
+  the comparison has been built -- after every descriptor-option refusal,
+  after the input normalization that can empty the item list, and after the
+  C++ constructor's own verdicts. It is **not** ordered against validation
+  that happens later in the calling entry point: under `-W error` a warning
+  about `inverse_covariance` will stop a call that would otherwise have
+  failed on, say, `num_threads`, because that filter makes the first warning
+  fatal by design. What is guaranteed is that the advisory never displaces a
+  refusal about the options it is itself describing. The band is `1e-6` of an entry pair's own
   Cauchy-Schwarz scale, plus a triangular-fill rule for one side exactly zero
   and the other above `1e-6/n` of that scale. Measured over 30 draws per
   decade and 3 to 20 variables, a legitimate inverse stays silent to about
