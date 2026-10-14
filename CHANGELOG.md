@@ -2,6 +2,120 @@
 
 This file starts at 5.0.0; earlier releases are not recorded here.
 
+## [5.23.0] - 2026-10-13
+
+### Changed
+
+Six argument surfaces replace silent acceptance with an error or a warning.
+Each took an input, discarded or reinterpreted it, and returned a result
+anyway, so a caller who relied on that silence sees new behaviour: a
+`TypeError`, a `ValueError` or a `UserWarning` where 5.22.0 returned normally.
+
+- `pdist()` refuses the arguments its prebuilt-comparison branch would
+  discard. A prebuilt comparison carries its own items and its own options, so
+  any comparison keyword passed beside one now raises `TypeError` naming the
+  keywords, and an item count that disagrees with `comparison.Size()` raises
+  `ValueError` naming both counts. The keywords are judged first, because no
+  edit to `items` makes a dropped option take effect.
+- On that same branch, `items` must now be **sized**. Anything without
+  `__len__` -- a generator, an iterator, a lazily built view -- raises
+  `TypeError` rather than being accepted, because there is no count to check
+  the comparison against. This narrows more than the mismatch rule does: a
+  call that passed a generator beside a prebuilt comparison ran in 5.22.0 and
+  raises in 5.23.0. Pass a list. `similarity=` is unaffected -- it is a named
+  parameter rather than a comparison option, and a prebuilt comparison still
+  ignores it and reads its own orientation.
+- `p` is refused with `TypeError` on any descriptor metric but `minkowski`,
+  across all three Python descriptor surfaces: `pdist()`, `cdist()` and the
+  `DescriptorComparison` constructor. It was accepted and inert before --
+  measured, the condensed values were bit-identical with and without it. The
+  rule is case-insensitive and covers the `seuclidean` alias, and C++ still
+  speaks first: a metric that is unknown or unavailable on this surface raises
+  `RuntimeError` before the `p` rule runs. No precedence against the
+  schema-dependent checks is promised, because supplying `variances` or
+  `inverse_covariance` resolves the schema earlier and moves them. The rule
+  does **not** reach the raw `oecluster.oecluster` bindings, the documented
+  escape hatch to the C++ options: `DescriptorOptions::p` is a plain `double`
+  with a default, so C++ cannot tell "not supplied" from "supplied as the
+  default", and `p` stays inert on that route.
+- An asymmetric `inverse_covariance` now produces a `UserWarning` instead of
+  nothing. The `mahalanobis` metric has always scored `(A + A.T) / 2`, so
+  `[[2, 1], [0, 2]]`, its transpose and the symmetrization returned
+  bit-identical distances; the defect was the silence, not the asymmetry. The
+  Python layer now substitutes `(A + A.T) / 2` itself and warns, naming one
+  offending entry pair with both of its values. It is **not** refused, and the
+  C++ validator does not refuse for asymmetry at all: no tolerance separates a
+  caller's mistake from the round-off of a real inverse, since a perturbation
+  below any band still moves a distance arbitrarily far in relative terms.
+  Both the named paths and the constructor warn once per call, after C++ has
+  accepted the options, so an advisory never pre-empts a real refusal -- which
+  matters under `-W error`. The band is `1e-6` of an entry pair's own
+  Cauchy-Schwarz scale, plus a triangular-fill rule for one side exactly zero
+  and the other above `1e-6/n` of that scale. Measured over 30 draws per
+  decade and 3 to 20 variables, a legitimate inverse stays silent to about
+  condition number `1e10` and can warn from `1e11` up, which is acceptable
+  because the message reports a substitution rather than an error.
+- `SymmetricDistanceMatrix.from_condensed()` requires `probe_triples` to be an
+  integer, raising `TypeError` naming the parameter. The check is
+  unconditional rather than inside `check=True`, because the downstream guard
+  only reached the value at `n >= 3`, so a nonsense `probe_triples` passed
+  with a two-item matrix was accepted in silence.
+- `murcko()` and `murcko_scaffolds()` decide emptiness with
+  `list.__len__` rather than truthiness, matching the `PyList_Size` the SWIG
+  typemap reads. An empty `list` subclass whose `__len__` reports otherwise is
+  now refused as empty with the documented `ValueError`; before, it reached
+  the native call and surfaced a `RuntimeError`.
+- `k_medoids()` refuses an empty `initial_medoids` under every `init` with
+  `ValueError`, rather than reading it as the option never having been passed.
+  Under `init="explicit"` that message comes ahead of the count check. A
+  generator `initial_medoids` is still accepted: the emptiness is tested after
+  materializing, not with `len()`.
+
+### Fixed
+
+- `missing="propagate"` no longer reports `nan_present` for a matrix that
+  contains no non-finite entry. The comparison stamps `data_integrity` from
+  its missing-value policy before any pair is scored, which is the only honest
+  answer at that point but not after the sweep, so `pdist()` and `cdist()` now
+  let the finished matrix have the last word. Only a stamp reading
+  `nan_present` is ever rewritten; `subset_scored` answers a different
+  question and is untouched. The conservative stamp is kept where the output
+  is not a witness to what was computed: sparse `pdist()` storage discards
+  values above the cutoff, `+inf` among them, and a `cdist()` run with a
+  positive finite cutoff rewrites them to `0.0`. An infinite, negative or
+  `NaN` `cdist()` cutoff filters nothing, so those runs are judged on the
+  data. A matrix cleared this way is no longer refused on that ground by the
+  clustering entry points, which have no override for `nan_present`.
+- `cdist()` converts `cutoff` to a C `double` once, at the top, and every
+  later reader works from that double rather than from the caller's object. A
+  float subclass with an unstable `__gt__` could previously answer one way to
+  the `similarity` guard and another to the stamping test while native
+  `cdist` filtered with a value neither saw. A non-numeric `cutoff` is now a
+  `TypeError` raised before the matrix is computed rather than after.
+- `from_condensed()` names `params=` when it cannot build a mapping from it.
+  **Nothing about what `params` accepts or raises has changed.** `dict()`'s
+  own exception propagates unaltered -- same class, same args, same object,
+  same traceback -- with a note appended through `BaseException.add_note`, and
+  only when the exception is a built-in type, so no user code can run on the
+  way. Anything a caller catches or matches on is byte-identical to 5.22.0;
+  `params=[]` and `params=""` remain an empty mapping. Only the diagnostic for
+  a case such as `params=0`, which reported `'int' object is not iterable` and
+  named neither the parameter nor the entry point, gained context.
+- The fingerprint keyword refusal no longer says "select one of those
+  families" when it names exactly one. Every current entry names a single
+  family, so the plural was always wrong; the sentence is derived from the
+  count and stays correct if an entry grows a second family.
+- Five docstrings described the `allow_nonmetric` refusal as firing when the
+  argument is not a `bool`, but the metric gate accepts `numpy.bool_` as well,
+  so each documented the refusal of an input the code takes. They now match
+  the wording `cluster_report` already carried.
+- The descriptor section of `docs/python-api.md` left two rules unstated:
+  `variances` and `inverse_covariance` each belong to one metric and are
+  refused on any other, and an empty sequence is refused rather than read as
+  an omitted option. It now also carries the `p` rule, the
+  `inverse_covariance` symmetrization warning, and -- in the `pdist()`
+  section -- the prebuilt-comparison contract.
+
 ## [5.22.0] - 2026-10-12
 
 ### Added

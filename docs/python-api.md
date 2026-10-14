@@ -43,6 +43,38 @@ are `"descriptor"`, `"fingerprint"`, `"mcs"`, `"rmsd"`, `"rocs"`,
 accepts, and [Metric Requirements](#metric-requirements) for which of them
 produce a matrix the clustering algorithms will accept.
 
+The second argument may instead be a **prebuilt comparison** such as
+`FingerprintComparison(mols)`, and that form has a narrower contract, because
+a prebuilt comparison already carries both its items and the options it was
+built with. Anything passed beside it that it would discard is refused rather
+than dropped in silence:
+
+```python
+cmp = oecluster.FingerprintComparison(mols)
+
+oecluster.pdist(mols, cmp, metric="dice")
+# TypeError: pdist does not take comparison options alongside a prebuilt
+# comparison, ...
+
+oecluster.pdist(mols[:5], cmp)
+# ValueError: pdist was given 5 items and a prebuilt comparison over
+# len(mols): ...
+
+oecluster.pdist((m for m in mols), cmp)
+# TypeError: pdist requires items to be a sized sequence when a prebuilt
+# comparison is passed, ...
+```
+
+The keywords are judged first: no change to `items` makes a dropped option
+take effect. `items` must then have a length, so the two can be checked
+against each other -- a generator or any other unsized iterable is refused on
+this branch, though both remain fine with a comparison *name*. On this branch
+`items` contributes nothing but that count; the distances are the
+comparison's, and the matrix carries no labels and no `params`.
+`similarity=` is the one keyword that is not refused, being a named parameter
+rather than a comparison option, but a prebuilt comparison ignores it and
+reads its own orientation.
+
 Storage is chosen by keyword:
 
 ```python
@@ -3456,7 +3488,7 @@ patch-score comparison.
 | `variances` | Explicit per-column variances for `standardized_euclidean` | fitted from the input |
 | `inverse_covariance` | Explicit inverse covariance for `mahalanobis` | fitted from the input |
 | `missing` | `complete_case`, `propagate`, `ignore` | `complete_case` |
-| `p` | Minkowski order | `2.0` |
+| `p` | Minkowski order, `metric="minkowski"` only | `2.0` |
 
 `variances` and `inverse_covariance` are mutually exclusive, and each is
 refused on a metric it does not belong to -- `variances` outside
@@ -3465,6 +3497,61 @@ refused on a metric it does not belong to -- `variances` outside
 `inverse_covariance` passed as an *empty* sequence is refused rather than
 silently read as "not supplied", because emptiness is how the native layer
 encodes an absent override; omit the keyword to take the default.
+
+`p` belongs to `minkowski` alone and is refused on every other metric,
+including the default `standardized_euclidean` and the `seuclidean` alias,
+rather than being accepted and ignored:
+
+```python
+oecluster.pdist(mols, "descriptor", metric="euclidean", p=3.0)
+# TypeError: p does not apply to metric='euclidean'; it belongs to
+# 'minkowski'. Drop p, or select metric='minkowski'.
+```
+
+The rule covers `pdist()`, `cdist()` and the `DescriptorComparison`
+constructor, and C++ still speaks first: a metric that is unknown or
+unavailable on this surface raises `RuntimeError` before the `p` rule runs,
+so the message names the fault that has to be fixed first. No precedence
+against the source, column and group checks is promised in either direction,
+because supplying `variances` or `inverse_covariance` resolves the schema
+earlier and moves them. The rule is this layer's, not the struct's: a
+`DescriptorOptions` built through the raw `oecluster.oecluster` bindings
+(see [Advanced C++ Binding Access](#advanced-c-binding-access)) reaches the
+comparison without it, and `p` is inert there rather than refused, because
+`DescriptorOptions::p` is a plain `double` with a default and C++ cannot tell
+"not supplied" from "supplied as the default".
+
+`mahalanobis` scores `(A + A.T) / 2` whatever `inverse_covariance` holds, so
+an asymmetric matrix is reinterpreted rather than used as given: `[[2, 1],
+[0, 2]]`, its transpose and the symmetrization all return bit-identical
+distances. That substitution is now reported. The Python layer performs it
+and issues a `UserWarning` naming one offending entry pair with both of its
+values:
+
+```python
+import numpy as np
+oecluster.pdist(mols, "descriptor", metric="mahalanobis",
+                inverse_covariance=np.array([[2.0, 1.0], [0.0, 2.0]]),
+                columns=["MolecularWeight", "XLogP"])
+# UserWarning: inverse_covariance is not symmetric: entry [0][1] is 1.0 but
+# [1][0] is 0.0. The mahalanobis metric scores (A + A.T) / 2, and that is
+# what has been used here in place of the matrix supplied. ...
+```
+
+It is a warning rather than a refusal, and the C++ validator does not refuse
+for asymmetry at all: no tolerance separates a caller's mistake from the
+round-off of a real inverse, because a perturbation below any band can still
+move a distance arbitrarily far in relative terms. Pass `(A + A.T) / 2`
+yourself if the symmetrization is what you meant, or mirror the entries you
+filled if it is not. An entry pair is reported when it differs by more than
+`1e-6` of its own Cauchy-Schwarz scale, `sqrt(|Aii|) * sqrt(|Ajj|)`, or when
+one side is exactly zero and the other exceeds `1e-6/n` of that scale, which
+catches a half-filled triangle that the magnitude rule alone cannot see.
+Inverting a well-conditioned covariance stays well under that band; past a
+condition number of about `1e11` a legitimate inverse does warn, which is
+harmless, since the message reports a substitution rather than an error. A
+non-square length or a non-finite entry is left to the refusal that owns it,
+and no warning is issued on a call that is about to raise.
 
 `seuclidean` is an alias of `standardized_euclidean`. Non-numeric columns are
 dropped from any selection, on every metric. A zero-variance column is dropped
