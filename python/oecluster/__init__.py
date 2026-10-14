@@ -1520,9 +1520,20 @@ class SymmetricDistanceMatrix(DistanceMatrix):
                 # same traceback, with the missing context appended. This is
                 # a diagnostic fix, and this is the only form of it that
                 # cannot change behaviour.
-                error.add_note(
-                    "raised while reading from_condensed params=, which must "
-                    "be a mapping or an iterable of key/value pairs")
+                try:
+                    # ``BaseException.add_note`` rather than the bound
+                    # method, so a subclass that overrides it cannot run its
+                    # own code here, and guarded so that a failure to
+                    # annotate -- an overridden setter, a ``__notes__`` that
+                    # is not a list -- cannot replace the caller's exception
+                    # with ours. Annotating is strictly optional; propagating
+                    # what dict raised is not.
+                    BaseException.add_note(
+                        error,
+                        "raised while reading from_condensed params=, which "
+                        "must be a mapping or an iterable of key/value pairs")
+                except Exception:  # noqa: BLE001, S110 - see above
+                    pass
                 raise
         return cls(storage, comparison_name, labels, copied, facts)
 

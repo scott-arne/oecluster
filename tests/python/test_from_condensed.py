@@ -467,6 +467,41 @@ def test_a_malformed_params_iterable_keeps_raising_ValueError():
         SymmetricDistanceMatrix.from_condensed(condensed, params=[([1], 2)])
 
 
+def test_a_failure_to_annotate_cannot_replace_the_caller_s_exception():
+    """Annotating is optional; propagating what ``dict`` raised is not.
+
+    A subclass can override ``add_note`` or carry a ``__notes__`` that is
+    not a list. Either would make the annotation itself raise, and an
+    unguarded ``add_note`` would then hand the caller that failure in
+    place of their own error.
+    """
+    class Hostile(ValueError):
+        def add_note(self, note):
+            raise RuntimeError("annotation refused")
+
+    hostile = Hostile("the caller's own problem")
+
+    def pairs():
+        yield ("a", 1)
+        raise hostile
+
+    condensed, _ = _metric_condensed(n=3)
+    with pytest.raises(Hostile) as caught:
+        SymmetricDistanceMatrix.from_condensed(condensed, params=pairs())
+    assert caught.value is hostile
+
+    broken = ValueError("also theirs")
+    broken.__notes__ = "not a list"
+
+    def more():
+        yield ("a", 1)
+        raise broken
+
+    with pytest.raises(ValueError) as caught:
+        SymmetricDistanceMatrix.from_condensed(condensed, params=more())
+    assert caught.value is broken
+
+
 def test_the_shapes_dict_accepts_without_being_iterable_still_work():
     """``dict`` takes two protocols an ``Iterable`` check would turn away.
 
