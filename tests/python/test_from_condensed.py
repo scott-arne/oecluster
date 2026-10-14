@@ -438,18 +438,26 @@ def test_an_empty_iterable_params_is_still_an_empty_mapping(empty):
 
 
 def test_a_malformed_params_iterable_keeps_raising_ValueError():
-    """Only the message changes; the exception class a caller catches does not.
+    """A fault inside ``params`` is dict's to report, not this layer's.
 
-    ``dict([(1, 2, 3)])`` raises ``ValueError`` -- a pair of the wrong length,
-    not a non-iterable -- so re-raising everything as ``TypeError`` would
-    change what a caller has to catch.
+    Rewording is scoped to the one case item 59 measured -- a ``params``
+    that is not iterable at all. Anything deeper cannot be attributed: an
+    unhashable key raises an exact ``TypeError`` and a caller's own
+    ``__next__`` can raise an exact ``ValueError``, so no test on the
+    exception class distinguishes dict's complaint from theirs.
     """
     condensed, _ = _metric_condensed(n=3)
-    with pytest.raises(ValueError, match=r"from_condensed params="):
+    # dict's own message, unchanged: this layer names the parameter only for
+    # the one fault it owns, a params that is not iterable at all.
+    with pytest.raises(ValueError, match="dictionary update sequence"):
         SymmetricDistanceMatrix.from_condensed(condensed, params=[(1, 2, 3)])
-    # The same call with a non-iterable element stays a TypeError.
-    with pytest.raises(TypeError, match=r"from_condensed params="):
+    # The same call with a non-sequence element stays a TypeError.
+    with pytest.raises(TypeError):
         SymmetricDistanceMatrix.from_condensed(condensed, params=[1, 2, 3])
+    # And an unhashable key is dict's complaint, not ours -- an exact
+    # TypeError that no class test could have told apart from a shape fault.
+    with pytest.raises(TypeError, match="unhashable"):
+        SymmetricDistanceMatrix.from_condensed(condensed, params=[([1], 2)])
 
 
 def test_an_exception_from_the_caller_s_own_iterator_is_untouched():

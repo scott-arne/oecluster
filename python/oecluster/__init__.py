@@ -1314,12 +1314,13 @@ class SymmetricDistanceMatrix(DistanceMatrix):
         :param seed: Seed for the probe sampler.
         :returns: SymmetricDistanceMatrix.
         :raises TypeError: If check is not a bool or ``numpy.bool_``, if
-            ``probe_triples`` is not an integer, or if ``params`` is not
-            iterable or yields an element that is not a sequence.
+            ``probe_triples`` is not an integer, or if ``params`` is neither
+            a mapping nor iterable. A fault *inside* ``params`` -- a bad
+            element, an unhashable key, an error from the caller's own
+            iterator -- is reported by ``dict`` and reaches the caller
+            exactly as it would have.
         :raises ValueError: If the shape, dtype, length, or values are
-            invalid, or if ``params`` yields a sequence that is not a pair.
-            Anything else raised while consuming ``params`` propagates as
-            it is, since it came from the caller's own iterator.
+            invalid.
         """
         # Rejected before the input is even read: a malformed switch is a call
         # the caller must fix whatever the numbers look like. Truthiness would
@@ -1493,27 +1494,25 @@ class SymmetricDistanceMatrix(DistanceMatrix):
         # Whatever ``dict()`` accepts stays accepted -- ``params=[]`` and
         # ``params=''`` are an empty mapping by design, pinned by
         # test_an_explicitly_falsy_params_is_not_treated_as_unspecified. Only
-        # the diagnostic changes: ``dict(0)`` reports "'int' object is not
-        # iterable", which names neither the parameter nor this entry point.
+        # the diagnostic changes, and only for the one fault this owns:
+        # ``dict(0)`` reports "'int' object is not iterable", naming neither
+        # the parameter nor this entry point.
+        #
+        # Checked up front rather than by catching, because no exception the
+        # call raises can be attributed reliably. An unhashable key is an
+        # exact TypeError, a caller's own ``__next__`` can raise an exact
+        # ValueError, and rewording either would replace their diagnosis
+        # with ours. Everything past "is this iterable at all" is left to
+        # ``dict`` and reaches the caller exactly as it did before.
         if params is None:
             copied = {}
         else:
-            try:
-                copied = dict(params)
-            except (TypeError, ValueError) as error:
-                # Only an exact TypeError or ValueError is reworded. A
-                # subclass is re-raised untouched: it comes from the caller's
-                # own iterator rather than from the shape of ``params``, its
-                # constructor may not take a single string -- rebuilding a
-                # UnicodeDecodeError that way raises "function takes exactly
-                # 5 arguments" -- and a caller catching that subclass must
-                # keep catching it. This is a message fix, so it must not
-                # change which exception reaches anyone.
-                if type(error) not in (TypeError, ValueError):
-                    raise
-                raise type(error)(
+            if not isinstance(params, (collections.abc.Mapping,
+                                       collections.abc.Iterable)):
+                raise TypeError(
                     f"from_condensed params= must be a mapping or an iterable "
-                    f"of key/value pairs, got {type(params).__name__}") from error
+                    f"of key/value pairs, got {type(params).__name__}")
+            copied = dict(params)
         return cls(storage, comparison_name, labels, copied, facts)
 
     @staticmethod
