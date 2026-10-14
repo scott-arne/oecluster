@@ -956,8 +956,9 @@ def test_a_selection_with_no_spread_is_refused_by_the_constructor():
 
     identical = _mols(["CCO", "CCO"])
     with pytest.raises(RuntimeError,
-                       match="Every selected descriptor column has zero "
-                             "variance"):
+                       match=re.escape(
+                           "Every selected descriptor column was dropped over "
+                           "these molecules (zero-variance)")):
         oecluster.pdist(identical, "descriptor", columns=["MolecularWeight"])
 
     # The options alone are never enough to know: the same request over

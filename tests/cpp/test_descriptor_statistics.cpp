@@ -277,3 +277,75 @@ TEST(DescriptorStatisticsNonFiniteTest, NonFiniteVarianceColumnsAreDropped) {
         EXPECT_EQ(reason, "non-finite-variance") << reason;
     }
 }
+
+TEST(DescriptorStatisticsEmptySelectionTest, TheAllDroppedRefusalNamesTheCauses) {
+    // The refusal fires before any result is returned, so it is the whole of
+    // what the caller is told -- the per-column reasons never reach them. It
+    // used to report that every column was constant, and over these ions,
+    // where XLogP is computable exactly once, constant is the one thing the
+    // column provably is not.
+    std::vector<OEChem::OEGraphMol> ion_mols(4);
+    OEChem::OESmilesToMol(ion_mols[0], "[Na+]");
+    OEChem::OESmilesToMol(ion_mols[1], "[K+]");
+    OEChem::OESmilesToMol(ion_mols[2], "[Li+]");
+    OEChem::OESmilesToMol(ion_mols[3], "CCO");
+    std::vector<OEChem::OEMolBase*> ions;
+    for (auto& gm : ion_mols) {
+        ions.push_back(&static_cast<OEChem::OEMolBase&>(gm));
+    }
+
+    DescriptorStatisticsOptions logp_only;
+    logp_only.columns = {"XLogP"};
+    std::string message;
+    try {
+        descriptor_statistics(ions, logp_only);
+        ADD_FAILURE() << "an empty surviving selection must be refused";
+    } catch (const ComparisonError& err) {
+        message = err.what();
+    }
+    EXPECT_NE(message.find("Every selected descriptor column was dropped over these "
+                           "molecules (insufficient-data)"),
+              std::string::npos)
+        << message;
+    EXPECT_EQ(message.find("zero"), std::string::npos) << message;
+
+    // The control, because a reason that always appears carries no more
+    // information than the wording it replaced: two identical molecules make
+    // the same column genuinely constant, and that refusal must still say so.
+    std::vector<OEChem::OEGraphMol> identical_mols(2);
+    OEChem::OESmilesToMol(identical_mols[0], "CCO");
+    OEChem::OESmilesToMol(identical_mols[1], "CCO");
+    std::vector<OEChem::OEMolBase*> identical;
+    for (auto& gm : identical_mols) {
+        identical.push_back(&static_cast<OEChem::OEMolBase&>(gm));
+    }
+
+    std::string constant_message;
+    try {
+        descriptor_statistics(identical, logp_only);
+        ADD_FAILURE() << "an empty surviving selection must be refused";
+    } catch (const ComparisonError& err) {
+        constant_message = err.what();
+    }
+    EXPECT_NE(constant_message.find("Every selected descriptor column was dropped over these "
+                                    "molecules (zero-variance)"),
+              std::string::npos)
+        << constant_message;
+}
+
+TEST(JoinDropReasonsTest, DeduplicatesAndOrdersCanonically) {
+    // The joined list is part of two public refusal messages, so the order
+    // cannot follow the caller's column order: the same unusable selection
+    // named in a different order would otherwise produce a different message.
+    EXPECT_EQ(join_drop_reasons({}), "");
+    EXPECT_EQ(join_drop_reasons({"zero-variance"}), "zero-variance");
+    EXPECT_EQ(join_drop_reasons({"zero-variance", "zero-variance"}), "zero-variance");
+    EXPECT_EQ(join_drop_reasons({"zero-variance", "insufficient-data"}),
+              "insufficient-data, zero-variance");
+    EXPECT_EQ(join_drop_reasons({"zero-variance", "non-finite-variance", "insufficient-data"}),
+              "insufficient-data, non-finite-variance, zero-variance");
+    // A reason from outside the canonical set keeps its collected position
+    // after the ones inside it rather than disappearing or sorting first.
+    EXPECT_EQ(join_drop_reasons({"non-numeric", "zero-variance"}),
+              "zero-variance, non-numeric");
+}

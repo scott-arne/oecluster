@@ -90,6 +90,10 @@ DescriptorStatisticsResult descriptor_statistics(const std::vector<OEChem::OEMol
     }
 
     std::vector<size_t> surviving;
+    // Collected as each column is dropped rather than re-derived from the
+    // variances below, so the refusal and the per-column report can never
+    // name different causes for the same column.
+    std::vector<std::string> drop_reasons;
     for (size_t k = 0; k < numeric.size(); ++k) {
         const std::string& name = schema.Definition(numeric[k]).name;
         const double variance = raw.variance[k];
@@ -98,6 +102,7 @@ DescriptorStatisticsResult descriptor_statistics(const std::vector<OEChem::OEMol
         if (!reason.empty()) {
             result.dropped_columns.push_back(name);
             result.dropped_reasons.push_back(reason);
+            drop_reasons.push_back(reason);
             continue;
         }
         surviving.push_back(numeric[k]);
@@ -110,8 +115,13 @@ DescriptorStatisticsResult descriptor_statistics(const std::vector<OEChem::OEMol
     }
 
     if (surviving.empty()) {
-        throw ComparisonError(
-            "Every selected descriptor column has zero variance over these molecules");
+        // The caller never receives the drop report in this case, so the
+        // causes have to travel in the refusal itself. Naming one cause for
+        // all of them told a caller their columns were constant when the
+        // truth was that none had enough values to measure.
+        throw ComparisonError("Every selected descriptor column was dropped over these "
+                              "molecules (" +
+                              join_drop_reasons(drop_reasons) + ")");
     }
 
     if (options.inverse_covariance) {

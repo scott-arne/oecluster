@@ -81,8 +81,9 @@ public:
      * :raises ComparisonError: Among the reasons: a source, column, group,
      *     metric, or missing policy is invalid; an override does not match the
      *     selection; a fitted metric was asked to fit fewer than two molecules;
-     *     every selected column is constant; or ``complete_case`` is requested
-     *     and a selected value is absent or non-finite.
+     *     every selected column is dropped, for whichever of the three causes
+     *     the refusal names; or ``complete_case`` is requested and a selected
+     *     value is absent or non-finite.
      */
     explicit DescriptorComparison(const std::vector<OEChem::OEMolBase*>& mols,
                                   const Options& opts = Options());
@@ -150,7 +151,7 @@ std::vector<size_t> descriptor_excluded_indices(const std::vector<OEChem::OEMolB
  *
  * The constructor still refuses on its own account. Among those reasons: the
  * input is smaller than a fitted metric needs; a ``complete_case`` row check
- * fails; every selected column is constant over these molecules. Each reads
+ * fails; every selected column is dropped over these molecules. Each reads
  * the input, so nothing here can anticipate it. The constructor also
  * keeps the source, column and group name checks on any request with no
  * override, because this function builds no calculator on that path and so

@@ -653,14 +653,16 @@ TEST(DescriptorOptionValidationTest, TheInputSizeRuleIsLeftToTheConstructor) {
     EXPECT_NE(message.find("at least two molecules"), std::string::npos) << message;
 }
 
-TEST(DescriptorOptionValidationTest, TheAllColumnsConstantRuleIsLeftToTheConstructor) {
+TEST(DescriptorOptionValidationTest, TheAllColumnsDroppedRuleIsLeftToTheConstructor) {
     // One of the rules the constructor keeps because it has to read the input
     // to decide, and the one DescriptorComparison.h's prose once omitted: a
     // fitted metric needs spread to fit against, and whether there is any is a
     // fact about the molecules. Deliberately no ordinal -- NullMoleculeIsRejected
     // above covers another input-reading refusal, and the set is open.
-    // Identical inputs make every selected column constant, which no option
-    // value can be blamed for and no validator could have foreseen.
+    // Identical inputs leave every selected column dropped, which no option
+    // value can be blamed for and no validator could have foreseen. Constant
+    // is only one of the three ways a selection empties; the refusal reports
+    // which, and this fixture is the constant one.
     DescriptorOptions single_column;
     single_column.columns = {"MolecularWeight"};
     EXPECT_NO_THROW(validate_descriptor_options(single_column));
@@ -672,7 +674,8 @@ TEST(DescriptorOptionValidationTest, TheAllColumnsConstantRuleIsLeftToTheConstru
                                          &static_cast<OEChem::OEMolBase&>(graph_mols[1])};
     const std::string message =
         refusal_message([&] { DescriptorComparison(mols, single_column); });
-    EXPECT_NE(message.find("Every selected descriptor column has zero variance"),
+    EXPECT_NE(message.find("Every selected descriptor column was dropped over these "
+                           "molecules (zero-variance); there is no distance to compute"),
               std::string::npos)
         << message;
 
@@ -681,6 +684,35 @@ TEST(DescriptorOptionValidationTest, TheAllColumnsConstantRuleIsLeftToTheConstru
     DescriptorOptions unfitted = single_column;
     unfitted.metric = "euclidean";
     EXPECT_NO_THROW(DescriptorComparison(mols, unfitted));
+}
+
+TEST(DescriptorOptionValidationTest, TheAllDroppedRefusalNamesWhyTheSelectionEmptied) {
+    // The constructor throws before DroppedReasons() exists to be read, so
+    // this message is the only account the caller gets of why their selection
+    // emptied. XLogP is computable for ethanol and for none of these ions, so
+    // its variance was never measured -- calling it constant, as the refusal
+    // once did for every cause alike, sent the caller looking for spread in
+    // data that has none to find.
+    std::vector<OEChem::OEGraphMol> graph_mols(4);
+    OEChem::OESmilesToMol(graph_mols[0], "[Na+]");
+    OEChem::OESmilesToMol(graph_mols[1], "[K+]");
+    OEChem::OESmilesToMol(graph_mols[2], "[Li+]");
+    OEChem::OESmilesToMol(graph_mols[3], "CCO");
+    std::vector<OEChem::OEMolBase*> mols;
+    for (auto& gm : graph_mols) {
+        mols.push_back(&static_cast<OEChem::OEMolBase&>(gm));
+    }
+
+    DescriptorOptions logp_only;
+    logp_only.columns = {"XLogP"};
+    logp_only.missing = "propagate";
+    const std::string message =
+        refusal_message([&] { DescriptorComparison(mols, logp_only); });
+    EXPECT_NE(message.find("Every selected descriptor column was dropped over these "
+                           "molecules (insufficient-data); there is no distance to compute"),
+              std::string::npos)
+        << message;
+    EXPECT_EQ(message.find("zero"), std::string::npos) << message;
 }
 
 TEST_F(DescriptorComparisonTest, TheConstructorRepeatsEveryValidatorMessageVerbatim) {

@@ -52,7 +52,7 @@ struct DescriptorStatisticsResult {
     size_t inverse_covariance_rank = 0;       ///< Retained eigenvalues; 0 unless requested.
     size_t inverse_covariance_rows = 0;       ///< Complete rows the covariance used; 0 unless requested.
     std::vector<std::string> dropped_columns; ///< Discarded column names.
-    /// "zero-variance" (zero, negative, or non-finite) or "non-numeric".
+    /// "insufficient-data", "non-finite-variance", "zero-variance", or "non-numeric".
     std::vector<std::string> dropped_reasons;
     size_t num_rows = 0;                      ///< Molecules the fit ran over.
 };
@@ -68,7 +68,9 @@ struct DescriptorStatisticsResult {
  * :param options: Source, column, group, and inverse-covariance selection.
  * :returns: The fitted statistics and the drop report.
  * :raises ComparisonError: When a source, column, or group is unknown, a
- *     molecule pointer is null, or OEFP cannot compute the requested statistics.
+ *     molecule pointer is null, every selected column is dropped -- the
+ *     refusal names the causes, since no drop report is returned -- or OEFP
+ *     cannot compute the requested statistics.
  */
 DescriptorStatisticsResult descriptor_statistics(const std::vector<OEChem::OEMolBase*>& mols,
                                                  const DescriptorStatisticsOptions& options);

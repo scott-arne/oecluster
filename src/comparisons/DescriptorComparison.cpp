@@ -294,7 +294,7 @@ DescriptorComparison::DescriptorComparison(const std::vector<OEChem::OEMolBase*>
     // path it builds no calculator and so resolves none. Everything else left
     // below reads the input; among those, the minimum count a fit requires,
     // the complete-case row check, the refusal when every selected column is
-    // constant.
+    // dropped.
     //
     // The Python layer calls the same function before its complete-case
     // filter runs, so an unusable option value is reported as itself rather
@@ -362,6 +362,12 @@ DescriptorComparison::DescriptorComparison(const std::vector<OEChem::OEMolBase*>
                 OEFP::ColumnStatistics(batch, OEFP::DescriptorSelection::Indices(selection));
             std::vector<size_t> surviving;
             std::vector<double> variances;
+            // Collected as each column is dropped rather than re-derived from
+            // the variances below, so the refusal and DroppedReasons() can
+            // never name different causes for the same column. Only the
+            // variance causes belong here: a non-numeric column was dropped
+            // before the fit was attempted and never reached this selection.
+            std::vector<std::string> drop_reasons;
             for (size_t k = 0; k < selection.size(); ++k) {
                 const double variance = stats.variance[k];
                 const std::string reason = variance_drop_reason(
@@ -369,15 +375,22 @@ DescriptorComparison::DescriptorComparison(const std::vector<OEChem::OEMolBase*>
                 if (!reason.empty()) {
                     impl->dropped_columns.push_back(schema.Definition(selection[k]).name);
                     impl->dropped_reasons.push_back(reason);
+                    drop_reasons.push_back(reason);
                     continue;
                 }
                 surviving.push_back(selection[k]);
                 variances.push_back(variance);
             }
             if (surviving.empty()) {
-                throw ComparisonError(
-                    "Every selected descriptor column has zero variance over these molecules; "
-                    "there is no distance to compute");
+                // The constructor throws before DroppedReasons() can be read,
+                // so the causes have to travel in the refusal itself. Naming
+                // one cause for all of them told a caller their columns were
+                // constant when the truth was that none had enough values to
+                // measure.
+                throw ComparisonError("Every selected descriptor column was dropped over these "
+                                      "molecules (" +
+                                      join_drop_reasons(drop_reasons) +
+                                      "); there is no distance to compute");
             }
             if (surviving.size() != selection.size()) {
                 // Only rematerialize when the selection actually narrowed. The

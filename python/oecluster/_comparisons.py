@@ -981,7 +981,7 @@ def _validate_descriptor(similarity, kwargs):
     # built, so C++ reports them further down instead. Everything else left
     # downstream reads the input; among those, the minimum input size, the
     # complete-case row check, the refusal when every selected column is
-    # constant. None of it can be decided here.
+    # dropped. None of it can be decided here.
     opts, empty = _descriptor_options_and_empties(kwargs)
     _oecluster.validate_descriptor_options(opts)
 

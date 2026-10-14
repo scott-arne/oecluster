@@ -136,4 +136,37 @@ std::string variance_drop_reason(double variance, size_t present_count) {
     return {};
 }
 
+std::string join_drop_reasons(const std::vector<std::string>& reasons) {
+    static const std::vector<std::string> CANONICAL_ORDER = {
+        "insufficient-data", "non-finite-variance", "zero-variance"};
+
+    std::vector<std::string> distinct;
+    for (const std::string& reason : reasons) {
+        if (std::find(distinct.begin(), distinct.end(), reason) == distinct.end()) {
+            distinct.push_back(reason);
+        }
+    }
+
+    // An unknown reason lands at CANONICAL_ORDER.size(), which ranks it last,
+    // and the sort is stable so several of them keep the order they were
+    // collected in instead of being reordered arbitrarily against each other.
+    const auto rank = [](const std::string& reason) {
+        return std::distance(CANONICAL_ORDER.begin(),
+                             std::find(CANONICAL_ORDER.begin(), CANONICAL_ORDER.end(), reason));
+    };
+    std::stable_sort(distinct.begin(), distinct.end(),
+                     [&rank](const std::string& left, const std::string& right) {
+                         return rank(left) < rank(right);
+                     });
+
+    std::string joined;
+    for (const std::string& reason : distinct) {
+        if (!joined.empty()) {
+            joined += ", ";
+        }
+        joined += reason;
+    }
+    return joined;
+}
+
 }  // namespace OECluster

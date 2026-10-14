@@ -80,6 +80,21 @@ bool is_numeric_kind(OEFP::DescriptorValueKind kind);
 std::string variance_drop_reason(double variance, size_t present_count);
 
 /**
+ * @brief Join drop reasons into the phrase a refusal reports.
+ *
+ * Duplicates are removed, keeping each reason's first appearance, and what
+ * remains is ordered canonically -- ``insufficient-data``,
+ * ``non-finite-variance``, ``zero-variance`` -- so that one unusable
+ * selection produces one message however the caller ordered the columns.
+ * A reason outside that set keeps its collected position after the ones in
+ * it rather than being dropped from the list.
+ *
+ * :param reasons: One reason per dropped column, in column order.
+ * :returns: The reasons joined with ``", "``, or ``""`` for no reasons.
+ */
+std::string join_drop_reasons(const std::vector<std::string>& reasons);
+
+/**
  * @brief Convert a string to lowercase for case-insensitive matching.
  *
  * :param value: Input string.
