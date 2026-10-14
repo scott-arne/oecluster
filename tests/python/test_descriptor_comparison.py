@@ -1513,6 +1513,21 @@ def test_a_metric_is_read_once_however_unstable_its_str_is(build):
         build(_mols(), columns=_first_columns(2), metric=Shifty(),
               inverse_covariance=asymmetric.ravel().tolist())
 
+    # A ``str`` subclass is the sharper case: ``str()`` returns it, SWIG
+    # would store its payload, and a later Python reader would call the
+    # overridden method again and get something else. Reading the metric
+    # back off the options settles it -- whatever text C++ holds is the
+    # text every rule judges, so this behaves exactly as the plain string
+    # its ``__str__`` yields would.
+    class Sneaky(str):
+        def __str__(self):
+            return "euclidean"
+
+    with pytest.raises(RuntimeError, match="applies only to"):
+        build(_mols(), columns=_first_columns(2),
+              metric=Sneaky("mahalanobis"),
+              inverse_covariance=asymmetric.ravel().tolist())
+
 
 @pytest.mark.parametrize("build", _DESCRIPTOR_SURFACES)
 def test_p_is_refused_by_default_because_the_default_is_not_minkowski(build):

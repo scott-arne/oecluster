@@ -845,7 +845,13 @@ def _descriptor_options_and_empties(kwargs):
         # ``__str__`` answering differently on successive calls would
         # otherwise let them disagree, which is the hazard the cdist cutoff
         # had and is resolved the same way: decide once, reuse the decision.
-        kwargs['metric'] = opts.metric = str(kwargs['metric'])
+        opts.metric = str(kwargs['metric'])
+        # Read back off the options, not from the str() result: ``str`` may
+        # return a *subclass* whose __str__ is overridden, and SWIG stores
+        # that object's payload while a later Python reader would call the
+        # method again and get something else. The getter hands back the
+        # exact built-in string C++ holds.
+        kwargs['metric'] = opts.metric
     if kwargs.get('variances') is not None:
         opts.variances = _double_vector(kwargs['variances'])
     if kwargs.get('inverse_covariance') is not None:
