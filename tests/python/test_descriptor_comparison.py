@@ -1513,19 +1513,24 @@ def test_a_metric_is_read_once_however_unstable_its_str_is(build):
         build(_mols(), columns=_first_columns(2), metric=Shifty(),
               inverse_covariance=asymmetric.ravel().tolist())
 
-    # A ``str`` subclass is the sharper case: ``str()`` returns it, SWIG
-    # would store its payload, and a later Python reader would call the
-    # overridden method again and get something else. Reading the metric
-    # back off the options settles it -- whatever text C++ holds is the
-    # text every rule judges, so this behaves exactly as the plain string
-    # its ``__str__`` yields would.
-    class Sneaky(str):
+    # The sharper case: ``str()`` returns whatever ``__str__`` gives, and
+    # that may itself be a ``str`` *subclass*. SWIG stores its payload --
+    # "mahalanobis" -- while a later Python reader calling ``str`` on it
+    # gets "euclidean", so C++ and the rules judged different metrics.
+    # Taking the value back off the options settles it: the getter hands
+    # over the plain string C++ holds, so this behaves as "mahalanobis"
+    # and the asymmetry is reported rather than slipping past.
+    class Masked(str):
         def __str__(self):
             return "euclidean"
 
-    with pytest.raises(RuntimeError, match="applies only to"):
+    class Indirect(str):
+        def __str__(self):
+            return Masked("mahalanobis")
+
+    with pytest.warns(UserWarning, match="inverse_covariance is not symmetric"):
         build(_mols(), columns=_first_columns(2),
-              metric=Sneaky("mahalanobis"),
+              metric=Indirect("unused"),
               inverse_covariance=asymmetric.ravel().tolist())
 
 
