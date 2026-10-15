@@ -92,7 +92,10 @@ std::string variance_drop_reason(double variance, size_t present_count);
  * -- recorded by the filter that runs before any variance is measured --
  * reaches this function from a mixed selection.
  *
- * :param reasons: One reason per dropped column, in column order.
+ * :param reasons: One reason per dropped column, in any order -- the
+ *     output is canonically ordered, so the caller's is not a contract.
+ *     The ledgers that feed this append all non-numeric drops before
+ *     any variance drop, so it is not column order either.
  * :returns: The reasons joined with ``", "``, or ``""`` for no reasons.
  */
 std::string join_drop_reasons(const std::vector<std::string>& reasons);
