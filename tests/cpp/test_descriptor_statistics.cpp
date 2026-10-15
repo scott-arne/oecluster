@@ -347,20 +347,24 @@ TEST(JoinDropReasonsTest, DeduplicatesAndOrdersCanonically) {
               "insufficient-data, zero-variance");
     EXPECT_EQ(join_drop_reasons({"zero-variance", "non-finite-variance", "insufficient-data"}),
               "insufficient-data, non-finite-variance, zero-variance");
-    // Both refusals are built from the surface's whole drop ledger, which the
-    // non-numeric filter writes to before the variance filter does, so
-    // "non-numeric" is an input the helper really receives -- from a mixed
-    // selection, where some columns are dropped as non-numeric and the
-    // remaining numeric ones all fail the variance test. The refusal claims to
-    // say why every selected column was dropped, so the reason has to reach
-    // the message rather than be silently discarded for sitting outside the
+    // The shapes below are simulated, not collected. No source
+    // make_descriptor_calculator can build emits a non-numeric column, so no
+    // schema produces a selection carrying this reason and these inputs are
+    // handed to the helper directly.
+    //
+    // What they simulate is the mixed selection a future source would make:
+    // both refusals are built from the surface's whole drop ledger, which the
+    // non-numeric filter writes to before the variance filter does, so the
+    // helper would receive "non-numeric" alongside a variance reason whenever
+    // some columns were dropped as non-numeric and the remaining numeric ones
+    // all failed the variance test. The refusal claims to say why every
+    // selected column was dropped, so the reason would have to reach the
+    // message rather than be silently discarded for sitting outside the
     // canonical order. It is placed after the causes that are in it.
     //
-    // No descriptor source OEFP 0.3.0 ships emits a non-numeric column, so
-    // these shapes cannot be driven through a schema and are pinned here
-    // instead. The filter they come from is kept against schema drift, and a
-    // message that over-claims the moment it fires is the defect this helper
-    // exists to prevent.
+    // Pinned here because the filter the reason comes from is kept against
+    // schema drift, and a message that over-claims the moment it first fires
+    // is the defect this helper exists to prevent.
     EXPECT_EQ(join_drop_reasons({"non-numeric"}), "non-numeric");
     EXPECT_EQ(join_drop_reasons({"non-numeric", "zero-variance"}),
               "zero-variance, non-numeric");

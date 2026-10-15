@@ -3580,11 +3580,13 @@ each one asks something different of the caller:
 - `insufficient-data` -- the column had a value in fewer than two molecules, so
   no variance was ever measured. Nothing is yet known about the column itself;
   supply more molecules on which the descriptor is defined.
-- `non-finite-variance` -- a variance was measured and is not finite, because a
-  present value was itself NaN or the accumulation overflowed. Which of those
-  it was is not established. `descriptor_excluded_indices()` names the
-  molecules carrying a non-finite value; drop them, or drop the column from
-  `columns=`.
+- `non-finite-variance` -- the fitted variance is not finite. That is the whole
+  of what the layer established: the values themselves may be finite, since an
+  accumulation over values spanning a wide magnitude range can overflow on its
+  own. So the remedy depends on something you have to find out separately. If
+  the column does hold non-finite values -- `descriptor_excluded_indices()`
+  names the molecules carrying one -- drop those molecules. If it does not, the
+  fit overflowed, and the column has to be rescaled or left out of `columns=`.
 - `zero-variance` -- a variance was measured and came out zero or negative. The
   column is constant over these molecules and carries no signal, so there is
   nothing to recover: leave it out, or pass molecules it separates.

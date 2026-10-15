@@ -39,14 +39,23 @@ DescriptorStatisticsResult descriptor_statistics(const std::vector<OEChem::OEMol
         resolve_column_indices(schema, options.columns, options.groups);
 
     // Non-numeric columns cannot be summarized, so they are dropped before OEFP
-    // is asked for statistics rather than causing it to throw. No source OEFP
-    // 0.3.0 ships can reach this branch -- openeye, rdkit and mordred emit only
-    // float, int and bool. A future string-valued column is handled here as
-    // written: OEFP counts String as scalar, so the batch builds and the filter
-    // drops it. A vector, matrix or fingerprint column is NOT handled here --
-    // CalculateBatch builds a batch over the whole merged schema and rejects
-    // any non-scalar column before this filter can matter, so such a source
-    // would need the calculator narrowed to the numeric columns first.
+    // is asked for statistics rather than causing it to throw.
+    //
+    // The branch is reserved, not live, exactly as its counterpart in
+    // numeric_selection is. oecluster counts Bool, Int and Float as numeric,
+    // and every source make_descriptor_calculator can build emits only those
+    // kinds, so no schema reaches the branch and no test can drive it -- it is
+    // untested because it is unreachable, not because it was overlooked. It is
+    // kept against OEFP adding a source that emits another kind, where
+    // rebuilding the handling would cost more than carrying it.
+    //
+    // Which kinds it would then cover is worth recording, because the two
+    // differ. A string-valued column is handled here as written: OEFP counts
+    // String as scalar, so the batch builds and this filter drops it. A
+    // vector, matrix or fingerprint column is NOT -- CalculateBatch builds a
+    // batch over the whole merged schema and rejects any non-scalar column
+    // before this filter can matter, so such a source would need the
+    // calculator narrowed to the numeric columns first.
     DescriptorStatisticsResult result;
     std::vector<size_t> numeric;
     for (size_t index : requested) {
