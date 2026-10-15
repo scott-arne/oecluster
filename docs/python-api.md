@@ -3610,11 +3610,15 @@ the schema those sources build, and `DescriptorOptions` defaults to
 `["openeye"]`, so the call above with the default raises `RuntimeError: Unknown
 descriptor column: BCUT2D_MWHI`. That is the likely case rather than a corner
 one, since `rdkit` is the source that emits present NaNs in practice. Order
-matters where two sources declare the same column name, because OEFP keeps the
-first and discards the rest. A `groups` selection is deliberately not carried
--- replacing it with the one column is the narrowing. Nothing else in
-`DescriptorOptions` moves the answer: `metric`, `missing`, `p` and the two
-overrides can only turn the call into a refusal.
+matters because OEFP deduplicates canonical-equivalent descriptors first-wins:
+openeye's `MolecularWeight` and mordred's `MW` carry the same identity, so
+`["openeye", "mordred"]` keeps the first name and `["mordred", "openeye"]` the
+second. The surviving column is the same quantity either way, but it is called
+something different, and the name the drop was reported under no longer
+resolves. A `groups` selection is deliberately not carried -- replacing it
+with the one column is the narrowing. Nothing else in `DescriptorOptions`
+moves the answer: `metric`, `missing`, `p` and the two overrides can only turn
+the call into a refusal.
 
 An empty `rows` settles it: every value in that column was present and finite,
 so the accumulation is what overflowed, and the column has to be rescaled or
