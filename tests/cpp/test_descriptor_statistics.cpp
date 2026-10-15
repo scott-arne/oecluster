@@ -334,9 +334,12 @@ TEST(DescriptorStatisticsEmptySelectionTest, TheAllDroppedRefusalNamesTheCauses)
 }
 
 TEST(JoinDropReasonsTest, DeduplicatesAndOrdersCanonically) {
-    // The joined list is part of two public refusal messages, so the order
-    // cannot follow the caller's column order: the same unusable selection
-    // named in a different order would otherwise produce a different message.
+    // The joined list is part of two public refusal messages, so it is
+    // ordered here rather than by however the reasons were collected. The
+    // ledgers append every non-numeric drop before any variance drop, and a
+    // future collector could append in some third order; sorting at the join
+    // means none of that reaches the message. Caller column order is not the
+    // reason -- resolve_column_indices sorts the selection long before this.
     EXPECT_EQ(join_drop_reasons({}), "");
     EXPECT_EQ(join_drop_reasons({"zero-variance"}), "zero-variance");
     EXPECT_EQ(join_drop_reasons({"zero-variance", "zero-variance"}), "zero-variance");
