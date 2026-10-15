@@ -661,8 +661,10 @@ TEST(DescriptorOptionValidationTest, TheAllColumnsDroppedRuleIsLeftToTheConstruc
     // above covers another input-reading refusal, and the set is open.
     // Identical inputs leave every selected column dropped, which no option
     // value can be blamed for and no validator could have foreseen. Constant
-    // is only one of the three ways a selection empties; the refusal reports
-    // which, and this fixture is the constant one.
+    // is only one of the ways a selection empties -- the ledger carries
+    // whichever reasons applied, and counting them here would go stale the
+    // next time one is added. The refusal reports which; this fixture is
+    // the constant one.
     DescriptorOptions single_column;
     single_column.columns = {"MolecularWeight"};
     EXPECT_NO_THROW(validate_descriptor_options(single_column));
