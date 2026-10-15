@@ -1500,6 +1500,29 @@ def test_descriptor_statistics_refuses_an_empty_sequence_option(option):
         oecluster.descriptor_statistics(_mols(), **{option: []})
 
 
+def _rdkit_group_members(group):
+    import oefp
+    schema = oefp.rdkit_schema()
+    return [schema.names[i] for i in schema.group(group)]
+
+
+def test_a_valid_group_resolves_to_its_member_columns():
+    """The success branch of group resolution, which no test had reached.
+
+    Every existing groups= case is a refusal, so a group that resolves has
+    never been exercised end to end.
+    """
+    group = "rdkit:Crippen"
+    stats = oecluster.descriptor_statistics(
+        _mols(), sources=["rdkit"], groups=[group])
+    # Read the membership from the schema rather than hard-coding it: the
+    # group's contents belong to OEFP and will drift. Measured today as
+    # ['MolLogP', 'MolMR'], but that is the fixture's business, not ours.
+    expected = _rdkit_group_members(group)
+    assert expected, f"{group} resolved to nothing; pick a group that exists"
+    assert stats["columns"] == expected
+
+
 # The descriptor surfaces the Python layer exposes. The rule lives in one
 # shared helper but is called from two places, and only a test over all three
 # catches a call site that was missed. These are not every route to the
