@@ -2,6 +2,64 @@
 
 This file starts at 5.0.0; earlier releases are not recorded here.
 
+## [5.24.0] - 2026-10-14
+
+### Changed
+
+- A dropped descriptor column now reports one of three reasons where
+  `"zero-variance"` was the only one any selection could produce.
+  `"zero-variance"` keeps the narrowest of the three: a variance that was
+  measured and came out zero or negative, so the column is constant over
+  these molecules. `"insufficient-data"` is new, for a column with a value
+  in fewer than two of the rows the fit ran over -- no variance was ever
+  measured, so nothing is yet established about the column itself.
+  `"non-finite-variance"` is new, for a measured variance that is not
+  finite. **A caller matching `"zero-variance"` therefore stops matching
+  two populations it matched in 5.23.1**: the too-few-rows columns, and the
+  non-finite ones, which is where a column with a present NaN lands when it
+  has a value in two or more rows -- OpenEye's `FractionCsp3` over a set
+  containing water, and all eight of RDKit's `BCUT2D_*` columns over a
+  selection containing a bare metal ion, the common real case. The reasons
+  are read from `descriptor_statistics()['dropped']` and from
+  `DescriptorComparison.DroppedReasons()`; both surfaces now call one shared
+  rule, where each carried its own copy of it.
+- `"non-finite-variance"` names the variance and claims nothing about the
+  values. A present NaN is one way to reach it, but an accumulation over
+  perfectly finite values spanning a wide magnitude range can overflow on
+  its own, and the variance alone does not separate the two. The guide gives
+  a narrowing `descriptor_excluded_indices` call for the dropped column, and
+  what its answer does and does not settle. The three tests are ordered --
+  row count, then finiteness, then sign -- so a `-inf` variance over two or
+  more rows reports `"non-finite-variance"` rather than being read as a
+  negative one.
+- The refusal both surfaces raise when the selection empties names the
+  causes present instead of asserting one. `descriptor_statistics()` and the
+  `DescriptorComparison` constructor each said "Every selected descriptor
+  column has zero variance over these molecules"; they now say "Every
+  selected descriptor column was dropped over these molecules (<causes>)",
+  with the comparison's trailing "; there is no distance to compute"
+  unchanged. The causes are deduplicated and ordered `insufficient-data`,
+  `non-finite-variance`, `zero-variance`, so one unusable selection gives
+  one message however the columns were ordered. This message is the whole
+  account the caller gets: the constructor throws before `DroppedReasons()`
+  can be read, and `descriptor_statistics()` returns no drop report when it
+  refuses.
+
+### Fixed
+
+- The descriptor section of `docs/python-api.md` presented the
+  `"non-numeric"` drop as current behaviour -- "Non-numeric columns are
+  dropped from any selection, on every metric". oecluster counts Bool, Int
+  and Float columns as numeric, and every descriptor source it can build --
+  `openeye`, `mordred` and `rdkit` -- emits only those kinds, so no
+  selection can produce that reason. It is now documented as reserved,
+  against OEFP adding a source that emits another kind. The same passage
+  gained what each live reason asks of the caller, and the header comments
+  on `DescriptorStatisticsResult::dropped_reasons` and
+  `DescriptorComparison::DroppedReasons`, which described a single
+  `"zero-variance"` covering "zero, negative, or not finite" alike, were
+  corrected with it.
+
 ## [5.23.1] - 2026-10-14
 
 ### Fixed
