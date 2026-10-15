@@ -1517,10 +1517,15 @@ def test_a_valid_group_resolves_to_its_member_columns():
         _mols(), sources=["rdkit"], groups=[group])
     # Read the membership from the schema rather than hard-coding it: the
     # group's contents belong to OEFP and will drift. Measured today as
-    # ['MolLogP', 'MolMR'], but that is the fixture's business, not ours.
+    # ['MolLogP', 'MolMR'].
     expected = _rdkit_group_members(group)
     assert expected, f"{group} resolved to nothing; pick a group that exists"
-    assert stats["columns"] == expected
+    # Kept and dropped columns together, so a member that is constant over
+    # these molecules is still counted as resolved. If every selected column
+    # is dropped, descriptor_statistics raises before returning and the test
+    # errors instead of failing.
+    resolved = sorted(stats["columns"] + [name for name, _ in stats["dropped"]])
+    assert resolved == sorted(expected)
 
 
 # The descriptor surfaces the Python layer exposes. The rule lives in one
