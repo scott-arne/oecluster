@@ -97,7 +97,7 @@ endif()
 FetchContent_Declare(
     oeselect
     GIT_REPOSITORY https://github.com/scott-arne/oeselect.git
-    GIT_TAG master
+    GIT_TAG v1.4.1
     GIT_SHALLOW TRUE
 )
 set(OESELECT_BUILD_TESTS OFF CACHE BOOL "" FORCE)
