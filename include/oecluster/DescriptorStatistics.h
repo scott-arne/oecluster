@@ -52,7 +52,9 @@ struct DescriptorStatisticsResult {
     size_t inverse_covariance_rank = 0;       ///< Retained eigenvalues; 0 unless requested.
     size_t inverse_covariance_rows = 0;       ///< Complete rows the covariance used; 0 unless requested.
     std::vector<std::string> dropped_columns; ///< Discarded column names.
-    /// "insufficient-data", "non-finite-variance", "zero-variance", or "non-numeric".
+    /// "insufficient-data", "non-finite-variance", or "zero-variance".
+    /// "non-numeric" is reserved and cannot appear today -- see
+    /// descriptor_statistics below.
     std::vector<std::string> dropped_reasons;
     size_t num_rows = 0;                      ///< Molecules the fit ran over.
 };
@@ -60,12 +62,17 @@ struct DescriptorStatisticsResult {
 /**
  * @brief Fit descriptor statistics over a set of molecules.
  *
- * Non-numeric columns are discarded, as are columns with too few values to
- * measure a variance, with a non-finite variance, or with a variance of zero
- * or less. Each is reported with its own reason, because the responses differ:
- * a zero-variance column contributes nothing to a distance and makes
- * standardized Euclidean divide by zero, while a column never measured needs
- * more molecules where the descriptor is defined.
+ * Columns with too few values to measure a variance, with a non-finite
+ * variance, or with a variance of zero or less are discarded. Each is reported
+ * with its own reason, because the responses differ: a zero-variance column
+ * contributes nothing to a distance and makes standardized Euclidean divide by
+ * zero, while a column never measured needs more molecules where the
+ * descriptor is defined.
+ *
+ * A non-numeric column would be discarded as "non-numeric" before any variance
+ * is measured, but no descriptor source this layer can build emits one -- Bool,
+ * Int and Float all count as numeric -- so that reason is reserved rather than
+ * reachable.
  *
  * :param mols: Molecules to describe. Must not contain null pointers.
  * :param options: Source, column, group, and inverse-covariance selection.

@@ -59,8 +59,8 @@ struct DescriptorOptions {
  * comparison so that ``Size()`` always equals the input count, which is what the
  * cdist split index is measured against.
  *
- * Rows are checked against the full requested selection *before* any
- * zero-variance column is dropped. A column whose gaps are present-and-NaN
+ * Rows are checked against the full requested selection *before* any variance
+ * drop removes a column from it. A column whose gaps are present-and-NaN
  * rather than absent has a non-finite variance and would be dropped by the fit,
  * so validating afterwards would let the constructor silently score molecules
  * that ``descriptor_excluded_indices`` excludes. The two must not disagree.
@@ -103,11 +103,12 @@ public:
     /// Columns removed before scoring.
     const std::vector<std::string>& DroppedColumns() const;
     /// Parallel to DroppedColumns: "insufficient-data", "non-finite-variance",
-    /// "zero-variance", or "non-numeric". A column present in fewer than two
-    /// rows has no measured variance at all and is "insufficient-data"; a
-    /// source that emits a present NaN yields "non-finite-variance";
-    /// "zero-variance" is a variance that was measured and came out zero or
-    /// negative.
+    /// or "zero-variance". A column present in fewer than two rows has no
+    /// measured variance at all and is "insufficient-data"; a source that
+    /// emits a present NaN yields "non-finite-variance"; "zero-variance" is a
+    /// variance that was measured and came out zero or negative. A further
+    /// reason, "non-numeric", is reserved and cannot appear today: every
+    /// descriptor source this layer can build emits only numeric columns.
     const std::vector<std::string>& DroppedReasons() const;
     /// Fitted or supplied variances; empty unless the metric is standardized_euclidean.
     const std::vector<double>& Variances() const;

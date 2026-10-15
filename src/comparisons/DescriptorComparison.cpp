@@ -53,6 +53,13 @@ bool is_fitted_metric(const std::string& metric) {
 }
 
 /// Resolve the numeric subset of the requested selection, recording the rest.
+///
+/// The non-numeric branch is reserved, not live. oecluster counts Bool, Int
+/// and Float as numeric, and every source make_descriptor_calculator can build
+/// emits only those kinds, so no schema reaches the branch and no test can
+/// drive it -- it is untested because it is unreachable, not because it was
+/// overlooked. It is kept against OEFP adding a source that emits another
+/// kind, where rebuilding the handling would cost more than carrying it.
 std::vector<size_t> numeric_selection(const OEFP::DescriptorSchema& schema,
                                       const DescriptorOptions& opts,
                                       std::vector<std::string>& dropped_columns,
@@ -69,6 +76,10 @@ std::vector<size_t> numeric_selection(const OEFP::DescriptorSchema& schema,
             dropped_reasons.push_back("non-numeric");
         }
     }
+    // Reserved along with the filter above: the loop can only empty a
+    // selection that resolve_column_indices filled, so this refusal needs a
+    // column the schema declares and this layer does not count as numeric.
+    //
     // Kept apart from the all-dropped refusal below, which says the columns
     // were dropped "over these molecules": this function is also called by
     // validate_descriptor_options, which holds no molecules at all, and the

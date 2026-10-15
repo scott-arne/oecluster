@@ -88,9 +88,10 @@ std::string variance_drop_reason(double variance, size_t present_count);
  * selection produces one message however the caller ordered the columns.
  * A reason outside that set keeps its collected position after the ones in
  * it rather than being dropped from the list: a refusal that claims to say
- * why every column was dropped must carry every cause, and ``"non-numeric"``
- * -- recorded by the filter that runs before any variance is measured --
- * reaches this function from a mixed selection.
+ * why every column was dropped must carry every cause. The reserved
+ * ``"non-numeric"`` -- recorded by the filter that runs before any variance
+ * is measured, and unreachable through every source this layer can build --
+ * would arrive that way, from a mixed selection.
  *
  * :param reasons: One reason per dropped column, in any order -- the
  *     output is canonically ordered, so the caller's is not a contract.

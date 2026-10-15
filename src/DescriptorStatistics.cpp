@@ -58,6 +58,10 @@ DescriptorStatisticsResult descriptor_statistics(const std::vector<OEChem::OEMol
             result.dropped_reasons.push_back("non-numeric");
         }
     }
+    // Reserved along with the filter above, and unreachable for the same
+    // reason: emptying the selection here takes a column the schema declares
+    // and this layer does not count as numeric.
+    //
     // Kept apart from the all-dropped refusal below, which says the columns
     // were dropped "over these molecules": nothing has been computed over
     // them yet here, and the comparison surface words this same verdict the

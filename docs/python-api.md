@@ -3565,15 +3565,35 @@ the calling entry point: under `-W error` a warning about `inverse_covariance`
 will stop a call that would otherwise have failed on, say, `num_threads`,
 because that filter makes the first warning fatal by design.
 
-`seuclidean` is an alias of `standardized_euclidean`. Non-numeric columns are
-dropped from any selection, on every metric. A zero-variance column is dropped
-only where a variance is being fitted -- `standardized_euclidean`, `seuclidean`
-and `mahalanobis` -- and only when that fit actually runs: over `["CCO", "CCC"]`
-those three metrics lose `HeavyAtomCount`, `FractionCsp3`, `AromaticRingCount`
-and `RotatableBondCount` that way, while `euclidean`, `hamming` and the other
-raw metrics keep all eleven openeye columns. Supplying `variances=` or
-`inverse_covariance=` skips the fit, so the selection is used exactly as given
-and nothing is dropped for variance even on a fitted metric.
+`seuclidean` is an alias of `standardized_euclidean`. A column is dropped for
+its variance only where a variance is being fitted -- `standardized_euclidean`,
+`seuclidean` and `mahalanobis` -- and only when that fit actually runs: over
+`["CCO", "CCC"]` those three metrics lose `HeavyAtomCount`, `FractionCsp3`,
+`AromaticRingCount` and `RotatableBondCount` that way, while `euclidean`,
+`hamming` and the other raw metrics keep all eleven openeye columns. Supplying
+`variances=` or `inverse_covariance=` skips the fit, so the selection is used
+exactly as given and nothing is dropped for variance even on a fitted metric.
+
+The reason recorded with a drop says what the layer was able to establish, and
+each one asks something different of the caller:
+
+- `insufficient-data` -- the column had a value in fewer than two molecules, so
+  no variance was ever measured. Nothing is yet known about the column itself;
+  supply more molecules on which the descriptor is defined.
+- `non-finite-variance` -- a variance was measured and is not finite, because a
+  present value was itself NaN or the accumulation overflowed. Which of those
+  it was is not established. `descriptor_excluded_indices()` names the
+  molecules carrying a non-finite value; drop them, or drop the column from
+  `columns=`.
+- `zero-variance` -- a variance was measured and came out zero or negative. The
+  column is constant over these molecules and carries no signal, so there is
+  nothing to recover: leave it out, or pass molecules it separates.
+
+One further reason, `non-numeric`, is reserved and cannot appear in `dropped`
+today. oecluster counts Bool, Int and Float columns as numeric, and every
+descriptor source it can build -- `openeye`, `mordred` and `rdkit` -- emits
+only those kinds. The handling is kept against OEFP adding a source that emits
+another.
 
 `descriptor_statistics()` has no metric to key on and fits regardless, so it
 reports those same four as `zero-variance` over that pair and leaves them out

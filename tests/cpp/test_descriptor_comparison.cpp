@@ -744,7 +744,12 @@ TEST(DescriptorComparisonMinimumInputTest, AFittedMetricNeedsTwoMolecules) {
     } catch (const ComparisonError& exc) {
         const std::string message(exc.what());
         EXPECT_NE(message.find("at least two molecules"), std::string::npos) << message;
-        EXPECT_EQ(message.find("zero variance"), std::string::npos)
+        // Matched against the refusal the guard pre-empts, so removing the
+        // guard fails here. That wording used to be "zero variance"; the
+        // all-dropped refusal now reports whichever causes applied, and over
+        // one molecule the cause would be insufficient-data -- a needle left
+        // on the old phrasing would have gone on passing.
+        EXPECT_EQ(message.find("column was dropped over these"), std::string::npos)
             << "the error must not blame the descriptors: " << message;
     }
 }
