@@ -58,6 +58,10 @@ DescriptorStatisticsResult descriptor_statistics(const std::vector<OEChem::OEMol
             result.dropped_reasons.push_back("non-numeric");
         }
     }
+    // Kept apart from the all-dropped refusal below, which says the columns
+    // were dropped "over these molecules": nothing has been computed over
+    // them yet here, and the comparison surface words this same verdict the
+    // same way from a validator that holds no molecules at all.
     if (numeric.empty()) {
         throw ComparisonError("Descriptor selection resolved to zero numeric columns");
     }
@@ -92,12 +96,6 @@ DescriptorStatisticsResult descriptor_statistics(const std::vector<OEChem::OEMol
     }
 
     std::vector<size_t> surviving;
-    // Collected as each column is dropped rather than re-derived from the
-    // variances below, so the refusal and the per-column report can never
-    // name different causes for the same column. Kept apart from
-    // result.dropped_reasons, which may already carry a "non-numeric" column
-    // dropped before statistics were asked for and so never a candidate here.
-    std::vector<std::string> drop_reasons;
     for (size_t k = 0; k < numeric.size(); ++k) {
         const std::string& name = schema.Definition(numeric[k]).name;
         const double variance = raw.variance[k];
@@ -106,7 +104,6 @@ DescriptorStatisticsResult descriptor_statistics(const std::vector<OEChem::OEMol
         if (!reason.empty()) {
             result.dropped_columns.push_back(name);
             result.dropped_reasons.push_back(reason);
-            drop_reasons.push_back(reason);
             continue;
         }
         surviving.push_back(numeric[k]);
@@ -123,9 +120,16 @@ DescriptorStatisticsResult descriptor_statistics(const std::vector<OEChem::OEMol
         // causes have to travel in the refusal itself. Naming one cause for
         // all of them told a caller their columns were constant when the
         // truth was that none had enough values to measure.
+        //
+        // Built from result.dropped_reasons, the one ledger both filters
+        // write to, rather than from a second vector collected here. A
+        // message that claims to say why every selected column was dropped
+        // has to read every drop, and the non-numeric filter above records
+        // its own: a selection half emptied there and half here would
+        // otherwise be explained by half its causes.
         throw ComparisonError("Every selected descriptor column was dropped over these "
                               "molecules (" +
-                              join_drop_reasons(drop_reasons) + ")");
+                              join_drop_reasons(result.dropped_reasons) + ")");
     }
 
     if (options.inverse_covariance) {

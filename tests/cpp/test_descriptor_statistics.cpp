@@ -344,13 +344,23 @@ TEST(JoinDropReasonsTest, DeduplicatesAndOrdersCanonically) {
               "insufficient-data, zero-variance");
     EXPECT_EQ(join_drop_reasons({"zero-variance", "non-finite-variance", "insufficient-data"}),
               "insufficient-data, non-finite-variance, zero-variance");
-    // Neither call site can produce this input today: both collect only what
-    // variance_drop_reason returns. It is pinned because "non-numeric" is a
-    // real reason in the same vocabulary, sitting in the same dropped_reasons
-    // vectors, so joining one of those wholesale is the plausible next
-    // mistake -- and the failure worth excluding is the silent one, a reason
-    // the canonical order does not know being dropped from the message rather
-    // than placed last.
+    // Both refusals are built from the surface's whole drop ledger, which the
+    // non-numeric filter writes to before the variance filter does, so
+    // "non-numeric" is an input the helper really receives -- from a mixed
+    // selection, where some columns are dropped as non-numeric and the
+    // remaining numeric ones all fail the variance test. The refusal claims to
+    // say why every selected column was dropped, so the reason has to reach
+    // the message rather than be silently discarded for sitting outside the
+    // canonical order. It is placed after the causes that are in it.
+    //
+    // No descriptor source OEFP 0.3.0 ships emits a non-numeric column, so
+    // these shapes cannot be driven through a schema and are pinned here
+    // instead. The filter they come from is kept against schema drift, and a
+    // message that over-claims the moment it fires is the defect this helper
+    // exists to prevent.
+    EXPECT_EQ(join_drop_reasons({"non-numeric"}), "non-numeric");
     EXPECT_EQ(join_drop_reasons({"non-numeric", "zero-variance"}),
               "zero-variance, non-numeric");
+    EXPECT_EQ(join_drop_reasons({"non-numeric", "insufficient-data", "non-numeric"}),
+              "insufficient-data, non-numeric");
 }

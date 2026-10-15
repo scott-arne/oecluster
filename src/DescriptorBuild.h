@@ -87,7 +87,10 @@ std::string variance_drop_reason(double variance, size_t present_count);
  * ``non-finite-variance``, ``zero-variance`` -- so that one unusable
  * selection produces one message however the caller ordered the columns.
  * A reason outside that set keeps its collected position after the ones in
- * it rather than being dropped from the list.
+ * it rather than being dropped from the list: a refusal that claims to say
+ * why every column was dropped must carry every cause, and ``"non-numeric"``
+ * -- recorded by the filter that runs before any variance is measured --
+ * reaches this function from a mixed selection.
  *
  * :param reasons: One reason per dropped column, in column order.
  * :returns: The reasons joined with ``", "``, or ``""`` for no reasons.

@@ -949,14 +949,14 @@ TEST_F(DescriptorMissingnessTest, IgnoreEscalatesToNaNPresentWhenNaNActuallyReac
 // ordering exists for, and no test above reaches it -- though not for want of a
 // present-and-NaN gap. The missingness fixture has one, FractionCsp3 on its six
 // untyped species. It also has an absent gap on those same six rows, XLogP, so
-// the row check fires whether it runs before or after the zero-variance drop
+// the row check fires whether it runs before or after the variance filter
 // removes FractionCsp3. Isolating the ordering needs a fixture whose only gap
 // is the present-and-NaN one, which is what this one is.
 //
 // Measured against OEFP 0.3.0 and OpenEye 2026.1.0 over water plus the five
 // organics: zero absent cells, exactly one present-and-NaN cell (FractionCsp3
 // on water), and FractionCsp3 is the only one of the 11 columns whose variance
-// is non-finite. Validate after the zero-variance drop and that column is gone,
+// is non-finite. Validate after the variance filter and that column is gone,
 // the remaining 10 are complete, and the constructor silently scores a molecule
 // that descriptor_excluded_indices excludes.
 class DescriptorPresentNaNTest : public ::testing::Test {

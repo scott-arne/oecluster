@@ -69,6 +69,10 @@ std::vector<size_t> numeric_selection(const OEFP::DescriptorSchema& schema,
             dropped_reasons.push_back("non-numeric");
         }
     }
+    // Kept apart from the all-dropped refusal below, which says the columns
+    // were dropped "over these molecules": this function is also called by
+    // validate_descriptor_options, which holds no molecules at all, and the
+    // verdict is a property of the schema rather than of any input.
     if (numeric.empty()) {
         throw ComparisonError("Descriptor selection resolved to zero numeric columns");
     }
@@ -340,7 +344,7 @@ DescriptorComparison::DescriptorComparison(const std::vector<OEChem::OEMolBase*>
         // dropped below. A column whose gaps are present-and-NaN rather than
         // absent has a non-finite variance -- FractionCsp3 over a set that
         // includes water, or RDKit's BCUT2D_* over a bare ion -- so the
-        // zero-variance filter would remove that column and leave the offending
+        // variance filter would remove that column and leave the offending
         // rows to pass an after-the-fact row check unchallenged. The
         // constructor would then silently score molecules that
         // descriptor_excluded_indices excludes, and the filtered and unfiltered
@@ -363,12 +367,6 @@ DescriptorComparison::DescriptorComparison(const std::vector<OEChem::OEMolBase*>
                 OEFP::ColumnStatistics(batch, OEFP::DescriptorSelection::Indices(selection));
             std::vector<size_t> surviving;
             std::vector<double> variances;
-            // Collected as each column is dropped rather than re-derived from
-            // the variances below, so the refusal and DroppedReasons() can
-            // never name different causes for the same column. Only the
-            // variance causes belong here: a non-numeric column was dropped
-            // before the fit was attempted and never reached this selection.
-            std::vector<std::string> drop_reasons;
             for (size_t k = 0; k < selection.size(); ++k) {
                 const double variance = stats.variance[k];
                 const std::string reason = variance_drop_reason(
@@ -376,7 +374,6 @@ DescriptorComparison::DescriptorComparison(const std::vector<OEChem::OEMolBase*>
                 if (!reason.empty()) {
                     impl->dropped_columns.push_back(schema.Definition(selection[k]).name);
                     impl->dropped_reasons.push_back(reason);
-                    drop_reasons.push_back(reason);
                     continue;
                 }
                 surviving.push_back(selection[k]);
@@ -388,9 +385,17 @@ DescriptorComparison::DescriptorComparison(const std::vector<OEChem::OEMolBase*>
                 // one cause for all of them told a caller their columns were
                 // constant when the truth was that none had enough values to
                 // measure.
+                //
+                // Built from impl->dropped_reasons, the one ledger both
+                // filters write to, rather than from a second vector
+                // collected here. A message that claims to say why every
+                // selected column was dropped has to read every drop, and
+                // numeric_selection records its own above: a selection half
+                // emptied there and half here would otherwise be explained
+                // by half its causes.
                 throw ComparisonError("Every selected descriptor column was dropped over these "
                                       "molecules (" +
-                                      join_drop_reasons(drop_reasons) +
+                                      join_drop_reasons(impl->dropped_reasons) +
                                       "); there is no distance to compute");
             }
             if (surviving.size() != selection.size()) {

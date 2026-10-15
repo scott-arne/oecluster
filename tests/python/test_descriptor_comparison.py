@@ -159,7 +159,7 @@ def test_descriptor_statistics_reports_the_covariance_row_count():
     """An absent value costs its row in the covariance but not elsewhere.
 
     OpenEye assigns sodium no XLogP value, and XLogP survives the
-    zero-variance drop here, so the sodium row reaches the per-column
+    variance filter here, so the sodium row reaches the per-column
     statistics but is deleted listwise from the covariance. A caller reading
     ``num_rows`` beside the matrix would overstate what produced it.
 
