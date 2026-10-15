@@ -373,3 +373,18 @@ TEST(JoinDropReasonsTest, DeduplicatesAndOrdersCanonically) {
     EXPECT_EQ(join_drop_reasons({"non-numeric", "insufficient-data", "non-numeric"}),
               "insufficient-data, non-numeric");
 }
+
+TEST(JoinDropReasonsTest, TwoOutOfSetReasonsDoNotCarryTheCollectorsOrder) {
+    // Simulated like the shapes above, and a step further out: there is one
+    // reason outside the canonical set today, so the tie this pins cannot be
+    // reached at all. What makes it worth pinning is that the guarantee the
+    // header states -- that the order the reasons were collected in never
+    // reaches a public message -- would otherwise hold only while that stays
+    // true. Equal-ranked reasons are ordered by the reason itself, so a second
+    // one arriving does not make the message depend on the ledger's order.
+    EXPECT_EQ(join_drop_reasons({"future-b", "future-a"}),
+              join_drop_reasons({"future-a", "future-b"}));
+    EXPECT_EQ(join_drop_reasons({"future-b", "future-a"}), "future-a, future-b");
+    EXPECT_EQ(join_drop_reasons({"future-b", "zero-variance", "future-a"}),
+              "zero-variance, future-a, future-b");
+}

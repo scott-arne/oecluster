@@ -84,14 +84,15 @@ std::string variance_drop_reason(double variance, size_t present_count);
  *
  * Duplicates are removed, keeping each reason's first appearance, and what
  * remains is ordered canonically -- ``insufficient-data``,
- * ``non-finite-variance``, ``zero-variance`` -- so that the order the
- * reasons were collected in never reaches a public message. The ledgers
- * append every non-numeric drop before any variance drop, and a future
- * collector could append in some third order; sorting here means one
- * unusable selection produces one message whichever order that is.
- * A reason outside that set keeps its collected position after the ones in
- * it rather than being dropped from the list: a refusal that claims to say
- * why every column was dropped must carry every cause. The reserved
+ * ``non-finite-variance``, ``zero-variance``, then any reason outside that
+ * set, alphabetically among themselves -- so that the order the reasons
+ * were collected in never reaches a public message. The ledgers append
+ * every non-numeric drop before any variance drop, and a future collector
+ * could append in some third order; ordering here means one unusable
+ * selection produces one message whichever order that is.
+ * A reason outside that set is ranked after the ones in it rather than
+ * being dropped from the list: a refusal that claims to say why every
+ * column was dropped must carry every cause. The reserved
  * ``"non-numeric"`` -- recorded by the filter that runs before any variance
  * is measured, and unreachable through every source this layer can build --
  * would arrive that way, from a mixed selection.

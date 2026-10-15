@@ -148,17 +148,26 @@ std::string join_drop_reasons(const std::vector<std::string>& reasons) {
         }
     }
 
-    // An unknown reason lands at CANONICAL_ORDER.size(), which ranks it last,
-    // and the sort is stable so several of them keep the order they were
-    // collected in instead of being reordered arbitrarily against each other.
+    // An unknown reason lands at CANONICAL_ORDER.size(), which ranks it last.
+    // Several of them share that rank, so the reason itself breaks the tie:
+    // the same set of reasons has to produce the same public message whatever
+    // order it was collected in, and leaving the tie to a stable sort would
+    // have carried the collector's order into that message instead. With
+    // duplicates already removed, (rank, reason) is distinct per element, so
+    // no tie survives for stability to decide.
     const auto rank = [](const std::string& reason) {
         return std::distance(CANONICAL_ORDER.begin(),
                              std::find(CANONICAL_ORDER.begin(), CANONICAL_ORDER.end(), reason));
     };
-    std::stable_sort(distinct.begin(), distinct.end(),
-                     [&rank](const std::string& left, const std::string& right) {
-                         return rank(left) < rank(right);
-                     });
+    std::sort(distinct.begin(), distinct.end(),
+              [&rank](const std::string& left, const std::string& right) {
+                  const auto left_rank = rank(left);
+                  const auto right_rank = rank(right);
+                  if (left_rank != right_rank) {
+                      return left_rank < right_rank;
+                  }
+                  return left < right;
+              });
 
     std::string joined;
     for (const std::string& reason : distinct) {
