@@ -3580,16 +3580,37 @@ each one asks something different of the caller:
 - `insufficient-data` -- the column had a value in fewer than two molecules, so
   no variance was ever measured. Nothing is yet known about the column itself;
   supply more molecules on which the descriptor is defined.
-- `non-finite-variance` -- the fitted variance is not finite. That is the whole
-  of what the layer established: the values themselves may be finite, since an
+- `non-finite-variance` -- the fitted variance is not finite, and that is the
+  whole of what the layer established. The values themselves may be finite: an
   accumulation over values spanning a wide magnitude range can overflow on its
-  own. So the remedy depends on something you have to find out separately. If
-  the column does hold non-finite values -- `descriptor_excluded_indices()`
-  names the molecules carrying one -- drop those molecules. If it does not, the
-  fit overflowed, and the column has to be rescaled or left out of `columns=`.
+  own. The two cases need different remedies, and telling them apart takes the
+  second call below.
 - `zero-variance` -- a variance was measured and came out zero or negative. The
   column is constant over these molecules and carries no signal, so there is
   nothing to recover: leave it out, or pass molecules it separates.
+
+That second call runs over the dropped column alone.
+`descriptor_excluded_indices` reports the rows `missing="complete_case"` would
+drop. The package does not re-export it, so it is reached through the raw
+bindings (see [Advanced C++ Binding Access](#advanced-c-binding-access)), and
+`columns` on a raw `DescriptorOptions` takes a `StringVector` rather than a
+list:
+
+```python
+raw = oecluster.oecluster
+opts = raw.DescriptorOptions()
+opts.columns = raw.StringVector(["FractionCsp3"])
+rows = list(raw.descriptor_excluded_indices(mols, opts))
+```
+
+An empty `rows` settles it: every value in that column was present and finite,
+so the accumulation is what overflowed, and the column has to be rescaled or
+left out of `columns=`. A non-empty `rows` says less than it looks. It is one
+undifferentiated row mask over the columns asked for -- a row enters it for an
+absent value exactly as it does for a non-finite one, and the result does not
+say which of the two was found. Narrowing `columns` to the dropped column is
+what makes the answer about that column at all: over the original selection the
+same call also returns rows that some other column is merely missing.
 
 One further reason, `non-numeric`, is reserved and cannot appear in `dropped`
 today. oecluster counts Bool, Int and Float columns as numeric, and every
