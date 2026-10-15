@@ -40,7 +40,7 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   with the comparison's trailing "; there is no distance to compute"
   unchanged. The causes are deduplicated and ordered `insufficient-data`,
   `non-finite-variance`, `zero-variance`, so one unusable selection gives
-  one message however the columns were ordered. This message is the whole
+  one message however the drops were collected. This message is the whole
   account the caller gets: the constructor throws before `DroppedReasons()`
   can be read, and `descriptor_statistics()` returns no drop report when it
   refuses.

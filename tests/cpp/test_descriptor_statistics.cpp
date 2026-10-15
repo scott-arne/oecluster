@@ -142,9 +142,11 @@ TEST_F(DescriptorStatisticsTest, UnknownGroupIsRejected) {
 }
 
 TEST_F(DescriptorStatisticsTest, TooFewMoleculesIsRejectedByCount) {
-    // The pre-guard behavior was to report every column as zero-variance, which
-    // is a different and false claim. Match on the count so a regression back to
-    // that message fails here rather than passing on the exception type alone.
+    // Matched against the refusal the guard pre-empts, so removing the guard
+    // fails here. That refusal used to report every column as zero-variance;
+    // it now names the causes present, and under two molecules every column
+    // trips present_count < 2, so the cause would be insufficient-data. Both
+    // refusals throw ComparisonError, so match on the count, not the type.
     for (size_t n : {size_t{0}, size_t{1}}) {
         const std::vector<OEChem::OEMolBase*> few(mols_.begin(), mols_.begin() + n);
         DescriptorStatisticsOptions options;
