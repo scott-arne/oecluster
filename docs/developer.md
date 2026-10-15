@@ -60,8 +60,9 @@ importable because the package imports it at module load.
 ## Building The Extension
 
 The C++/SWIG extension is built and tested with CMake. The committed presets
-hard-code an interpreter path that may not exist, so override it on the command
-line and use the micromamba `main` interpreter:
+carry no machine paths: set `OPENEYE_ROOT` in the environment or in a gitignored
+`CMakeUserPresets.json` (see the README), and pass
+`-DPython3_EXECUTABLE=/path/to/python` when configuring:
 
 ```bash
 cmake --build build --target oecluster_python
@@ -71,7 +72,7 @@ cd build && ctest --output-on-failure
 Run the Python suite with the same interpreter:
 
 ```bash
-/Users/johnss51/Applications/micromamba/envs/main/bin/python -m pytest tests/python
+/path/to/python -m pytest tests/python
 ```
 
 The package version is read live from `python/oecluster/__init__.py` in an
