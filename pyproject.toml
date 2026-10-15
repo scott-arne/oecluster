@@ -7,7 +7,7 @@
 # exchanges native objects with the oefp wheel, which loads pyarrow's Arrow
 # too). Mirrored by PYARROW_REQUIREMENT in .github/workflows/build-wheels.yml
 # and by oefp's own pin.
-requires = ["scikit-build-core>=0.8", "swig>=4.0", "pyarrow>=25,<26"]
+requires = ["scikit-build-core>=0.8", "swig>=4.4.1", "pyarrow>=25,<26"]
 build-backend = "scikit_build_core.build"
 
 [project]
