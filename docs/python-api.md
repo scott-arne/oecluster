@@ -3599,9 +3599,22 @@ list:
 ```python
 raw = oecluster.oecluster
 opts = raw.DescriptorOptions()
-opts.columns = raw.StringVector(["FractionCsp3"])
+opts.sources = raw.StringVector(["rdkit"])
+opts.columns = raw.StringVector(["BCUT2D_MWHI"])
 rows = list(raw.descriptor_excluded_indices(mols, opts))
 ```
+
+`sources` has to be the same list, in the same order, as the request the drop
+came from. Narrowing without it resolves nothing: a column name is looked up in
+the schema those sources build, and `DescriptorOptions` defaults to
+`["openeye"]`, so the call above with the default raises `RuntimeError: Unknown
+descriptor column: BCUT2D_MWHI`. That is the likely case rather than a corner
+one, since `rdkit` is the source that emits present NaNs in practice. Order
+matters where two sources declare the same column name, because OEFP keeps the
+first and discards the rest. A `groups` selection is deliberately not carried
+-- replacing it with the one column is the narrowing. Nothing else in
+`DescriptorOptions` moves the answer: `metric`, `missing`, `p` and the two
+overrides can only turn the call into a refusal.
 
 An empty `rows` settles it: every value in that column was present and finite,
 so the accumulation is what overflowed, and the column has to be rescaled or
