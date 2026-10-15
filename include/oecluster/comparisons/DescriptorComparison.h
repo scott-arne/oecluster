@@ -21,7 +21,7 @@ namespace OECluster {
  *
  * ``variances`` and ``inverse_covariance`` are mutually exclusive overrides for
  * the two fitted metrics. Supplying one skips fitting and skips the
- * zero-variance drop, so the selection is used exactly as given.
+ * variance drop, so the selection is used exactly as given.
  */
 struct DescriptorOptions {
     std::vector<std::string> sources;  ///< Empty selects {"openeye"}.
@@ -81,8 +81,8 @@ public:
      * :raises ComparisonError: Among the reasons: a source, column, group,
      *     metric, or missing policy is invalid; an override does not match the
      *     selection; a fitted metric was asked to fit fewer than two molecules;
-     *     every selected column is dropped, for whichever of the three causes
-     *     the refusal names; or ``complete_case`` is requested and a selected
+     *     every selected column is dropped, for whichever causes the refusal
+     *     names; or ``complete_case`` is requested and a selected
      *     value is absent or non-finite.
      */
     explicit DescriptorComparison(const std::vector<OEChem::OEMolBase*>& mols,
@@ -127,7 +127,7 @@ private:
  *
  * A molecule is excluded when any selected descriptor value is absent or not
  * finite. The selection is resolved exactly as ``DescriptorComparison`` would
- * resolve it, before any zero-variance drop, so filtering and scoring agree.
+ * resolve it, before any variance drop, so filtering and scoring agree.
  *
  * The options are validated by ``validate_descriptor_options`` before anything
  * is computed, because the caller who filters here goes on to construct with
