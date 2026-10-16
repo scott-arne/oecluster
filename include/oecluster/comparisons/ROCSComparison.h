@@ -56,11 +56,13 @@ struct ROCSOptions {
  *
  * ``Compare(i, j)`` is directional: it makes ``i`` the overlay reference and
  * searches only ``j``'s conformers, so the two orientations of a pair are two
- * different searches with two different answers. ``pdist`` fills one triangle
- * and presents it as symmetric, so it routes through a protected seam,
- * ``CompareUnordered``, which scores both orientations and keeps the better
- * overlay. That seam is not part of the public surface and does not appear in
- * the bindings. ``cdist`` and direct ``Compare`` callers keep the directional
+ * different searches whose answers may differ. They need not: a self-pair, a
+ * duplicate and any genuinely symmetric pair agree either way, which is why
+ * ``CompareUnordered`` runs one search when ``i == j``. ``pdist`` fills one
+ * triangle and presents it as symmetric, so it routes through a protected
+ * seam, ``CompareUnordered``, which scores both orientations and keeps the
+ * better overlay. That seam is not part of the public surface and does not
+ * appear in the bindings. ``cdist`` and direct ``Compare`` callers keep the directional
  * meaning, which is the one their output documents -- a ``cdist`` row says what
  * each reference finds in the fit set, and symmetrizing it would answer a
  * different question.

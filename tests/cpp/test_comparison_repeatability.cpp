@@ -8,9 +8,9 @@
  * chunk. Its exactness rests on Compare being repeatable across differing
  * clone histories, which PairwiseComparison does not promise. These tests are
  * the evidence for that precondition, family by family. ROCS used to fail it
- * and no longer does; the last three tests record the half it now satisfies,
- * and the comment above them records the half that cannot be measured while
- * the builders refuse it.
+ * and no longer does on the fixtures below; the last three tests record that
+ * half of it, measured rather than promised, and the comment above them
+ * records the half that cannot be measured while the builders refuse it.
  */
 
 #include <gtest/gtest-spi.h>

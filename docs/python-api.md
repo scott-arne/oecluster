@@ -197,8 +197,10 @@ to the threshold can be decided differently. The two passes must see the same
 value for every pair; the test suite checks every built-in comparison family
 except ROCS, in one or two configurations each, and each returns
 bit-identical values across calls and across clones with different
-histories. ROCS satisfies that much too, now that every search builds its own
-overlay -- it did not while one was reused per clone -- but the whole-graph
+histories. ROCS passes that much too on the three fixtures it is run over,
+now that every search builds its own overlay -- it did not while one was
+reused per clone -- though OEShape promises no bit identity, so those
+fixtures measure the property rather than guarantee it. The whole-graph
 half of the check has never run for it, because these paths refuse it before
 it starts. They still refuse it, now for want of evidence rather than against
 it; cluster a ROCS matrix from `pdist()` instead. A native comparison that
@@ -277,11 +279,12 @@ provided the comparison is repeatable: `Compare(i, j)` must return a
 bit-identical value on every call and every clone. The test suite checks
 every built-in comparison family except ROCS, in one or two configurations
 each, and each returns bit-identical values across calls and across clones.
-ROCS does too, now that every search builds its own overlay, but these paths
-still refuse it: the whole-graph half of the evidence cannot be gathered while
-they do. Against `pdist()` the agreement is per distance, to about
-1e-12, so distances that close can tie or order differently and change the
-tree.
+ROCS passes that check too, on the three fixtures it is run over, now that
+every search builds its own overlay -- a measurement, not a guarantee, since
+OEShape promises no bit identity. These paths still refuse it, and the
+whole-graph half of the evidence cannot be gathered while they do. Against
+`pdist()` the agreement is per distance, to about 1e-12, so distances that
+close can tie or order differently and change the tree.
 
 **The distance domain.** Every linkage needs finite distances -- since
 5.21.0 complete, average and weighted linkage do too, not single linkage
@@ -532,10 +535,11 @@ through the same `Compare`, for every `num_threads` and `chunk_size`,
 provided the comparison is repeatable: the test suite checks the two forms
 bitwise on labels, medoids, cost and iteration count. ROCS is refused here as
 on the other comparison paths. Its scores stopped depending on clone history
-when every search began building its own overlay, but the refusal stands until
-the whole-graph evidence exists; cluster a ROCS matrix from `pdist()` instead.
-Against `pdist()`, whose batched kernels agree with `Compare` only to about
-1e-12, a cost that close to a tie can be decided differently.
+on the fixtures that measure it, once every search began building its own
+overlay, but the refusal stands until the whole-graph evidence exists;
+cluster a ROCS matrix from `pdist()` instead. Against `pdist()`, whose
+batched kernels agree with `Compare` only to about 1e-12, a cost that close
+to a tie can be decided differently.
 
 **What it costs: passes, not exactness.** A converged run makes
 `init passes + (iterations + 1) + n_clusters` passes over every pair, each of
@@ -3419,11 +3423,14 @@ Distance ranges: combo_norm [0, 1], combo [0, 2], shape [0, 1], color [0, 1].
 
 **A ROCS score is directional, and `pdist` is the one entry point that hides
 it.** Scoring a pair makes the first molecule the overlay reference and
-searches only the second molecule's conformers, so the two orientations are two
-different searches with two different answers. Measured over three flexible
-multiconformer molecules at twenty conformers each, the largest gap between the
-two orientations is 0.0355 on `combo_norm`, 0.0710 on `combo`, 0.0660 on
-`shape` and 0.0010 on `color` -- each on its own scale, and one fixture rather
+searches only the second molecule's conformers, so the two orientations are
+two different searches whose answers may differ. They need not: a self-pair,
+a duplicate and any genuinely symmetric pair come back the same either way,
+which is why the symmetrizing seam runs one search when the two indices are
+equal. Measured over three flexible multiconformer molecules at twenty
+conformers each, the largest gap between the two orientations is 0.0355 on
+`combo_norm`, 0.0710 on `combo`, 0.0660 on `shape` and 0.0010 on `color` --
+each on its own scale, and one fixture rather
 than a bound. `pdist` stores a single triangle and mirrors it, so it scores
 both orientations and keeps the better overlay.
 

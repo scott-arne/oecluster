@@ -3399,11 +3399,13 @@ def hdbscan(items=_MISSING, *, distance_matrix=_MISSING, min_cluster_size=5,
         every call and every clone. The test suite checks every built-in
         comparison family except ROCS, in one or two configurations each;
         ROCS is refused, not because it fails that check -- it stopped
-        failing it, since every search began building its own overlay --
-        but because the whole-graph half of the evidence cannot be gathered
-        while it is refused. Against :func:`pdist`, whose batched kernels
-        agree with ``Compare`` only to about 1e-12, distances that close can
-        tie or order differently and change the tree.
+        failing it on the fixtures that measure it, since every search began
+        building its own overlay -- but because those fixtures measure the
+        property rather than guarantee it, and the whole-graph half of the
+        evidence cannot be gathered while it is refused. Against
+        :func:`pdist`, whose batched kernels agree with ``Compare`` only to
+        about 1e-12, distances that close can tie or order differently and
+        change the tree.
     :raises TypeError: If both or neither of ``items`` and
         ``distance_matrix`` are given; the arguments fit none of the three
         forms, or ``comparison`` or a keyword this function does not take
@@ -3567,11 +3569,12 @@ def agglomerative(items=_MISSING, *, distance_matrix=_MISSING, n_clusters=2,
         bit-identical value on every call and every clone. The test suite
         checks every built-in comparison family except ROCS, in one or two
         configurations each; ROCS is refused, not for failing that check --
-        it stopped failing it when every search began building its own
-        overlay -- but because the whole-graph half of the evidence cannot
-        be gathered while it is refused. Against :func:`pdist`, whose batched
-        kernels agree with ``Compare`` only to about 1e-12, distances that
-        close can tie or order differently.
+        it stopped failing it on the fixtures that measure it, when every
+        search began building its own overlay -- but because those fixtures
+        measure the property rather than guarantee it, and the whole-graph
+        half of the evidence cannot be gathered while it is refused. Against
+        :func:`pdist`, whose batched kernels agree with ``Compare`` only to
+        about 1e-12, distances that close can tie or order differently.
     :raises TypeError: If both or neither of ``items`` and
         ``distance_matrix`` are given; the arguments fit none of the three
         forms, or ``comparison`` or a keyword this function does not take
