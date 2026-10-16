@@ -133,9 +133,12 @@ protected:
     /// member. The call sits inside ``pdist``'s ``ParallelFor`` lambda, whose
     /// body is access-checked in the context of the enclosing function, and it
     /// goes through a ``std::unique_ptr<PairwiseComparison>``; neither changes
-    /// what this declaration has to say. No default argument here: ``PDist.h``
-    /// owns the one for ``options``, and a friend declaration that is also the
-    /// first declaration of a function may not supply one.
+    /// what this declaration has to say. No default argument here, and it is
+    /// not a matter of taste: adding one was tried on 2026-10-15 and is
+    /// rejected either way round -- ``friend declaration specifying a default
+    /// argument must be a definition`` where this header is seen first, and
+    /// ``redefinition of default argument`` where ``PDist.h`` is. ``PDist.h``
+    /// owns the one for ``options``.
     ///
     /// Hidden from SWIG, for a smaller reason than it might look. Measured on
     /// 2026-10-15 with the guard removed: SWIG matches this declaration to the

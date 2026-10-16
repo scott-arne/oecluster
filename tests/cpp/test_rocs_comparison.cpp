@@ -597,9 +597,9 @@ struct CompareUnorderedIsPublic<
 // The seam must not become a second public way to compare two items, and the
 // access of an override is set by its own declaration rather than inherited
 // from the function it overrides, so the base and the ROCS override each have
-// to be checked. These two assertions are the only thing in the suite that
-// catches a public one: re-exposing the member through a derived class, as the
-// probe below does, compiles whatever access it had.
+// to be checked. Nothing else in this file catches a public one: re-exposing
+// the member through a derived class, as the probe below does, compiles
+// whatever access it had.
 static_assert(!CompareUnorderedIsPublic<PairwiseComparison>::value,
               "PairwiseComparison::CompareUnordered must stay protected");
 static_assert(!CompareUnorderedIsPublic<ROCSComparison>::value,
@@ -622,17 +622,20 @@ TEST_F(ROCSComparisonTest, UnorderedKeepsTheBetterOverlayForEveryScoreType) {
     // implementation that took the maximum of the converted values instead of
     // the raw ones, on 2026-10-15: all four similarity rows pass, and three of
     // the four distance rows fail. The Color distance row stays silent, its two
-    // orientations agreeing to 0.000000 on this fixture, which is the reason
-    // the fixture is two flexible molecules rather than a Color-bearing pair --
-    // no fixture was found that separates all eight rows at once.
+    // orientations agreeing to 0.000000 on this fixture. No fixture separating
+    // all eight rows at once was looked for; what carries the Color rows
+    // instead is that all four types share one combine, which the
+    // ROCSScoreCombine tests below exercise directly.
     const std::vector<std::shared_ptr<OEChem::OEMol>> flexible{
         MakeConformer("CCCCCCCC", 20), MakeConformer("c1ccc(CCCCO)cc1", 20)};
     ASSERT_GT(flexible[0]->NumConfs(), 1u);
     ASSERT_GT(flexible[1]->NumConfs(), 1u);
 
     // Not exact agreement: the overlay keeps state between calls, so the pair
-    // of searches run for {0, 1} is not bit-identical to the pair run for
-    // {1, 0}, nor to the two standalone Compare calls below.
+    // of searches run for {0, 1} need not be bit-identical to the pair run for
+    // {1, 0}, nor to the two standalone Compare calls below. On this fixture
+    // they currently are, which is why the tolerance is not load-bearing here
+    // and must not be read as a measured residual.
     constexpr double tolerance = 1e-6;
     double largest_orientation_gap = 0.0;
 
@@ -673,10 +676,12 @@ TEST_F(ROCSComparisonTest, UnorderedKeepsTheBetterOverlayForEveryScoreType) {
 }
 
 TEST_F(ROCSComparisonTest, UnorderedAgreesWithCompareOnTheDiagonal) {
-    // pdist stores no diagonal, so the short-circuit is for a future caller.
-    // What is pinned is that it delegates instead of scoring two orientations:
-    // a self-pair has only one search to run, and running it twice would cost
-    // twice as much for an answer no better.
+    // Numerical parity on the diagonal between the two entry points, and
+    // nothing more. This reads returned values only, so it cannot see whether
+    // the short-circuit ran one self-search or two -- an implementation that
+    // scored both orientations of a self-pair and returned either one would
+    // pass. The cost argument for the short-circuit is in ROCSComparison.cpp,
+    // where it is a reading of the code rather than a claim about this test.
     //
     // Agreement to a tolerance rather than bit-equality, for the reason this
     // whole commit gives: the two calls below are two separate searches with

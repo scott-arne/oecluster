@@ -3420,9 +3420,16 @@ multiconformer molecules at twenty conformers each, the largest gap between the
 two orientations is 0.0355 on `combo_norm`, 0.0710 on `combo`, 0.0660 on
 `shape` and 0.0010 on `color` -- each on its own scale, and one fixture rather
 than a bound. `pdist` stores a single triangle and mirrors it, so it scores
-both orientations and keeps the better overlay; reordering the input list no
-longer moves the matrix beyond the residual described below, and so no longer
-moves the clustering.
+both orientations and keeps the better overlay.
+
+What that buys is the removal of the orientation-scale dependence -- the
+0.0355 effect above -- from a reordered `pdist`. It is not a promise that
+clustering a reordered list gives identical labels. The residual scorer noise
+described below survives, and clustering is categorical: a distance sitting on
+a `threshold`, or a tie between two equally close candidate neighbours, can
+fall the other way on a residual far smaller than the 1e-6 the matrix is
+pinned to. What changed is the size of what can move: an effect on the scale
+of the numbers above, rather than one on the scale of the residual.
 
 The cost is two overlay searches per pair instead of one: a `pdist` over n
 molecules now runs n*(n-1) searches rather than n*(n-1)/2, plus the n

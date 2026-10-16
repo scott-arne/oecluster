@@ -715,7 +715,8 @@ def test_pdist_rocs_end_to_end():
     assert np.allclose(square, square.T)
 
 
-def _multiconformer_rocs_mols():
+@pytest.fixture(scope="module")
+def multiconformer_rocs_mols():
     """Three flexible molecules with real ensembles, for the ROCS order test.
 
     Every molecule in ``test_pdist_rocs_end_to_end`` is built with
@@ -725,7 +726,14 @@ def _multiconformer_rocs_mols():
     three reach. Flexible molecules at twenty conformers each are what make
     ``BestOverlay`` a genuine search and the two orientations of a pair
     genuinely different answers.
+
+    Module-scoped because the test below is parameterized over four score types
+    and Omega need not run four times to produce the same ensembles. The
+    molecules are only read afterwards -- ``ROCSComparison`` snapshots its own
+    copies and prepares those -- so sharing them across parameters cannot carry
+    state from one to the next.
     """
+    pytest.importorskip("openeye.oeomega")
     from openeye import oechem, oeomega
 
     omega = oeomega.OEOmega()
@@ -743,39 +751,78 @@ def _multiconformer_rocs_mols():
 
 
 # Measured 2026-10-15: the largest absolute disagreement between the forward
-# and reversed matrices on the fixture above is exactly 0.0, for all three
-# pairs and on all four score types. Zero is still not the right tolerance to
-# assert, because the overlay keeps state between calls and nothing promises a
-# future fixture will stay at zero; 1e-6 is the float-precision scale
-# OEBestOverlayScore actually works at, the same reasoning and the same value
-# as SELF_SCORE_TOLERANCE in ROCSComparison.cpp. The directional gap this has
-# to catch on this fixture is 0.0355 on combo_norm, which the test below runs,
-# so the tolerance sits more than four orders of magnitude clear of it.
+# and reversed matrices on the fixture above is exactly 0.0, on all four score
+# types. Zero is still not the right tolerance to assert, because the overlay
+# keeps state between calls and nothing promises a future fixture will stay at
+# zero; 1e-6 is the float-precision scale OEBestOverlayScore actually works at,
+# the same reasoning and the same value as SELF_SCORE_TOLERANCE in
+# ROCSComparison.cpp. The smallest directional gap it has to catch is 0.00099,
+# on color, which still leaves it three orders of magnitude clear.
 ROCS_ORDER_TOLERANCE = 1e-6
 
+# Half the orientation gap measured on this fixture on 2026-10-15 --
+# combo_norm 0.035512, combo 0.071024, shape 0.066000, color 0.000994 -- so
+# each floor is a real observation halved rather than a round number, and a
+# fixture that drifted most of the way to symmetric would fail here rather
+# than let the reversal check below pass vacuously.
+ROCS_MIN_ORIENTATION_GAP = {
+    "combo_norm": 0.0177,
+    "combo": 0.0355,
+    "shape": 0.0330,
+    "color": 0.0004,
+}
 
-def test_rocs_pdist_does_not_depend_on_input_order():
+
+def _rocs_orientation_gap(mols, score_type):
+    """The directional gap on ``mols``, measured without the symmetrization.
+
+    ``cdist(mols, mols)`` fills the whole square and keeps it directional:
+    entry ``[i, j]`` scores ``mols[i]`` as the overlay reference against
+    ``mols[j]``'s conformers, so entry ``[j, i]`` is the same pair the other way
+    round and the block's own asymmetry is the orientation gap. One call rather
+    than two, and through the public surface rather than the protected seam.
+    """
+    import oecluster
+
+    block = np.asarray(oecluster.cdist(mols, mols, "rocs", score_type=score_type))
+    off_diagonal = ~np.eye(len(mols), dtype=bool)
+    return float(np.max(np.abs(block - block.T)[off_diagonal]))
+
+
+@pytest.mark.parametrize("score_type", ["combo_norm", "combo", "shape", "color"])
+def test_rocs_pdist_does_not_depend_on_input_order(multiconformer_rocs_mols,
+                                                   score_type):
     """ROCS scores one orientation; pdist stores one triangle as symmetric.
 
     Agreement is within a tolerance, not exact: the ROCS overlay keeps state
     between calls, so a score is not a pure function of its pair.
+
+    All four score types, because the guide claims the residual on all four and
+    a test narrower than its documentation leaves the rest unpinned. The
+    combine happens on the raw Tanimoto and each type converts it differently,
+    so these are four distinct conversions of one rule.
     """
-    pytest.importorskip("openeye.oeomega")
     import oecluster
 
-    mols = _multiconformer_rocs_mols()
-    forward = np.asarray(oecluster.pdist(mols, comparison="rocs").squareform())
+    mols = multiconformer_rocs_mols
+
+    # First establish that the two orientations disagree at all on this
+    # fixture. Without this the reversal check below is satisfied by any
+    # scorer that is already symmetric, including a one-orientation
+    # implementation running on molecules that happen not to discriminate --
+    # which is the regression this test exists to catch.
+    gap = _rocs_orientation_gap(mols, score_type)
+    assert gap > ROCS_MIN_ORIENTATION_GAP[score_type], (
+        f"the {score_type} orientations no longer disagree on this fixture "
+        f"(gap={gap}), so the reversal assertion below would pass vacuously")
+
+    forward = np.asarray(
+        oecluster.pdist(mols, comparison="rocs", score_type=score_type).squareform())
     reversed_ = np.asarray(
-        oecluster.pdist(mols[::-1], comparison="rocs").squareform())
+        oecluster.pdist(mols[::-1], comparison="rocs",
+                        score_type=score_type).squareform())
     assert np.allclose(forward, reversed_[::-1, ::-1],
                        rtol=0.0, atol=ROCS_ORDER_TOLERANCE)
-
-    # Not vacuous only if the fixture produces distances that could have
-    # disagreed. A set that scored every pair identically, or saturated, would
-    # satisfy the assertion above without testing anything.
-    off_diagonal = forward[~np.eye(3, dtype=bool)]
-    assert np.all(off_diagonal > 0.0)
-    assert off_diagonal.max() - off_diagonal.min() > 0.1
 
 
 def test_cdist_rocs_stays_directional():
