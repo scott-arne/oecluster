@@ -176,7 +176,8 @@ public:
      *     more pair bytes than size_t can address, or more bytes than this
      *     platform's file size limit. The message names n and which limit it
      *     crossed, and the refusal happens before the file is created.
-     * :raises StorageError: If file operations fail.
+     * :raises std::runtime_error: If opening, sizing or mapping the file
+     *     fails. The message names the path and the operating system's error.
      */
     MMapStorage(const std::string& path, size_t n);
     ~MMapStorage() override;

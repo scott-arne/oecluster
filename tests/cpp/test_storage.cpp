@@ -4,6 +4,7 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include "oecluster/StorageBackend.h"
 
 using namespace OECluster;
@@ -273,14 +274,32 @@ std::string overflow_message(Call call) {
     return "<threw nothing>";
 }
 
-/// Path for an MMapStorage refusal probe, removed first so that the existence
-/// check after the probe describes only the call under test.
-std::string cleared_probe_path(const char* name) {
-    const std::string path =
-        (std::filesystem::temp_directory_path() / name).string();
-    std::filesystem::remove(path);
-    return path;
-}
+/// Path for an MMapStorage refusal probe, removed at both ends of the test.
+/// Removing it first makes the existence check after the probe describe only
+/// the call under test; removing it again on the way out keeps a regressed
+/// guard from leaving the multi-gigabyte file it would then create.
+class ProbePath {
+public:
+    explicit ProbePath(const char* name)
+        : path_((std::filesystem::temp_directory_path() / name).string()) {
+        std::filesystem::remove(path_);
+    }
+
+    ~ProbePath() {
+        // A destructor must not throw, and a probe that left nothing behind is
+        // the expected case rather than an error.
+        std::error_code ignored;
+        std::filesystem::remove(path_, ignored);
+    }
+
+    ProbePath(const ProbePath&) = delete;
+    ProbePath& operator=(const ProbePath&) = delete;
+
+    const std::string& Path() const { return path_; }
+
+private:
+    std::string path_;
+};
 
 /// Largest n whose pair count fits in size_t (18446744070963499500). Its byte
 /// count does not, so it is refused -- but by the byte check, which is what
@@ -333,7 +352,8 @@ TEST(StorageOverflowTest, DenseRefusesTheLargestRepresentablePairCountAtTheByteC
 }
 
 TEST(StorageOverflowTest, MMapRefusesASampleCountWhosePairCountWraps) {
-    const std::string path = cleared_probe_path("oecluster_overflow_pairs.bin");
+    const ProbePath probe("oecluster_overflow_pairs.bin");
+    const std::string& path = probe.Path();
     const size_t n = std::numeric_limits<size_t>::max();
     EXPECT_EQ(overflow_message([&path, n] { MMapStorage storage(path, n); }),
               "MMapStorage: sample count 18446744073709551615 has more pairs "
@@ -342,8 +362,8 @@ TEST(StorageOverflowTest, MMapRefusesASampleCountWhosePairCountWraps) {
 }
 
 TEST(StorageOverflowTest, MMapRefusesTheSmallestSampleCountWhosePairCountWraps) {
-    const std::string path =
-        cleared_probe_path("oecluster_overflow_pairs_edge.bin");
+    const ProbePath probe("oecluster_overflow_pairs_edge.bin");
+    const std::string& path = probe.Path();
     EXPECT_EQ(overflow_message([&path] {
                   MMapStorage storage(path, SMALLEST_WRAPPING_PAIRS_N);
               }),
@@ -353,7 +373,8 @@ TEST(StorageOverflowTest, MMapRefusesTheSmallestSampleCountWhosePairCountWraps) 
 }
 
 TEST(StorageOverflowTest, MMapRefusesASampleCountWhoseByteCountWraps) {
-    const std::string path = cleared_probe_path("oecluster_overflow_bytes.bin");
+    const ProbePath probe("oecluster_overflow_bytes.bin");
+    const std::string& path = probe.Path();
     EXPECT_EQ(overflow_message([&path] {
                   MMapStorage storage(path, SMALLEST_WRAPPING_BYTES_N);
               }),
@@ -366,7 +387,8 @@ TEST(StorageOverflowTest, MMapRefusesAByteCountPastTheFileOffsetLimit) {
     // This n passes both size_t checks. What it exceeds is the signed offset
     // the resize call takes, which would receive the byte count as a negative
     // size.
-    const std::string path = cleared_probe_path("oecluster_overflow_offset.bin");
+    const ProbePath probe("oecluster_overflow_offset.bin");
+    const std::string& path = probe.Path();
     const std::string message = overflow_message(
         [&path] { MMapStorage storage(path, SMALLEST_UNMAPPABLE_N); });
     EXPECT_NE(message.find("MMapStorage: sample count 1518500251 needs "

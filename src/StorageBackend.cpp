@@ -153,8 +153,10 @@ size_t checked_pair_count(size_t n, const char* backend) {
     // Exactly one of {n, n - 1} is even, so halve that one before multiplying.
     // Testing n * (n - 1) against SIZE_MAX directly would need the product
     // this check exists to avoid, and dividing SIZE_MAX by n then doubling
-    // loses the remainder -- which rejects representable counts near the
-    // ceiling.
+    // loses the remainder. That form accepts the same counts this one does,
+    // since the byte check below refuses everything between them anyway; what
+    // it gets wrong is the diagnosis, reporting a count near the ceiling as
+    // having too many pairs when what it has is too many bytes.
     const bool n_even = (n % 2 == 0);
     const size_t a = n_even ? n / 2 : n;
     const size_t b = n_even ? n - 1 : (n - 1) / 2;
