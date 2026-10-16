@@ -351,10 +351,10 @@ TEST(CheckedPairCountTest, CountsNoPairsBelowTwoSamples) {
 
 TEST(CheckedPairCountTest, AcceptsTheLargestSampleCountWhoseByteCountFits) {
     // The byte boundary itself: 2305843008139952128 pairs come to
-    // 18446744065119617024 bytes, the last byte count size_t can hold. One
-    // more sample crosses it, which the refusal test below pins. Nothing
-    // constructs a backend for this count -- accepting it means asking for 18
-    // exabytes.
+    // 18446744065119617024 bytes, the largest byte count any sample count
+    // reaches while still fitting size_t. One more sample crosses it, which
+    // the refusal test below pins. Nothing constructs a backend for this
+    // count -- accepting it means asking for 18 exabytes.
     EXPECT_EQ(checked_pair_count(LARGEST_ACCEPTED_N, "DenseStorage"),
               2305843008139952128ULL);
 }
@@ -374,9 +374,10 @@ TEST(CheckedPairCountTest, RefusesTheSmallestSampleCountWhoseByteCountWraps) {
 }
 
 TEST(CheckedPairCountTest, RefusesTheLargestRepresentablePairCountAtTheByteCheck) {
-    // The pair count here is the largest size_t can hold, so a predicate that
-    // discarded the remainder of its division would refuse this n for having
-    // too many pairs. The refusal is right; the reason would not be.
+    // The pair count here is the largest any sample count reaches while still
+    // fitting size_t, so a predicate that discarded the remainder of its
+    // division would refuse this n for having too many pairs. The refusal is
+    // right; the reason would not be.
     EXPECT_EQ(overflow_message(
                   [] { checked_pair_count(LARGEST_REPRESENTABLE_PAIRS_N, "DenseStorage"); }),
               "DenseStorage: sample count 6074001000 needs more than size_t "
