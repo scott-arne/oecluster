@@ -6,6 +6,7 @@
 #include <string>
 #include <system_error>
 #include "oecluster/StorageBackend.h"
+#include "../../src/StorageOverflow.h"
 
 using namespace OECluster;
 
@@ -256,6 +257,17 @@ TEST(SparseStorageTest, SetOutOfRangeStoresNothing) {
 // large enough n used to wrap one of those two multiplications and report a
 // NumSamples() the buffer cannot back: DenseStorage(SIZE_MAX) constructed with
 // NumPairs() == 1.
+//
+// The boundary values are tested against checked_pair_count rather than
+// against a constructor, because the only run that matters is the one where
+// the guard has regressed, and then most of these counts are not an assertion
+// failure but a dead machine: 6074001001 wraps to 3327948884 pairs, which an
+// unguarded DenseStorage zero-fills as 26.6 GB of memory and an unguarded
+// MMapStorage writes to disk, and 2147483649 wraps to exactly 8 GiB. A test
+// that is OOM-killed has reported nothing, and no destructor of ours runs to
+// clean up after it. Constructing is reserved below for the few counts that
+// stay cheap even unguarded; those cases prove the wiring, and the cases here
+// prove the arithmetic.
 
 namespace {
 
@@ -301,6 +313,10 @@ private:
     std::string path_;
 };
 
+/// Largest n accepted: 2305843008139952128 pairs, 18446744065119617024 bytes,
+/// both inside size_t.
+constexpr size_t LARGEST_ACCEPTED_N = 2147483648ULL;
+
 /// Largest n whose pair count fits in size_t (18446744070963499500). Its byte
 /// count does not, so it is refused -- but by the byte check, which is what
 /// distinguishes an exact predicate from one that divides SIZE_MAX by n and
@@ -320,38 +336,90 @@ constexpr size_t SMALLEST_UNMAPPABLE_N = 1518500251ULL;
 
 }  // namespace
 
+// The arithmetic. Nothing below this point until the wiring tests constructs
+// a backend, so no sample count here can allocate anything.
+
+TEST(CheckedPairCountTest, CountsNoPairsBelowTwoSamples) {
+    // n - 1 underflows at n == 0, which the early return is there to avoid.
+    EXPECT_EQ(checked_pair_count(0, "DenseStorage"), 0u);
+    EXPECT_EQ(checked_pair_count(1, "DenseStorage"), 0u);
+    EXPECT_EQ(checked_pair_count(2, "DenseStorage"), 1u);
+    EXPECT_EQ(checked_pair_count(5, "DenseStorage"), 10u);
+}
+
+TEST(CheckedPairCountTest, AcceptsTheLargestSampleCountWhoseByteCountFits) {
+    // Both checks pass here, which is what makes the halve-first form worth
+    // its awkwardness: this count's pair product overflows if computed
+    // directly. No test constructs a backend for it -- accepting it means an
+    // 18 exabyte allocation.
+    EXPECT_EQ(checked_pair_count(LARGEST_ACCEPTED_N, "DenseStorage"),
+              2305843008139952128ULL);
+}
+
+TEST(CheckedPairCountTest, AcceptsTheSmallestSampleCountNoFileCanHold) {
+    // Past every file size limit, but that is MMapStorage's complaint, not
+    // this helper's: both of its checks pass.
+    EXPECT_EQ(checked_pair_count(SMALLEST_UNMAPPABLE_N, "MMapStorage"),
+              1152921505384281375ULL);
+}
+
+TEST(CheckedPairCountTest, RefusesTheSmallestSampleCountWhoseByteCountWraps) {
+    EXPECT_EQ(overflow_message(
+                  [] { checked_pair_count(SMALLEST_WRAPPING_BYTES_N, "DenseStorage"); }),
+              "DenseStorage: sample count 2147483649 needs more than size_t "
+              "bytes of storage");
+}
+
+TEST(CheckedPairCountTest, RefusesTheLargestRepresentablePairCountAtTheByteCheck) {
+    // The pair count here is the largest size_t can hold, so a predicate that
+    // discarded the remainder of its division would refuse this n for having
+    // too many pairs. The refusal is right; the reason would not be.
+    EXPECT_EQ(overflow_message(
+                  [] { checked_pair_count(LARGEST_REPRESENTABLE_PAIRS_N, "DenseStorage"); }),
+              "DenseStorage: sample count 6074001000 needs more than size_t "
+              "bytes of storage");
+}
+
+TEST(CheckedPairCountTest, RefusesTheSmallestSampleCountWhosePairCountWraps) {
+    EXPECT_EQ(overflow_message(
+                  [] { checked_pair_count(SMALLEST_WRAPPING_PAIRS_N, "DenseStorage"); }),
+              "DenseStorage: sample count 6074001001 has more pairs than "
+              "size_t can hold");
+}
+
+TEST(CheckedPairCountTest, RefusesTheLargestSampleCountThereIs) {
+    EXPECT_EQ(overflow_message([] {
+                  checked_pair_count(std::numeric_limits<size_t>::max(),
+                                     "DenseStorage");
+              }),
+              "DenseStorage: sample count 18446744073709551615 has more pairs "
+              "than size_t can hold");
+}
+
+TEST(CheckedPairCountTest, NamesTheBackendItWasGiven) {
+    EXPECT_EQ(overflow_message(
+                  [] { checked_pair_count(SMALLEST_WRAPPING_PAIRS_N, "MMapStorage"); }),
+              "MMapStorage: sample count 6074001001 has more pairs than "
+              "size_t can hold");
+}
+
+// The wiring. Each case below constructs a backend, so each uses a sample
+// count that stays cheap even if the guard it is testing is removed.
+
 TEST(StorageOverflowTest, DenseRefusesASampleCountWhosePairCountWraps) {
+    // Unguarded this allocates one double: SIZE_MAX * (SIZE_MAX - 1) wraps to
+    // 2, so the buffer is a single pair while NumSamples() reports SIZE_MAX.
+    // That is the cheapest possible regression and the reason this count, not
+    // one of the large ones, is the one constructed here.
     const size_t n = std::numeric_limits<size_t>::max();
     EXPECT_EQ(overflow_message([n] { DenseStorage storage(n); }),
               "DenseStorage: sample count 18446744073709551615 has more pairs "
               "than size_t can hold");
 }
 
-TEST(StorageOverflowTest, DenseRefusesTheSmallestSampleCountWhosePairCountWraps) {
-    EXPECT_EQ(overflow_message(
-                  [] { DenseStorage storage(SMALLEST_WRAPPING_PAIRS_N); }),
-              "DenseStorage: sample count 6074001001 has more pairs than "
-              "size_t can hold");
-}
-
-TEST(StorageOverflowTest, DenseRefusesASampleCountWhoseByteCountWraps) {
-    EXPECT_EQ(overflow_message(
-                  [] { DenseStorage storage(SMALLEST_WRAPPING_BYTES_N); }),
-              "DenseStorage: sample count 2147483649 needs more than size_t "
-              "bytes of storage");
-}
-
-TEST(StorageOverflowTest, DenseRefusesTheLargestRepresentablePairCountAtTheByteCheck) {
-    // The pair count here is the largest size_t can hold, so a predicate that
-    // discarded the remainder of its division would refuse this n for having
-    // too many pairs. The refusal is right; the reason would not be.
-    EXPECT_EQ(overflow_message(
-                  [] { DenseStorage storage(LARGEST_REPRESENTABLE_PAIRS_N); }),
-              "DenseStorage: sample count 6074001000 needs more than size_t "
-              "bytes of storage");
-}
-
 TEST(StorageOverflowTest, MMapRefusesASampleCountWhosePairCountWraps) {
+    // Unguarded this creates and maps an 8-byte file, for the same wrap as
+    // above.
     const ProbePath probe("oecluster_overflow_pairs.bin");
     const std::string& path = probe.Path();
     const size_t n = std::numeric_limits<size_t>::max();
@@ -361,32 +429,13 @@ TEST(StorageOverflowTest, MMapRefusesASampleCountWhosePairCountWraps) {
     EXPECT_FALSE(std::filesystem::exists(path));
 }
 
-TEST(StorageOverflowTest, MMapRefusesTheSmallestSampleCountWhosePairCountWraps) {
-    const ProbePath probe("oecluster_overflow_pairs_edge.bin");
-    const std::string& path = probe.Path();
-    EXPECT_EQ(overflow_message([&path] {
-                  MMapStorage storage(path, SMALLEST_WRAPPING_PAIRS_N);
-              }),
-              "MMapStorage: sample count 6074001001 has more pairs than "
-              "size_t can hold");
-    EXPECT_FALSE(std::filesystem::exists(path));
-}
-
-TEST(StorageOverflowTest, MMapRefusesASampleCountWhoseByteCountWraps) {
-    const ProbePath probe("oecluster_overflow_bytes.bin");
-    const std::string& path = probe.Path();
-    EXPECT_EQ(overflow_message([&path] {
-                  MMapStorage storage(path, SMALLEST_WRAPPING_BYTES_N);
-              }),
-              "MMapStorage: sample count 2147483649 needs more than size_t "
-              "bytes of storage");
-    EXPECT_FALSE(std::filesystem::exists(path));
-}
-
 TEST(StorageOverflowTest, MMapRefusesAByteCountPastTheFileOffsetLimit) {
     // This n passes both size_t checks. What it exceeds is the signed offset
     // the resize call takes, which would receive the byte count as a negative
-    // size.
+    // size -- and be refused for it, so unguarded this costs an empty file
+    // rather than the 9 exabytes the count asks for. It is the only test of
+    // this third refusal, which has no arithmetic half: the limit it compares
+    // against is the platform's.
     const ProbePath probe("oecluster_overflow_offset.bin");
     const std::string& path = probe.Path();
     const std::string message = overflow_message(

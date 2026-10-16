@@ -4,6 +4,7 @@
  */
 
 #include "oecluster/StorageBackend.h"
+#include "StorageOverflow.h"
 #include <cassert>
 #include <algorithm>
 #include <cstdint>
@@ -131,52 +132,6 @@ inline void check_set_indices(const char* backend, size_t i, size_t j, size_t n)
 }
 
 /**
- * @brief Pair count for n items, refusing a count whose buffer cannot be sized.
- *
- * Both contiguous backends derive a buffer length from the sample count in two
- * steps, and either can wrap. A wrapped length is not a short allocation the
- * caller can notice: NumSamples() keeps reporting n while the buffer holds
- * whatever the wrapped product came to, so Set, Get and every reader that
- * walks Data() index past the end. Refusing here gives those readers the
- * precondition they already assume.
- *
- * :param n: Number of items the backend was asked to store.
- * :param backend: Storage class name, used in the message.
- * :returns: n * (n - 1) / 2, which is 0 for fewer than two items.
- * :raises std::overflow_error: If that pair count, or the byte count it
- *     implies, exceeds what size_t can represent.
- */
-size_t checked_pair_count(size_t n, const char* backend) {
-    if (n < 2) {
-        return 0;
-    }
-    // Exactly one of {n, n - 1} is even, so halve that one before multiplying.
-    // Testing n * (n - 1) against SIZE_MAX directly would need the product
-    // this check exists to avoid, and dividing SIZE_MAX by n then doubling
-    // loses the remainder. That form accepts the same counts this one does,
-    // since the byte check below refuses everything between them anyway; what
-    // it gets wrong is the diagnosis, reporting a count near the ceiling as
-    // having too many pairs when what it has is too many bytes.
-    const bool n_even = (n % 2 == 0);
-    const size_t a = n_even ? n / 2 : n;
-    const size_t b = n_even ? n - 1 : (n - 1) / 2;
-    if (a > std::numeric_limits<size_t>::max() / b) {
-        throw std::overflow_error(
-            std::string(backend) + ": sample count " + std::to_string(n) +
-            " has more pairs than size_t can hold");
-    }
-    const size_t pairs = a * b;
-    // A pair count that fits can still have a byte count that does not, and
-    // that product is the one the allocation actually uses.
-    if (pairs > std::numeric_limits<size_t>::max() / sizeof(double)) {
-        throw std::overflow_error(
-            std::string(backend) + ": sample count " + std::to_string(n) +
-            " needs more than size_t bytes of storage");
-    }
-    return pairs;
-}
-
-/**
  * @brief Refuse a mapped file larger than this platform's file APIs can size.
  *
  * A byte count that fits in size_t can still exceed the signed offset the
@@ -208,6 +163,37 @@ void check_file_size_fits_offset(size_t bytes, size_t n) {
 }
 
 }  // namespace
+
+// Declared in StorageOverflow.h, which is where its contract is written.
+size_t checked_pair_count(size_t n, const char* backend) {
+    if (n < 2) {
+        return 0;
+    }
+    // Exactly one of {n, n - 1} is even, so halve that one before multiplying.
+    // Testing n * (n - 1) against SIZE_MAX directly would need the product
+    // this check exists to avoid, and dividing SIZE_MAX by n then doubling
+    // loses the remainder. That form accepts the same counts this one does,
+    // since the byte check below refuses everything between them anyway; what
+    // it gets wrong is the diagnosis, reporting a count near the ceiling as
+    // having too many pairs when what it has is too many bytes.
+    const bool n_even = (n % 2 == 0);
+    const size_t a = n_even ? n / 2 : n;
+    const size_t b = n_even ? n - 1 : (n - 1) / 2;
+    if (a > std::numeric_limits<size_t>::max() / b) {
+        throw std::overflow_error(
+            std::string(backend) + ": sample count " + std::to_string(n) +
+            " has more pairs than size_t can hold");
+    }
+    const size_t pairs = a * b;
+    // A pair count that fits can still have a byte count that does not, and
+    // that product is the one the allocation actually uses.
+    if (pairs > std::numeric_limits<size_t>::max() / sizeof(double)) {
+        throw std::overflow_error(
+            std::string(backend) + ": sample count " + std::to_string(n) +
+            " needs more than size_t bytes of storage");
+    }
+    return pairs;
+}
 
 // DenseStorage implementation
 
