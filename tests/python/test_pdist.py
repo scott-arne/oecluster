@@ -719,10 +719,12 @@ def _multiconformer_rocs_mols():
     """Three flexible molecules with real ensembles, for the ROCS order test.
 
     Every molecule in ``test_pdist_rocs_end_to_end`` is built with
-    ``SetMaxConfs(1)``, where the orientation gap is only 0.010 and nothing
-    bites. These three are flexible and are given twenty conformers each, which
-    is what makes ``BestOverlay`` a genuine search and the two orientations of a
-    pair genuinely different answers.
+    ``SetMaxConfs(1)``, where there is no ensemble to search and nothing bites:
+    measured 2026-10-15, the orientation gap on that fixture reaches 0.00028 on
+    combo_norm and 0.00056 on shape, two orders of magnitude below what these
+    three reach. Flexible molecules at twenty conformers each are what make
+    ``BestOverlay`` a genuine search and the two orientations of a pair
+    genuinely different answers.
     """
     from openeye import oechem, oeomega
 
@@ -742,12 +744,13 @@ def _multiconformer_rocs_mols():
 
 # Measured 2026-10-15: the largest absolute disagreement between the forward
 # and reversed matrices on the fixture above is exactly 0.0, for all three
-# pairs. Zero is still not the right tolerance to assert, because the overlay
-# keeps state between calls and nothing promises a future fixture will stay at
-# zero; 1e-6 is the float-precision scale OEBestOverlayScore actually works at,
-# the same reasoning and the same value as SELF_SCORE_TOLERANCE in
-# ROCSComparison.cpp. The directional gap this has to catch is 0.035 on
-# combo_norm for this fixture, four orders of magnitude clear of it.
+# pairs and on all four score types. Zero is still not the right tolerance to
+# assert, because the overlay keeps state between calls and nothing promises a
+# future fixture will stay at zero; 1e-6 is the float-precision scale
+# OEBestOverlayScore actually works at, the same reasoning and the same value
+# as SELF_SCORE_TOLERANCE in ROCSComparison.cpp. The directional gap this has
+# to catch on this fixture is 0.0355 on combo_norm, which the test below runs,
+# so the tolerance sits more than four orders of magnitude clear of it.
 ROCS_ORDER_TOLERANCE = 1e-6
 
 
@@ -811,10 +814,10 @@ def test_cdist_rocs_stays_directional():
     # The ensemble as the fit set contains the reference's own pose, so the
     # search recovers it exactly. Measured 0.0 on 2026-10-15.
     assert forward[0, 0] == pytest.approx(0.0, abs=1e-3)
-    # The other direction searches a single pose against the ensemble's active
-    # conformer and cannot match it. Measured 0.481 on 2026-10-15; asserting a
-    # loose floor rather than the value keeps this from becoming a change
-    # detector for Omega output.
+    # Swapping the sets makes the single pose the fit set, leaving BestOverlay
+    # nothing to search, and the match is not recovered. Measured 0.481 on
+    # 2026-10-15; asserting a loose floor rather than the value keeps this from
+    # becoming a change detector for Omega output.
     assert backward[0, 0] > 0.1
 
 

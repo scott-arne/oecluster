@@ -430,10 +430,12 @@ double ROCSComparison::CompareUnordered(size_t i, size_t j) {
     detail::check_compare_index_range("ROCSComparison", i, j, shared_->mols.size());
 
     // Both orientations of a self-pair are the same search, so there is nothing
-    // to combine. pdist never stores a diagonal, so this is for a future caller
-    // rather than the current one; it also keeps the diagonal that
-    // MeasureDiagonal stamps and the diagonal a direct caller would see here
-    // the same number.
+    // to combine and scoring twice would only cost twice as much. pdist never
+    // stores a diagonal, so this is for a future caller rather than the current
+    // one. It does not promise that a self-score read here equals the one
+    // MeasureDiagonal read when it stamped zero_self: those are separate
+    // searches with different overlay history behind them, which is exactly
+    // what the rest of this comparison declines to promise.
     if (i == j) {
         return Compare(i, j);
     }

@@ -3415,12 +3415,20 @@ Distance ranges: combo_norm [0, 1], combo [0, 2], shape [0, 1], color [0, 1].
 **A ROCS score is directional, and `pdist` is the one entry point that hides
 it.** Scoring a pair makes the first molecule the overlay reference and
 searches only the second molecule's conformers, so the two orientations are two
-different searches with two different answers. On three flexible
-multiconformer molecules the two orientations were measured 0.035 apart on
-combo_norm and 0.070 apart on shape -- one fixture, not a bound. `pdist` stores
-a single triangle and mirrors it, so it scores both orientations and keeps the
-better overlay; reordering the input list no longer moves the matrix, and with
-it the clustering.
+different searches with two different answers. Measured over three flexible
+multiconformer molecules at twenty conformers each, the largest gap between the
+two orientations is 0.0355 on `combo_norm`, 0.0710 on `combo`, 0.0660 on
+`shape` and 0.0010 on `color` -- each on its own scale, and one fixture rather
+than a bound. `pdist` stores a single triangle and mirrors it, so it scores
+both orientations and keeps the better overlay; reordering the input list no
+longer moves the matrix beyond the residual described below, and so no longer
+moves the clustering.
+
+The cost is two overlay searches per pair instead of one: a `pdist` over n
+molecules now runs n*(n-1) searches rather than n*(n-1)/2, plus the n
+self-overlays the comparison takes when it is built, which are unchanged. That
+is an operation count, not a wall-clock factor -- how much of a run it accounts
+for depends on conformer counts and thread count.
 
 `cdist` keeps the directional reading, deliberately. Entry `[i, j]` is what
 `items_a[i]` finds when it searches `items_b[j]`'s conformers, which is the
@@ -3432,9 +3440,9 @@ Order-independence on `pdist` holds up to scorer-state noise rather than
 exactly. `OEOverlay` keeps state between calls, so a score is not a pure
 function of its pair -- the same property that makes the streaming clustering
 paths refuse ROCS outright. On the three-molecule fixture above the forward and
-reversed matrices agreed to the last bit, and the test that pins this asserts
-agreement to 1e-6 rather than equality, because nothing in the toolkit promises
-that they always will.
+reversed matrices agreed exactly -- a residual of 0.0 on all four score types
+-- and the test that pins this asserts agreement to 1e-6 rather than equality,
+because nothing in the toolkit promises that they always will.
 
 Either `OEMol` or `OEGraphMol` is accepted, since the comparison snapshots its
 own copies, but the choice changes what is computed rather than only what is

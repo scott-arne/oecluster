@@ -57,19 +57,25 @@ struct ROCSOptions {
  * different searches with two different answers. ``pdist`` fills one triangle
  * and presents it as symmetric, so it routes through a protected seam,
  * ``CompareUnordered``, which scores both orientations and keeps the better
- * overlay. Being protected, that seam is not callable from outside the class
- * and does not appear in the bindings. ``cdist`` and
- * direct ``Compare`` callers keep the directional meaning, which is the one
- * their output documents -- a ``cdist`` row says what each reference finds in
- * the fit set, and symmetrizing it would answer a different question.
+ * overlay. That seam is not part of the public surface and does not appear in
+ * the bindings. ``cdist`` and direct ``Compare`` callers keep the directional
+ * meaning, which is the one their output documents -- a ``cdist`` row says what
+ * each reference finds in the fit set, and symmetrizing it would answer a
+ * different question.
+ *
+ * The cost is two overlay searches per off-diagonal pair instead of one, so a
+ * ``pdist`` over n molecules runs n*(n-1) searches rather than n*(n-1)/2. The
+ * n self-overlays the constructor takes are unchanged.
  *
  * The result is order-independence up to scorer-state noise, not exact
  * symmetry. ``OEOverlay`` carries state between calls, so a score is not a pure
  * function of its pair; the same property is why
  * ``src/clustering/DiversityValidation.h`` refuses ROCS on the streaming paths.
  * Reordering the input moves a ``pdist`` matrix by that residual rather than by
- * the orientation gap, which on flexible multiconformer molecules has been
- * measured at over a tenth of a unit on a [0, 1] scale.
+ * the orientation gap. Measured 2026-10-15 over three flexible multiconformer
+ * molecules at twenty conformers each, that gap reaches 0.0355 on ComboNorm,
+ * 0.0710 on Combo, 0.0660 on Shape and 0.0010 on Color, while the residual
+ * after symmetrization was 0.0 on every one. One fixture, not a bound.
  */
 class ROCSComparison : public PairwiseComparison {
 public:

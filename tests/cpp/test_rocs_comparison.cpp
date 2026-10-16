@@ -14,6 +14,8 @@
 #include <cmath>
 #include <limits>
 #include <string>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 using namespace OECluster;
@@ -580,13 +582,33 @@ TEST_F(ROCSComparisonTest, FactsCoverEveryScoreTypeAndDirection) {
     }
 }
 
-/// Reaches the protected seam ``pdist`` calls. ``CompareUnordered`` is
-/// protected so that it cannot become a second public way to compare two
-/// items; deriving is the access the language offers a caller that genuinely
-/// needs it, and the call it makes is the one ``pdist`` makes through its
-/// friendship. That the ``using`` declaration below compiles is itself part of
-/// the test: it would not if the override had been left public, because the
-/// base declares it protected.
+/// True only when ``T::CompareUnordered`` can be called from namespace scope,
+/// which is to say only when the declaration that names it made it public.
+/// Access checking is part of template argument substitution, so a protected
+/// member leaves the primary template selected instead of raising a hard error.
+template <typename T, typename = void>
+struct CompareUnorderedIsPublic : std::false_type {};
+
+template <typename T>
+struct CompareUnorderedIsPublic<
+    T, std::void_t<decltype(std::declval<T&>().CompareUnordered(size_t{0}, size_t{0}))>>
+    : std::true_type {};
+
+// The seam must not become a second public way to compare two items, and the
+// access of an override is set by its own declaration rather than inherited
+// from the function it overrides, so the base and the ROCS override each have
+// to be checked. These two assertions are the only thing in the suite that
+// catches a public one: re-exposing the member through a derived class, as the
+// probe below does, compiles whatever access it had.
+static_assert(!CompareUnorderedIsPublic<PairwiseComparison>::value,
+              "PairwiseComparison::CompareUnordered must stay protected");
+static_assert(!CompareUnorderedIsPublic<ROCSComparison>::value,
+              "ROCSComparison::CompareUnordered must stay protected");
+
+/// Reaches the protected seam ``pdist`` calls, deriving being the access the
+/// language offers a test in another translation unit; the call it makes is the
+/// one ``pdist`` makes through its friendship. This says nothing about access
+/// on its own -- the assertions above are what say that.
 struct ROCSUnorderedProbe : ROCSComparison {
     using ROCSComparison::ROCSComparison;
     using ROCSComparison::CompareUnordered;
@@ -596,9 +618,13 @@ TEST_F(ROCSComparisonTest, UnorderedKeepsTheBetterOverlayForEveryScoreType) {
     // Eight cases rather than one. The two orientations are combined on the raw
     // Tanimoto, and the conversion from that to the reported value differs per
     // score type and reverses direction on the similarity flag, so a
-    // single-type test would prove an eighth of the rule. An implementation
-    // that took the maximum of the converted values instead of the raw ones
-    // would pass all four similarity rows and fail all four distance rows.
+    // single-type test would prove an eighth of the rule. Measured against an
+    // implementation that took the maximum of the converted values instead of
+    // the raw ones, on 2026-10-15: all four similarity rows pass, and three of
+    // the four distance rows fail. The Color distance row stays silent, its two
+    // orientations agreeing to 0.000000 on this fixture, which is the reason
+    // the fixture is two flexible molecules rather than a Color-bearing pair --
+    // no fixture was found that separates all eight rows at once.
     const std::vector<std::shared_ptr<OEChem::OEMol>> flexible{
         MakeConformer("CCCCCCCC", 20), MakeConformer("c1ccc(CCCCO)cc1", 20)};
     ASSERT_GT(flexible[0]->NumConfs(), 1u);
@@ -640,18 +666,26 @@ TEST_F(ROCSComparisonTest, UnorderedKeepsTheBetterOverlayForEveryScoreType) {
     }
 
     // The assertions above hold for free on a fixture whose two orientations
-    // agree, so the fixture has to be shown to disagree. Measured 0.070 on
-    // 2026-10-15, on the Shape rows.
+    // agree, so the fixture has to be shown to disagree. Measured 0.0516 on
+    // 2026-10-15, on the Combo and the Shape rows alike; ComboNorm reaches
+    // 0.0258 and Color 0.000000.
     EXPECT_GT(largest_orientation_gap, 0.01);
 }
 
 TEST_F(ROCSComparisonTest, UnorderedAgreesWithCompareOnTheDiagonal) {
-    // pdist stores no diagonal, so this is for a future caller. It also keeps
-    // the self-score a direct caller sees here equal to the one MeasureDiagonal
-    // stamps zero_self from, which reads Compare.
+    // pdist stores no diagonal, so the short-circuit is for a future caller.
+    // What is pinned is that it delegates instead of scoring two orientations:
+    // a self-pair has only one search to run, and running it twice would cost
+    // twice as much for an answer no better.
+    //
+    // Agreement to a tolerance rather than bit-equality, for the reason this
+    // whole commit gives: the two calls below are two separate searches with
+    // different overlay history behind them. They happen to come out
+    // bit-identical on this fixture as of 2026-10-15, and asserting that would
+    // be asserting a coincidence.
     ROCSUnorderedProbe probe(mols_, ROCSOptions());
     for (size_t i = 0; i < mols_.size(); ++i) {
-        EXPECT_DOUBLE_EQ(probe.CompareUnordered(i, i), probe.Compare(i, i)) << i;
+        EXPECT_NEAR(probe.CompareUnordered(i, i), probe.Compare(i, i), 1e-6) << i;
     }
 }
 

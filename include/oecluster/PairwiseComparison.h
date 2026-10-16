@@ -137,11 +137,13 @@ protected:
     /// owns the one for ``options``, and a friend declaration that is also the
     /// first declaration of a function may not supply one.
     ///
-    /// Hidden from SWIG. ``swig/oecluster.i`` ``%include``s this header before
-    /// it declares ``pdist`` itself, and SWIG wraps a friend declaration as a
-    /// namespace-scope function, so leaving this visible would have SWIG wrap
-    /// ``pdist`` here -- against parameter types that are still incomplete at
-    /// this point -- and then redeclare it later.
+    /// Hidden from SWIG, for a smaller reason than it might look. Measured on
+    /// 2026-10-15 with the guard removed: SWIG matches this declaration to the
+    /// ``pdist`` it already wraps, so there is no second wrapper and no new
+    /// warning, but it does attach the comment above to the generated
+    /// ``oecluster.pdist`` as that function's Python docstring. A note about
+    /// which C++ member needs friendship is not what a Python caller should
+    /// read there, and the guard is the cheapest way to keep it out.
     friend void pdist(PairwiseComparison& comparison, StorageBackend& storage,
                       const PDistOptions& options);
 #endif
