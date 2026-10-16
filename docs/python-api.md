@@ -779,11 +779,11 @@ result = oecluster.bitbirch_refine(
 ```
 
 All three return a `BitBirchResult` with `labels`, `clusters`, `centroids`, and
-`cluster_sizes`, and every cluster in it has at least one member. That last
-point is where `bitbirch_refine()` departs from the Python reference: its prune
-pass can empty a leaf subcluster, which the reference reports as an empty
-cluster and `bitbirch_refine()` drops. The member lists are ordered by member
-count, largest first, so a dropped one is trailing and no label moves.
+`cluster_sizes`, and every cluster in it has at least one member. At that last
+point `bitbirch_refine()` departs from the Python reference: its prune pass can
+empty a leaf subcluster, which the reference reports as an empty cluster and
+`bitbirch_refine()` drops. The member lists are ordered by member count,
+largest first, so a dropped one is trailing and no label moves.
 
 The `mode` parameter accepts `"strict_parity"` (exact
 reference-implementation parity for the fit) or `"fast"` (partition-merge
@@ -968,10 +968,10 @@ row order whatever `num_threads` is.
 
 `cluster_report()` refuses any result carrying an empty cluster, with a
 `RuntimeError` reading `Cluster must contain at least one member`;
-`isim_report()` refuses it the same way and with the same message. No
-clustering the library ships produces one, so the check fires only on a result
-the caller built. `bitbirch_refine()` used to return the leaf subcluster its
-prune pass emptied as an empty member list, and now drops it.
+`isim_report()` refuses it the same way and with the same message, since it
+reuses `cluster_report()`'s native partition checks. `bitbirch_refine()` used
+to hit that refusal by returning the leaf subcluster its prune pass emptied as
+an empty member list; it now drops that subcluster.
 
 ### Internal validity indices
 
@@ -1421,9 +1421,9 @@ in the table, not produced by the scorer, or unavailable for the input.
 
 Nothing is wrapped during the sweep. A grid value the algorithm refuses
 raises that function's own exception, and a partition the scorer refuses
-raises the scorer's. No algorithm on the roster produces a partition either
-scorecard refuses, so the second case takes a foreign clusterer -- one that
-returns an empty cluster, say, which both scorecards reject with
+raises the scorer's. `bitbirch_refine` used to reach that second case by
+returning an empty cluster and no longer does; the clean way to reach it now
+is a foreign clusterer that returns one, which both scorecards reject with
 `RuntimeError`. A degenerate partition is not an error; it becomes a row with
 a NaN score or a rejected row.
 

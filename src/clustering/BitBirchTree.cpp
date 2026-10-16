@@ -641,9 +641,10 @@ BitBirchResult BitBirchTree::Result(
         const BitBirchSubcluster& subcluster = *ordered[label];
         // The sort above is size-descending, so the first empty subcluster means
         // every later one is empty too, and stopping here renumbers no positive
-        // label. Refinement can empty a leaf subcluster; emitting it cost
-        // nothing except that cluster_report and isim_report both refuse an
-        // empty member list, which made a supported pipeline raise.
+        // label. Refinement can empty a leaf subcluster; emitting one published
+        // a centroid for a cluster with no members and made cluster_report and
+        // isim_report, which both refuse an empty member list, raise on a
+        // supported pipeline.
         if (subcluster.members.empty()) {
             break;
         }

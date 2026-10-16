@@ -468,9 +468,9 @@ TEST(BitBirchClusteringTest, ClusterReportAcceptsBitBirchOutput) {
 // validate_cluster_members refuses an empty member list, and refinement could
 // hand it one, so a supported pipeline raised. BitBirch now drops the
 // subclusters refinement empties -- see RefinePruneDropsTheSubclusterItEmptied
-// above -- so both scorecards accept the result. cluster_report's own
-// empty-cluster refusal is unchanged and still fires on a hand-built result;
-// test_cluster_report.cpp covers it.
+// above -- so both scorecards accept the result. Their empty-cluster refusals
+// are unchanged and still fire on a hand-built result; test_cluster_report.cpp
+// and test_isim_report.cpp cover them.
 TEST(BitBirchClusteringTest, BothScorecardsAcceptARefinementThatEmptiedASubcluster) {
     const auto batch = make_batch({
         make_fp(3, {0, 1, 2}),

@@ -1190,8 +1190,9 @@ anyway, so a caller who relied on that silence sees new behaviour: a
   only fire on a hand-built result. That is not true of the unchanged
   empty-cluster refusal: `bitbirch_refine` can return an emptied leaf subcluster
   as an empty member list, and `cluster_report` rejects such a result.
-  `ClusterReportRefusesEmptiedRefinementSubclusters` in
-  `tests/cpp/test_bitbirch_clustering.cpp` pins that gap.
+  `BothScorecardsAcceptARefinementThatEmptiedASubcluster` in
+  `tests/cpp/test_bitbirch_clustering.cpp` pinned that gap, and now pins its
+  closure.
 - `cluster_report` now refuses a non-finite distance that reaches a reported
   value with `std::invalid_argument`. Previously a NaN reached `std::sort` through the
   intra-distance median, which is undefined behaviour, so this removes a hazard

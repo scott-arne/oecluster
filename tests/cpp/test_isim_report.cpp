@@ -324,6 +324,20 @@ TEST(ISimReportValidationTest, MalformedPartitionIsRefused) {
     EXPECT_THROW(isim_report(duplicated, batch), std::invalid_argument);
 }
 
+TEST(ISimReportValidationTest, AnEmptyClusterIsRefusedWithClusterReportsMessage) {
+    const auto batch = isim_test::make_random_batch(2, 16, 1u);
+    const ClusteringResult empty_member({0, 0}, Clusters{{0, 1}, {}});
+    try {
+        isim_report(empty_member, batch);
+        FAIL() << "expected invalid_argument";
+    } catch (const std::invalid_argument& error) {
+        // Unprefixed, unlike isim_report's own refusals: this one comes from
+        // the partition checks it shares with cluster_report, which is what
+        // lets the documentation give the two the same message.
+        EXPECT_EQ(std::string(error.what()), "Cluster must contain at least one member");
+    }
+}
+
 TEST(ISimReportValidationTest, NegativeThresholdIsAcceptedNatively) {
     const auto batch = isim_test::make_random_batch(4, 16, 1u);
     ISimReportOptions options;

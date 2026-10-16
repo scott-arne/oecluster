@@ -293,6 +293,16 @@ def test_report_validation_order():
         oecluster.isim_report(_result([0, 0, 0]), batch)
 
 
+def test_an_empty_cluster_is_refused_with_cluster_reports_message():
+    # The documented promise is that isim_report refuses an empty cluster the
+    # same way cluster_report does and with the same message; it reuses those
+    # native partition checks, so the message arrives unprefixed.
+    result = oecluster.ClusteringResult([0, 0], ((0, 1), ()))
+    with pytest.raises(RuntimeError,
+                       match="^Cluster must contain at least one member$"):
+        oecluster.isim_report(result, _batch(8, [[1], [2]]))
+
+
 def _same(left, right):
     if isinstance(left, float) and math.isnan(left):
         return isinstance(right, float) and math.isnan(right)

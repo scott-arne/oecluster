@@ -711,8 +711,9 @@ def test_pair_rank_criteria_need_a_matrix(criterion):
 # --- a partition the scorer refuses ----------------------------------------
 
 def test_a_partition_the_scorer_refuses_propagates_its_error():
-    # No shipped algorithm produces an empty cluster, so the only route left to
-    # the scorer's refusal is a foreign clusterer that hands one back.
+    # bitbirch_refine used to reach the scorer's refusal with an empty cluster
+    # and no longer does, so a foreign clusterer that hands one back is the
+    # clean way to keep the propagation pinned.
     def empty_cluster(items, **options):
         return oecluster.ClusteringResult([0, 0, 0, 0], ((0, 1, 2, 3), ()))
 

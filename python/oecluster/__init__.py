@@ -4302,9 +4302,9 @@ def bitbirch_refine(fingerprints, *, threshold=0.65, branching_factor=50,
     :returns: BitBirchResult with labels, clusters, centroids, and cluster
         sizes, every cluster holding at least one member. A leaf subcluster
         the prune pass empties is dropped rather than reported as an empty
-        cluster, which is where the result departs from the Python reference;
-        clusters are ordered by member count, largest first, so a dropped one
-        is trailing and no label is renumbered.
+        cluster, a deliberate divergence from the Python reference; clusters
+        are ordered by member count, largest first, so a dropped one is
+        trailing and no label is renumbered.
     """
     _require_oefp_batch(fingerprints, "bitbirch_refine")
     if threshold < 0.0:

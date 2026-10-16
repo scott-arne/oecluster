@@ -645,8 +645,9 @@ purchasing, and diversity triage.
 interpretation; set it `False` to keep them distinct. The report requires
 complete pairwise distances (dense or memory-mapped storage); a sparse
 (`cutoff`) matrix raises. `cluster_report` and `isim_report` both refuse a
-result carrying an empty cluster, which no clustering the library ships
-produces.
+result carrying an empty cluster, with the same message; `bitbirch_refine`
+used to hit that refusal by returning the leaf subcluster its prune pass
+emptied, and now drops it.
 
 ### Internal validity indices and optional stages
 

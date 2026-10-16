@@ -37,7 +37,7 @@ enum class BitBirchMergeCriterion {
  * quality-equivalent. For inputs at or below the internal chunk target, `Fast`
  * is byte-identical to `StrictParity`. Implemented for `bitbirch_cluster` and
  * `bitbirch_recluster`; `bitbirch_refine` always runs `StrictParity`, which
- * governs its fit -- see `bitbirch_refine` for where its output departs from
+ * governs its fit -- see `bitbirch_refine` for how its output can differ from
  * the reference.
  */
 enum class BitBirchMode {
@@ -132,10 +132,10 @@ BitBirchResult bitbirch_recluster(
  * @brief Fit BitBirch and apply requested refinement passes.
  *
  * The prune pass can leave a leaf subcluster with no members. Such a
- * subcluster is dropped rather than reported, which is where the output
- * departs from the Python reference: the reference reports it as an empty
- * cluster. Member lists are ordered by member count, largest first, so a
- * dropped one is trailing and no label is renumbered.
+ * subcluster is dropped rather than reported, a deliberate divergence from
+ * the Python reference, which reports it as an empty cluster. Member lists
+ * are ordered by member count, largest first, so a dropped one is trailing
+ * and no label is renumbered.
  *
  * :param fingerprints: Dense binary fingerprint batch.
  * :param options: Refinement options.
