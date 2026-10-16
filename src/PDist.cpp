@@ -88,7 +88,12 @@ void pdist(PairwiseComparison& comparison, StorageBackend& storage,
             size_t i, j;
             for (size_t k = chunk_begin; k < chunk_end; ++k) {
                 condensed_to_pair(k, n, i, j);
-                double distance = local_comparison->Compare(i, j);
+                // CompareUnordered, not Compare: only one triangle is stored
+                // and squareform() mirrors it, so a directional comparison
+                // would otherwise make the matrix depend on the caller's input
+                // order. The default implementation forwards to Compare, so
+                // this is a no-op for every symmetric comparison.
+                double distance = local_comparison->CompareUnordered(i, j);
                 storage.Set(i, j, distance);
             }
 

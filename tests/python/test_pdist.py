@@ -715,6 +715,109 @@ def test_pdist_rocs_end_to_end():
     assert np.allclose(square, square.T)
 
 
+def _multiconformer_rocs_mols():
+    """Three flexible molecules with real ensembles, for the ROCS order test.
+
+    Every molecule in ``test_pdist_rocs_end_to_end`` is built with
+    ``SetMaxConfs(1)``, where the orientation gap is only 0.010 and nothing
+    bites. These three are flexible and are given twenty conformers each, which
+    is what makes ``BestOverlay`` a genuine search and the two orientations of a
+    pair genuinely different answers.
+    """
+    from openeye import oechem, oeomega
+
+    omega = oeomega.OEOmega()
+    omega.SetMaxConfs(20)
+    omega.SetStrictStereo(False)
+    mols = []
+    for idx, smi in enumerate(["CCCCCCCC", "CCCCCCCCO", "c1ccc(CCCCO)cc1"]):
+        mol = oechem.OEMol()
+        oechem.OESmilesToMol(mol, smi)
+        assert omega(mol)
+        assert mol.NumConfs() > 1
+        mol.SetTitle(f"m{idx}")
+        mols.append(mol)
+    return mols
+
+
+# Measured 2026-10-15: the largest absolute disagreement between the forward
+# and reversed matrices on the fixture above is exactly 0.0, for all three
+# pairs. Zero is still not the right tolerance to assert, because the overlay
+# keeps state between calls and nothing promises a future fixture will stay at
+# zero; 1e-6 is the float-precision scale OEBestOverlayScore actually works at,
+# the same reasoning and the same value as SELF_SCORE_TOLERANCE in
+# ROCSComparison.cpp. The directional gap this has to catch is 0.035 on
+# combo_norm for this fixture, four orders of magnitude clear of it.
+ROCS_ORDER_TOLERANCE = 1e-6
+
+
+def test_rocs_pdist_does_not_depend_on_input_order():
+    """ROCS scores one orientation; pdist stores one triangle as symmetric.
+
+    Agreement is within a tolerance, not exact: the ROCS overlay keeps state
+    between calls, so a score is not a pure function of its pair.
+    """
+    pytest.importorskip("openeye.oeomega")
+    import oecluster
+
+    mols = _multiconformer_rocs_mols()
+    forward = np.asarray(oecluster.pdist(mols, comparison="rocs").squareform())
+    reversed_ = np.asarray(
+        oecluster.pdist(mols[::-1], comparison="rocs").squareform())
+    assert np.allclose(forward, reversed_[::-1, ::-1],
+                       rtol=0.0, atol=ROCS_ORDER_TOLERANCE)
+
+    # Not vacuous only if the fixture produces distances that could have
+    # disagreed. A set that scored every pair identically, or saturated, would
+    # satisfy the assertion above without testing anything.
+    off_diagonal = forward[~np.eye(3, dtype=bool)]
+    assert np.all(off_diagonal > 0.0)
+    assert off_diagonal.max() - off_diagonal.min() > 0.1
+
+
+def test_cdist_rocs_stays_directional():
+    """``cdist`` must keep searching only the fit molecule's conformers.
+
+    ``pdist`` symmetrizes because it stores one triangle; ``cdist`` stores both
+    and documents entry ``[i, j]`` as ``items_a[i]`` used *as the reference*.
+    Taking a non-active conformer of a multiconformer molecule as the reference
+    makes the two readings separable: the ensemble contains the pose the
+    reference was taken from, so searching it recovers an exact overlay, while
+    the single-conformer reference scored the other way round does not. A later
+    change that symmetrized ``cdist`` as well would take the best of the two and
+    lose that asymmetry.
+    """
+    pytest.importorskip("openeye.oeomega")
+    import oecluster
+    from openeye import oechem, oeomega
+
+    omega = oeomega.OEOmega()
+    omega.SetMaxConfs(5)
+    omega.SetStrictStereo(False)
+    multi = oechem.OEMol()
+    oechem.OESmilesToMol(multi, "c1ccccc1CCCCc1ccccc1")
+    assert omega(multi)
+    assert multi.NumConfs() > 1
+
+    last = list(multi.GetConfs())[-1]
+    reference = oechem.OEMol(multi.GetConf(oechem.OEHasConfIdx(last.GetIdx())))
+    assert reference.NumConfs() == 1
+
+    forward = np.asarray(
+        oecluster.cdist([reference], [multi], "rocs", score_type="shape"))
+    backward = np.asarray(
+        oecluster.cdist([multi], [reference], "rocs", score_type="shape"))
+
+    # The ensemble as the fit set contains the reference's own pose, so the
+    # search recovers it exactly. Measured 0.0 on 2026-10-15.
+    assert forward[0, 0] == pytest.approx(0.0, abs=1e-3)
+    # The other direction searches a single pose against the ensemble's active
+    # conformer and cannot match it. Measured 0.481 on 2026-10-15; asserting a
+    # loose floor rather than the value keeps this from becoming a change
+    # detector for Omega output.
+    assert backward[0, 0] > 0.1
+
+
 def test_pdist_rocs_accepts_graph_molecules():
     """The documented input type, which ``rocs`` rejected until 5.7.0.
 

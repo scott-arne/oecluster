@@ -3412,6 +3412,30 @@ atom-pair window must ask for it with
 
 Distance ranges: combo_norm [0, 1], combo [0, 2], shape [0, 1], color [0, 1].
 
+**A ROCS score is directional, and `pdist` is the one entry point that hides
+it.** Scoring a pair makes the first molecule the overlay reference and
+searches only the second molecule's conformers, so the two orientations are two
+different searches with two different answers. On three flexible
+multiconformer molecules the two orientations were measured 0.035 apart on
+combo_norm and 0.070 apart on shape -- one fixture, not a bound. `pdist` stores
+a single triangle and mirrors it, so it scores both orientations and keeps the
+better overlay; reordering the input list no longer moves the matrix, and with
+it the clustering.
+
+`cdist` keeps the directional reading, deliberately. Entry `[i, j]` is what
+`items_a[i]` finds when it searches `items_b[j]`'s conformers, which is the
+question a cross-distance block is asked and the one its documentation above
+answers; taking the better of the two orientations there would answer a
+different one. The same applies to a `ROCSComparison` used directly from C++.
+
+Order-independence on `pdist` holds up to scorer-state noise rather than
+exactly. `OEOverlay` keeps state between calls, so a score is not a pure
+function of its pair -- the same property that makes the streaming clustering
+paths refuse ROCS outright. On the three-molecule fixture above the forward and
+reversed matrices agreed to the last bit, and the test that pins this asserts
+agreement to 1e-6 rather than equality, because nothing in the toolkit promises
+that they always will.
+
 Either `OEMol` or `OEGraphMol` is accepted, since the comparison snapshots its
 own copies, but the choice changes what is computed rather than only what is
 accepted. An `OEGraphMol` carries a single conformer, so `BestOverlay` has one

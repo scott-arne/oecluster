@@ -8,9 +8,11 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <limits>
 #include <oechem.h>
 #include <oeshape.h>
 #include "IndexRange.h"
+#include "ROCSScoreCombine.h"
 #include "oecluster/Error.h"
 
 namespace OECluster {
@@ -60,7 +62,60 @@ std::vector<std::shared_ptr<OEChem::OEMol>> to_oemol_snapshots(
     }
     return out;
 }
+
+/// The Tanimoto the configured score type reads off a scored overlay, before
+/// any conversion to the comparison's output scale. Split out from the
+/// conversion because the two orientations an unordered pair is scored in have
+/// to be combined on this scale: every raw score here rises with overlay
+/// quality, while half the converted forms fall.
+double raw_overlay_score(const OEShape::OEBestOverlayScore& score, ROCSScoreType type) {
+    switch (type) {
+        case ROCSScoreType::ComboNorm:
+        case ROCSScoreType::Combo:
+            return static_cast<double>(score.GetTanimotoCombo());
+        case ROCSScoreType::Shape:
+            return static_cast<double>(score.GetTanimoto());
+        case ROCSScoreType::Color:
+            return static_cast<double>(score.GetColorTanimoto());
+    }
+    return 0.0;
+}
+
+/// The value this comparison reports for a raw Tanimoto, under the configured
+/// score type and direction flag.
+double convert_raw_score(double raw, const ROCSOptions& opts) {
+    if (opts.similarity) {
+        switch (opts.score_type) {
+            case ROCSScoreType::ComboNorm:
+                return raw / 2.0;
+            case ROCSScoreType::Combo:
+            case ROCSScoreType::Shape:
+            case ROCSScoreType::Color:
+                return raw;
+        }
+    }
+
+    switch (opts.score_type) {
+        case ROCSScoreType::ComboNorm:
+            return 1.0 - raw / 2.0;
+        case ROCSScoreType::Combo:
+            return 2.0 - raw;
+        case ROCSScoreType::Shape:
+        case ROCSScoreType::Color:
+            return 1.0 - raw;
+    }
+
+    return 0.0;
+}
 }  // namespace
+
+// Declared in ROCSScoreCombine.h, which is where its contract is written.
+double better_raw_score(double a, double b) {
+    if (!std::isfinite(a) || !std::isfinite(b)) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    return std::max(a, b);
+}
 
 struct ROCSComparison::SharedData {
     /// The comparison's own copies of the caller's molecules. Color preparation
@@ -368,31 +423,36 @@ double ROCSComparison::Compare(size_t i, size_t j) {
     OEShape::OEBestOverlayScore score;
     local_->overlay.BestOverlay(score, *shared_->mols[j]);
 
-    if (opts_.similarity) {
-        switch (opts_.score_type) {
-            case ROCSScoreType::ComboNorm:
-                return static_cast<double>(score.GetTanimotoCombo()) / 2.0;
-            case ROCSScoreType::Combo:
-                return static_cast<double>(score.GetTanimotoCombo());
-            case ROCSScoreType::Shape:
-                return static_cast<double>(score.GetTanimoto());
-            case ROCSScoreType::Color:
-                return static_cast<double>(score.GetColorTanimoto());
-        }
+    return convert_raw_score(raw_overlay_score(score, opts_.score_type), opts_);
+}
+
+double ROCSComparison::CompareUnordered(size_t i, size_t j) {
+    detail::check_compare_index_range("ROCSComparison", i, j, shared_->mols.size());
+
+    // Both orientations of a self-pair are the same search, so there is nothing
+    // to combine. pdist never stores a diagonal, so this is for a future caller
+    // rather than the current one; it also keeps the diagonal that
+    // MeasureDiagonal stamps and the diagonal a direct caller would see here
+    // the same number.
+    if (i == j) {
+        return Compare(i, j);
     }
 
-    switch (opts_.score_type) {
-        case ROCSScoreType::ComboNorm:
-            return 1.0 - static_cast<double>(score.GetTanimotoCombo()) / 2.0;
-        case ROCSScoreType::Combo:
-            return 2.0 - static_cast<double>(score.GetTanimotoCombo());
-        case ROCSScoreType::Shape:
-            return 1.0 - static_cast<double>(score.GetTanimoto());
-        case ROCSScoreType::Color:
-            return 1.0 - static_cast<double>(score.GetColorTanimoto());
-    }
+    local_->overlay.SetupRef(*shared_->mols[i]);
+    OEShape::OEBestOverlayScore forward;
+    local_->overlay.BestOverlay(forward, *shared_->mols[j]);
+    // Read before the second SetupRef: local_->overlay is one stateful object
+    // and SetupRef replaces the reference this score was taken against.
+    const double forward_raw = raw_overlay_score(forward, opts_.score_type);
 
-    return 0.0;
+    local_->overlay.SetupRef(*shared_->mols[j]);
+    OEShape::OEBestOverlayScore reverse;
+    local_->overlay.BestOverlay(reverse, *shared_->mols[i]);
+    const double reverse_raw = raw_overlay_score(reverse, opts_.score_type);
+
+    // Combine on the raw scale and convert once. See ROCSScoreCombine.h for why
+    // the maximum of the converted values would be the wrong rule.
+    return convert_raw_score(better_raw_score(forward_raw, reverse_raw), opts_);
 }
 
 std::unique_ptr<PairwiseComparison> ROCSComparison::Clone() const {

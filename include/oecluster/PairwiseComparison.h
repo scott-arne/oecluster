@@ -114,6 +114,37 @@ public:
      * :returns: Name of the comparison.
      */
     virtual std::string ComparisonName() const = 0;
+
+protected:
+    /**
+     * @brief The value ``pdist`` stores for the unordered pair {i, j}.
+     *
+     * Defaults to ``Compare(i, j)``. A comparison whose ``Compare`` is
+     * directional overrides this so that the single stored triangle does not
+     * depend on which index ``pdist`` happened to pass first. It is protected
+     * because it is not a second public way to compare two items: ``Compare``
+     * keeps its own meaning, which ``cdist`` and direct callers rely on.
+     */
+    virtual double CompareUnordered(size_t i, size_t j) { return Compare(i, j); }
+
+#ifndef SWIG
+    /// ``pdist`` is the one caller of the seam above, and it is a free function
+    /// rather than a member, so it needs friendship to reach a protected
+    /// member. The call sits inside ``pdist``'s ``ParallelFor`` lambda, whose
+    /// body is access-checked in the context of the enclosing function, and it
+    /// goes through a ``std::unique_ptr<PairwiseComparison>``; neither changes
+    /// what this declaration has to say. No default argument here: ``PDist.h``
+    /// owns the one for ``options``, and a friend declaration that is also the
+    /// first declaration of a function may not supply one.
+    ///
+    /// Hidden from SWIG. ``swig/oecluster.i`` ``%include``s this header before
+    /// it declares ``pdist`` itself, and SWIG wraps a friend declaration as a
+    /// namespace-scope function, so leaving this visible would have SWIG wrap
+    /// ``pdist`` here -- against parameter types that are still incomplete at
+    /// this point -- and then redeclare it later.
+    friend void pdist(PairwiseComparison& comparison, StorageBackend& storage,
+                      const PDistOptions& options);
+#endif
 };
 
 }  // namespace OECluster

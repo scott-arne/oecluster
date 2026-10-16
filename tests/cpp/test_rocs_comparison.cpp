@@ -1,12 +1,20 @@
 #include <gtest/gtest.h>
 #include "oecluster/oecluster.h"
 #include "oecluster/comparisons/ROCSComparison.h"
+// Private to the ROCS implementation and reached by relative path, as
+// test_storage.cpp reaches StorageOverflow.h: the test target has no ``src``
+// include directory, and the helper is deliberately given external linkage so
+// that its non-finite rule can be tested on numbers rather than on an overlay
+// fixture that may not be able to produce them.
+#include "../../src/comparisons/ROCSScoreCombine.h"
 #include <oechem.h>
 #include <oeomega2.h>
 #include <oeshape.h>
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <string>
+#include <vector>
 
 using namespace OECluster;
 
@@ -570,4 +578,118 @@ TEST_F(ROCSComparisonTest, FactsCoverEveryScoreTypeAndDirection) {
         EXPECT_EQ(facts.triangle, Capability::Unknown) << label;
         EXPECT_EQ(facts.data_integrity, DataIntegrity::Complete) << label;
     }
+}
+
+/// Reaches the protected seam ``pdist`` calls. ``CompareUnordered`` is
+/// protected so that it cannot become a second public way to compare two
+/// items; deriving is the access the language offers a caller that genuinely
+/// needs it, and the call it makes is the one ``pdist`` makes through its
+/// friendship. That the ``using`` declaration below compiles is itself part of
+/// the test: it would not if the override had been left public, because the
+/// base declares it protected.
+struct ROCSUnorderedProbe : ROCSComparison {
+    using ROCSComparison::ROCSComparison;
+    using ROCSComparison::CompareUnordered;
+};
+
+TEST_F(ROCSComparisonTest, UnorderedKeepsTheBetterOverlayForEveryScoreType) {
+    // Eight cases rather than one. The two orientations are combined on the raw
+    // Tanimoto, and the conversion from that to the reported value differs per
+    // score type and reverses direction on the similarity flag, so a
+    // single-type test would prove an eighth of the rule. An implementation
+    // that took the maximum of the converted values instead of the raw ones
+    // would pass all four similarity rows and fail all four distance rows.
+    const std::vector<std::shared_ptr<OEChem::OEMol>> flexible{
+        MakeConformer("CCCCCCCC", 20), MakeConformer("c1ccc(CCCCO)cc1", 20)};
+    ASSERT_GT(flexible[0]->NumConfs(), 1u);
+    ASSERT_GT(flexible[1]->NumConfs(), 1u);
+
+    // Not exact agreement: the overlay keeps state between calls, so the pair
+    // of searches run for {0, 1} is not bit-identical to the pair run for
+    // {1, 0}, nor to the two standalone Compare calls below.
+    constexpr double tolerance = 1e-6;
+    double largest_orientation_gap = 0.0;
+
+    for (ROCSScoreType score_type : {ROCSScoreType::ComboNorm, ROCSScoreType::Combo,
+                                     ROCSScoreType::Shape, ROCSScoreType::Color}) {
+        for (bool similarity : {false, true}) {
+            ROCSOptions opts;
+            opts.score_type = score_type;
+            opts.similarity = similarity;
+            ROCSUnorderedProbe probe(flexible, opts);
+
+            const double unordered = probe.CompareUnordered(0, 1);
+            const double swapped = probe.CompareUnordered(1, 0);
+            const double forward = probe.Compare(0, 1);
+            const double reverse = probe.Compare(1, 0);
+
+            const std::string label =
+                std::to_string(static_cast<int>(score_type)) +
+                (similarity ? " similarity" : " distance");
+
+            EXPECT_NEAR(unordered, swapped, tolerance) << label;
+            if (similarity) {
+                EXPECT_GE(unordered, std::max(forward, reverse) - tolerance) << label;
+            } else {
+                EXPECT_LE(unordered, std::min(forward, reverse) + tolerance) << label;
+            }
+
+            largest_orientation_gap =
+                std::max(largest_orientation_gap, std::abs(forward - reverse));
+        }
+    }
+
+    // The assertions above hold for free on a fixture whose two orientations
+    // agree, so the fixture has to be shown to disagree. Measured 0.070 on
+    // 2026-10-15, on the Shape rows.
+    EXPECT_GT(largest_orientation_gap, 0.01);
+}
+
+TEST_F(ROCSComparisonTest, UnorderedAgreesWithCompareOnTheDiagonal) {
+    // pdist stores no diagonal, so this is for a future caller. It also keeps
+    // the self-score a direct caller sees here equal to the one MeasureDiagonal
+    // stamps zero_self from, which reads Compare.
+    ROCSUnorderedProbe probe(mols_, ROCSOptions());
+    for (size_t i = 0; i < mols_.size(); ++i) {
+        EXPECT_DOUBLE_EQ(probe.CompareUnordered(i, i), probe.Compare(i, i)) << i;
+    }
+}
+
+TEST(ROCSScoreCombine, NonFiniteOperandsCollapseToOneCanonicalNaN) {
+    // std::max compares false against a NaN and so returns whichever operand it
+    // was handed first, which would leave the combine order-dependent on
+    // exactly the inputs it exists to make order-independent. Every row is
+    // asserted in both argument orders for that reason.
+    constexpr double quiet_nan = std::numeric_limits<double>::quiet_NaN();
+    constexpr double infinity = std::numeric_limits<double>::infinity();
+
+    struct Row {
+        double a;
+        double b;
+        const char* why;
+    };
+    const std::vector<Row> rows{
+        {quiet_nan, 0.5, "the basic case"},
+        {quiet_nan, -infinity, "two non-finite values, neither preferable"},
+        {infinity, 0.5,
+         "a rule testing isnan rather than !isfinite passes every NaN row "
+         "above and still returns inf here"},
+        {-infinity, 0.5, "the same hole on the other side"},
+    };
+
+    for (const Row& row : rows) {
+        EXPECT_TRUE(std::isnan(better_raw_score(row.a, row.b))) << row.why;
+        EXPECT_TRUE(std::isnan(better_raw_score(row.b, row.a))) << row.why;
+    }
+}
+
+TEST(ROCSScoreCombine, FiniteOperandsTakeTheLargerInEitherOrder) {
+    // Larger is better for every ROCS raw score: all four are Tanimotos that
+    // rise with overlay quality, which is what lets one combine serve the
+    // distance and the similarity forms alike.
+    EXPECT_DOUBLE_EQ(better_raw_score(0.25, 0.75), 0.75);
+    EXPECT_DOUBLE_EQ(better_raw_score(0.75, 0.25), 0.75);
+    EXPECT_DOUBLE_EQ(better_raw_score(-1.0, -2.0), -1.0);
+    EXPECT_DOUBLE_EQ(better_raw_score(-2.0, -1.0), -1.0);
+    EXPECT_DOUBLE_EQ(better_raw_score(0.5, 0.5), 0.5);
 }

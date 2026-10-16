@@ -51,6 +51,25 @@ struct ROCSOptions {
  *
  * Each Clone() creates a new ``OEOverlay`` instance so that Compare()
  * can be called concurrently from different threads without locking.
+ *
+ * ``Compare(i, j)`` is directional: it makes ``i`` the overlay reference and
+ * searches only ``j``'s conformers, so the two orientations of a pair are two
+ * different searches with two different answers. ``pdist`` fills one triangle
+ * and presents it as symmetric, so it routes through a protected seam,
+ * ``CompareUnordered``, which scores both orientations and keeps the better
+ * overlay. Being protected, that seam is not callable from outside the class
+ * and does not appear in the bindings. ``cdist`` and
+ * direct ``Compare`` callers keep the directional meaning, which is the one
+ * their output documents -- a ``cdist`` row says what each reference finds in
+ * the fit set, and symmetrizing it would answer a different question.
+ *
+ * The result is order-independence up to scorer-state noise, not exact
+ * symmetry. ``OEOverlay`` carries state between calls, so a score is not a pure
+ * function of its pair; the same property is why
+ * ``src/clustering/DiversityValidation.h`` refuses ROCS on the streaming paths.
+ * Reordering the input moves a ``pdist`` matrix by that residual rather than by
+ * the orientation gap, which on flexible multiconformer molecules has been
+ * measured at over a tenth of a unit on a [0, 1] scale.
  */
 class ROCSComparison : public PairwiseComparison {
 public:
@@ -162,6 +181,23 @@ public:
     size_t Size() const override;
     std::string ComparisonName() const override;
     GateFacts Facts() const override;
+
+protected:
+    /// Score both orientations of {i, j} and keep the better overlay, so that
+    /// the one triangle ``pdist`` stores does not depend on which index it
+    /// passed first. Equal indices short-circuit to ``Compare``, both
+    /// orientations there being the same search.
+    ///
+    /// Declared here rather than beside the public overrides above, and
+    /// deliberately: the access of an override is set by its own declaration,
+    /// so listing it there would make it public and give callers a second,
+    /// contradictory way to compare two items. The base declares it protected
+    /// precisely to keep that from happening.
+    ///
+    /// Agreement between the two argument orders is close, not exact. The
+    /// overlay keeps state between calls, so the pair of searches this runs for
+    /// {i, j} is not bit-identical to the pair it runs for {j, i}.
+    double CompareUnordered(size_t i, size_t j) override;
 
 private:
     struct SharedData;
