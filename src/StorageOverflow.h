@@ -3,6 +3,14 @@
  * @brief Buffer-length arithmetic shared by the contiguous storage backends.
  *
  * Private to the storage implementation: not installed, not exposed through SWIG.
+ *
+ * Declaring the helper here gives it external linkage, which it did not have
+ * while it sat in an anonymous namespace in StorageBackend.cpp. That is the
+ * trade being made rather than an oversight: the arithmetic below decides
+ * whether a sample count is representable, the counts that exercise it are
+ * ones no test can afford to allocate, and reaching it from the test suite is
+ * what makes them affordable. DescriptorBuild.h declares its private helpers
+ * the same way, and one shared pattern is worth more than one fewer symbol.
  */
 
 #ifndef OECLUSTER_STORAGEOVERFLOW_H

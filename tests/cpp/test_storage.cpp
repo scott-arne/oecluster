@@ -263,11 +263,12 @@ TEST(SparseStorageTest, SetOutOfRangeStoresNothing) {
 // the guard has regressed, and then most of these counts are not an assertion
 // failure but a dead machine: 6074001001 wraps to 3327948884 pairs, which an
 // unguarded DenseStorage zero-fills as 26.6 GB of memory and an unguarded
-// MMapStorage writes to disk, and 2147483649 wraps to exactly 8 GiB. A test
-// that is OOM-killed has reported nothing, and no destructor of ours runs to
-// clean up after it. Constructing is reserved below for the few counts that
-// stay cheap even unguarded; those cases prove the wiring, and the cases here
-// prove the arithmetic.
+// MMapStorage writes to disk; 2147483649 has a byte count that wraps to
+// exactly 8 GiB, which an unguarded MMapStorage writes. A test that is
+// OOM-killed has reported nothing, and no destructor of ours runs to clean up
+// after it. Constructing is reserved for the few counts that stay cheap even
+// unguarded; those cases prove the wiring, and the helper cases prove the
+// arithmetic.
 
 namespace {
 
@@ -288,8 +289,9 @@ std::string overflow_message(Call call) {
 
 /// Path for an MMapStorage refusal probe, removed at both ends of the test.
 /// Removing it first makes the existence check after the probe describe only
-/// the call under test; removing it again on the way out keeps a regressed
-/// guard from leaving the multi-gigabyte file it would then create.
+/// the call under test; removing it again on the way out clears any residual
+/// artifact a regressed guard left, which for the counts constructed below is
+/// an 8-byte file or an empty one.
 class ProbePath {
 public:
     explicit ProbePath(const char* name)
@@ -348,17 +350,18 @@ TEST(CheckedPairCountTest, CountsNoPairsBelowTwoSamples) {
 }
 
 TEST(CheckedPairCountTest, AcceptsTheLargestSampleCountWhoseByteCountFits) {
-    // Both checks pass here, which is what makes the halve-first form worth
-    // its awkwardness: this count's pair product overflows if computed
-    // directly. No test constructs a backend for it -- accepting it means an
-    // 18 exabyte allocation.
+    // The byte boundary itself: 2305843008139952128 pairs come to
+    // 18446744065119617024 bytes, the last byte count size_t can hold. One
+    // more sample crosses it, which the refusal test below pins. Nothing
+    // constructs a backend for this count -- accepting it means asking for 18
+    // exabytes.
     EXPECT_EQ(checked_pair_count(LARGEST_ACCEPTED_N, "DenseStorage"),
               2305843008139952128ULL);
 }
 
 TEST(CheckedPairCountTest, AcceptsTheSmallestSampleCountNoFileCanHold) {
-    // Past every file size limit, but that is MMapStorage's complaint, not
-    // this helper's: both of its checks pass.
+    // Past the signed offset the file APIs size files with, but that is
+    // MMapStorage's complaint, not this helper's: both of its checks pass.
     EXPECT_EQ(checked_pair_count(SMALLEST_UNMAPPABLE_N, "MMapStorage"),
               1152921505384281375ULL);
 }
