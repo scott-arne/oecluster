@@ -711,12 +711,28 @@ def test_pair_rank_criteria_need_a_matrix(criterion):
 # --- a partition the scorer refuses ----------------------------------------
 
 def test_a_partition_the_scorer_refuses_propagates_its_error():
-    # bitbirch_refine can hand back an emptied leaf subcluster as an empty
-    # member list; both scorecards refuse an empty cluster.
+    # No shipped algorithm produces an empty cluster, so the only route left to
+    # the scorer's refusal is a foreign clusterer that hands one back.
+    def empty_cluster(items, **options):
+        return oecluster.ClusteringResult([0, 0, 0, 0], ((0, 1, 2, 3), ()))
+
+    bits = [[1, 1, 1], [0, 1, 1], [1, 0, 0], [1, 1, 0]]
+    with pytest.raises(RuntimeError, match="at least one member"):
+        oecluster.select_parameter(empty_cluster, _batch_from_bits(bits),
+                                   "threshold", (0.8,))
+
+
+def test_a_refinement_that_emptied_a_subcluster_is_scored():
+    # bitbirch_refine used to hand back the leaf subcluster its prune pass
+    # emptied as an empty member list, which both scorecards refused; it now
+    # drops it, so this grid point scores instead of raising.
     bits = [[1, 1, 1], [0, 1, 1], [1, 0, 0], [1, 1, 0]]
     spec = oecluster.ClusteringSpec(
         "bitbirch_refine", branching_factor=2, merge_criterion="diameter",
         singly=False, redistribute_largest_cluster=True)
-    with pytest.raises(RuntimeError, match="at least one member"):
-        oecluster.select_parameter(spec, _batch_from_bits(bits), "threshold",
-                                   (0.8,))
+
+    selection = oecluster.select_parameter(spec, _batch_from_bits(bits),
+                                           "threshold", (0.8,))
+
+    assert [row.value for row in selection.rows] == [0.8]
+    assert selection.rows[0].report.num_clusters == 4

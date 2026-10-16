@@ -524,8 +524,10 @@ def test_bitbirch_refine_redistribute_largest_cluster_matches_reference():
     assert observed.cluster_sizes == tuple(len(cluster) for cluster in expected_clusters)
 
 
-def test_bitbirch_refine_prune_matches_zero_sample_reference_centroid():
-    bits = np.array(
+def _emptied_subcluster_fixture_bits():
+    # This fixture makes prune leave one leaf subcluster with no members: the
+    # reference reports it as an empty cluster, and the native result drops it.
+    return np.array(
         [
             [1, 1, 1],
             [0, 1, 1],
@@ -534,13 +536,10 @@ def test_bitbirch_refine_prune_matches_zero_sample_reference_centroid():
         ],
         dtype=np.uint8,
     )
-    expected_labels, expected_clusters = _reference_refine_prune(
-        bits,
-        threshold=0.8,
-        branching_factor=2,
-    )
 
-    observed = oecluster.bitbirch_refine(
+
+def _refine_emptied_subcluster(bits):
+    return oecluster.bitbirch_refine(
         _batch_from_bits(bits),
         threshold=0.8,
         branching_factor=2,
@@ -549,8 +548,45 @@ def test_bitbirch_refine_prune_matches_zero_sample_reference_centroid():
         redistribute_largest_cluster=True,
     )
 
+
+def test_bitbirch_refine_prune_matches_the_reference_but_drops_the_emptied_subcluster():
+    bits = _emptied_subcluster_fixture_bits()
+    expected_labels, expected_clusters = _reference_refine_prune(
+        bits,
+        threshold=0.8,
+        branching_factor=2,
+    )
+    # A deliberate divergence from the reference: it reports the subcluster
+    # prune emptied as an empty cluster, and the native result drops it. The
+    # sort is size-descending, so the empties are trailing and no label moves
+    # -- which is why the labels below are still compared as-is.
+    assert expected_clusters[-1] == ()
+    expected_clusters = tuple(
+        cluster for cluster in expected_clusters if cluster)
+
+    observed = _refine_emptied_subcluster(bits)
+
     assert observed.labels.tolist() == expected_labels.tolist()
     assert observed.clusters == expected_clusters
+
+
+def test_cluster_report_accepts_a_refinement_that_emptied_a_subcluster():
+    bits = _emptied_subcluster_fixture_bits()
+    result = _refine_emptied_subcluster(bits)
+
+    assert all(len(cluster) > 0 for cluster in result.clusters)
+    report = oecluster.cluster_report(
+        result, _tanimoto_distance_matrix(bits), allow_nonmetric=True)
+    assert report.num_clusters == len(result.clusters)
+
+
+def test_isim_report_accepts_a_refinement_that_emptied_a_subcluster():
+    bits = _emptied_subcluster_fixture_bits()
+    result = _refine_emptied_subcluster(bits)
+
+    assert all(len(cluster) > 0 for cluster in result.clusters)
+    report = oecluster.isim_report(result, _batch_from_bits(bits))
+    assert report.num_clusters == len(result.clusters)
 
 
 def test_bitbirch_refine_prune_then_reassign_matches_reference():

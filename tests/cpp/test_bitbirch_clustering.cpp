@@ -9,6 +9,7 @@
 #include "oefp/fingerprint.h"
 #include "oecluster/clustering/BitBirch.h"
 #include "oecluster/clustering/ClusterReport.h"
+#include "oecluster/clustering/ISimReport.h"
 #include "oecluster/StorageBackend.h"
 #include "../../src/clustering/BitBirchTree.h"
 
@@ -193,7 +194,11 @@ TEST(BitBirchClusteringTest, RefinePruneRedistributesLargestCluster) {
     EXPECT_EQ(assigned, 12u);
 }
 
-TEST(BitBirchClusteringTest, RefinePruneMatchesZeroSampleReferenceCentroid) {
+// The reference implementation reports the leaf subcluster prune emptied as a
+// fifth, empty cluster; dropping it is a deliberate divergence. The member
+// lists are sorted size-descending, so the empty one is trailing and dropping
+// it moves no label, which the labels below pin.
+TEST(BitBirchClusteringTest, RefinePruneDropsTheSubclusterItEmptied) {
     const auto batch = make_batch({
         make_fp(3, {0, 1, 2}),
         make_fp(3, {1, 2}),
@@ -210,12 +215,13 @@ TEST(BitBirchClusteringTest, RefinePruneMatchesZeroSampleReferenceCentroid) {
     const auto result = OECluster::bitbirch_refine(batch, options);
 
     EXPECT_EQ(result.Labels(), (std::vector<OECluster::ClusterLabel>{2, 1, 0, 3}));
-    ASSERT_EQ(result.Members().size(), 5u);
+    ASSERT_EQ(result.Members().size(), 4u);
     EXPECT_EQ(result.Members()[0], (OECluster::Cluster{2}));
     EXPECT_EQ(result.Members()[1], (OECluster::Cluster{1}));
     EXPECT_EQ(result.Members()[2], (OECluster::Cluster{0}));
     EXPECT_EQ(result.Members()[3], (OECluster::Cluster{3}));
-    EXPECT_TRUE(result.Members()[4].empty());
+    EXPECT_EQ(result.ClusterSizes(), (std::vector<size_t>{1, 1, 1, 1}));
+    EXPECT_EQ(result.Centroids().Size(), 4u);
 }
 
 TEST(BitBirchFastTest, PartitionCountIsDeterministicInNAlone) {
@@ -458,17 +464,14 @@ TEST(BitBirchClusteringTest, ClusterReportAcceptsBitBirchOutput) {
         OECluster::cluster_report(result, storage, OECluster::ClusterReportOptions()));
 }
 
-// Known gap, pinned deliberately rather than left latent. bitbirch_refine can
-// return an emptied leaf subcluster as an empty member list -- see
-// RefinePruneMatchesZeroSampleReferenceCentroid above, which fixes that shape as
-// reference-parity behaviour -- and cluster_report's long-standing
-// validate_cluster_members refuses it. The refusal predates the bijection
-// pre-pass; what is new is only that a sibling test now claims the preconditions
-// accept everything the library ships. This test makes the disagreement visible,
-// so whichever way it is resolved -- BitBirch compacting its output, or
-// cluster_report accepting an empty cluster -- the change is deliberate and this
-// test flips with it.
-TEST(BitBirchClusteringTest, ClusterReportRefusesEmptiedRefinementSubclusters) {
+// The disagreement this used to pin: cluster_report's long-standing
+// validate_cluster_members refuses an empty member list, and refinement could
+// hand it one, so a supported pipeline raised. BitBirch now drops the
+// subclusters refinement empties -- see RefinePruneDropsTheSubclusterItEmptied
+// above -- so both scorecards accept the result. cluster_report's own
+// empty-cluster refusal is unchanged and still fires on a hand-built result;
+// test_cluster_report.cpp covers it.
+TEST(BitBirchClusteringTest, BothScorecardsAcceptARefinementThatEmptiedASubcluster) {
     const auto batch = make_batch({
         make_fp(3, {0, 1, 2}),
         make_fp(3, {1, 2}),
@@ -485,15 +488,12 @@ TEST(BitBirchClusteringTest, ClusterReportRefusesEmptiedRefinementSubclusters) {
     options.redistribute_largest_cluster = true;
 
     const auto result = OECluster::bitbirch_refine(batch, options);
-    ASSERT_EQ(result.Members().size(), 5u);
-    ASSERT_TRUE(result.Members()[4].empty());
-
-    try {
-        OECluster::cluster_report(result, storage, OECluster::ClusterReportOptions());
-        FAIL() << "expected std::invalid_argument";
-    } catch (const std::invalid_argument& e) {
-        EXPECT_NE(std::string(e.what()).find("Cluster must contain at least one member"),
-                  std::string::npos)
-            << e.what();
+    ASSERT_EQ(result.Members().size(), 4u);
+    for (const auto& cluster : result.Members()) {
+        EXPECT_FALSE(cluster.empty());
     }
+
+    EXPECT_NO_THROW(
+        OECluster::cluster_report(result, storage, OECluster::ClusterReportOptions()));
+    EXPECT_NO_THROW(OECluster::isim_report(result, batch, OECluster::ISimReportOptions()));
 }

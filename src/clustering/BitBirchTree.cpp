@@ -639,6 +639,14 @@ BitBirchResult BitBirchTree::Result(
     centroid_fingerprints.reserve(ordered.size());
     for (size_t label = 0; label < ordered.size(); ++label) {
         const BitBirchSubcluster& subcluster = *ordered[label];
+        // The sort above is size-descending, so the first empty subcluster means
+        // every later one is empty too, and stopping here renumbers no positive
+        // label. Refinement can empty a leaf subcluster; emitting it cost
+        // nothing except that cluster_report and isim_report both refuse an
+        // empty member list, which made a supported pipeline raise.
+        if (subcluster.members.empty()) {
+            break;
+        }
         members.push_back(subcluster.members);
         cluster_sizes.push_back(subcluster.members.size());
         for (const size_t member : subcluster.members) {

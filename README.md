@@ -365,7 +365,7 @@ result = oecluster.bitbirch_refine(
 )
 ```
 
-Both functions return a `BitBirchResult` with `labels`, `clusters`, `centroids`, and `cluster_sizes`. The `mode` parameter accepts `"strict_parity"` (exact reference-implementation parity) or `"fast"` (partition-merge parallelism with deterministic output). Fast mode applies to `bitbirch` and `bitbirch_recluster`; `bitbirch_refine` always runs in strict parity because its prune/reassign passes are order-sensitive (the `mode` argument is accepted for API symmetry but does not change refine's behavior).
+Both functions return a `BitBirchResult` with `labels`, `clusters`, `centroids`, and `cluster_sizes`, and every cluster in it has at least one member — where a prune pass empties a leaf subcluster, the Python reference reports an empty cluster and `bitbirch_refine` drops it. The `mode` parameter accepts `"strict_parity"` (exact reference-implementation parity for the fit) or `"fast"` (partition-merge parallelism with deterministic output). Fast mode applies to `bitbirch` and `bitbirch_recluster`; `bitbirch_refine` always runs in strict parity because its prune/reassign passes are order-sensitive (the `mode` argument is accepted for API symmetry but does not change refine's behavior).
 
 ### Choosing A Parameter
 
@@ -644,9 +644,9 @@ purchasing, and diversity triage.
 `treat_noise_as_singletons=True` folds noise into the `singleton_fraction`
 interpretation; set it `False` to keep them distinct. The report requires
 complete pairwise distances (dense or memory-mapped storage); a sparse
-(`cutoff`) matrix raises. `bitbirch_refine` can return an emptied leaf
-subcluster as an empty member list, and `cluster_report` refuses a result
-carrying one; nothing else the library produces trips that check.
+(`cutoff`) matrix raises. `cluster_report` and `isim_report` both refuse a
+result carrying an empty cluster, which no clustering the library ships
+produces.
 
 ### Internal validity indices and optional stages
 

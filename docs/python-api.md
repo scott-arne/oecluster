@@ -779,9 +779,15 @@ result = oecluster.bitbirch_refine(
 ```
 
 All three return a `BitBirchResult` with `labels`, `clusters`, `centroids`, and
-`cluster_sizes`. The `mode` parameter accepts `"strict_parity"` (exact
-reference-implementation parity) or `"fast"` (partition-merge parallelism with
-deterministic output). Fast mode applies to `bitbirch()` and
+`cluster_sizes`, and every cluster in it has at least one member. That last
+point is where `bitbirch_refine()` departs from the Python reference: its prune
+pass can empty a leaf subcluster, which the reference reports as an empty
+cluster and `bitbirch_refine()` drops. The member lists are ordered by member
+count, largest first, so a dropped one is trailing and no label moves.
+
+The `mode` parameter accepts `"strict_parity"` (exact
+reference-implementation parity for the fit) or `"fast"` (partition-merge
+parallelism with deterministic output). Fast mode applies to `bitbirch()` and
 `bitbirch_recluster()`; `bitbirch_refine()` always runs in strict parity
 because its prune/reassign passes are order-sensitive, so its `mode` argument is
 accepted for API symmetry but does not change behavior.
@@ -960,11 +966,12 @@ field depends on such a pair, so the comparison result is still the
 right one. When several pairs are bad, the report names the earliest in
 row order whatever `num_threads` is.
 
-One shipped combination is refused. `bitbirch_refine()` can return an emptied
-leaf subcluster as an empty member list -- reference-parity behaviour for its
-prune pass -- and `cluster_report()` refuses any result carrying an empty
-cluster, with a `RuntimeError` reading `Cluster must contain at least one
-member`. Nothing else the library produces trips that check.
+`cluster_report()` refuses any result carrying an empty cluster, with a
+`RuntimeError` reading `Cluster must contain at least one member`;
+`isim_report()` refuses it the same way and with the same message. No
+clustering the library ships produces one, so the check fires only on a result
+the caller built. `bitbirch_refine()` used to return the leaf subcluster its
+prune pass emptied as an empty member list, and now drops it.
 
 ### Internal validity indices
 
@@ -1414,11 +1421,11 @@ in the table, not produced by the scorer, or unavailable for the input.
 
 Nothing is wrapped during the sweep. A grid value the algorithm refuses
 raises that function's own exception, and a partition the scorer refuses
-raises the scorer's; the one known case of the latter is `bitbirch_refine`
-with `redistribute_largest_cluster=True` and `singly=False`, which can
-return an emptied leaf subcluster as an empty member list that both
-scorecards reject with `RuntimeError`. A degenerate partition is not an
-error; it becomes a row with a NaN score or a rejected row.
+raises the scorer's. No algorithm on the roster produces a partition either
+scorecard refuses, so the second case takes a foreign clusterer -- one that
+returns an empty cluster, say, which both scorecards reject with
+`RuntimeError`. A degenerate partition is not an error; it becomes a row with
+a NaN score or a rejected row.
 
 ### Fingerprints
 
