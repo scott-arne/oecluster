@@ -121,7 +121,11 @@ protected:
      *
      * Defaults to ``Compare(i, j)``. A comparison whose ``Compare`` is
      * directional overrides this so that the single stored triangle does not
-     * depend on which index ``pdist`` happened to pass first. It is protected
+     * depend on which index ``pdist`` happened to pass first. Direction is not
+     * the only way that can happen: what an override owes ``pdist`` is a value
+     * that is a function of the unordered pair, so a comparison carrying
+     * scorer state from one call to the next has to deal with that too.
+     * ``ROCSComparison`` is both, and does both. It is protected
      * because it is not a second public way to compare two items: ``Compare``
      * keeps its own meaning, which ``cdist`` and direct callers rely on.
      */

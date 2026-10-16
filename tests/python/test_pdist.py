@@ -1,3 +1,5 @@
+import itertools
+
 import numpy as np
 import pytest
 
@@ -752,12 +754,14 @@ def multiconformer_rocs_mols():
 
 # Measured 2026-10-15: the largest absolute disagreement between the forward
 # and reversed matrices on the fixture above is exactly 0.0, on all four score
-# types. Zero is still not the right tolerance to assert, because the overlay
-# keeps state between calls and nothing promises a future fixture will stay at
-# zero; 1e-6 is the float-precision scale OEBestOverlayScore actually works at,
-# the same reasoning and the same value as SELF_SCORE_TOLERANCE in
-# ROCSComparison.cpp. The smallest directional gap it has to catch is 0.00099,
-# on color, which still leaves it three orders of magnitude clear.
+# types, and so is the worst of the six permutations of the displaced-phenol
+# fixture further down. Zero is still not the right tolerance to assert,
+# because OEBestOverlayScore returns float and nothing in the toolkit promises
+# bit-reproducibility; 1e-6 is the float-precision scale it works at, the same
+# reasoning and the same value as SELF_SCORE_TOLERANCE in ROCSComparison.cpp.
+# The effects it has to stay clear of are the 0.00099 color orientation gap
+# below and the 0.4538 permutation effect, three and five orders of magnitude
+# above it.
 ROCS_ORDER_TOLERANCE = 1e-6
 
 # Half the orientation gap measured on this fixture on 2026-10-15 --
@@ -823,6 +827,63 @@ def test_rocs_pdist_does_not_depend_on_input_order(multiconformer_rocs_mols,
                         score_type=score_type).squareform())
     assert np.allclose(forward, reversed_[::-1, ::-1],
                        rtol=0.0, atol=ROCS_ORDER_TOLERANCE)
+
+
+def test_rocs_pdist_survives_an_input_that_saturates_a_reused_overlay():
+    """The input that proved scoring both orientations was not enough on its own.
+
+    A phenol with one atom displaced to 200 angstroms is accepted -- two orders
+    of magnitude inside the extent guard -- and it is the case
+    ``ROCSComparison.cpp`` already documented: it scores 0.546 against benzene
+    on an overlay used for the first time and saturates at exactly 1.0 on one
+    that has scored anything before. While ``pdist`` reused a single overlay per
+    worker, which of the two a pair got depended on where that pair fell in the
+    input order, and the matrix moved by 0.453840 under a permutation even with
+    both orientations scored. Measured 2026-10-15; the fix is that
+    ``CompareUnordered`` builds its own overlay per search.
+
+    All six permutations rather than a reversal, because only three of the six
+    moved, and ``num_threads=1`` because that is the configuration the effect
+    was found in -- it is not a thread race.
+    """
+    pytest.importorskip("openeye.oeomega")
+    import oecluster
+    from openeye import oechem, oeomega
+
+    omega = oeomega.OEOmega()
+    omega.SetMaxConfs(1)
+    omega.SetStrictStereo(False)
+    mols = []
+    for smi in ["c1ccc(O)cc1", "c1ccccc1", "CCCCCCCC"]:
+        mol = oechem.OEMol()
+        oechem.OESmilesToMol(mol, smi)
+        assert omega(mol)
+        mols.append(mol)
+
+    conformer = next(iter(mols[0].GetConfs()))
+    atom = next(iter(conformer.GetAtoms()))
+    coords = list(conformer.GetCoords(atom))
+    coords[0] = 200.0
+    assert conformer.SetCoords(atom, coords)
+
+    def square(ordered):
+        return np.asarray(
+            oecluster.pdist(ordered, comparison="rocs", num_threads=1).squareform())
+
+    base = square(mols)
+    # Not vacuous only if this input still reaches the saturating branch at
+    # all. The phenol/benzene entry is the one that moved; 1.0 is the
+    # saturation value, and a fixture that no longer came near the first-use
+    # score would make every permutation agree for the wrong reason.
+    assert 0.0 < base[0, 1] < 1.0
+
+    for perm in itertools.permutations(range(3)):
+        permuted = square([mols[i] for i in perm])
+        inverse = np.argsort(perm)
+        restored = permuted[np.ix_(inverse, inverse)]
+        assert np.allclose(base, restored, rtol=0.0, atol=ROCS_ORDER_TOLERANCE), (
+            f"permutation {perm} moved the matrix by "
+            f"{np.max(np.abs(base - restored))}")
 
 
 def test_cdist_rocs_stays_directional():

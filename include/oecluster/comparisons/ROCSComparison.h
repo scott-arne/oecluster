@@ -63,19 +63,31 @@ struct ROCSOptions {
  * each reference finds in the fit set, and symmetrizing it would answer a
  * different question.
  *
- * The cost is two overlay searches per off-diagonal pair instead of one, so a
- * ``pdist`` over n molecules runs n*(n-1) searches rather than n*(n-1)/2. The
- * n self-overlays the constructor takes are unchanged.
+ * Direction was only half of it. ``OEOverlay`` also carries state between
+ * calls, enough to move an accepted input by 0.45 rather than by a rounding
+ * error, so ``CompareUnordered`` builds a fresh overlay for each of its two
+ * searches and touches no state that outlives the call. ``Compare`` keeps the
+ * per-thread overlay, which is why ``src/clustering/DiversityValidation.h``
+ * still refuses ROCS on the streaming paths: that refusal is about ``Compare``
+ * and remains correct.
  *
- * The result is order-independence up to scorer-state noise, not exact
- * symmetry. ``OEOverlay`` carries state between calls, so a score is not a pure
- * function of its pair; the same property is why
- * ``src/clustering/DiversityValidation.h`` refuses ROCS on the streaming paths.
- * Reordering the input moves a ``pdist`` matrix by that residual rather than by
- * the orientation gap. Measured 2026-10-15 over three flexible multiconformer
- * molecules at twenty conformers each, that gap reaches 0.0355 on ComboNorm,
- * 0.0710 on Combo, 0.0660 on Shape and 0.0010 on Color, while the residual
- * after symmetrization was 0.0 on every one. One fixture, not a bound.
+ * The cost is two searches per off-diagonal pair instead of one, each on its
+ * own overlay, so a ``pdist`` over n molecules runs n*(n-1) searches rather
+ * than n*(n-1)/2. The n self-overlays the constructor takes are unchanged.
+ * Building an overlay per search is not what costs: measured 2026-10-15 over
+ * eight flexible 20-conformer molecules at one thread, 20.3-20.8 ms per pair
+ * shared against 18.9-19.4 ms per pair fresh, three runs of nine repetitions
+ * each.
+ *
+ * What this buys is a ``pdist`` value that is a function of its pair, and so a
+ * matrix that does not depend on input order. Measured 2026-10-15: on three
+ * flexible multiconformer molecules at twenty conformers each, the orientation
+ * gap reaches 0.0355 on ComboNorm, 0.0710 on Combo, 0.0660 on Shape and 0.0010
+ * on Color, and the forward-against-reversed residual is 0.0 on all four; on a
+ * phenol displaced to 200 angstroms with benzene and octane, all six
+ * permutations give a residual of 0.0, against 0.4538 before the fresh
+ * overlay. Two fixtures, not a proof: the tests assert 1e-6 rather than
+ * equality, because nothing in the toolkit promises bit-reproducibility.
  */
 class ROCSComparison : public PairwiseComparison {
 public:
@@ -189,10 +201,11 @@ public:
     GateFacts Facts() const override;
 
 protected:
-    /// Score both orientations of {i, j} and keep the better overlay, so that
-    /// the one triangle ``pdist`` stores does not depend on which index it
-    /// passed first. Equal indices short-circuit to ``Compare``, both
-    /// orientations there being the same search.
+    /// Score both orientations of {i, j} on overlays built for the purpose and
+    /// keep the better one, so that the single triangle ``pdist`` stores
+    /// depends neither on which index it passed first nor on what this object
+    /// scored before. Equal indices run one search, both orientations there
+    /// being the same search.
     ///
     /// Declared here rather than beside the public overrides above, and
     /// deliberately: the access of an override is set by its own declaration,
@@ -200,9 +213,11 @@ protected:
     /// contradictory way to compare two items. The base declares it protected
     /// precisely to keep that from happening.
     ///
-    /// Agreement between the two argument orders is close, not exact. The
-    /// overlay keeps state between calls, so the pair of searches this runs for
-    /// {i, j} is not bit-identical to the pair it runs for {j, i}.
+    /// Both searches run on overlays built here and discarded here, so the two
+    /// argument orders run the same two searches and have been measured to
+    /// agree exactly. The tests still assert a tolerance rather than equality,
+    /// that being a measurement of this toolkit on these fixtures rather than
+    /// a promise the toolkit makes.
     double CompareUnordered(size_t i, size_t j) override;
 
 private:

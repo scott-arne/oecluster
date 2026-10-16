@@ -43,7 +43,10 @@ constexpr double SELF_SCORE_TOLERANCE = 1e-6;
 /// benzene on an overlay being used for the first time and exactly 1.0 on one
 /// that has scored anything before it, so cross-pair values well inside this
 /// limit can still be unreliable. That split is a property of OEOverlay reuse
-/// rather than of the input, and is tracked separately from this guard.
+/// rather than of the input, and is tracked separately from this guard. It no
+/// longer reaches pdist: since CompareUnordered started building its own
+/// overlay per search, every pdist search is a first use. Compare, and so
+/// cdist, still reuse one overlay and still see both branches.
 constexpr double MAX_COORDINATE_EXTENT = 1e4;  // angstroms
 
 /// Snapshot raw molecule pointers so the shared_ptr<OEMol> constructor can own
@@ -79,6 +82,28 @@ double raw_overlay_score(const OEShape::OEBestOverlayScore& score, ROCSScoreType
             return static_cast<double>(score.GetColorTanimoto());
     }
     return 0.0;
+}
+
+/// One overlay search on an overlay built for this call alone, returning the
+/// raw Tanimoto the configured score type reads off it.
+///
+/// The fresh OEOverlay is the whole point. SetupRef is already called per
+/// search, so what carries between searches is the overlay object, and it
+/// carries enough to move an accepted input's score by 0.45: measured
+/// 2026-10-15, a phenol with one atom displaced to 200 angstroms -- inside
+/// MAX_COORDINATE_EXTENT, and accepted -- scores 0.546 against benzene on an
+/// overlay used for the first time and saturates at exactly 1.0 on one that
+/// has scored anything before. Which branch a pdist pair landed on depended on
+/// where it fell in the input order, so a permutation moved the matrix by 0.45
+/// even with both orientations scored.
+double fresh_overlay_raw_score(const OEShape::OEOverlayOptions& overlay_opts,
+                               ROCSScoreType type, OEChem::OEMol& reference,
+                               OEChem::OEMol& fit) {
+    OEShape::OEOverlay overlay(overlay_opts);
+    overlay.SetupRef(reference);
+    OEShape::OEBestOverlayScore score;
+    overlay.BestOverlay(score, fit);
+    return raw_overlay_score(score, type);
 }
 
 /// The value this comparison reports for a raw Tanimoto, under the configured
@@ -429,28 +454,25 @@ double ROCSComparison::Compare(size_t i, size_t j) {
 double ROCSComparison::CompareUnordered(size_t i, size_t j) {
     detail::check_compare_index_range("ROCSComparison", i, j, shared_->mols.size());
 
-    // Both orientations of a self-pair are the same search, so there is nothing
-    // to combine and scoring twice would only cost twice as much. pdist never
-    // stores a diagonal, so this is for a future caller rather than the current
-    // one. It does not promise that a self-score read here equals the one
-    // MeasureDiagonal read when it stamped zero_self: those are separate
-    // searches with different overlay history behind them, which is exactly
-    // what the rest of this comparison declines to promise.
+    // Deliberately not local_->overlay. This function reads and writes no
+    // state that outlives it, which is what makes its value a function of the
+    // pair alone; Compare keeps the shared overlay, so cdist and a direct
+    // Compare still carry history from one call to the next.
+    const double forward_raw =
+        fresh_overlay_raw_score(local_->overlay_opts, opts_.score_type,
+                                *shared_->mols[i], *shared_->mols[j]);
+
+    // Both orientations of a self-pair are the same search, so there is
+    // nothing to combine and running it twice would only cost twice as much.
+    // pdist never stores a diagonal, so this is for a future caller rather
+    // than the current one.
     if (i == j) {
-        return Compare(i, j);
+        return convert_raw_score(forward_raw, opts_);
     }
 
-    local_->overlay.SetupRef(*shared_->mols[i]);
-    OEShape::OEBestOverlayScore forward;
-    local_->overlay.BestOverlay(forward, *shared_->mols[j]);
-    // Read before the second SetupRef: local_->overlay is one stateful object
-    // and SetupRef replaces the reference this score was taken against.
-    const double forward_raw = raw_overlay_score(forward, opts_.score_type);
-
-    local_->overlay.SetupRef(*shared_->mols[j]);
-    OEShape::OEBestOverlayScore reverse;
-    local_->overlay.BestOverlay(reverse, *shared_->mols[i]);
-    const double reverse_raw = raw_overlay_score(reverse, opts_.score_type);
+    const double reverse_raw =
+        fresh_overlay_raw_score(local_->overlay_opts, opts_.score_type,
+                                *shared_->mols[j], *shared_->mols[i]);
 
     // Combine on the raw scale and convert once. See ROCSScoreCombine.h for why
     // the maximum of the converted values would be the wrong rule.

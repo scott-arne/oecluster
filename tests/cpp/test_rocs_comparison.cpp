@@ -631,11 +631,13 @@ TEST_F(ROCSComparisonTest, UnorderedKeepsTheBetterOverlayForEveryScoreType) {
     ASSERT_GT(flexible[0]->NumConfs(), 1u);
     ASSERT_GT(flexible[1]->NumConfs(), 1u);
 
-    // Not exact agreement: the overlay keeps state between calls, so the pair
-    // of searches run for {0, 1} need not be bit-identical to the pair run for
-    // {1, 0}, nor to the two standalone Compare calls below. On this fixture
-    // they currently are, which is why the tolerance is not load-bearing here
-    // and must not be read as a measured residual.
+    // A tolerance rather than equality, and it is load-bearing in one
+    // direction only. CompareUnordered builds its overlays per search, so its
+    // two argument orders run the same searches; the standalone Compare calls
+    // below share the per-thread overlay and carry history, so the comparison
+    // against them is the one that needs slack. On this fixture everything
+    // here agrees to the bit as of 2026-10-15, so the number is a bound rather
+    // than a measured residual.
     constexpr double tolerance = 1e-6;
     double largest_orientation_gap = 0.0;
 
@@ -683,11 +685,11 @@ TEST_F(ROCSComparisonTest, UnorderedAgreesWithCompareOnTheDiagonal) {
     // pass. The cost argument for the short-circuit is in ROCSComparison.cpp,
     // where it is a reading of the code rather than a claim about this test.
     //
-    // Agreement to a tolerance rather than bit-equality, for the reason this
-    // whole commit gives: the two calls below are two separate searches with
-    // different overlay history behind them. They happen to come out
-    // bit-identical on this fixture as of 2026-10-15, and asserting that would
-    // be asserting a coincidence.
+    // Agreement to a tolerance rather than bit-equality: the two calls below
+    // run on different overlays, CompareUnordered building its own and Compare
+    // using the shared one with whatever history it carries. They happen to
+    // come out bit-identical on this fixture as of 2026-10-15, and asserting
+    // that would be asserting a coincidence.
     ROCSUnorderedProbe probe(mols_, ROCSOptions());
     for (size_t i = 0; i < mols_.size(); ++i) {
         EXPECT_NEAR(probe.CompareUnordered(i, i), probe.Compare(i, i), 1e-6) << i;

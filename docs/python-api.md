@@ -3422,34 +3422,46 @@ two orientations is 0.0355 on `combo_norm`, 0.0710 on `combo`, 0.0660 on
 than a bound. `pdist` stores a single triangle and mirrors it, so it scores
 both orientations and keeps the better overlay.
 
-What that buys is the removal of the orientation-scale dependence -- the
-0.0355 effect above -- from a reordered `pdist`. It is not a promise that
-clustering a reordered list gives identical labels. The residual scorer noise
-described below survives, and clustering is categorical: a distance sitting on
-a `threshold`, or a tie between two equally close candidate neighbours, can
-fall the other way on a residual far smaller than the 1e-6 the matrix is
-pinned to. What changed is the size of what can move: an effect on the scale
-of the numbers above, rather than one on the scale of the residual.
+**Scoring both orientations is only half of it.** `OEOverlay` also keeps state
+between calls, and that state is not a small perturbation: a phenol with one
+atom displaced to 200 A -- accepted input, two orders of magnitude inside the
+coordinate-extent guard -- scores 0.546 against benzene on an overlay used for
+the first time and saturates at exactly 1.0 on one that has scored anything
+before. While `pdist` reused one overlay per worker, which branch a pair got
+depended on where it fell in the input order, and permuting three such
+molecules moved the matrix by **0.45**. `pdist` therefore builds a fresh
+overlay for each search, so the value it stores for a pair is a function of
+that pair alone.
 
-The cost is two overlay searches per pair instead of one: a `pdist` over n
-molecules now runs n*(n-1) searches rather than n*(n-1)/2, plus the n
-self-overlays the comparison takes when it is built, which are unchanged. That
-is an operation count, not a wall-clock factor -- how much of a run it accounts
-for depends on conformer counts and thread count.
+`cdist` and a direct `Compare` do neither of these things: they stay
+directional, and they keep reusing one overlay per thread. Entry `[i, j]` of a
+`cdist` block is what `items_a[i]` finds when it searches `items_b[j]`'s
+conformers, which is the question a cross-distance block is asked; taking the
+better of the two orientations there would answer a different one. The reuse
+is why the streaming clustering paths refuse ROCS outright.
 
-`cdist` keeps the directional reading, deliberately. Entry `[i, j]` is what
-`items_a[i]` finds when it searches `items_b[j]`'s conformers, which is the
-question a cross-distance block is asked and the one its documentation above
-answers; taking the better of the two orientations there would answer a
-different one. The same applies to a `ROCSComparison` used directly from C++.
+Measured 2026-10-15, all at `num_threads=1`. On the three-molecule flexible
+fixture above, forward against reversed: residual 0.0 on all four score types.
+On the displaced-phenol fixture, all six permutations: residual 0.0, against
+0.4538 before the fresh overlay. The tests assert 1e-6 rather than equality,
+because the toolkit does not promise bit-reproducibility and a tolerance is
+what that uncertainty deserves.
 
-Order-independence on `pdist` holds up to scorer-state noise rather than
-exactly. `OEOverlay` keeps state between calls, so a score is not a pure
-function of its pair -- the same property that makes the streaming clustering
-paths refuse ROCS outright. On the three-molecule fixture above the forward and
-reversed matrices agreed exactly -- a residual of 0.0 on all four score types
--- and the test that pins this asserts agreement to 1e-6 rather than equality,
-because nothing in the toolkit promises that they always will.
+Clustering is a separate question and this does not settle it. A reproducible
+matrix is necessary for reordering not to change labels, not sufficient:
+clustering is categorical, so a tie between two equally close candidates can
+still fall either way on the algorithm's own tie-breaking. What changed is the
+matrix.
+
+The cost is two overlay searches per pair instead of one, each on an overlay of
+its own: a `pdist` over n molecules runs n*(n-1) searches rather than
+n*(n-1)/2, plus the n self-overlays the comparison takes when it is built,
+which are unchanged. Building the overlays is not what costs: over eight
+flexible 20-conformer molecules at one thread, three runs of nine repetitions
+each measured 20.3-20.8 ms per pair with a shared overlay and 18.9-19.4 ms per
+pair with a fresh one per search. The doubling from symmetrization is real and
+is in both of those numbers; the per-search rebuild on top of it was below the
+noise.
 
 Either `OEMol` or `OEGraphMol` is accepted, since the comparison snapshots its
 own copies, but the choice changes what is computed rather than only what is
