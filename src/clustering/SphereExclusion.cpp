@@ -15,6 +15,7 @@
 #include <utility>
 #include <vector>
 
+#include "../CompareUnordered.h"
 #include "ChunkedComparisons.h"
 #include "DistanceAccess.h"
 #include "DiversityValidation.h"
@@ -174,8 +175,7 @@ public:
                                       size_t end) {
             for (size_t p = begin; p < end; ++p) {
                 const size_t item = targets[p];
-                distances[p] = local.Compare(std::min(center, item),
-                                             std::max(center, item));
+                distances[p] = detail::compare_unordered(local, center, item);
             }
         });
     }
@@ -188,7 +188,7 @@ public:
         work_.Run(items.size(), [&](PairwiseComparison& local, size_t begin,
                                     size_t end) {
             const auto read = [&local](size_t a, size_t b) {
-                return local.Compare(std::min(a, b), std::max(a, b));
+                return detail::compare_unordered(local, a, b);
             };
             for (size_t p = begin; p < end; ++p) {
                 detail::nearest_center(items[p], centers, read, best[p],

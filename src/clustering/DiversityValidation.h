@@ -79,6 +79,15 @@ inline void validate_comparison_facts(const PairwiseComparison& comparison,
 // needing that evidence and a cost assessment -- two overlay searches per pair
 // per pass is not free.
 //
+// Lifting it also means routing those paths through the unordered seam. The
+// readers that a ROCS comparison can reach -- cluster_report, the SAR
+// metrics, the selection and set-diversity scores, knn_graph and sphere
+// exclusion away from the neighbor order -- read d(i, j) through
+// detail::compare_unordered, so they agree with a pdist() matrix. The paths
+// this function guards still read Compare(min(i, j), max(i, j)), which is the
+// same value for every comparison in this library that does not override the
+// seam, and ROCSComparison is the only one that does.
+//
 // :param action: What the caller cannot do, e.g. "build a threshold graph".
 // :param consequence: Why repeatability matters to it, after "so ".
 inline void refuse_unrepeatable(const PairwiseComparison& comparison,

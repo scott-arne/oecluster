@@ -52,6 +52,22 @@ each worker thread evaluates pairs without sharing scorer internals. A
 comparison can optionally provide a batched `TryPDist()`/`TryCDist()` kernel;
 returning `false` asks the engine to fall back to per-pair `Compare()` calls.
 
+`Compare(i, j)` is directional where the comparison is. Beside it sits a
+protected seam, `CompareUnordered(i, j)`, which defaults to `Compare(i, j)`
+and is where every reader of a *symmetric* distance goes: `pdist()`, and with
+it `cluster_report`, the SAR metrics, diversity selection, the set-diversity
+scores, `knn_graph` and sphere exclusion away from the neighbor order. Callers
+reach it through `detail::compare_unordered` (`src/CompareUnordered.h`), which
+passes the pair in ascending index order, so a comparison that does not
+override the seam reads exactly `Compare(min(i, j), max(i, j))`.
+`ROCSComparison` is the one that does override it: it scores both
+orientations and keeps the better overlay, which is why those readers and a
+`pdist()` matrix agree for ROCS. `cdist()` and a direct `Compare()` keep the
+direction, deliberately. The paths that still call `Compare(min, max)`
+themselves — Butina, DBSCAN, sphere exclusion's neighbor order, agglomerative,
+HDBSCAN and k-medoids — are exactly the ones that refuse a ROCS comparison
+outright.
+
 The concrete comparisons are:
 
 - `FingerprintComparison` — OEFP fingerprint similarity/distance, configured by
@@ -337,10 +353,12 @@ when it is 0, capped at N. No term grows with the pair count. A `cluster_report`
 holds at most 2^20 distances, or one row if a row is longer.
 
 The comparison contract is the one `maxmin_select`, `knn_graph` and
-`leiden` already document: the engines call `Compare(min(i, j), max(i,
-j))`, never a self-pair, and `Compare` must return the same value, or
-throw the same exception, for the same pair on every call and on every
-clone. `cluster_report`'s exact median rereads pairs above its 2^20-value
+`leiden` already document: the engines read each pair through the unordered
+seam `pdist()` fills through -- `Compare(min(i, j), max(i, j))` for every
+comparison but ROCS, which overrides that seam -- never a self-pair, and the
+seam must return the same value, or throw the same exception, for the same
+pair on every call and on every clone. `cluster_report`'s exact median
+rereads pairs above its 2^20-value
 budget, so a comparison that breaks this voids the exactness. It is a
 documented precondition, not a checked one. Given it, each result is
 bit-identical to the storage overload over a matrix holding the values
@@ -450,8 +468,8 @@ cluster count.
 from: `const StorageBackend& storage`, which must hold complete dense or
 memory-mapped distances, or `PairwiseComparison& comparison`, evaluated
 lazily with one `Clone()` per concurrently running chunk. The comparison
-overloads compare only the pairs the run needs, always as
-`Compare(min(i, j), max(i, j))` and never a self-pair, and refuse a comparison
+overloads compare only the pairs the run needs, always through the unordered
+seam described above and never a self-pair, and refuse a comparison
 whose `Facts()` report a similarity, a nonzero self-distance, `NaNPresent` or
 `SubsetScored` with `ComparisonError`. Every other refusal is
 `std::invalid_argument`.
@@ -482,8 +500,8 @@ unchanged.
 
 `vendi_score` and `logdet_diversity` are overloaded on the same two distance
 sources as `maxmin_select`, with the same `ComparisonError` fact refusals.
-Every pair is compared once as `Compare(i, j)` with `i < j`. Each distance
-becomes a kernel entry through `DiversityKernel::Complement` (`1 - d`, which
+Every pair is compared once, through the unordered seam, with `i < j`. Each
+distance becomes a kernel entry through `DiversityKernel::Complement` (`1 - d`, which
 refuses d outside [0, 1]) or `DiversityKernel::Laplacian`
 (`exp(-d / bandwidth)`, which refuses a negative d). Either kernel refuses a
 non-finite d, and every refusal is `std::invalid_argument`.
@@ -569,8 +587,9 @@ const auto result = OECluster::jarvis_patrick(graph, 3);
   rows with `ThreadPool::ParallelFor`, and the comparison path uses one
   clone per running unit. A unit covers `max(1, chunk_size / (n - 1))` rows,
   and the result is identical for every `num_threads` and `chunk_size`.
-- The comparison overload calls `Compare(min(i, j), max(i, j))` N(N-1)
-  times. `Compare` must be repeatable across calls and clones.
+- The comparison overload reads N(N-1) pairs through the unordered seam,
+  which is `Compare(min(i, j), max(i, j))` for every comparison but ROCS.
+  The seam must be repeatable across calls and clones.
 - Sparse storage must hold every pair at or within its cutoff; the builder
   cannot verify that, and a missing nearer pair silently changes a row. An
   item with fewer than `k` distinct stored neighbors is refused with

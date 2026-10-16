@@ -16,6 +16,21 @@ namespace OECluster {
 struct CDistOptions;
 struct PDistOptions;
 class StorageBackend;
+class PairwiseComparison;
+
+#ifndef SWIG
+namespace detail {
+/// Declared here so the class below can name it a friend, and documented in
+/// src/CompareUnordered.h, which is where its contract is written.
+///
+/// Hidden from SWIG, and not merely for tidiness: measured on 2026-10-16 with
+/// the guard removed, SWIG flattens the namespace and generates
+/// ``oecluster.compare_unordered``, a public Python function that reaches the
+/// protected seam on any comparison. The guard is what keeps the bindings
+/// from offering a second way to compare two items.
+double compare_unordered(PairwiseComparison& comparison, size_t i, size_t j);
+}  // namespace detail
+#endif
 
 /**
  * @brief Abstract base class for pairwise comparison methods.
@@ -117,42 +132,51 @@ public:
 
 protected:
     /**
-     * @brief The value ``pdist`` stores for the unordered pair {i, j}.
+     * @brief The value every caller reads for the unordered pair {i, j}.
      *
      * Defaults to ``Compare(i, j)``. A comparison whose ``Compare`` is
-     * directional overrides this so that the single stored triangle does not
-     * depend on which index ``pdist`` happened to pass first. Direction is not
-     * the only way that can happen: what an override owes ``pdist`` is a value
-     * that is a function of the unordered pair, so a comparison carrying
-     * scorer state from one call to the next has to deal with that too.
-     * ``ROCSComparison`` is both, and does both. It is protected
-     * because it is not a second public way to compare two items: ``Compare``
-     * keeps its own meaning, which ``cdist`` and direct callers rely on.
+     * directional overrides this so that a reader presenting d(i, j) as
+     * symmetric does not get a value that depends on which index it happened
+     * to pass first. Direction is not the only way that can happen: what an
+     * override owes its callers is a value that is a function of the unordered
+     * pair, so a comparison carrying scorer state from one call to the next
+     * has to deal with that too. ``ROCSComparison`` is both, and does both.
+     *
+     * ``pdist`` fills its single triangle through here, and so does every
+     * other reader of a symmetric distance -- ``cluster_report``,
+     * ``activity_landscape``, ``modelability``, ``maxmin_select``, ``circles``,
+     * ``knn_graph``, ``sphere_exclusion`` away from the neighbor order,
+     * ``vendi_score`` and ``logdet_diversity`` -- so that the lazy route and a
+     * matrix from ``pdist`` answer with the same number. The paths that still
+     * read ``Compare(min(i, j), max(i, j))`` instead are the ones that refuse
+     * ROCS outright; ``src/clustering/DiversityValidation.h`` is where that
+     * refusal and the consequence of lifting it are recorded.
+     *
+     * It is protected because it is not a second public way to compare two
+     * items: ``Compare`` keeps its own meaning, which ``cdist`` and direct
+     * callers rely on. Callers reach it through
+     * ``detail::compare_unordered``, declared above, which passes the pair in
+     * ascending index order -- that, and not this default, is what makes the
+     * unoverridden forward to ``Compare`` a function of the unordered pair.
      */
     virtual double CompareUnordered(size_t i, size_t j) { return Compare(i, j); }
 
 #ifndef SWIG
-    /// ``pdist`` is the one caller of the seam above, and it is a free function
-    /// rather than a member, so it needs friendship to reach a protected
-    /// member. The call sits inside ``pdist``'s ``ParallelFor`` lambda, whose
-    /// body is access-checked in the context of the enclosing function, and it
-    /// goes through a ``std::unique_ptr<PairwiseComparison>``; neither changes
-    /// what this declaration has to say. No default argument here, and it is
-    /// not a matter of taste: adding one was tried on 2026-10-15 and is
-    /// rejected either way round -- ``friend declaration specifying a default
-    /// argument must be a definition`` where this header is seen first, and
-    /// ``redefinition of default argument`` where ``PDist.h`` is. ``PDist.h``
-    /// owns the one for ``options``.
+    /// The one friend, and the reason the accessor exists: every caller of
+    /// the seam is a free function rather than a member, so without a shared
+    /// accessor each would need a friend declaration of its own. ``pdist``
+    /// had one until 2026-10-16 and no longer does; it goes through the
+    /// accessor like everything else.
     ///
-    /// Hidden from SWIG, for a smaller reason than it might look. Measured on
-    /// 2026-10-15 with the guard removed: SWIG matches this declaration to the
-    /// ``pdist`` it already wraps, so there is no second wrapper and no new
-    /// warning, but it does attach the comment above to the generated
-    /// ``oecluster.pdist`` as that function's Python docstring. A note about
-    /// which C++ member needs friendship is not what a Python caller should
-    /// read there, and the guard is the cheapest way to keep it out.
-    friend void pdist(PairwiseComparison& comparison, StorageBackend& storage,
-                      const PDistOptions& options);
+    /// Guarded for the reason given on the declaration above, and the guard
+    /// has to cover this line too: the friend names ``detail::`` and will not
+    /// compile where that declaration is hidden. A second, smaller reason
+    /// retired with the ``friend void pdist`` this replaces -- measured on
+    /// 2026-10-15, SWIG matched that declaration to the ``pdist`` it already
+    /// wraps and attached the comment above it to the generated
+    /// ``oecluster.pdist`` as that function's Python docstring.
+    friend double detail::compare_unordered(PairwiseComparison& comparison,
+                                            size_t i, size_t j);
 #endif
 };
 

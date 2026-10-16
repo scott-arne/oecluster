@@ -13,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include "../CompareUnordered.h"
 #include "ActivityMetrics.h"
 #include "ChunkedComparisons.h"
 #include "ContingencyTable.h"
@@ -223,8 +224,9 @@ private:
 };
 
 // The comparison overloads' traversal: units of whole rows, about chunk_size
-// distances each, each unit on its own clone. Every pair is read as
-// Compare(min, max), so modelability's two visits of a pair see one value.
+// distances each, each unit on its own clone. Every pair is read through the
+// unordered seam, so modelability's two visits of a pair see one value and
+// both agree with the matrix pdist() fills.
 class ComparisonSweep {
 public:
     ComparisonSweep(const PairwiseComparison& comparison, std::size_t num_threads,
@@ -249,7 +251,7 @@ public:
         detail::ChunkedComparisons units(comparison_, n, workers, rows_per_unit);
         units.Run(n, [&](PairwiseComparison& clone, std::size_t begin, std::size_t end) {
             const auto read = [&clone](std::size_t a, std::size_t b) {
-                return clone.Compare(std::min(a, b), std::max(a, b));
+                return detail::compare_unordered(clone, a, b);
             };
             body(read, begin, end);
         });
@@ -261,7 +263,7 @@ public:
     void Serial(std::size_t n, Body&& body) const {
         const std::unique_ptr<PairwiseComparison> clone = comparison_.Clone();
         const auto read = [&clone](std::size_t a, std::size_t b) {
-            return clone->Compare(std::min(a, b), std::max(a, b));
+            return detail::compare_unordered(*clone, a, b);
         };
         body(read, 0, n);
     }

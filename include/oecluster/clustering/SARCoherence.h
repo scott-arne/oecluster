@@ -223,14 +223,17 @@ ActivityLandscape activity_landscape(const StorageBackend& storage,
 /**
  * @brief Cliff density, SALI and RMODI over a comparison, evaluated lazily.
  *
- * Bit-identical to the storage overload over a matrix holding
- * Compare(min(i, j), max(i, j)) for every pair. Each pair of scored samples is
+ * Bit-identical to the storage overload over a matrix holding, for every
+ * pair, the value the unordered seam pdist() fills through reports -- which
+ * is Compare(min(i, j), max(i, j)) for every comparison in this library but
+ * ROCS, the one that overrides the seam. Each pair of scored samples is
  * compared once, on worker threads, and memory does not grow with the number
  * of pairs. Only pairs of scored samples are compared; a non-finite value on
  * a pair with a missing activity is never seen.
  *
- * Precondition: Compare(i, j) returns the same value on every call and every
- * clone, and is called only with i < j.
+ * Precondition: the comparison returns the same value for a pair on every
+ * call and every clone. The pair is always passed in ascending index order
+ * and is never a self-pair.
  *
  * :param comparison: Distance comparison; cloned once per running unit.
  * :param activity: One value per sample, NaN for a missing measurement.
@@ -325,18 +328,22 @@ Modelability modelability(const StorageBackend& storage,
 /**
  * @brief Nearest-neighbour class concordance over a comparison, evaluated lazily.
  *
- * Bit-identical to the storage overload over a matrix holding
- * Compare(min(i, j), max(i, j)) for every pair. Each scored row is scanned in
+ * Bit-identical to the storage overload over a matrix holding, for every
+ * pair, the value the unordered seam pdist() fills through reports -- which
+ * is Compare(min(i, j), max(i, j)) for every comparison in this library but
+ * ROCS, the one that overrides the seam. Each scored row is scanned in
  * full, as on the storage overload, so a run with n scored samples and at
  * least two scored classes makes n * (n - 1) comparisons: every pair twice,
- * both times as Compare(min, max). With one scored class nothing is scored
- * and each pair is only validated, n * (n - 1) / 2 comparisons.
+ * both times through that seam, which is why the two visits agree. With one
+ * scored class nothing is scored and each pair is only validated,
+ * n * (n - 1) / 2 comparisons.
  * Memory does not grow with the number of pairs. Only pairs of scored samples
  * are compared; a non-finite value on a pair with an empty class is never
  * seen.
  *
- * Precondition: Compare(i, j) returns the same value on every call and every
- * clone, and is called only with i < j.
+ * Precondition: the comparison returns the same value for a pair on every
+ * call and every clone. The pair is always passed in ascending index order
+ * and is never a self-pair.
  *
  * :param comparison: Distance comparison; cloned once per running unit.
  * :param activity_classes: One class string per sample; empty means missing.

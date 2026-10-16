@@ -12,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include "../CompareUnordered.h"
 #include "ChunkedComparisons.h"
 #include "DistanceAccess.h"
 #include "DiversityValidation.h"
@@ -219,8 +220,8 @@ detail::MaxMinKernelRequest circles_request(double threshold) {
 
 // Row provider over a comparison. Always refuses non-finite reads: every
 // entry point that builds one is new, so there is no legacy to preserve.
-// Compare(min, max) reads the orientation pdist stores, so an asymmetric
-// comparison gives the lazy and matrix paths the same numbers.
+// The unordered seam is the value pdist stores, so reading it here gives the
+// lazy and matrix paths the same numbers for an asymmetric comparison.
 class ComparisonRowProvider {
 public:
     explicit ComparisonRowProvider(ChunkedComparisons& work) : work_(work) {}
@@ -233,8 +234,7 @@ public:
                 if (selected[j]) {
                     continue;
                 }
-                const double distance =
-                    local.Compare(std::min(p, j), std::max(p, j));
+                const double distance = detail::compare_unordered(local, p, j);
                 if (!std::isfinite(distance)) {
                     throw detail::non_finite_distance_error(p, j);
                 }
@@ -350,12 +350,14 @@ CirclesResult circles(PairwiseComparison& comparison, double threshold,
     std::vector<double> distances;
     for (size_t candidate = 0; candidate < n; ++candidate) {
         distances.resize(members.size());
-        // Members precede the candidate in input order, so member < candidate
-        // is already the (min, max) orientation.
+        // Read through the unordered seam, as the MaxMin provider above
+        // does: the candidate's distance to a member is a symmetric distance
+        // here, whichever index comes first.
         work.Run(members.size(),
                  [&](PairwiseComparison& local, size_t begin, size_t end) {
             for (size_t position = begin; position < end; ++position) {
-                distances[position] = local.Compare(members[position], candidate);
+                distances[position] =
+                    detail::compare_unordered(local, members[position], candidate);
             }
         });
         if (accept_candidate(distances, members, candidate, threshold)) {

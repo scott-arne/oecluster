@@ -108,13 +108,20 @@ SphereExclusionResult sphere_exclusion(const StorageBackend& storage,
  * @brief Sphere exclusion over a comparison, evaluated lazily.
  *
  * Under SphereOrder::Input and SphereOrder::Permutation each center
- * compares against the still-unclaimed items in parallel chunks, as
- * Compare(min, max). Under SphereOrder::Neighbors the threshold graph is
+ * compares against the still-unclaimed items in parallel chunks. Those
+ * reads, and nearest assignment's, go through the unordered seam pdist()
+ * fills through, which is Compare(min(i, j), max(i, j)) for every comparison
+ * in this library but ROCS, the one that overrides the seam. Under
+ * SphereOrder::Neighbors the threshold graph is
  * built in two passes over every pair, one to count each item's neighbors
  * and one to record them, at 16 bytes per within-threshold pair plus 16 per
  * item on a 64-bit platform; its exact size is known before it is allocated,
  * so a graph above max_graph_bytes (or the default limit) is refused rather
- * than attempted.
+ * than attempted. That order reads Compare(min(i, j), max(i, j)) itself, so a
+ * Neighbors run with SphereAssignment::Nearest takes its graph from Compare
+ * and its assignment from the seam. No comparison in this library can see the
+ * two differ: ROCS is the only one that overrides the seam, and the graph
+ * builder refuses it before either read happens.
  * Nearest assignment compares every non-center item with every center. The
  * result equals the matrix overload's on the same distances, for every
  * num_threads and chunk_size.

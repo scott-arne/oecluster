@@ -1,9 +1,12 @@
 """Lazy paths of cluster_report, activity_landscape and modelability.
 
 A lazy path reads its distances through a comparison instead of a stored
-matrix. Exactness is defined against a matrix filled through the same
-comparison's Compare(min, max), so every parity test below builds that matrix
-rather than calling pdist, whose batch kernels may differ in the last bit.
+matrix, pair by pair through the unordered seam pdist fills through.
+Exactness is defined against a matrix holding that seam's value for every
+pair, so every parity test below builds that matrix rather than calling
+pdist, whose batch kernels may differ in the last bit. Every comparison used
+here leaves the seam at its default, which is Compare(min, max), so that is
+what the matrices below are filled with.
 """
 
 import math

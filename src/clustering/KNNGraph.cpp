@@ -15,6 +15,7 @@
 #include <utility>
 #include <vector>
 
+#include "../CompareUnordered.h"
 #include "ChunkedComparisons.h"
 #include "DistanceAccess.h"
 #include "DiversityValidation.h"
@@ -270,8 +271,7 @@ KNNGraph build_knn_graph(PairwiseComparison& comparison,
                 if (j == i) {
                     continue;
                 }
-                const double distance =
-                    local.Compare(std::min(i, j), std::max(i, j));
+                const double distance = compare_unordered(local, i, j);
                 if (!std::isfinite(distance)) {
                     throw knn_non_finite_error(caller, i, j);
                 }

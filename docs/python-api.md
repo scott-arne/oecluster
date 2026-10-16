@@ -904,10 +904,15 @@ prebuilt comparison already fixes the distances, so `comparison=` or any
 keyword `cluster_report()` does not take beside one is a `TypeError` too,
 which is how a misspelled keyword is caught.
 
-The comparison forms are exact. Each pair is read as `Compare(min(i, j),
-max(i, j))`, never as a self-pair, and the report is identical, field for
-field, to the matrix form over a matrix filled through that same
-`Compare`. Medians are exact: a distribution small enough to hold is
+The comparison forms are exact. Each pair is read through the same
+unordered-pair seam `pdist()` fills through, never as a self-pair, and the
+report is identical, field for field, to the matrix form over a matrix
+holding those same values. For every comparison but `"rocs"` that seam is
+`Compare(min(i, j), max(i, j))`, as before; `"rocs"` scores both orientations
+and keeps the better overlay. `"rocs"` has no bulk `pdist` kernel, so for it
+the comparison form and a `pdist()` matrix of the same molecules agree
+exactly, where before 5.25.0 they were two different numbers.
+Medians are exact: a distribution small enough to hold is
 stored and sorted, a larger one is found by radix selection that rereads
 its pairs, so memory stays O(N) per worker while a large cluster's pairs
 are compared more than once: with `compute_per_cluster_records=True`, each
@@ -919,7 +924,8 @@ exception holds on every path: a zero median is reported as `+0.0` even
 where the input held `-0.0`.
 
 Against `pdist()` of the same items the agreement is approximate rather
-than exact: `pdist` computes its fingerprint distances by a different
+than exact wherever `pdist` takes a bulk kernel instead of scoring pair by
+pair: it computes its fingerprint distances by a different
 route, so individual distances agree with `Compare` only to about 1e-12.
 That is a per-distance agreement, not a guarantee on the report: any
 thresholded count, and any field derived from an argmin (medoids,
@@ -3443,7 +3449,7 @@ both orientations and keeps the better overlay.
 
 **Scoring both orientations is only half of it.** `OEOverlay` also keeps state
 between calls, and that state is not a small perturbation: a phenol with one
-atom displaced to 200 A -- accepted input, two orders of magnitude inside the
+atom displaced to 200 A -- accepted input, a fiftieth of the 10,000 A
 coordinate-extent guard -- scores 0.546 against benzene on an overlay used for
 the first time and saturates at exactly 1.0 on one that has scored anything
 before. While `pdist` reused one overlay per worker, which branch a pair got

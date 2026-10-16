@@ -58,6 +58,7 @@ add_executable(oecluster_tests
     cpp/test_consensus.cpp
     cpp/test_streaming_threshold_graph.cpp
     cpp/test_comparison_repeatability.cpp
+    cpp/test_unordered_seam.cpp
     cpp/test_streaming_clustering.cpp
     cpp/test_step_team.cpp
     cpp/test_prim_mst.cpp

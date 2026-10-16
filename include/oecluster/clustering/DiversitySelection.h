@@ -117,8 +117,10 @@ MaxMinSelection maxmin_select(const StorageBackend& storage,
 /**
  * @brief Farthest-first (MaxMin) selection over a lazily evaluated comparison.
  *
- * Only the pairs the selection needs are compared, each as
- * ``Compare(min(i, j), max(i, j))``, and never a self-pair.
+ * Only the pairs the selection needs are compared, each through the
+ * unordered seam ``pdist()`` fills through, and never a self-pair. That is
+ * ``Compare(min(i, j), max(i, j))`` for every comparison in this library but
+ * ROCS, the one that overrides the seam.
  *
  * :param comparison: Distances to select over; cloned once per worker.
  * :param options: Stop conditions, seed and threading. The Medoid seed is

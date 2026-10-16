@@ -25,6 +25,7 @@
 #include <utility>
 #include <vector>
 
+#include "../CompareUnordered.h"
 #include "ChunkedComparisons.h"
 #include "InternalIndices.h"
 #include "oecluster/PairwiseComparison.h"
@@ -278,7 +279,7 @@ public:
             try {
                 out[k] = row.anchor == t
                     ? 0.0
-                    : comparison.Compare(std::min(row.anchor, t), std::max(row.anchor, t));
+                    : compare_unordered(comparison, row.anchor, t);
             } catch (...) {
                 error = std::current_exception();
                 return k;

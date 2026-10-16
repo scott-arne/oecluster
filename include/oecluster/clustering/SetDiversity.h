@@ -118,8 +118,10 @@ VendiResult vendi_score(const StorageBackend& storage,
 /**
  * @brief The Vendi score of a lazily evaluated comparison.
  *
- * Every pair is compared once, as ``Compare(i, j)`` with i < j, and never a
- * self-pair.
+ * Every pair is compared once, through the unordered seam ``pdist()`` fills
+ * through, and never a self-pair. That is ``Compare(i, j)`` with i < j for
+ * every comparison in this library but ROCS, the one that overrides the
+ * seam.
  *
  * :param comparison: Distances to score; cloned once per concurrent worker.
  * :param options: Order, kernel, ceiling and threading.

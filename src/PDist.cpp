@@ -9,6 +9,7 @@
 #include <mutex>
 #include <vector>
 
+#include "CompareUnordered.h"
 #include "oecluster/CondensedIndex.h"
 #include "oecluster/Error.h"
 #include "oecluster/PairwiseComparison.h"
@@ -88,13 +89,14 @@ void pdist(PairwiseComparison& comparison, StorageBackend& storage,
             size_t i, j;
             for (size_t k = chunk_begin; k < chunk_end; ++k) {
                 condensed_to_pair(k, n, i, j);
-                // CompareUnordered, not Compare: only one triangle is stored
+                // The unordered seam, not Compare: only one triangle is stored
                 // and every reader presents it as symmetric, so a directional
                 // comparison would otherwise make the matrix depend on the
                 // caller's input order. The base implementation forwards to
                 // Compare, so this changes nothing for a comparison that does
                 // not override it.
-                double distance = local_comparison->CompareUnordered(i, j);
+                double distance =
+                    detail::compare_unordered(*local_comparison, i, j);
                 storage.Set(i, j, distance);
             }
 

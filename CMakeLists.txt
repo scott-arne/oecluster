@@ -118,6 +118,7 @@ find_package(OpenEye REQUIRED)
 set(OECLUSTER_SOURCES
     src/StorageBackend.cpp
     src/ThreadPool.cpp
+    src/CompareUnordered.cpp
     src/PDist.cpp
     src/CDist.cpp
     src/DistanceMatrix.cpp

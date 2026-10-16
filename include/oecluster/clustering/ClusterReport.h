@@ -252,16 +252,22 @@ ClusterReport cluster_report(
 /**
  * @brief Compute a clustering-quality report over a comparison, evaluated lazily.
  *
- * The result is bit-identical to the storage overload over a matrix holding
- * Compare(min(i, j), max(i, j)) for every pair, except that a zero median is
- * always +0.0. Memory does not grow with the number of pairs: distances are
- * computed in bounded blocks on worker threads and consumed in a fixed order,
- * and medians are selected without storing every pair. Only the pairs a
- * reported value reads are compared; a non-finite value elsewhere is never
- * seen.
+ * Every pair is read through the same unordered seam pdist() fills through,
+ * so the result is bit-identical to the storage overload over a matrix
+ * holding that seam's value for every pair, except that a zero median is
+ * always +0.0. For a comparison that does not override the seam -- every one
+ * in this library but ROCS -- that value is Compare(min(i, j), max(i, j)), as
+ * before. Against a pdist() matrix of the same items the agreement is exact
+ * only where pdist() scored pair by pair: a comparison with a bulk TryPDist
+ * kernel computes its distances by another route.
+ * Memory does not grow with the number of pairs: distances are computed in
+ * bounded blocks on worker threads and consumed in a fixed order, and medians
+ * are selected without storing every pair. Only the pairs a reported value
+ * reads are compared; a non-finite value elsewhere is never seen.
  *
- * Precondition: Compare(i, j) returns the same value on every call and every
- * clone, and is called only with i < j.
+ * Precondition: the comparison returns the same value for a pair on every
+ * call and every clone. The pair is always passed in ascending index order
+ * and is never a self-pair.
  *
  * :param result: Any algorithm's clustering result (base ClusteringResult).
  * :param comparison: Distance comparison; cloned once per running unit.

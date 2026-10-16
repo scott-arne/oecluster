@@ -61,7 +61,9 @@ struct ROCSOptions {
  * ``CompareUnordered`` runs one search when ``i == j``. ``pdist`` fills one
  * triangle and presents it as symmetric, so it routes through a protected
  * seam, ``CompareUnordered``, which scores both orientations and keeps the
- * better overlay. That seam is not part of the public surface and does not
+ * better overlay; so does every other reader of a symmetric distance that
+ * accepts a ROCS comparison, which is why those readers and a ``pdist``
+ * matrix agree. That seam is not part of the public surface and does not
  * appear in the bindings. ``cdist`` and direct ``Compare`` callers keep the directional
  * meaning, which is the one their output documents -- a ``cdist`` row says what
  * each reference finds in the fit set, and symmetrizing it would answer a
@@ -78,16 +80,18 @@ struct ROCSOptions {
  * sat in the target list.
  *
  * The cost is two searches per off-diagonal pair instead of one, so a
- * ``pdist`` over n molecules runs n*(n-1) searches rather than n*(n-1)/2. The
- * n self-overlays the constructor takes are unchanged. Building an overlay per
+ * ``pdist`` over n molecules runs n*(n-1) searches rather than n*(n-1)/2, and
+ * every other reader of the seam pays the same doubling on the pairs it
+ * reads. The n self-overlays the constructor takes are unchanged. Building an overlay per
  * search costs on top of that, and the fraction falls as the search grows,
  * since the construction is fixed and the search is not:
  * ``benchmarks/rocs_overlay_reuse.py`` measures the two strategies against
  * each other in one process, and on 2026-10-16 put fresh over shared at a
  * median of 1.20 at one conformer, 1.09 to 1.11 at twenty and 1.06 at fifty.
  *
- * What this buys is a ``pdist`` value that is a function of its pair, and so a
- * matrix that does not depend on input order. Measured 2026-10-15: on three
+ * What this buys is a seam value that is a function of its pair, and so a
+ * ``pdist`` matrix that does not depend on input order and a set of lazy
+ * readers that agree with it. Measured 2026-10-15: on three
  * flexible multiconformer molecules at twenty conformers each, the orientation
  * gap reaches 0.0355 on ComboNorm, 0.0710 on Combo, 0.0660 on Shape and 0.0010
  * on Color, and the forward-against-reversed residual is 0.0 on all four; on a

@@ -89,10 +89,12 @@ KNNGraph knn_graph(const StorageBackend& storage, const KNNGraphOptions& options
 /**
  * @brief The k-nearest-neighbor graph over a comparison, evaluated lazily.
  *
- * Row i evaluates Compare(min(i, j), max(i, j)) for every j != i, N(N-1)
- * calls in total, and keeps O(N * k) results plus one comparison clone per
- * running work unit. Compare must return the same value on every call and
- * every clone; every built-in comparison does.
+ * Row i reads every j != i through the unordered seam ``pdist()`` fills
+ * through -- ``Compare(min(i, j), max(i, j))`` for every comparison in this
+ * library but ROCS, the one that overrides the seam -- N(N-1) calls in
+ * total, and keeps O(N * k) results plus one comparison clone per running
+ * work unit. The seam must return the same value for a pair on every call
+ * and every clone; every built-in comparison does.
  *
  * :param comparison: Distance comparison; cloned once per running unit.
  * :param options: k and threading options.

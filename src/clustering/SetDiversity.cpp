@@ -15,6 +15,7 @@
 #include <utility>
 #include <vector>
 
+#include "../CompareUnordered.h"
 #include "ChunkedComparisons.h"
 #include "DistanceAccess.h"
 #include "DiversityValidation.h"
@@ -164,9 +165,11 @@ private:
     KernelTransform transform_;
 };
 
-// Visits every pair i < j of a comparison. A chunk owns whole rows, so one
-// worker visits all of row i's pairs, in ascending j, and body may write any
-// state keyed by i without synchronization.
+// Visits every pair i < j of a comparison, reading each through the unordered
+// seam so that the kernel entry matches the one a pdist() matrix would give.
+// A chunk owns whole rows, so one worker visits all of row i's pairs, in
+// ascending j, and body may write any state keyed by i without
+// synchronization.
 class ComparisonPairs {
 public:
     ComparisonPairs(PairwiseComparison& comparison, size_t n, size_t num_threads,
@@ -180,7 +183,8 @@ public:
         work_.Run(n_, [&](PairwiseComparison& local, size_t begin, size_t end) {
             for (size_t i = begin; i < end; ++i) {
                 for (size_t j = i + 1; j < n_; ++j) {
-                    body(i, j, transform_(i, j, local.Compare(i, j)));
+                    body(i, j,
+                         transform_(i, j, detail::compare_unordered(local, i, j)));
                 }
             }
         });
