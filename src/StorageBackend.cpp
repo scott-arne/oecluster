@@ -6,6 +6,8 @@
 #include "oecluster/StorageBackend.h"
 #include <cassert>
 #include <algorithm>
+#include <cstdint>
+#include <limits>
 #include <mutex>
 #include <stdexcept>
 #include <cstring>
@@ -128,12 +130,87 @@ inline void check_set_indices(const char* backend, size_t i, size_t j, size_t n)
     }
 }
 
+/**
+ * @brief Pair count for n items, refusing a count whose buffer cannot be sized.
+ *
+ * Both contiguous backends derive a buffer length from the sample count in two
+ * steps, and either can wrap. A wrapped length is not a short allocation the
+ * caller can notice: NumSamples() keeps reporting n while the buffer holds
+ * whatever the wrapped product came to, so Set, Get and every reader that
+ * walks Data() index past the end. Refusing here gives those readers the
+ * precondition they already assume.
+ *
+ * :param n: Number of items the backend was asked to store.
+ * :param backend: Storage class name, used in the message.
+ * :returns: n * (n - 1) / 2, which is 0 for fewer than two items.
+ * :raises std::overflow_error: If that pair count, or the byte count it
+ *     implies, exceeds what size_t can represent.
+ */
+size_t checked_pair_count(size_t n, const char* backend) {
+    if (n < 2) {
+        return 0;
+    }
+    // Exactly one of {n, n - 1} is even, so halve that one before multiplying.
+    // Testing n * (n - 1) against SIZE_MAX directly would need the product
+    // this check exists to avoid, and dividing SIZE_MAX by n then doubling
+    // loses the remainder -- which rejects representable counts near the
+    // ceiling.
+    const bool n_even = (n % 2 == 0);
+    const size_t a = n_even ? n / 2 : n;
+    const size_t b = n_even ? n - 1 : (n - 1) / 2;
+    if (a > std::numeric_limits<size_t>::max() / b) {
+        throw std::overflow_error(
+            std::string(backend) + ": sample count " + std::to_string(n) +
+            " has more pairs than size_t can hold");
+    }
+    const size_t pairs = a * b;
+    // A pair count that fits can still have a byte count that does not, and
+    // that product is the one the allocation actually uses.
+    if (pairs > std::numeric_limits<size_t>::max() / sizeof(double)) {
+        throw std::overflow_error(
+            std::string(backend) + ": sample count " + std::to_string(n) +
+            " needs more than size_t bytes of storage");
+    }
+    return pairs;
+}
+
+/**
+ * @brief Refuse a mapped file larger than this platform's file APIs can size.
+ *
+ * A byte count that fits in size_t can still exceed the signed offset the
+ * resize calls take -- ftruncate takes an off_t, and the Win32 branch sets the
+ * end of file from a LONGLONG -- in which case they receive it as a negative
+ * size.
+ *
+ * Callers invoke this before opening the file so that a refused size leaves
+ * nothing behind; MMapStorage creates the file it maps.
+ *
+ * :param bytes: Byte count derived from the sample count.
+ * :param n: Number of items the backend was asked to store, used in the message.
+ * :raises std::overflow_error: If bytes exceeds the platform's file size limit.
+ */
+void check_file_size_fits_offset(size_t bytes, size_t n) {
+#ifdef _WIN32
+    // The Win32 branch sizes files through a LONGLONG, a signed 64-bit value.
+    // MSVC's off_t is a 32-bit long and describes none of the calls used here.
+    const uint64_t limit = static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
+#else
+    const uint64_t limit = static_cast<uint64_t>(std::numeric_limits<off_t>::max());
+#endif
+    if (static_cast<uint64_t>(bytes) > limit) {
+        throw std::overflow_error(
+            "MMapStorage: sample count " + std::to_string(n) + " needs " +
+            std::to_string(bytes) + " bytes, past the " +
+            std::to_string(limit) + " byte file size limit on this platform");
+    }
+}
+
 }  // namespace
 
 // DenseStorage implementation
 
 DenseStorage::DenseStorage(size_t n)
-    : n_(n), data_(n * (n - 1) / 2, 0.0) {
+    : n_(n), data_(checked_pair_count(n, "DenseStorage"), 0.0) {
 }
 
 void DenseStorage::Set(size_t i, size_t j, double value) {
@@ -219,12 +296,16 @@ std::string win32_error_message(DWORD code) {
 
 MMapStorage::MMapStorage(const std::string& path, size_t n)
     : n_(n),
-      num_pairs_(n * (n - 1) / 2),
+      num_pairs_(checked_pair_count(n, "MMapStorage")),
       file_size_(num_pairs_ * sizeof(double)),
       path_(path),
       file_handle_(INVALID_HANDLE_VALUE),
       mapping_handle_(nullptr),
       data_(nullptr) {
+
+    // Ahead of CreateFileA, so a size this platform cannot represent leaves no
+    // file behind.
+    check_file_size_fits_offset(file_size_, n);
 
     // CREATE_ALWAYS would truncate; OPEN_ALWAYS keeps existing contents,
     // matching the POSIX O_RDWR|O_CREAT behavior used on other platforms.
@@ -313,11 +394,15 @@ MMapStorage::~MMapStorage() {
 
 MMapStorage::MMapStorage(const std::string& path, size_t n)
     : n_(n),
-      num_pairs_(n * (n - 1) / 2),
+      num_pairs_(checked_pair_count(n, "MMapStorage")),
       file_size_(num_pairs_ * sizeof(double)),
       path_(path),
       fd_(-1),
       data_(nullptr) {
+
+    // Ahead of open(O_CREAT), so a size this platform cannot represent leaves
+    // no file behind.
+    check_file_size_fits_offset(file_size_, n);
 
     // Open or create the file
     fd_ = open(path.c_str(), O_RDWR | O_CREAT, 0644);

@@ -1,6 +1,9 @@
 #include <gtest/gtest.h>
+#include <cstddef>
 #include <filesystem>
+#include <limits>
 #include <stdexcept>
+#include <string>
 #include "oecluster/StorageBackend.h"
 
 using namespace OECluster;
@@ -245,4 +248,134 @@ TEST(SparseStorageTest, SetOutOfRangeStoresNothing) {
     EXPECT_THROW(storage.Set(0, 4, 0.3), std::out_of_range);
     storage.Finalize();
     EXPECT_EQ(storage.Entries().size(), 0u);
+}
+
+// Sample counts whose derived buffer length wraps. DenseStorage and
+// MMapStorage both size their storage from n * (n - 1) / 2 doubles, and a
+// large enough n used to wrap one of those two multiplications and report a
+// NumSamples() the buffer cannot back: DenseStorage(SIZE_MAX) constructed with
+// NumPairs() == 1.
+
+namespace {
+
+/// Runs `call` and returns the message of the std::overflow_error it threw, or
+/// a sentinel no expectation below can match. gtest has no message matcher
+/// without gmock, and EXPECT_THROW discards the exception it catches.
+template <typename Call>
+std::string overflow_message(Call call) {
+    try {
+        call();
+    } catch (const std::overflow_error& error) {
+        return error.what();
+    } catch (...) {
+        return "<threw some other exception type>";
+    }
+    return "<threw nothing>";
+}
+
+/// Path for an MMapStorage refusal probe, removed first so that the existence
+/// check after the probe describes only the call under test.
+std::string cleared_probe_path(const char* name) {
+    const std::string path =
+        (std::filesystem::temp_directory_path() / name).string();
+    std::filesystem::remove(path);
+    return path;
+}
+
+/// Largest n whose pair count fits in size_t (18446744070963499500). Its byte
+/// count does not, so it is refused -- but by the byte check, which is what
+/// distinguishes an exact predicate from one that divides SIZE_MAX by n and
+/// doubles, losing the remainder.
+constexpr size_t LARGEST_REPRESENTABLE_PAIRS_N = 6074001000ULL;
+
+/// Smallest n whose pair count exceeds size_t, one past the count above.
+constexpr size_t SMALLEST_WRAPPING_PAIRS_N = 6074001001ULL;
+
+/// Smallest n whose pair count fits in size_t while its byte count does not:
+/// 2305843010287435776 pairs, whose byte count wraps to 8 GiB.
+constexpr size_t SMALLEST_WRAPPING_BYTES_N = 2147483649ULL;
+
+/// Smallest n whose byte count fits in size_t but exceeds the signed file
+/// offset the resize calls take: 9223372043074251000 bytes.
+constexpr size_t SMALLEST_UNMAPPABLE_N = 1518500251ULL;
+
+}  // namespace
+
+TEST(StorageOverflowTest, DenseRefusesASampleCountWhosePairCountWraps) {
+    const size_t n = std::numeric_limits<size_t>::max();
+    EXPECT_EQ(overflow_message([n] { DenseStorage storage(n); }),
+              "DenseStorage: sample count 18446744073709551615 has more pairs "
+              "than size_t can hold");
+}
+
+TEST(StorageOverflowTest, DenseRefusesTheSmallestSampleCountWhosePairCountWraps) {
+    EXPECT_EQ(overflow_message(
+                  [] { DenseStorage storage(SMALLEST_WRAPPING_PAIRS_N); }),
+              "DenseStorage: sample count 6074001001 has more pairs than "
+              "size_t can hold");
+}
+
+TEST(StorageOverflowTest, DenseRefusesASampleCountWhoseByteCountWraps) {
+    EXPECT_EQ(overflow_message(
+                  [] { DenseStorage storage(SMALLEST_WRAPPING_BYTES_N); }),
+              "DenseStorage: sample count 2147483649 needs more than size_t "
+              "bytes of storage");
+}
+
+TEST(StorageOverflowTest, DenseRefusesTheLargestRepresentablePairCountAtTheByteCheck) {
+    // The pair count here is the largest size_t can hold, so a predicate that
+    // discarded the remainder of its division would refuse this n for having
+    // too many pairs. The refusal is right; the reason would not be.
+    EXPECT_EQ(overflow_message(
+                  [] { DenseStorage storage(LARGEST_REPRESENTABLE_PAIRS_N); }),
+              "DenseStorage: sample count 6074001000 needs more than size_t "
+              "bytes of storage");
+}
+
+TEST(StorageOverflowTest, MMapRefusesASampleCountWhosePairCountWraps) {
+    const std::string path = cleared_probe_path("oecluster_overflow_pairs.bin");
+    const size_t n = std::numeric_limits<size_t>::max();
+    EXPECT_EQ(overflow_message([&path, n] { MMapStorage storage(path, n); }),
+              "MMapStorage: sample count 18446744073709551615 has more pairs "
+              "than size_t can hold");
+    EXPECT_FALSE(std::filesystem::exists(path));
+}
+
+TEST(StorageOverflowTest, MMapRefusesTheSmallestSampleCountWhosePairCountWraps) {
+    const std::string path =
+        cleared_probe_path("oecluster_overflow_pairs_edge.bin");
+    EXPECT_EQ(overflow_message([&path] {
+                  MMapStorage storage(path, SMALLEST_WRAPPING_PAIRS_N);
+              }),
+              "MMapStorage: sample count 6074001001 has more pairs than "
+              "size_t can hold");
+    EXPECT_FALSE(std::filesystem::exists(path));
+}
+
+TEST(StorageOverflowTest, MMapRefusesASampleCountWhoseByteCountWraps) {
+    const std::string path = cleared_probe_path("oecluster_overflow_bytes.bin");
+    EXPECT_EQ(overflow_message([&path] {
+                  MMapStorage storage(path, SMALLEST_WRAPPING_BYTES_N);
+              }),
+              "MMapStorage: sample count 2147483649 needs more than size_t "
+              "bytes of storage");
+    EXPECT_FALSE(std::filesystem::exists(path));
+}
+
+TEST(StorageOverflowTest, MMapRefusesAByteCountPastTheFileOffsetLimit) {
+    // This n passes both size_t checks. What it exceeds is the signed offset
+    // the resize call takes, which would receive the byte count as a negative
+    // size.
+    const std::string path = cleared_probe_path("oecluster_overflow_offset.bin");
+    const std::string message = overflow_message(
+        [&path] { MMapStorage storage(path, SMALLEST_UNMAPPABLE_N); });
+    EXPECT_NE(message.find("MMapStorage: sample count 1518500251 needs "
+                           "9223372043074251000 bytes"),
+              std::string::npos)
+        << "message was: " << message;
+    // The limit that completes the sentence is the platform's, so only the
+    // wording around it is asserted here.
+    EXPECT_NE(message.find(" byte file size limit"), std::string::npos)
+        << "message was: " << message;
+    EXPECT_FALSE(std::filesystem::exists(path));
 }

@@ -119,6 +119,9 @@ public:
      * @brief Construct a DenseStorage for n items.
      *
      * :param n: Number of items in the dataset.
+     * :raises std::overflow_error: If n names more pairs than size_t can hold,
+     *     or more pair bytes than size_t can address. The message names n and
+     *     which of the two limits it crossed.
      */
     explicit DenseStorage(size_t n);
 
@@ -169,6 +172,10 @@ public:
      *
      * :param path: File path for the memory-mapped file.
      * :param n: Number of items.
+     * :raises std::overflow_error: If n names more pairs than size_t can hold,
+     *     more pair bytes than size_t can address, or more bytes than this
+     *     platform's file size limit. The message names n and which limit it
+     *     crossed, and the refusal happens before the file is created.
      * :raises StorageError: If file operations fail.
      */
     MMapStorage(const std::string& path, size_t n);
