@@ -132,7 +132,7 @@ SphereExclusionResult sphere_exclusion(const StorageBackend& storage,
  *     order other than SphereOrder::Neighbors.
  * :raises ComparisonError: If the comparison's facts rule out ranking its
  *     distances; or, under SphereOrder::Neighbors, if it is a ROCS
- *     comparison, whose scores depend on what its overlay scored before.
+ *     comparison, which is not certified for the repeated scoring this does.
  * :raises std::runtime_error: If a comparison returns NaN or infinity.
  * :raises std::length_error: If the threshold graph would exceed its limit.
  * :raises std::logic_error: If the graph's two passes disagree on a row's

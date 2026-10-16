@@ -2737,17 +2737,21 @@ def _refuse_unrepeatable(items, comparison, caller, reason=_THRESHOLD_GRAPH_REAS
     """
     Refuse ROCS ahead of dispatch on a path that clusters from a comparison.
 
-    A ROCS score depends on what its overlay scored before, so a path that
-    compares a pair in more than one pass, or in an order unlike a matrix
-    fill, would cluster on scores no matrix holds; the native entry points
-    refuse it too. Checked here first because a ROCS build overlays every
+    ROCS is refused on every path that clusters a pair in more than one pass,
+    or in an order unlike a matrix fill, because it is not certified for that
+    kind of repeated scoring; the native entry points refuse it too. The
+    refusal used to rest on a measured fact -- one overlay was reused per
+    clone, so a score depended on what the clone had scored before -- which
+    stopped being true when every search began building its own overlay. What
+    is still missing is the whole-graph half of the evidence, which cannot be
+    gathered while these refusals stand. Checked here first because a ROCS build overlays every
     molecule onto itself before the native refusal could run.
 
     :param items: The resolved input.
     :param comparison: Comparison name, for the named path.
     :param caller: Entry point name for the messages.
-    :param reason: Why the path needs repeatable scores, completing "a ROCS
-        score depends on what its overlay scored before, and ...".
+    :param reason: Why the path needs repeatable scores, completing
+        "ROCS is not certified for the repeated scoring these paths do, and ...".
     :raises ValueError: If the input is a ROCS comparison, named or prebuilt.
     """
     named = isinstance(comparison, str) and comparison.lower() == "rocs"
@@ -2755,10 +2759,10 @@ def _refuse_unrepeatable(items, comparison, caller, reason=_THRESHOLD_GRAPH_REAS
                 and items.ComparisonName() == "rocs")
     if named or prebuilt:
         raise ValueError(
-            f"{caller}() cannot cluster a ROCS comparison without a matrix: a "
-            f"ROCS score depends on what its overlay scored before, and "
-            f"{reason}. Compute the matrix with pdist(items, 'rocs') and pass "
-            "that instead")
+            f"{caller}() cannot cluster a ROCS comparison without a matrix: "
+            f"ROCS is not certified for the repeated scoring these paths do, "
+            f"and {reason}. Compute the matrix with pdist(items, 'rocs') and "
+            "pass that instead")
 
 
 def _streaming_target(items, comparison, kwargs, caller, allow_nonmetric, *,
@@ -3390,8 +3394,10 @@ def hdbscan(items=_MISSING, *, distance_matrix=_MISSING, min_cluster_size=5,
         is repeatable: ``Compare(i, j)`` returns a bit-identical value on
         every call and every clone. The test suite checks every built-in
         comparison family except ROCS, in one or two configurations each;
-        ROCS is not repeatable, because its overlay keeps state between
-        calls, and is refused. Against :func:`pdist`, whose batched kernels
+        ROCS is refused, not because it fails that check -- it stopped
+        failing it, since every search began building its own overlay --
+        but because the whole-graph half of the
+        evidence cannot be gathered while it is refused. Against :func:`pdist`, whose batched kernels
         agree with ``Compare`` only to about 1e-12, distances that close can
         tie or order differently and change the tree.
     :raises TypeError: If both or neither of ``items`` and
@@ -3556,8 +3562,10 @@ def agglomerative(items=_MISSING, *, distance_matrix=_MISSING, n_clusters=2,
         provided the comparison is repeatable: ``Compare(i, j)`` returns a
         bit-identical value on every call and every clone. The test suite
         checks every built-in comparison family except ROCS, in one or two
-        configurations each; ROCS is not repeatable, because its overlay
-        keeps state between calls, and is refused. Against :func:`pdist`,
+        configurations each; ROCS is refused, not for failing that check --
+        it stopped failing it when every search began building its own
+        overlay -- but because the whole-graph half of the evidence cannot
+        be gathered while it is refused. Against :func:`pdist`,
         whose batched kernels agree with ``Compare`` only to about 1e-12,
         distances that close can tie or order differently.
     :raises TypeError: If both or neither of ``items`` and

@@ -431,8 +431,8 @@ TEST(StreamingClusteringTest, RefusesROCSWhereverItWouldBuildAGraph) {
     ROCSComparison rocs(mols);
     const auto message = [](const std::string& caller) {
         return caller +
-               " cannot build a threshold graph from a ROCS comparison: a ROCS "
-               "score depends on what its overlay scored before, so the graph's "
+               " cannot build a threshold graph from a ROCS comparison: "
+               "ROCS is not certified for the repeated scoring these paths do, so the graph's "
                "two passes can disagree; cluster a matrix from pdist() instead";
     };
     ExpectThrowWithMessage<ComparisonError>(

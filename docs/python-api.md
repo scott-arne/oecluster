@@ -197,9 +197,12 @@ to the threshold can be decided differently. The two passes must see the same
 value for every pair; the test suite checks every built-in comparison family
 except ROCS, in one or two configurations each, and each returns
 bit-identical values across calls and across clones with different
-histories. ROCS does not, because its overlay keeps state between calls, so
-these paths refuse a ROCS comparison; cluster a ROCS matrix from `pdist()`
-instead. A native comparison that changes a row's neighbor count between the
+histories. ROCS satisfies that much too, now that every search builds its own
+overlay -- it did not while one was reused per clone -- but the whole-graph
+half of the check has
+never run for it, because these paths refuse it before it starts. They still
+refuse it, now for want of evidence rather than against it; cluster a ROCS
+matrix from `pdist()` instead. A native comparison that changes a row's neighbor count between the
 passes raises `RuntimeError` rather than returning a wrong graph, and a
 non-finite distance raises `RuntimeError` naming the pair.
 
@@ -274,8 +277,9 @@ provided the comparison is repeatable: `Compare(i, j)` must return a
 bit-identical value on every call and every clone. The test suite checks
 every built-in comparison family except ROCS, in one or two configurations
 each, and each returns bit-identical values across calls and across clones.
-ROCS does not, because its overlay keeps state between calls, and these
-paths refuse it. Against `pdist()` the agreement is per distance, to about
+ROCS does too, now that every search builds its own overlay, but these paths
+still refuse it: the whole-graph half of the evidence cannot be gathered while
+they do. Against `pdist()` the agreement is per distance, to about
 1e-12, so distances that close can tie or order differently and change the
 tree.
 
@@ -527,7 +531,9 @@ result = oecluster.k_medoids(oecluster.FingerprintComparison(mols),
 through the same `Compare`, for every `num_threads` and `chunk_size`,
 provided the comparison is repeatable: the test suite checks the two forms
 bitwise on labels, medoids, cost and iteration count. ROCS is refused here as
-on the other comparison paths, because its overlay keeps state between calls;
+on the other comparison paths. Its scores stopped depending on clone history
+when every search began building its own overlay, but the refusal stands until
+the whole-graph evidence exists;
 cluster a ROCS matrix from `pdist()` instead. Against `pdist()`, whose
 batched kernels agree with `Compare` only to about 1e-12, a cost that close
 to a tie can be decided differently.
@@ -3433,19 +3439,22 @@ molecules moved the matrix by **0.45**. `pdist` therefore builds a fresh
 overlay for each search, so the value it stores for a pair is a function of
 that pair alone.
 
-`cdist` and a direct `Compare` do neither of these things: they stay
-directional, and they keep reusing one overlay per thread. Entry `[i, j]` of a
-`cdist` block is what `items_a[i]` finds when it searches `items_b[j]`'s
-conformers, which is the question a cross-distance block is asked; taking the
-better of the two orientations there would answer a different one. The reuse
-is why the streaming clustering paths refuse ROCS outright.
+`cdist` and a direct `Compare` build their overlays the same way, and for the
+same reason: reusing one made a `cdist` cell move between 0.546 and the
+saturated 1.0 with the thread count and with where an unrelated molecule sat
+in the target list, which no reading of directionality justifies. What they do
+keep is the direction. Entry `[i, j]` of a `cdist` block is what `items_a[i]`
+finds when it searches `items_b[j]`'s conformers, which is the question a
+cross-distance block is asked; taking the better of the two orientations there
+would answer a different one.
 
-Measured 2026-10-15, all at `num_threads=1`. On the three-molecule flexible
-fixture above, forward against reversed: residual 0.0 on all four score types.
-On the displaced-phenol fixture, all six permutations: residual 0.0, against
-0.4538 before the fresh overlay. The tests assert 1e-6 rather than equality,
-because the toolkit does not promise bit-reproducibility and a tolerance is
-what that uncertainty deserves.
+Measured at `num_threads=1`. On the three-molecule flexible fixture above,
+forward against reversed: residual 0.0 on all four score types. On the
+displaced-phenol fixture, all six permutations: residual 0.0, against 0.4538
+before the fresh overlay. The `cdist` cell above reads 0.546160012 under all
+three of the arrangements that used to disagree. The tests assert 1e-6 rather
+than equality, because the toolkit does not promise bit-reproducibility and a
+tolerance is what that uncertainty deserves.
 
 Clustering is a separate question and this does not settle it. A reproducible
 matrix is necessary for reordering not to change labels, not sufficient:
@@ -3453,15 +3462,20 @@ clustering is categorical, so a tie between two equally close candidates can
 still fall either way on the algorithm's own tie-breaking. What changed is the
 matrix.
 
-The cost is two overlay searches per pair instead of one, each on an overlay of
-its own: a `pdist` over n molecules runs n*(n-1) searches rather than
-n*(n-1)/2, plus the n self-overlays the comparison takes when it is built,
-which are unchanged. Building the overlays is not what costs: over eight
-flexible 20-conformer molecules at one thread, three runs of nine repetitions
-each measured 20.3-20.8 ms per pair with a shared overlay and 18.9-19.4 ms per
-pair with a fresh one per search. The doubling from symmetrization is real and
-is in both of those numbers; the per-search rebuild on top of it was below the
-noise.
+`pdist` costs two overlay searches per pair instead of one: over n molecules
+it runs n*(n-1) searches rather than n*(n-1)/2, plus the n self-overlays the
+comparison takes when it is built, which are unchanged.
+
+Building an overlay per search costs on top of that doubling, and how much
+depends on how big the search is, the construction being fixed while the
+search is not. `benchmarks/rocs_overlay_reuse.py` measures the two strategies
+against each other in a single process -- warmed up, nine repetitions, the two
+arms in randomised order within each repetition -- and prints a ratio per
+repetition. On 2026-10-16, over the eight flexible molecules it names, the
+median of fresh over shared was **1.20 at one conformer, 1.09 to 1.11 at
+twenty, and 1.06 at fifty**, with per-repetition ratios spanning 1.00 to 1.26
+across all three. Re-run it rather than trusting those numbers on different
+hardware.
 
 Either `OEMol` or `OEGraphMol` is accepted, since the comparison snapshots its
 own copies, but the choice changes what is computed rather than only what is

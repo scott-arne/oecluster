@@ -798,8 +798,11 @@ def test_rocs_pdist_does_not_depend_on_input_order(multiconformer_rocs_mols,
                                                    score_type):
     """ROCS scores one orientation; pdist stores one triangle as symmetric.
 
-    Agreement is within a tolerance, not exact: the ROCS overlay keeps state
-    between calls, so a score is not a pure function of its pair.
+    A tolerance rather than equality, and the reason is no longer retained
+    history: every search runs on an overlay of its own, so a score is a
+    function of its pair. What the tolerance covers is that the toolkit does
+    not promise bit reproducibility, and pinning equality would make this a
+    change detector for OEShape rather than a test of ordering.
 
     All four score types, because the guide claims the residual on all four and
     a test narrower than its documentation leaves the rest unpinned. The
@@ -884,6 +887,57 @@ def test_rocs_pdist_survives_an_input_that_saturates_a_reused_overlay():
         assert np.allclose(base, restored, rtol=0.0, atol=ROCS_ORDER_TOLERANCE), (
             f"permutation {perm} moved the matrix by "
             f"{np.max(np.abs(base - restored))}")
+
+
+def test_cdist_rocs_does_not_depend_on_thread_count_or_target_order():
+    """A `cdist` cell must not move with the company its targets keep.
+
+    Directionality explains why ``cdist(A, B)`` differs from ``cdist(B, A)``.
+    It explains nothing about a cell changing with the thread count, or with
+    where an unrelated molecule sits in the target list, and while the two
+    scoring paths reused one overlay per thread this cell did both: measured
+    2026-10-16, phenol-against-benzene read 1.000000000 with octane first at
+    one thread and 0.546160012 both with two threads and with benzene first.
+    1.0 is the saturation value, so the reused overlay was not returning a
+    differently-oriented score but a wrong one.
+    """
+    pytest.importorskip("openeye.oeomega")
+    import oecluster
+    from openeye import oechem, oeomega
+
+    omega = oeomega.OEOmega()
+    omega.SetMaxConfs(1)
+    omega.SetStrictStereo(False)
+    built = []
+    for smi in ["c1ccc(O)cc1", "c1ccccc1", "CCCCCCCC"]:
+        mol = oechem.OEMol()
+        oechem.OESmilesToMol(mol, smi)
+        assert omega(mol)
+        built.append(mol)
+    phenol, benzene, octane = built
+
+    conformer = next(iter(phenol.GetConfs()))
+    atom = next(iter(conformer.GetAtoms()))
+    coords = list(conformer.GetCoords(atom))
+    coords[0] = 200.0
+    assert conformer.SetCoords(atom, coords)
+
+    def cell(targets, **kwargs):
+        block = np.asarray(
+            oecluster.cdist([phenol], targets, "rocs", **kwargs))
+        return block[0, targets.index(benzene)]
+
+    readings = [
+        cell([octane, benzene], num_threads=1),
+        cell([octane, benzene], num_threads=2, chunk_size=1),
+        cell([benzene, octane], num_threads=1),
+        cell([benzene], num_threads=1),
+    ]
+    assert max(readings) - min(readings) <= ROCS_ORDER_TOLERANCE, readings
+
+    # Not vacuous only if this input still reaches the branch that used to
+    # saturate. 1.0 is what a reused overlay returned here.
+    assert 0.0 < readings[0] < 1.0
 
 
 def test_cdist_rocs_stays_directional():

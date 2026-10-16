@@ -158,12 +158,17 @@ struct ROCSComparison::SharedData {
     DataIntegrity data_integrity = DataIntegrity::Complete;
 };
 
+/// The options every search is run under, and nothing else. A long-lived
+/// ``OEOverlay`` used to live here too, one per clone, and both scoring paths
+/// reused it; its retained state is what made a score depend on what the clone
+/// had scored before. Now that every search builds its own, keeping one would
+/// be an unused object that still cost a construction per clone, and a
+/// standing invitation to reuse it again.
 struct ROCSComparison::ThreadLocalData {
     OEShape::OEOverlayOptions overlay_opts;
-    OEShape::OEOverlay overlay;
 
     explicit ThreadLocalData(const OEShape::OEOverlayOptions& opts)
-        : overlay_opts(opts), overlay(opts) {}
+        : overlay_opts(opts) {}
 };
 
 ROCSComparison::~ROCSComparison() = default;
@@ -443,12 +448,17 @@ void ROCSComparison::MeasureDiagonal(SharedData& target) {
 double ROCSComparison::Compare(size_t i, size_t j) {
     detail::check_compare_index_range("ROCSComparison", i, j, shared_->mols.size());
 
-    local_->overlay.SetupRef(*shared_->mols[i]);
-
-    OEShape::OEBestOverlayScore score;
-    local_->overlay.BestOverlay(score, *shared_->mols[j]);
-
-    return convert_raw_score(raw_overlay_score(score, opts_.score_type), opts_);
+    // Directional, and that is the whole of what it owes its callers: i is the
+    // reference and j is searched, which is what a cdist row means. The
+    // overlay it runs on is built here and discarded here, which is not part
+    // of that contract and was never meant to be observable -- while this
+    // reused the per-thread overlay, a cdist cell moved between 0.546 and the
+    // saturated 1.0 depending on the thread count and on where an unrelated
+    // molecule sat in the target list.
+    return convert_raw_score(
+        fresh_overlay_raw_score(local_->overlay_opts, opts_.score_type,
+                                *shared_->mols[i], *shared_->mols[j]),
+        opts_);
 }
 
 double ROCSComparison::CompareUnordered(size_t i, size_t j) {

@@ -191,7 +191,7 @@ KMedoidsResult k_medoids_cluster(const StorageBackend& storage,
  * :raises std::runtime_error: If a scored distance is not finite.
  * :raises ComparisonError: If the comparison reports similarities, a non-zero
  *     self-distance, possibly non-finite values, per-pair feature subsets, or
- *     is not repeatable.
+ *     is a ROCS comparison, which these paths refuse by name.
  */
 KMedoidsResult k_medoids_cluster(PairwiseComparison& comparison,
                                  const KMedoidsOptions& options);

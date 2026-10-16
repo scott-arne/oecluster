@@ -59,11 +59,25 @@ inline void validate_comparison_facts(const PairwiseComparison& comparison,
     }
 }
 
-// ROCS fails the repeatability precondition every comparison-built clustering
-// relies on: its overlay keeps state between calls, so a clone's score for a
-// pair depends on what that clone scored before
-// (test_comparison_repeatability.cpp, ROCSDependsOnItsCloneHistory). Refused
-// by name, the remedy the D4a design gives for a family that fails.
+// ROCS is refused by name on every comparison-built clustering path, the
+// remedy the D4a design gives for a family that is not known to satisfy the
+// repeatability precondition.
+//
+// The original evidence for that refusal no longer holds and the comment is
+// updated rather than the behaviour. ROCS used to reuse one OEOverlay per
+// clone, so a clone's score for a pair depended on what that clone had scored
+// before; since every search builds its own overlay, it does not.
+// test_comparison_repeatability.cpp measures that directly
+// (ROCSScoresDoNotDependOnCloneHistory) across three fixtures and all four
+// score types.
+//
+// What is still missing is the other half of the precondition. The instrument
+// those tests use also builds whole graphs under several thread and chunk
+// settings and compares them bitwise, and that half has never run for ROCS,
+// because these refusals stop it before it starts. So ROCS is uncertified
+// here rather than disproved, and lifting the refusal is a separate decision
+// needing that evidence and a cost assessment -- two overlay searches per pair
+// per pass is not free.
 //
 // :param action: What the caller cannot do, e.g. "build a threshold graph".
 // :param consequence: Why repeatability matters to it, after "so ".
@@ -73,8 +87,8 @@ inline void refuse_unrepeatable(const PairwiseComparison& comparison,
                                 const std::string& consequence) {
     if (comparison.ComparisonName() == "rocs") {
         throw ComparisonError(
-            caller + " cannot " + action + " from a ROCS comparison: a ROCS "
-            "score depends on what its overlay scored before, so " +
+            caller + " cannot " + action + " from a ROCS comparison: "
+            "ROCS is not certified for the repeated scoring these paths do, so " +
             consequence + "; cluster a matrix from pdist() instead");
     }
 }

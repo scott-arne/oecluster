@@ -85,7 +85,7 @@ DBSCANResult dbscan_cluster(const StorageBackend& storage, const DBSCANOptions& 
  * :raises std::invalid_argument: If eps is negative or min_samples is zero.
  * :raises ComparisonError: If the comparison reports similarities, a
  *     non-zero self-distance, or values that may be NaN; or if it is a ROCS
- *     comparison, whose scores depend on what its overlay scored before.
+ *     comparison, which is not certified for the repeated scoring this does.
  * :raises std::runtime_error: If a comparison returns NaN or infinity.
  * :raises std::length_error: If the graph would exceed its limit.
  * :raises std::logic_error: If the two passes disagree on a row's size.

@@ -49,8 +49,10 @@ struct ROCSOptions {
  *   - Shape: ``1.0 - ShapeTanimoto`` (range [0,1])
  *   - Color: ``1.0 - ColorTanimoto`` (range [0,1])
  *
- * Each Clone() creates a new ``OEOverlay`` instance so that Compare()
- * can be called concurrently from different threads without locking.
+ * Every search builds and discards its own ``OEOverlay``, so clones share no
+ * scorer state and Compare() can be called concurrently from different
+ * threads without locking. A clone used to own one long-lived overlay
+ * instead; see below for why it does not.
  *
  * ``Compare(i, j)`` is directional: it makes ``i`` the overlay reference and
  * searches only ``j``'s conformers, so the two orientations of a pair are two
@@ -65,19 +67,22 @@ struct ROCSOptions {
  *
  * Direction was only half of it. ``OEOverlay`` also carries state between
  * calls, enough to move an accepted input by 0.45 rather than by a rounding
- * error, so ``CompareUnordered`` builds a fresh overlay for each of its two
- * searches and touches no state that outlives the call. ``Compare`` keeps the
- * per-thread overlay, which is why ``src/clustering/DiversityValidation.h``
- * still refuses ROCS on the streaming paths: that refusal is about ``Compare``
- * and remains correct.
+ * error, so every search here -- ``CompareUnordered``'s two and ``Compare``'s
+ * one -- runs on an overlay built for it and discarded after it. Neither
+ * function reads or writes state that outlives the call, which is what makes
+ * a score a function of its arguments. ``Compare`` reused the per-thread
+ * overlay until 2026-10-16, and a ``cdist`` cell moved between 0.546 and a
+ * saturated 1.0 with the thread count and with where an unrelated molecule
+ * sat in the target list.
  *
- * The cost is two searches per off-diagonal pair instead of one, each on its
- * own overlay, so a ``pdist`` over n molecules runs n*(n-1) searches rather
- * than n*(n-1)/2. The n self-overlays the constructor takes are unchanged.
- * Building an overlay per search is not what costs: measured 2026-10-15 over
- * eight flexible 20-conformer molecules at one thread, 20.3-20.8 ms per pair
- * shared against 18.9-19.4 ms per pair fresh, three runs of nine repetitions
- * each.
+ * The cost is two searches per off-diagonal pair instead of one, so a
+ * ``pdist`` over n molecules runs n*(n-1) searches rather than n*(n-1)/2. The
+ * n self-overlays the constructor takes are unchanged. Building an overlay per
+ * search costs on top of that, and the fraction falls as the search grows,
+ * since the construction is fixed and the search is not:
+ * ``benchmarks/rocs_overlay_reuse.py`` measures the two strategies against
+ * each other in one process, and on 2026-10-16 put fresh over shared at a
+ * median of 1.20 at one conformer, 1.09 to 1.11 at twenty and 1.06 at fifty.
  *
  * What this buys is a ``pdist`` value that is a function of its pair, and so a
  * matrix that does not depend on input order. Measured 2026-10-15: on three

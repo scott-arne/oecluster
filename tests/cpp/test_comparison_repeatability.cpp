@@ -7,9 +7,10 @@
  * each row and once to fill it, on whichever clone the scheduler hands the
  * chunk. Its exactness rests on Compare being repeatable across differing
  * clone histories, which PairwiseComparison does not promise. These tests are
- * the evidence for that precondition, family by family. ROCS fails it, and
- * the last test records how; the threshold-graph builder refuses ROCS by name
- * for that reason.
+ * the evidence for that precondition, family by family. ROCS used to fail it
+ * and no longer does; the last three tests record the half it now satisfies,
+ * and the comment above them records the half that cannot be measured while
+ * the builders refuse it.
  */
 
 #include <gtest/gtest-spi.h>
@@ -316,27 +317,95 @@ TEST(ComparisonRepeatabilityTest, SuperposeAndSiteHopper) {
     }
 }
 
-// ROCS fails the precondition: its overlay keeps state between calls, so a
-// clone's score for a pair depends on what that clone scored before. This is
-// the evidence the builder's refusal rests on, and the test fails if a toolkit
-// change ever makes ROCS repeatable, which is the cue to revisit the refusal.
-// The stretched phenol is the case ROCSComparison.cpp documents (0.546 on a
-// fresh overlay, 1.0 on a used one); planning also measured ordinary pairs
-// moving by 0.016 depending on which reference the clone saw last.
-TEST(ComparisonRepeatabilityTest, ROCSDependsOnItsCloneHistory) {
+// ROCS used to fail the precondition outright: one OEOverlay was reused per
+// clone, so a clone's score for a pair depended on what that clone had scored
+// before. The stretched phenol below is the case ROCSComparison.cpp documents
+// -- 0.546 on a fresh overlay, 1.0 on a used one -- and it is what made the
+// difference observable rather than subtle.
+//
+// Since every search builds its own overlay, that is no longer true, and this
+// test now pins the property that replaced it. It covers parts (a) and (b) of
+// the instrument above, clone histories, over the pathological fixture, a
+// multiconformer one, and all four score types. Part (c), whole graphs under
+// several thread and chunk settings, is the half that cannot run: the builders
+// refuse ROCS by name before it starts. That gap is why the refusal in
+// DiversityValidation.h stands even though the evidence it originally cited is
+// gone -- ROCS is uncertified here, not disproved -- and closing it is what a
+// slice that wanted to lift the refusal would have to do first.
+void ExpectCloneHistoryDoesNotMatter(PairwiseComparison& prototype) {
+    const size_t n = prototype.Size();
+    ASSERT_GE(n, 2u);
+    const std::vector<Pair> pairs = AllPairs(n);
+
+    std::unique_ptr<PairwiseComparison> first = prototype.Clone();
+    const std::vector<double> baseline = Score(*first, n, Shuffled(pairs, 1));
+    ExpectSameBits(Score(*first, n, Shuffled(pairs, 2)), baseline);
+
+    for (const unsigned seed : {3u, 4u}) {
+        std::unique_ptr<PairwiseComparison> clone = prototype.Clone();
+        Score(*clone, n, Shuffled(pairs, seed + 100));
+        ExpectSameBits(Score(*clone, n, Shuffled(pairs, seed)), baseline);
+    }
+    std::unique_ptr<PairwiseComparison> fresh = prototype.Clone();
+    ExpectSameBits(Score(*fresh, n, pairs), baseline);
+}
+
+/// Phenol with one atom at 200 angstroms, plus benzene and octane: accepted
+/// input that reaches the saturating branch of the overlay.
+std::vector<std::shared_ptr<OEChem::OEMol>> StretchedPhenolSet() {
     std::vector<std::shared_ptr<OEChem::OEMol>> mols =
-        Conformers({"c1ccc(O)cc1", "c1ccccc1"});
+        Conformers({"c1ccc(O)cc1", "c1ccccc1", "CCCCCCCC"});
     OEChem::OEConfBase* const active = mols[0]->GetActive();
     OESystem::OEIter<OEChem::OEAtomBase> atom = active->GetAtoms();
-    ASSERT_TRUE(atom);
-    double coords[3];
-    ASSERT_TRUE(active->GetCoords(&*atom, coords));
+    EXPECT_TRUE(atom);
+    double coords[3] = {0.0, 0.0, 0.0};
+    EXPECT_TRUE(active->GetCoords(&*atom, coords));
     coords[0] = 200.0;
-    ASSERT_TRUE(active->SetCoords(&*atom, coords));
+    EXPECT_TRUE(active->SetCoords(&*atom, coords));
+    return mols;
+}
 
+TEST(ComparisonRepeatabilityTest, ROCSScoresDoNotDependOnCloneHistory) {
+    std::vector<std::shared_ptr<OEChem::OEMol>> mols = StretchedPhenolSet();
+
+    // Not vacuous only if this fixture can still tell a reused overlay from a
+    // fresh one. It is the pair that used to move: measured 2026-10-16, the
+    // stretched phenol scores 0.546 against benzene, and the 1.0 it reached on
+    // a reused overlay is the saturation value a regression would return here.
     ROCSComparison comparison(mols);
-    std::unique_ptr<PairwiseComparison> clone = comparison.Clone();
-    const double fresh = clone->Compare(0, 1);
-    const double again = clone->Compare(0, 1);
-    EXPECT_NE(Bits(fresh), Bits(again)) << fresh << " vs " << again;
+    EXPECT_LT(comparison.Compare(0, 1), 1.0);
+    EXPECT_GT(comparison.Compare(0, 1), 0.0);
+
+    ExpectCloneHistoryDoesNotMatter(comparison);
+}
+
+TEST(ComparisonRepeatabilityTest, ROCSMulticonformerDoesNotDependOnCloneHistory) {
+    // Conformer search is where a reused overlay would have most to carry.
+    OEConfGen::OEOmega omega;
+    omega.SetMaxConfs(20);
+    omega.SetStrictStereo(false);
+    std::vector<std::shared_ptr<OEChem::OEMol>> mols;
+    for (const char* smi : {"CCCCCCCC", "CCCCCCCCO", "c1ccc(CCCCO)cc1"}) {
+        auto mol = std::make_shared<OEChem::OEMol>();
+        OEChem::OESmilesToMol(*mol, smi);
+        ASSERT_TRUE(omega(*mol)) << smi;
+        ASSERT_GT(mol->NumConfs(), 1u);
+        mols.push_back(mol);
+    }
+    ROCSComparison comparison(mols);
+    ExpectCloneHistoryDoesNotMatter(comparison);
+}
+
+TEST(ComparisonRepeatabilityTest, ROCSEveryScoreTypeIgnoresCloneHistory) {
+    // Per score type, because the color term is prepared separately and a
+    // single type would speak for one of four.
+    std::vector<std::shared_ptr<OEChem::OEMol>> mols = StretchedPhenolSet();
+    for (const ROCSScoreType type : {ROCSScoreType::ComboNorm, ROCSScoreType::Combo,
+                                     ROCSScoreType::Shape, ROCSScoreType::Color}) {
+        SCOPED_TRACE(::testing::Message() << "score type " << static_cast<int>(type));
+        ROCSOptions opts;
+        opts.score_type = type;
+        ROCSComparison comparison(mols, opts);
+        ExpectCloneHistoryDoesNotMatter(comparison);
+    }
 }
