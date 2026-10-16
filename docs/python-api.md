@@ -2599,8 +2599,13 @@ modi = oecluster.modelability(oecluster.FingerprintComparison(mols),
                               classes).modi
 ```
 
-The results are identical to the matrix form over a matrix filled through
-`Compare`. Against `pdist()`, individual fingerprint distances agree to
+The results are identical to the matrix form over a matrix holding, for
+every pair, the value the unordered-pair seam `pdist()` fills through
+reports -- `Compare(min(i, j), max(i, j))` for every comparison but
+`"rocs"`, which scores both orientations and keeps the better overlay. Since
+5.25.0 a `"rocs"` run therefore agrees with a `pdist()` matrix rather than
+with a direct-`Compare` one.
+Against `pdist()`, individual fingerprint distances agree to
 about 1e-12 on the same terms, and any thresholded count or
 argmin-derived field (RMODI, MODI) can differ when inputs sit within that
 margin of a threshold or a tie.

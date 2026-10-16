@@ -352,8 +352,8 @@ share their data. Workers are `num_threads`, or the hardware concurrency
 when it is 0, capped at N. No term grows with the pair count. A `cluster_report` fill block
 holds at most 2^20 distances, or one row if a row is longer.
 
-The comparison contract is the one `maxmin_select`, `knn_graph` and
-`leiden` already document: the engines read each pair through the unordered
+The comparison contract is the one `maxmin_select` and `knn_graph` already
+document: the engines read each pair through the unordered
 seam `pdist()` fills through -- `Compare(min(i, j), max(i, j))` for every
 comparison but ROCS, which overrides that seam -- never a self-pair, and the
 seam must return the same value, or throw the same exception, for the same

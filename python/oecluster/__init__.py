@@ -5105,10 +5105,15 @@ def cluster_report(result, items=_MISSING, *, distance_matrix=_MISSING,
         as :class:`FingerprintComparison`; or a sequence of items with
         ``comparison=`` naming the comparison to build. The two comparison
         forms compute the report without a matrix, in memory linear in the
-        number of items, calling ``Compare`` about ``N * (N - 1) / 2`` times
-        per pass over the pairs. Their results are identical to the matrix
-        path over a matrix filled through the same ``Compare``, except that a
-        zero median is always +0.0.
+        number of items, reading about ``N * (N - 1) / 2`` pairs per pass
+        through the same unordered-pair seam :func:`pdist` fills through,
+        always with the lower index first. Their results are identical to the
+        matrix path over a matrix holding that seam's value for every pair,
+        except that a zero median is always +0.0. For every comparison but
+        ``"rocs"`` that value is ``Compare(min(i, j), max(i, j))``, as
+        before; ``"rocs"`` scores both orientations and keeps the better
+        overlay, so since 5.25.0 the comparison forms agree with a
+        :func:`pdist` matrix rather than with a direct-``Compare`` one.
     :param distance_matrix: Keyword alias for ``items`` that accepts only a
         SymmetricDistanceMatrix. Passing both is a TypeError.
     :param comparison: Comparison name, such as ``"fingerprint"``, when
@@ -6037,11 +6042,15 @@ def activity_landscape(items=_MISSING, activity=_MISSING, *,
         SymmetricDistanceMatrix (SparseStorage is refused: a nearest neighbour
         read off a partial matrix is not one); a prebuilt comparison such as
         :class:`FingerprintComparison`; or a sequence of items with
-        ``comparison=``. The comparison forms hold no matrix and call
-        ``Compare`` once for each of the ``N * (N - 1) / 2`` pairs, where
-        ``N`` is the number of scored samples. Their
-        result is identical to the matrix path over a matrix filled through
-        the same ``Compare``.
+        ``comparison=``. The comparison forms hold no matrix and read each
+        of the ``N * (N - 1) / 2`` pairs once, where ``N`` is the number of
+        scored samples, through the same unordered-pair seam :func:`pdist`
+        fills through, always with the lower index first. Their result is
+        identical to the matrix path over a matrix holding that seam's value
+        for every pair: ``Compare(min(i, j), max(i, j))`` for every
+        comparison but ``"rocs"``, which scores both orientations and keeps
+        the better overlay, so since 5.25.0 the comparison forms agree with a
+        :func:`pdist` matrix rather than with a direct-``Compare`` one.
     :param distance_matrix: Keyword alias for ``items`` that accepts only a
         SymmetricDistanceMatrix. Passing both is a TypeError.
     :param comparison: Comparison name, such as ``"fingerprint"``, when
@@ -6210,12 +6219,17 @@ def modelability(items=_MISSING, activity_classes=_MISSING, *,
 
     :param items: What the distances come from, in the three forms
         :func:`activity_landscape` takes; SparseStorage is refused on the same
-        grounds. The comparison forms call ``Compare`` for every ordered pair,
-        ``N * (N - 1)`` times over ``N`` scored samples, because each
+        grounds. The comparison forms read every ordered pair through the
+        same unordered-pair seam :func:`activity_landscape` reads,
+        ``N * (N - 1)`` reads over ``N`` scored samples, because each
         sample's nearest neighbour is sought over its whole row; that is
-        twice the calls of :func:`activity_landscape`. With a single scored
-        class nothing is scored and each pair is only validated,
-        ``N * (N - 1) / 2`` calls.
+        twice the reads of :func:`activity_landscape`, and the two visits of
+        a pair see one value because both pass it lower index first. The
+        result matches the matrix path on those same seam values, so since
+        5.25.0 a ``"rocs"`` run agrees with a :func:`pdist` matrix rather
+        than with a direct-``Compare`` one. With a single scored class
+        nothing is scored and each pair is only validated,
+        ``N * (N - 1) / 2`` reads.
     :param distance_matrix: Keyword alias for ``items`` that accepts only a
         SymmetricDistanceMatrix. Passing both is a TypeError.
     :param comparison: Comparison name, such as ``"fingerprint"``, when
