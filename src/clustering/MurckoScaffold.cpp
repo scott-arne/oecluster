@@ -151,43 +151,58 @@ std::optional<std::string> scaffold_of(const OEChem::OEMolBase& mol,
         // scaffold, and stripping it yields a neutral hypervalent atom: an
         // azoniaspiro ammonium comes back with five bonds and no charge, which
         // OEChem will parse but which is not the molecule.
-        OEChem::OEGraphMol normalized(framework);
-        if (!OEChem::OEUncolorMol(
-                normalized, OEChem::OEUncolorStrategy::RemoveAtomProperties)) {
-            return std::nullopt;
-        }
-        // The transfer below matches atoms by index, which holds only because
-        // a framework region never contains a hydrogen: RemoveAtomProperties
-        // deletes explicit hydrogens and renumbers what is left, and a shifted
-        // index would silently move another atom's charge. Refusing on a count
-        // mismatch keeps that latent assumption from failing quietly.
-        if (normalized.NumAtoms() != framework.NumAtoms()) {
-            return std::nullopt;
-        }
-        for (OESystem::OEIter<OEChem::OEAtomBase> atom = framework.GetAtoms();
-             atom; ++atom) {
-            if (atom->GetMapIdx() != CUT_ATOM_MARK) {
-                continue;
-            }
-            const OEChem::OEAtomBase* source =
-                normalized.GetAtom(OEChem::OEHasAtomIdx(atom->GetIdx()));
-            if (source == nullptr) {
+        //
+        // Framework only. BemisMurcko is RemoveAtomProperties together with
+        // four further bits (oechem/uncolor.h), so the reduction below applies
+        // the same recomputation to every atom and overwrites whatever the
+        // transfer wrote; at Generic this is work whose result is discarded.
+        if (type == ScaffoldType::Framework) {
+            OEChem::OEGraphMol normalized(framework);
+            if (!OEChem::OEUncolorMol(
+                    normalized, OEChem::OEUncolorStrategy::RemoveAtomProperties)) {
                 return std::nullopt;
             }
-            atom->SetFormalCharge(source->GetFormalCharge());
-            atom->SetImplicitHCount(source->GetImplicitHCount());
+            // The transfer below matches atoms by index, which holds only
+            // because a framework region never contains a hydrogen:
+            // RemoveAtomProperties deletes explicit hydrogens and renumbers
+            // what is left, and a shifted index would silently move another
+            // atom's charge. Refusing on a count mismatch keeps that latent
+            // assumption from failing quietly.
+            if (normalized.NumAtoms() != framework.NumAtoms()) {
+                return std::nullopt;
+            }
+            for (OESystem::OEIter<OEChem::OEAtomBase> atom = framework.GetAtoms();
+                 atom; ++atom) {
+                if (atom->GetMapIdx() != CUT_ATOM_MARK) {
+                    continue;
+                }
+                const OEChem::OEAtomBase* source =
+                    normalized.GetAtom(OEChem::OEHasAtomIdx(atom->GetIdx()));
+                if (source == nullptr) {
+                    return std::nullopt;
+                }
+                atom->SetFormalCharge(source->GetFormalCharge());
+                atom->SetImplicitHCount(source->GetImplicitHCount());
+            }
         }
         // OECreateCanSmiString emits atom map indices, so clearing them is a
         // correctness step and not tidiness: leaving them turns c1ccccc1 into
-        // [cH:1]1ccccc1.
+        // [cH:1]1ccccc1. Both levels canonicalize, so this stays outside the
+        // guard above even though the marks it clears exist for the transfer
+        // inside it.
         for (OESystem::OEIter<OEChem::OEAtomBase> atom = framework.GetAtoms();
              atom; ++atom) {
             atom->SetMapIdx(0u);
         }
-        // Charge and hydrogen counts changed, so the flags assigned just above
-        // are re-derived before either level consumes them.
-        OEChem::OEFindRingAtomsAndBonds(framework);
-        OEChem::OEAssignAromaticFlags(framework);
+        if (type == ScaffoldType::Framework) {
+            // Charge and hydrogen counts changed, so the flags assigned
+            // further up are re-derived before the string is built. Guarded
+            // with the transfer that invalidates them: at Generic nothing has
+            // changed them here, and that branch re-perceives after its own
+            // reduction.
+            OEChem::OEFindRingAtomsAndBonds(framework);
+            OEChem::OEAssignAromaticFlags(framework);
+        }
 
         if (type == ScaffoldType::Generic) {
             // The library strategy rather than a hand-rolled rewrite: its

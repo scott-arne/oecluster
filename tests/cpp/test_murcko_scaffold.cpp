@@ -323,6 +323,96 @@ TEST(MurckoExtractionTest, LeavesTheInputMoleculeUnmodified) {
     EXPECT_EQ(after_ring_flags, before_ring_flags);
 }
 
+/// One panel row: an input and the two strings it canonicalizes to.
+struct ScaffoldRow {
+    const char* smiles;
+    const char* framework;
+    const char* generic;
+};
+
+TEST(MurckoExtractionTest, PinsBothLevelsOverAPanel) {
+    // A refactor guard, not a demonstration of a defect: these literals were
+    // captured from the build preceding the Framework-only guard on the
+    // cut-atom normalization, and the point of the test is that they still
+    // hold afterwards. It passes on both sides of that change by design.
+    //
+    // Each column catches a different way of drawing that guard wrong, and
+    // neither catch is available from the other column. The Framework column
+    // fails if the normalization stops running at the Framework level: the
+    // first six rows are molecules it changes, where the sulfonamide sulfur
+    // would come back as [SH4] and the ammonium and pyridinium nitrogens would
+    // keep a charge the cut took away. The Generic column fails if the
+    // map-index clear is pulled inside the guard, because
+    // OECreateCanSmiString emits the marks the clear exists to remove.
+    //
+    // Sixteen rows are real molecules from examples/assets/Bender.csv; the
+    // rest are the structural fixtures the tests above use.
+    static const ScaffoldRow PANEL[] = {
+        {"CN(C)c1c2ccccc2nc(n1)NC3CCC(CC3)NS(=O)(=O)c4ccc(cc4OC(F)(F)F)Br",
+         "c1ccc(cc1)SNC2CCC(CC2)Nc3ncc4ccccc4n3",
+         "C1CCC(CC1)CCC2CCC(CC2)CC3CCC4CCCCC4C3"},
+        {"CC1=C(c2cc(ccc2C1)S(=O)(=O)Nc3cccc4c3cccc4)CCN(C)C",
+         "c1ccc2c(c1)cccc2NSc3ccc4c(c3)C=CC4",
+         "C1CCC2C(C1)CCCC2CCC3CCC4CCCC4C3"},
+        {"CC(C)(C)CC(C)(C)c1ccc(cc1)OCCOCC[N+](C)(C)Cc2ccccc2",
+         "c1ccc(cc1)CNCCOCCOc2ccccc2",
+         "C1CCC(CC1)CCCCCCCCC2CCCCC2"},
+        {"C[N+]1(CCC(CC1)C(CC(=O)c2cc3cc(c(cc3s2)OC)OC)O)Cc4ccccc4",
+         "c1ccc(cc1)CN2CCC(CC2)CCCc3cc4ccccc4s3",
+         "C1CCC(CC1)CC2CCC(CC2)CCCC3CC4CCCCC4C3"},
+        {"CCC[n+]1ccc(cc1)CCC(=O)c2cc3cc(c(cc3s2)OC)OC",
+         "c1ccc2c(c1)cc(s2)CCCc3ccncc3",
+         "C1CCC(CC1)CCCC2CC3CCCCC3C2"},
+        {"c1cc2c(cc1NS(=O)(=O)c3c(nc4n3ccs4)Cl)C(=CC2)C5CCNC5",
+         "c1cc2c(cc1NSc3cnc4n3ccs4)C(=CC2)C5CCNC5",
+         "C1CCC(C1)C2CCC3C2CC(CC3)CCC4CCC5C4CCC5"},
+        {"CNCC1CC2c3ccccc3Cc4ccccc4N2O1",
+         "c1ccc2c(c1)Cc3ccccc3N4C2CCO4",
+         "C1CCC2C(C1)CC3CCCCC3C4C2CCC4"},
+        {"CC(=O)NC(Cc1ccc(cc1)C(F)(F)P(=O)(O)O)C(=O)NC(CCC(=O)O)C(=O)NC(CCC2CCCCC2)C(=O)N",
+         "c1ccc(cc1)CCCNCCNCCCC2CCCCC2",
+         "C1CCC(CC1)CCCCCCCCCCC2CCCCC2"},
+        {"CCSc1nc(nn1C(=O)N(C)C)c2ccc(cc2)Cl",
+         "c1ccc(cc1)c2nc[nH]n2",
+         "C1CCC(CC1)C2CCCC2"},
+        {"COc1cc2c(cc1OCCCN3CCOCC3)ncnc2Nc4nc(cs4)CC(=O)Nc5cccc(c5)F",
+         "c1ccc(cc1)NCCc2csc(n2)Nc3c4ccc(cc4ncn3)OCCCN5CCOCC5",
+         "C1CCC(CC1)CCCCC2CCC3C(C2)CCCC3CC4CCC(C4)CCCC5CCCCC5"},
+        {"CC(=O)Nc1cccc(c1)c2cncc(n2)Nc3cccc(c3)OCCN",
+         "c1ccc(cc1)c2cncc(n2)Nc3ccccc3",
+         "C1CCC(CC1)CC2CCCC(C2)C3CCCCC3"},
+        {"CCOc1ccc(cc1Cl)c2c(ncn2c3ccc(cc3)S(=O)(=O)N)Cl",
+         "c1ccc(cc1)c2cncn2c3ccccc3",
+         "C1CCC(CC1)C2CCCC2C3CCCCC3"},
+        {"COCc1ccc(cc1)C2=C(CCC2)c3ccc(cc3)S(=O)(=O)C",
+         "c1ccc(cc1)C2=C(CCC2)c3ccccc3",
+         "C1CCC(CC1)C2CCCC2C3CCCCC3"},
+        {"c1cc(ccc1c2cc(cnc2c3ccc(cc3Cl)Cl)C(=O)NC4CCCCC4)Cl",
+         "c1ccc(cc1)c2cc(cnc2c3ccccc3)CNC4CCCCC4",
+         "C1CCC(CC1)CCC2CCC(C(C2)C3CCCCC3)C4CCCCC4"},
+        {"C[S+](CCNC(=O)c1cc2cc(sc2s1)S(=O)(=O)N)[O-]",
+         "c1csc2c1ccs2",
+         "C1CC2CCCC2C1"},
+        {"CC(C)CC(C(=O)NC1CC(=O)OC1O)NC(=O)COc2ccccc2OCc3ccccc3",
+         "c1ccc(cc1)COc2ccccc2OCCNCCNC3CCOC3",
+         "C1CCC(CC1)CCC2CCCCC2CCCCCCCC3CCCC3"},
+        {"c1ccccc1", "c1ccccc1", "C1CCCCC1"},
+        {"CC(=O)Oc1ccccc1C(=O)O", "c1ccccc1", "C1CCCCC1"},
+        {"Cn1cnc2c1c(=O)n(C)c(=O)n2C", "c1[nH]c2c(n1)NCNC2", "C1CCC2CCCC2C1"},
+        {"C1CC[N+]2(CCCCC2)CC1", "C1CC[N+]2(CC1)CCCCC2", "C1CCC2(CC1)CCCCC2"},
+        {"COc1ccc2cc3[n+](cc2c1OC)CCc1cc2c(cc1-3)OCO2",
+         "c1ccc2c[n+]3c(cc2c1)-c4cc5c(cc4CC3)OCO5",
+         "C1CCC2CC3C(CCC4C3CC5CCCC5C4)CC2C1"},
+        {"c1ccccc1C(=O)O.c1ccncc1", "c1ccccc1.c1ccncc1", "C1CCCCC1.C1CCCCC1"},
+        {"CCCCCC", "", ""},
+        {"C1CC[C@H]2CCCC[C@@H]2C1", "C1CCC2CCCCC2C1", "C1CCC2CCCCC2C1"},
+    };
+    for (const ScaffoldRow& row : PANEL) {
+        EXPECT_EQ(framework(row.smiles), row.framework) << row.smiles;
+        EXPECT_EQ(generic(row.smiles), row.generic) << row.smiles;
+    }
+}
+
 /// Owns a set of molecules parsed from SMILES and hands out the pointer vector
 /// the public entry points take. Pointers are collected only after every
 /// molecule is allocated, so no reallocation can invalidate them.
