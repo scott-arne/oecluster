@@ -79,9 +79,11 @@ std::optional<std::string> scaffold_of(const OEChem::OEMolBase& mol,
         // OESubsetMol's hydrogen-count adjustment turns the bond order lost to
         // the cut into implicit hydrogens on the atom left behind. Which atoms
         // those are is knowable only here, while the parent still holds the
-        // bonds that leave the union, so they are marked now and normalized
-        // after the subset. The clearing pass is not redundant: an input read
-        // from mapped SMILES arrives with map indices already set.
+        // bonds that leave the union, so they are marked now and, at the
+        // Framework level, normalized after the subset. Generic never reads
+        // the marks: its reduction recomputes charge and hydrogen count over
+        // every atom. The clearing pass is not redundant: an input read from
+        // mapped SMILES arrives with map indices already set.
         for (OESystem::OEIter<OEChem::OEAtomBase> atom = work.GetAtoms(); atom;
              ++atom) {
             atom->SetMapIdx(0u);
@@ -186,10 +188,16 @@ std::optional<std::string> scaffold_of(const OEChem::OEMolBase& mol,
             }
         }
         // OECreateCanSmiString emits atom map indices, so clearing them is a
-        // correctness step and not tidiness: leaving them turns c1ccccc1 into
-        // [cH:1]1ccccc1. Both levels canonicalize, so this stays outside the
-        // guard above even though the marks it clears exist for the transfer
-        // inside it.
+        // correctness step and not tidiness: at the Framework level, leaving
+        // them turns c1ccccc1 into [cH:1]1ccccc1.
+        //
+        // It sits outside the guard because it is one cheap pass that nothing
+        // gains from skipping, not because Generic needs it. Moving it inside,
+        // so that it never runs at Generic, leaves every Generic scaffold of
+        // the 937 molecules in examples/assets/Bender.csv byte-identical: the
+        // reduction below emits no map index either way. The placement is
+        // harmless rather than load-bearing, so a reader who folds it in
+        // breaks nothing measured here.
         for (OESystem::OEIter<OEChem::OEAtomBase> atom = framework.GetAtoms();
              atom; ++atom) {
             atom->SetMapIdx(0u);

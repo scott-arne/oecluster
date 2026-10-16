@@ -336,14 +336,17 @@ TEST(MurckoExtractionTest, PinsBothLevelsOverAPanel) {
     // cut-atom normalization, and the point of the test is that they still
     // hold afterwards. It passes on both sides of that change by design.
     //
-    // Each column catches a different way of drawing that guard wrong, and
-    // neither catch is available from the other column. The Framework column
-    // fails if the normalization stops running at the Framework level: the
-    // first six rows are molecules it changes, where the sulfonamide sulfur
-    // would come back as [SH4] and the ammonium and pyridinium nitrogens would
-    // keep a charge the cut took away. The Generic column fails if the
-    // map-index clear is pulled inside the guard, because
-    // OECreateCanSmiString emits the marks the clear exists to remove.
+    // The Framework column is the discriminating half. It fails if the
+    // cut-atom normalization stops running at the Framework level: the first
+    // six rows are molecules it changes, where the sulfonamide sulfur comes
+    // back as [SH4] and the ammonium and pyridinium nitrogens keep a charge
+    // the cut took away.
+    //
+    // The Generic column pins that the guard left Generic output alone. It
+    // does not discriminate a mis-drawn boundary, and it should not be read as
+    // if it did: moving the map-index clear inside the guard, so that it never
+    // runs at Generic, leaves all 24 rows here and all 937 Generic scaffolds
+    // of examples/assets/Bender.csv unchanged.
     //
     // Sixteen rows are real molecules from examples/assets/Bender.csv; the
     // rest are the structural fixtures the tests above use.
