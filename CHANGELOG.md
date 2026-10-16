@@ -2,6 +2,130 @@
 
 This file starts at 5.0.0; earlier releases are not recorded here.
 
+## [5.25.0] - 2026-10-16
+
+### Changed
+
+- **ROCS distances change, and a ROCS matrix computed before 5.25.0 will not
+  reproduce under this release -- whichever function produced it.** Two things
+  moved. `pdist()` now scores an unordered pair in both orientations and keeps
+  the better overlay, where it scored one orientation and stored that as the
+  pair's distance; and every search -- `pdist()`'s two, and the one behind
+  `cdist()` and a direct `Compare` -- now runs on an `OEOverlay` built for that
+  search and discarded after it, where one overlay was built per clone and
+  reused. `pdist()` values move for any pair whose two orientations disagree,
+  and both measured fixtures show a gap: flexible molecules at twenty
+  conformers most, but single-conformer input too -- on the fixture behind
+  `test_pdist_rocs_end_to_end` the gap reaches 0.00028 on `combo_norm` and
+  0.00056 on `shape`. `cdist()` values move wherever the reused overlay's
+  state was reaching the score; the case measured is a cell that read a
+  saturated 1.0 where a first-use overlay reads 0.546160012. Recompute rather
+  than compare against a stored matrix.
+- The reuse was not a rounding-scale effect, and four separate behaviours went
+  with it. The orientation bias itself: measured 2026-10-15 over three
+  flexible molecules at twenty conformers each, the two orientations of a pair
+  differ by up to 0.0355 on `combo_norm`, 0.0710 on `combo`, 0.0660 on `shape`
+  and 0.0010 on `color`, each on its own scale and on one fixture rather than
+  as a bound.
+  A **0.45** order dependence on accepted input: a phenol with one atom
+  displaced to 200 angstroms -- two orders of magnitude inside the
+  coordinate-extent guard, and accepted -- scored against benzene and octane,
+  where three of the six input permutations moved the matrix by 0.4538.
+  Scoring both orientations did not remove that one; only the fresh overlay
+  did. A `cdist()` cell that depended on the thread count and on where an
+  unrelated molecule sat in the list: the same phenol-against-benzene cell
+  read 1.0 at one thread and 0.546160012 at two, and 0.546160012 again with
+  benzene listed first. And a false saturated 1.0: the phenol-against-octane
+  entry of that matrix was an artifact of the reused overlay rather than a
+  score, and now reads 0.772408.
+- What holds after the change, on the fixtures that measure it: the `pdist()`
+  matrix over the three-molecule flexible fixture agrees with the one computed
+  from the reversed input to a residual of 0.0 on all four score types; all
+  six permutations of the displaced-phenol fixture agree at 0.0, against
+  0.4538 before; and the `cdist()` cell above reads 0.546160012 under all
+  three arrangements that used to disagree. The tests assert `1e-6` rather
+  than equality, because OEShape promises no bit-reproducibility: these are
+  measurements of this toolkit on these fixtures, not a property the library
+  can guarantee. Clustering stability is a separate question and this does not
+  settle it -- a reproducible matrix is necessary for reordering not to change
+  labels, not sufficient, since ties are the algorithm's to break.
+- The cost. `pdist()` performs two overlay searches per off-diagonal pair
+  instead of one -- n*(n-1) searches over n molecules rather than n*(n-1)/2,
+  with the n self-overlays the constructor takes unchanged -- and building an
+  overlay per search costs on top of that doubling. `benchmarks/rocs_overlay_reuse.py`
+  is committed so that second part can be re-measured: it runs both strategies
+  in one process, warmed up, nine repetitions, the two arms in randomised
+  order within each repetition. On 2026-10-16, over the eight flexible
+  molecules it names, the median of fresh over shared was 1.20 at one
+  conformer, 1.09 to 1.11 at twenty and 1.06 at fifty. That is one panel on
+  one machine; re-run it rather than carrying the numbers.
+- `cdist()` and a direct `Compare` keep their direction, deliberately. Entry
+  `[i, j]` of a `cdist()` block is what `items_a[i]` finds when it searches
+  `items_b[j]`'s conformers, which is the question a cross-distance block is
+  asked, and keeping the better of the two orientations there would answer a
+  different one. The symmetrizing seam is `pdist()`'s alone: it is a protected
+  member of `PairwiseComparison` that defaults to `Compare`, and it does not
+  appear in the bindings.
+- The refusals that keep ROCS off the clustering and streaming paths are
+  **unchanged in behaviour** -- every one of them still refuses a ROCS
+  comparison -- but the reason they give is not. They asserted that a ROCS
+  score depends on what its overlay scored before, which three new C++ tests
+  now contradict on the fixtures they cover; they now say ROCS is not
+  certified for the repeated scoring those paths do. The whole-graph half of
+  the repeatability instrument still cannot run for ROCS, because these
+  refusals stop it before it starts, so "uncertified" is the accurate word
+  rather than "unrepeatable". **The message text changed**: "a ROCS score
+  depends on what its overlay scored before" became "ROCS is not certified for
+  the repeated scoring these paths do", and the k-medoids and single-linkage
+  clauses were reworded with it. A caller matching on "cannot cluster a ROCS
+  comparison without a matrix" is unaffected.
+- `DenseStorage(n)` and both platform-conditional `MMapStorage(path, n)`
+  constructors refuse a sample count whose buffer length cannot be
+  represented, where they computed it unchecked and carried on. Both
+  multiplications are tested -- `n * (n - 1) / 2`, then
+  `pairs * sizeof(double)` -- and `std::overflow_error` names `n` and which
+  limit it crossed; through the bindings that arrives as `RuntimeError`
+  carrying the same message. The smallest refused counts are 6074001001 for
+  the pair count and 2147483649 for the byte count. `MMapStorage` also refuses
+  a byte count past this platform's file size limit -- `off_t`'s maximum on
+  POSIX, `INT64_MAX` on Windows, first refused at n = 1518500251 -- and every
+  refusal happens before the file is opened, so a refused size leaves nothing
+  on disk. What it replaces: `DenseStorage(SIZE_MAX)` used to construct
+  successfully, reporting `NumSamples() == 18446744073709551615` with
+  `NumPairs() == 1`, after which `Set`, `Get` and every reader that walks
+  `Data()` indexed past a one-element allocation.
+- `bitbirch_refine()` drops a leaf subcluster its prune pass emptied instead
+  of reporting it as an empty cluster. Where that happens, `num_clusters`,
+  `len(result)`, `cluster_sizes` and `centroids` are each one shorter -- five
+  clusters become four on the four-fingerprint fixture in
+  `tests/python/test_bitbirch.py` -- while `labels` is unchanged: member lists
+  are ordered by member count, largest first, so an emptied subcluster is
+  trailing and no label is renumbered. `cluster_report()` and `isim_report()`
+  stop raising `RuntimeError: Cluster must contain at least one member` on
+  such a result, and a `select_parameter()` grid point that reached it now
+  scores instead of propagating that error. Reference parity is deliberately
+  given up here: the Python reference reports the empty cluster, together with
+  the zero-sample centroid it computes for it. `bitbirch()` and
+  `bitbirch_recluster()` are unaffected -- neither can empty a subcluster -- and
+  the empty-cluster refusal itself is unchanged, still firing on a result a
+  caller or a foreign clusterer builds.
+  `RefinePruneMatchesZeroSampleReferenceCentroid` and
+  `ClusterReportRefusesEmptiedRefinementSubclusters` were flipped and renamed
+  to `RefinePruneDropsTheSubclusterItEmptied` and
+  `BothScorecardsAcceptARefinementThatEmptiedASubcluster`.
+- The `Generic` scaffold level stops running the cut-atom normalization whose
+  result it discards. `OEUncolorMol` under the `BemisMurcko` strategy
+  recomputes formal charge and implicit hydrogen count over every atom, so the
+  charge and hydrogen-count transfer running ahead of it was overwritten at
+  that level; the transfer and the re-perception that followed it are now
+  guarded to `Framework`. **No molecule's scaffold changes and no failure mode
+  is fixed.** Over the 937 molecules of `examples/assets/Bender.csv`, the
+  `Framework` and `Generic` strings are byte-identical before and after, and
+  the three `std::nullopt` exits inside the guarded region were each counted
+  at zero at `Generic` on the unguarded build, so no molecule on that panel
+  ever reached one. This is work removed rather than output changed. No timing
+  was measured, and that panel is the whole of the evidence.
+
 ## [5.24.0] - 2026-10-14
 
 ### Changed
@@ -1191,8 +1315,8 @@ anyway, so a caller who relied on that silence sees new behaviour: a
   empty-cluster refusal: `bitbirch_refine` can return an emptied leaf subcluster
   as an empty member list, and `cluster_report` rejects such a result.
   `BothScorecardsAcceptARefinementThatEmptiedASubcluster` in
-  `tests/cpp/test_bitbirch_clustering.cpp` pinned that gap, and now pins its
-  closure.
+  `tests/cpp/test_bitbirch_clustering.cpp` pinned that gap under its former
+  name. See 5.25.0, which closed it.
 - `cluster_report` now refuses a non-finite distance that reaches a reported
   value with `std::invalid_argument`. Previously a NaN reached `std::sort` through the
   intra-distance median, which is undefined behaviour, so this removes a hazard
