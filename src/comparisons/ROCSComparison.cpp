@@ -92,8 +92,8 @@ double raw_overlay_score(const OEShape::OEBestOverlayScore& score, ROCSScoreType
 /// way, so a retained overlay was the only thing that could carry between
 /// searches, and it carried enough to move an accepted input's score by 0.45:
 /// measured 2026-10-15, a phenol with one atom displaced to 200 angstroms --
-/// inside MAX_COORDINATE_EXTENT, and accepted -- scored 0.546 against benzene
-/// on an overlay used for the first time and saturated at exactly 1.0 on one
+/// a fiftieth of MAX_COORDINATE_EXTENT, and accepted -- scored 0.546 against
+/// benzene on an overlay used for the first time and saturated at exactly 1.0 on one
 /// that had scored anything before. Which branch a pdist pair landed on
 /// depended on where it fell in the input order, so a permutation moved the
 /// matrix by 0.45 even with both orientations scored. Nothing is retained

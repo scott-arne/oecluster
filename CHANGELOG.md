@@ -28,16 +28,26 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   and 0.0010 on `color`, each on its own scale and on one fixture rather than
   as a bound.
   A **0.45** order dependence on accepted input: a phenol with one atom
-  displaced to 200 angstroms -- two orders of magnitude inside the
+  displaced to 200 angstroms -- a fiftieth of the 10,000 angstrom
   coordinate-extent guard, and accepted -- scored against benzene and octane,
-  where three of the six input permutations moved the matrix by 0.4538.
-  Scoring both orientations did not remove that one; only the fresh overlay
-  did. A `cdist()` cell that depended on the thread count and on where an
-  unrelated molecule sat in the list: the same phenol-against-benzene cell
-  read 1.0 at one thread and 0.546160012 at two, and 0.546160012 again with
-  benzene listed first. And a false saturated 1.0: the phenol-against-octane
-  entry of that matrix was an artifact of the reused overlay rather than a
-  score, and now reads 0.772408.
+  where three of the six input permutations moved the `pdist()` matrix by
+  0.4538. That is the phenol-benzene entry moving between a saturated 1.0 and
+  0.546160012. Scoring both orientations did not remove that one; only the
+  fresh overlay did. A `cdist()` cell that depended on the thread count and on
+  where an unrelated molecule sat in the list: the same phenol-against-benzene
+  cell read 1.0 at one thread and 0.546160012 at two, and 0.546160012 again
+  with benzene listed first. The phenol-against-octane entry of the `pdist()`
+  matrix above now reads **0.772408**, the orientation with octane as the
+  overlay reference, where `cdist()` of the same two molecules reports
+  0.8297612816095352 in the phenol-as-reference direction it is asked for.
+  That 0.772408 is a measurement of one fixture under this release, not a
+  property of the input: the fixture is
+  `test_rocs_pdist_survives_an_input_that_saturates_a_reused_overlay` in
+  `tests/python/test_pdist.py` -- phenol, benzene and octane from SMILES at
+  one Omega conformer each, phenol's atom 0 (a ring carbon) moved to x = 200
+  angstroms -- read at `combo_norm` as a distance from `pdist(num_threads=1)`.
+  Displacing any one of the other twelve atoms instead, and nothing else,
+  moves that entry anywhere in 0.747319 to 0.777447 on the same run.
 - What holds after the change, on the fixtures that measure it: the `pdist()`
   matrix over the three-molecule flexible fixture agrees with the one computed
   from the reversed input to a residual of 0.0 on all four score types; all
@@ -59,13 +69,35 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   molecules it names, the median of fresh over shared was 1.20 at one
   conformer, 1.09 to 1.11 at twenty and 1.06 at fifty. That is one panel on
   one machine; re-run it rather than carrying the numbers.
+- **ROCS results from the comparison forms move too, and land on what
+  `pdist()` gives.** Every entry point that consumes a pair as a symmetric
+  distance reads the same seam `pdist()` fills through, where each called
+  `Compare(min(i, j), max(i, j))` and so disagreed with a `pdist()` matrix of
+  the same molecules: `cluster_report()`, `activity_landscape()`,
+  `modelability()`, `maxmin_select()`, `circles()`, `knn_graph()` -- and with
+  it `jarvis_patrick()` and `leiden()` -- `sphere_exclusion()` away from the
+  neighbor order, `vendi_score()` and `logdet_diversity()`. Measured on the
+  eight SMILES of `benchmarks/rocs_overlay_reuse.py` at one Omega conformer
+  each, `combo_norm` as a distance, `num_threads=1`, Butina at threshold 0.5:
+  `cluster_report(result, mols, comparison="rocs").silhouette` was
+  **0.15030862789190502** against the `pdist()` matrix form's
+  **0.15076074788278154**, and both now read 0.15076074788278154. Only ROCS
+  moves; every other comparison leaves the seam at its default, which is the
+  `Compare(min, max)` these paths already read.
 - `cdist()` and a direct `Compare` keep their direction, deliberately. Entry
   `[i, j]` of a `cdist()` block is what `items_a[i]` finds when it searches
   `items_b[j]`'s conformers, which is the question a cross-distance block is
   asked, and keeping the better of the two orientations there would answer a
-  different one. The symmetrizing seam is `pdist()`'s alone: it is a protected
-  member of `PairwiseComparison` that defaults to `Compare`, and it does not
-  appear in the bindings.
+  different one. The seam stays a protected member of `PairwiseComparison`
+  that defaults to `Compare`, and it does not appear in the bindings: callers
+  reach it through one internal accessor, `detail::compare_unordered` in the
+  private `src/CompareUnordered.h`, which is the class's only friend. The
+  paths that still call `Compare(min, max)` themselves are the ones that
+  refuse a ROCS comparison outright -- Butina, DBSCAN, sphere exclusion's
+  neighbor order, agglomerative, HDBSCAN and k-medoids -- so no comparison in
+  this library can tell the two sources apart there. Lifting one of those
+  refusals means routing its path too; `src/clustering/DiversityValidation.h`
+  says so beside the refusal.
 - The refusals that keep ROCS off the clustering and streaming paths are
   **unchanged in behaviour** -- every one of them still refuses a ROCS
   comparison -- but the reason they give is not. They asserted that a ROCS
@@ -90,10 +122,14 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   a byte count past this platform's file size limit -- `off_t`'s maximum on
   POSIX, `INT64_MAX` on Windows, first refused at n = 1518500251 -- and every
   refusal happens before the file is opened, so a refused size leaves nothing
-  on disk. What it replaces: `DenseStorage(SIZE_MAX)` used to construct
-  successfully, reporting `NumSamples() == 18446744073709551615` with
-  `NumPairs() == 1`, after which `Set`, `Get` and every reader that walks
-  `Data()` indexed past a one-element allocation.
+  on disk. **`SparseStorage` is not covered and is not fixed**: it allocates
+  nothing up front, so its wrapped pair count mis-sizes no buffer, but it
+  still reports one -- `SparseStorage(SIZE_MAX, 0.5).NumPairs()` returns 1,
+  measured under this release. What the fix replaces:
+  `DenseStorage(SIZE_MAX)` used to construct successfully, reporting
+  `NumSamples() == 18446744073709551615` with `NumPairs() == 1`, after which
+  `Set`, `Get` and every reader that walks `Data()` indexed past a
+  one-element allocation.
 - `bitbirch_refine()` drops a leaf subcluster its prune pass emptied instead
   of reporting it as an empty cluster. Where that happens, `num_clusters`,
   `len(result)`, `cluster_sizes` and `centroids` are each one shorter -- five

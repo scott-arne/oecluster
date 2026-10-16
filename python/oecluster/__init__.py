@@ -2458,7 +2458,9 @@ def pdist(items,
     # A stamp can also originate from a value the storage never holds by
     # construction, and the diagonal is the known case: ROCS stamps
     # ``nan_present`` off a non-finite *self*-score
-    # (``MeasureDiagonal``, src/comparisons/ROCSComparison.cpp:433-434), which
+    # (``MeasureDiagonal`` in src/comparisons/ROCSComparison.cpp; no line
+    # number, because the last one cited had drifted onto the neighbouring
+    # ``zero_self`` stamp), which
     # a condensed matrix has no room for. Downgrading there is correct rather
     # than a loss: the stamp describes the matrix, and no algorithm can read a
     # distance the matrix does not store. The separate fact that records that

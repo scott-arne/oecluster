@@ -224,8 +224,10 @@ std::optional<std::string> scaffold_of(const OEChem::OEMolBase& mol,
             if (!OEChem::OEUncolorMol(framework, OEChem::OEUncolorStrategy::BemisMurcko)) {
                 return std::nullopt;
             }
-            // Converting every bond to single invalidates the flags the
-            // re-perception above just assigned, so it is run once more.
+            // Converting every bond to single invalidates the flags still
+            // standing from the post-cut re-perception further up -- the
+            // unconditional one, not the Framework-guarded branch just above,
+            // which this level does not run -- so perception runs once more.
             OEChem::OEFindRingAtomsAndBonds(framework);
             OEChem::OEAssignAromaticFlags(framework);
         }

@@ -835,8 +835,8 @@ def test_rocs_pdist_does_not_depend_on_input_order(multiconformer_rocs_mols,
 def test_rocs_pdist_survives_an_input_that_saturates_a_reused_overlay():
     """The input that proved scoring both orientations was not enough on its own.
 
-    A phenol with one atom displaced to 200 angstroms is accepted -- two orders
-    of magnitude inside the extent guard -- and it is the case
+    A phenol with one atom displaced to 200 angstroms is accepted -- a
+    fiftieth of the 10,000 angstrom extent guard -- and it is the case
     ``ROCSComparison.cpp`` already documented: it scores 0.546 against benzene
     on an overlay used for the first time and saturates at exactly 1.0 on one
     that has scored anything before. While ``pdist`` reused a single overlay per
