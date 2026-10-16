@@ -108,9 +108,9 @@ AgglomerativeResult agglomerative_cluster(
  * num_threads, provided the comparison is repeatable: Compare(i, j) returns a
  * bit-identical value on every call and every clone, whatever that clone
  * scored before. ROCS satisfies that now that every search builds its own
- * overlay, and is refused all the
- * same: the whole-graph half of the evidence cannot be gathered while it is
- * refused. See src/clustering/DiversityValidation.h.
+ * overlay, and is refused all the same: the whole-graph half of the evidence
+ * cannot be gathered while it is refused. See
+ * src/clustering/DiversityValidation.h.
  *
  * :param comparison: The comparison; cloned, never called itself.
  * :param options: Agglomerative clustering options; linkage must be Single.

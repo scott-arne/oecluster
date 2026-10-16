@@ -39,14 +39,15 @@ constexpr double SELF_SCORE_TOLERANCE = 1e-6;
 /// score exists that far out, not that the toolkit would crash there.
 ///
 /// An upper bound on catastrophe, not a certificate of quality. From somewhere
-/// between 100 and 200 angstroms a stretched phenol already scores 0.546 against
-/// benzene on an overlay being used for the first time and exactly 1.0 on one
-/// that has scored anything before it, so cross-pair values well inside this
-/// limit can still be unreliable. That split is a property of OEOverlay reuse
-/// rather than of the input, and is tracked separately from this guard. It no
-/// longer reaches pdist: since CompareUnordered started building its own
-/// overlay per search, every pdist search is a first use. Compare, and so
-/// cdist, still reuse one overlay and still see both branches.
+/// between 100 and 200 angstroms a stretched phenol scores 0.546 against
+/// benzene on an overlay being used for the first time, and scored exactly 1.0
+/// on one that had scored anything before it, so cross-pair values well inside
+/// this limit can still be unreliable. That split was a property of reusing one
+/// OEOverlay rather than of the input, and is tracked separately from this
+/// guard. No scoring path reaches it now: Compare and CompareUnordered alike
+/// build an overlay per search, so every search is a first use. What the
+/// first-use branch returns for such an input is still not a score this guard
+/// vouches for.
 constexpr double MAX_COORDINATE_EXTENT = 1e4;  // angstroms
 
 /// Snapshot raw molecule pointers so the shared_ptr<OEMol> constructor can own
@@ -87,15 +88,16 @@ double raw_overlay_score(const OEShape::OEBestOverlayScore& score, ROCSScoreType
 /// One overlay search on an overlay built for this call alone, returning the
 /// raw Tanimoto the configured score type reads off it.
 ///
-/// The fresh OEOverlay is the whole point. SetupRef is already called per
-/// search, so what carries between searches is the overlay object, and it
-/// carries enough to move an accepted input's score by 0.45: measured
-/// 2026-10-15, a phenol with one atom displaced to 200 angstroms -- inside
-/// MAX_COORDINATE_EXTENT, and accepted -- scores 0.546 against benzene on an
-/// overlay used for the first time and saturates at exactly 1.0 on one that
-/// has scored anything before. Which branch a pdist pair landed on depended on
-/// where it fell in the input order, so a permutation moved the matrix by 0.45
-/// even with both orientations scored.
+/// The fresh OEOverlay is the whole point. SetupRef runs per search either
+/// way, so a retained overlay was the only thing that could carry between
+/// searches, and it carried enough to move an accepted input's score by 0.45:
+/// measured 2026-10-15, a phenol with one atom displaced to 200 angstroms --
+/// inside MAX_COORDINATE_EXTENT, and accepted -- scored 0.546 against benzene
+/// on an overlay used for the first time and saturated at exactly 1.0 on one
+/// that had scored anything before. Which branch a pdist pair landed on
+/// depended on where it fell in the input order, so a permutation moved the
+/// matrix by 0.45 even with both orientations scored. Nothing is retained
+/// here, so there is no second branch to land on.
 double fresh_overlay_raw_score(const OEShape::OEOverlayOptions& overlay_opts,
                                ROCSScoreType type, OEChem::OEMol& reference,
                                OEChem::OEMol& fit) {
@@ -264,25 +266,26 @@ ROCSComparison::ROCSComparison(const std::vector<std::shared_ptr<OEChem::OEMol>>
         // Planar input is as unusable here as absent input, and it fails in two
         // different ways depending on the company it keeps.
         // ``OEShape::OEOverlay::SetupRef`` refuses a degenerate reference: it
-        // warns, returns ``false``, and leaves the previous reference installed.
-        // Compare() reuses one overlay per thread and discards that return
-        // value, so when one molecule is degenerate among sound ones -- the
-        // likelier accident, one failed conformer generation in an otherwise
-        // good set -- BestOverlay goes on to score the stale reference against
-        // the requested fit. Measured on one reused overlay, a refused flat
-        // octane reference followed by phenol returns a shape Tanimoto of
-        // 0.959704, which is exactly the benzene-against-phenol score from the
-        // step before it. That is not a saturation value a reader might
-        // question but a plausible score belonging to a different pair, and
-        // which pair depends on what that thread compared last. Each worker
-        // gets its own clone and its own chunk of the pair list, so the
-        // inherited pair should move with the thread count as well, but that
-        // part is a deduction from the partitioning, not a measurement. Only
-        // when every molecule is degenerate is there no stale reference to
-        // inherit; then the toolkit finds no coordinates it can overlay and
-        // returns a Tanimoto of exactly 0.0, so every pair -- the diagonal
-        // included -- comes back at whichever value saturation puts it at for
-        // the configured score type. The four distance forms saturate at
+        // warns, returns ``false``, and leaves whatever reference the overlay
+        // already had installed. The return value is discarded here, and while
+        // both scoring paths reused one overlay per thread that meant a
+        // degenerate molecule among sound ones -- the likelier accident, one
+        // failed conformer generation in an otherwise good set -- was scored
+        // against a stale reference: measured then, a refused flat octane
+        // reference followed by phenol returned a shape Tanimoto of 0.959704,
+        // exactly the benzene-against-phenol score from the step before it.
+        // Not a saturation value a reader might question but a plausible score
+        // belonging to a different pair, and which pair depended on what that
+        // thread had compared last. Every search now builds its own overlay,
+        // so there is no earlier reference to inherit and that particular
+        // confusion is out of reach; what BestOverlay does with a reference
+        // SetupRef refused on an overlay that has none has not been measured,
+        // and this guard does not rest on it. Where every molecule is
+        // degenerate there was no reference to inherit even then: the toolkit
+        // finds no coordinates it can overlay and returns a Tanimoto of
+        // exactly 0.0, so every pair -- the diagonal included -- comes back at
+        // whichever value saturation puts it at for the configured score
+        // type. The four distance forms saturate at
         // ComboNorm 1.0, Combo 2.0, Shape 1.0 and Color 1.0, which
         // MeasureDiagonal stamps No on. The four similarity forms saturate at
         // 0.0 and stamp ``zero_self = Yes``, which is a pass
@@ -464,10 +467,10 @@ double ROCSComparison::Compare(size_t i, size_t j) {
 double ROCSComparison::CompareUnordered(size_t i, size_t j) {
     detail::check_compare_index_range("ROCSComparison", i, j, shared_->mols.size());
 
-    // Deliberately not local_->overlay. This function reads and writes no
-    // state that outlives it, which is what makes its value a function of the
-    // pair alone; Compare keeps the shared overlay, so cdist and a direct
-    // Compare still carry history from one call to the next.
+    // Two searches, each on an overlay built and discarded inside this call.
+    // The function reads and writes no state that outlives it, which is what
+    // makes its value a function of the pair alone; Compare is built the same
+    // way and differs only in scoring one orientation rather than both.
     const double forward_raw =
         fresh_overlay_raw_score(local_->overlay_opts, opts_.score_type,
                                 *shared_->mols[i], *shared_->mols[j]);

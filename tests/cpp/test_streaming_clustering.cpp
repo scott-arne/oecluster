@@ -412,11 +412,13 @@ TEST(StreamingClusteringTest, SphereRefusesABudgetWithoutTheNeighborsOrder) {
     }
 }
 
-// ROCS fails the repeatability precondition
-// (test_comparison_repeatability.cpp, ROCSDependsOnItsCloneHistory), so every
-// entry point that builds a threshold graph from a comparison refuses it by
-// name before scoring a pair. Sphere exclusion's other orders build no graph
-// and keep accepting it.
+// ROCS is not certified for the repeatability precondition: the clone-history
+// half is measured and passes (test_comparison_repeatability.cpp,
+// ROCSScoresDoNotDependOnCloneHistory and the two tests beside it), and the
+// whole-graph half cannot run while these refusals stand. So every entry point
+// that builds a threshold graph from a comparison refuses it by name before
+// scoring a pair. Sphere exclusion's other orders build no graph and keep
+// accepting it.
 TEST(StreamingClusteringTest, RefusesROCSWhereverItWouldBuildAGraph) {
     OEConfGen::OEOmega omega;
     omega.SetMaxConfs(1);

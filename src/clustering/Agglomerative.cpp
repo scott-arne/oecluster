@@ -136,8 +136,9 @@ AgglomerativeResult agglomerative_cluster(
             "pdist()");
     }
     detail::refuse_unrepeatable(comparison, AGGLOMERATIVE_NAME, "cluster",
-                                "the tree would depend on the order the pairs "
-                                "are scored");
+                                "the spanning tree cannot be relied on to come "
+                                "out the same whatever order the pairs are "
+                                "scored in");
     detail::validate_distance_facts(comparison, AGGLOMERATIVE_NAME);
     const size_t n = comparison.Size();
     validate_cluster_bound(options, n);

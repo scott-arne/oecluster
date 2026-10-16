@@ -303,8 +303,8 @@ def test_a_budget_needs_a_comparison_and_the_neighbors_order():
 
 
 def test_the_lazy_neighbors_order_refuses_rocs():
-    # The neighbor order's graph needs repeatable scores, which ROCS does not
-    # give; refused by name before the comparison is built.
+    # The neighbor order's graph needs repeatable scores, which ROCS is not
+    # certified for; refused by name before the comparison is built.
     with pytest.raises(ValueError,
                        match="cannot cluster a ROCS comparison without a "
                              "matrix"):

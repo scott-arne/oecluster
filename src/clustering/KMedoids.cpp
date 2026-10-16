@@ -413,8 +413,8 @@ KMedoidsResult k_medoids_cluster(PairwiseComparison& comparison,
     detail::validate_comparison_facts(comparison, KMEDOIDS_NAME);
     detail::refuse_unrepeatable(
         comparison, KMEDOIDS_NAME, "cluster",
-        "the same pair would score differently on each of the many passes "
-        "k-medoids makes over it");
+        "the many passes k-medoids makes over a pair cannot be relied on to "
+        "see the same distance");
     validate_options_for_count(n, options);
 
     if (options.n_clusters == n) {

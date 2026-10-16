@@ -221,9 +221,11 @@ def test_any_budget_beside_a_matrix_is_refused_first(value):
 
 
 def test_rocs_is_refused_before_it_is_built():
-    # ROCS fails the repeatability the two graph passes need
-    # (tests/cpp/test_comparison_repeatability.cpp), so both the named and the
-    # prebuilt forms are refused; the matrix path still takes ROCS distances.
+    # ROCS is not certified for the repeatability the two graph passes need
+    # (tests/cpp/test_comparison_repeatability.cpp measures the clone-history
+    # half and cannot measure the whole-graph half while these refusals
+    # stand), so both the named and the prebuilt forms are refused; the matrix
+    # path still takes ROCS distances.
     pytest.importorskip("openeye.oeomega")
     from openeye import oeomega
 

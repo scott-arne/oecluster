@@ -499,10 +499,12 @@ TEST_F(ROCSComparisonTest, ALargeButPhysicallyRealExtentIsAdmitted) {
     // genuinely overlaid rather than handed the 1.0 an unusable grid returns.
     //
     // The cross pair is deliberately not asserted. Measured on this fixture it
-    // is 0.546 on an overlay being used for the first time and exactly 1.0 on
-    // one that has scored anything before it, a split that appears somewhere
-    // between 100 and 200 angstroms. That belongs to OEOverlay reuse rather than
-    // to this guard, so pinning a number here would pin the call order instead.
+    // was 0.546 on an overlay being used for the first time and exactly 1.0 on
+    // one that had scored anything before it, a split that appears somewhere
+    // between 100 and 200 angstroms. That belonged to reusing one OEOverlay
+    // rather than to this guard, and the per-search overlay leaves only the
+    // first-use branch; what that branch is worth on a stretched molecule is
+    // still not this guard's claim to make, so no number is pinned here.
     auto stretched = MakeConformer("c1ccc(O)cc1");
     StretchOneConformer(*stretched, true, 200.0);
     auto benzene = MakeConformer("c1ccccc1");
@@ -631,13 +633,13 @@ TEST_F(ROCSComparisonTest, UnorderedKeepsTheBetterOverlayForEveryScoreType) {
     ASSERT_GT(flexible[0]->NumConfs(), 1u);
     ASSERT_GT(flexible[1]->NumConfs(), 1u);
 
-    // A tolerance rather than equality, and it is load-bearing in one
-    // direction only. CompareUnordered builds its overlays per search, so its
-    // two argument orders run the same searches; the standalone Compare calls
-    // below share the per-thread overlay and carry history, so the comparison
-    // against them is the one that needs slack. On this fixture everything
-    // here agrees to the bit as of 2026-10-15, so the number is a bound rather
-    // than a measured residual.
+    // A tolerance rather than equality. Every call here builds its overlays
+    // per search, so the two argument orders of CompareUnordered run the same
+    // searches and the standalone Compare calls carry nothing from one to the
+    // next; what the slack covers is that the toolkit promises no
+    // bit-reproducibility, not a known difference between the two entry
+    // points. On this fixture everything here agrees to the bit as of
+    // 2026-10-15, so the number is a bound rather than a measured residual.
     constexpr double tolerance = 1e-6;
     double largest_orientation_gap = 0.0;
 
@@ -686,10 +688,11 @@ TEST_F(ROCSComparisonTest, UnorderedAgreesWithCompareOnTheDiagonal) {
     // where it is a reading of the code rather than a claim about this test.
     //
     // Agreement to a tolerance rather than bit-equality: the two calls below
-    // run on different overlays, CompareUnordered building its own and Compare
-    // using the shared one with whatever history it carries. They happen to
-    // come out bit-identical on this fixture as of 2026-10-15, and asserting
-    // that would be asserting a coincidence.
+    // each build an overlay of their own, so they run the same search on two
+    // different overlay objects, and nothing in the toolkit promises those
+    // return the same bits. They happen to come out bit-identical on this
+    // fixture as of 2026-10-15, and asserting that would be asserting a
+    // coincidence.
     ROCSUnorderedProbe probe(mols_, ROCSOptions());
     for (size_t i = 0; i < mols_.size(); ++i) {
         EXPECT_NEAR(probe.CompareUnordered(i, i), probe.Compare(i, i), 1e-6) << i;

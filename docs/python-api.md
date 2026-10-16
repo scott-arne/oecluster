@@ -199,12 +199,12 @@ except ROCS, in one or two configurations each, and each returns
 bit-identical values across calls and across clones with different
 histories. ROCS satisfies that much too, now that every search builds its own
 overlay -- it did not while one was reused per clone -- but the whole-graph
-half of the check has
-never run for it, because these paths refuse it before it starts. They still
-refuse it, now for want of evidence rather than against it; cluster a ROCS
-matrix from `pdist()` instead. A native comparison that changes a row's neighbor count between the
-passes raises `RuntimeError` rather than returning a wrong graph, and a
-non-finite distance raises `RuntimeError` naming the pair.
+half of the check has never run for it, because these paths refuse it before
+it starts. They still refuse it, now for want of evidence rather than against
+it; cluster a ROCS matrix from `pdist()` instead. A native comparison that
+changes a row's neighbor count between the passes raises `RuntimeError` rather
+than returning a wrong graph, and a non-finite distance raises `RuntimeError`
+naming the pair.
 
 **What is refused.** For `butina()` and `dbscan()`, as for
 `cluster_report()`'s comparison forms, and judged on the comparison's declared
@@ -533,10 +533,9 @@ provided the comparison is repeatable: the test suite checks the two forms
 bitwise on labels, medoids, cost and iteration count. ROCS is refused here as
 on the other comparison paths. Its scores stopped depending on clone history
 when every search began building its own overlay, but the refusal stands until
-the whole-graph evidence exists;
-cluster a ROCS matrix from `pdist()` instead. Against `pdist()`, whose
-batched kernels agree with `Compare` only to about 1e-12, a cost that close
-to a tie can be decided differently.
+the whole-graph evidence exists; cluster a ROCS matrix from `pdist()` instead.
+Against `pdist()`, whose batched kernels agree with `Compare` only to about
+1e-12, a cost that close to a tie can be decided differently.
 
 **What it costs: passes, not exactness.** A converged run makes
 `init passes + (iterations + 1) + n_clusters` passes over every pair, each of

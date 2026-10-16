@@ -2458,11 +2458,12 @@ def pdist(items,
     # A stamp can also originate from a value the storage never holds by
     # construction, and the diagonal is the known case: ROCS stamps
     # ``nan_present`` off a non-finite *self*-score
-    # (src/comparisons/ROCSComparison.cpp:346-347), which a condensed matrix
-    # has no room for. Downgrading there is correct rather than a loss: the
-    # stamp describes the matrix, and no algorithm can read a distance the
-    # matrix does not store. The separate fact that records that diagonal --
-    # ``zero_self`` -- is stamped ``No`` alongside it and is untouched here, so
+    # (``MeasureDiagonal``, src/comparisons/ROCSComparison.cpp:433-434), which
+    # a condensed matrix has no room for. Downgrading there is correct rather
+    # than a loss: the stamp describes the matrix, and no algorithm can read a
+    # distance the matrix does not store. The separate fact that records that
+    # diagonal -- ``zero_self`` -- is stamped ``No`` alongside it and is
+    # untouched here, so
     # nothing the downgrade drops was the only record of anything.
     if (facts['data_integrity'] == "nan_present" and not sparse
             and not _gate._has_nonfinite(matrix)):
@@ -2718,14 +2719,16 @@ _THRESHOLD_GRAPH_REASON = "the threshold graph compares every pair twice"
 #: Why HDBSCAN from a comparison needs a repeatable comparison.
 _HDBSCAN_REASON = "HDBSCAN compares pairs in two passes that must agree"
 
-#: Why single linkage from a comparison needs a repeatable comparison.
+#: Why single linkage from a comparison needs a repeatable comparison. Worded
+#: as the native refusal words it, so the two layers say the same thing.
 _SINGLE_LINKAGE_REASON = (
-    "the spanning tree would depend on the order the pairs are scored")
+    "the spanning tree cannot be relied on to come out the same whatever "
+    "order the pairs are scored in")
 
 #: Why k-medoids from a comparison needs a repeatable comparison. Worded as
 #: the native refusal words it, so the two layers say the same thing.
-_KMEDOIDS_REASON = ("the same pair would score differently on each of the "
-                    "many passes k-medoids makes over it")
+_KMEDOIDS_REASON = ("the many passes k-medoids makes over a pair cannot be "
+                    "relied on to see the same distance")
 
 #: The phrase k_medoids_cluster() composes when the comparisons a run cannot
 #: avoid exceed max_comparisons, by which that refusal is told apart from
@@ -2744,8 +2747,9 @@ def _refuse_unrepeatable(items, comparison, caller, reason=_THRESHOLD_GRAPH_REAS
     clone, so a score depended on what the clone had scored before -- which
     stopped being true when every search began building its own overlay. What
     is still missing is the whole-graph half of the evidence, which cannot be
-    gathered while these refusals stand. Checked here first because a ROCS build overlays every
-    molecule onto itself before the native refusal could run.
+    gathered while these refusals stand. Checked here first because a ROCS
+    build overlays every molecule onto itself before the native refusal could
+    run.
 
     :param items: The resolved input.
     :param comparison: Comparison name, for the named path.
@@ -3396,8 +3400,8 @@ def hdbscan(items=_MISSING, *, distance_matrix=_MISSING, min_cluster_size=5,
         comparison family except ROCS, in one or two configurations each;
         ROCS is refused, not because it fails that check -- it stopped
         failing it, since every search began building its own overlay --
-        but because the whole-graph half of the
-        evidence cannot be gathered while it is refused. Against :func:`pdist`, whose batched kernels
+        but because the whole-graph half of the evidence cannot be gathered
+        while it is refused. Against :func:`pdist`, whose batched kernels
         agree with ``Compare`` only to about 1e-12, distances that close can
         tie or order differently and change the tree.
     :raises TypeError: If both or neither of ``items`` and
@@ -3565,9 +3569,9 @@ def agglomerative(items=_MISSING, *, distance_matrix=_MISSING, n_clusters=2,
         configurations each; ROCS is refused, not for failing that check --
         it stopped failing it when every search began building its own
         overlay -- but because the whole-graph half of the evidence cannot
-        be gathered while it is refused. Against :func:`pdist`,
-        whose batched kernels agree with ``Compare`` only to about 1e-12,
-        distances that close can tie or order differently.
+        be gathered while it is refused. Against :func:`pdist`, whose batched
+        kernels agree with ``Compare`` only to about 1e-12, distances that
+        close can tie or order differently.
     :raises TypeError: If both or neither of ``items`` and
         ``distance_matrix`` are given; the arguments fit none of the three
         forms, or ``comparison`` or a keyword this function does not take

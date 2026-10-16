@@ -232,15 +232,18 @@ private:
     std::unique_ptr<ThreadLocalData> local_;
     Options opts_;
 
-    /// Private clone constructor -- shares molecule data, creates new overlay.
+    /// Private clone constructor -- shares molecule data, and takes its own
+    /// copy of the options each of its searches builds an overlay from.
     ROCSComparison(std::shared_ptr<const SharedData> shared,
                const Options& opts);
 
-    /// Initialize OEOverlay with configured options. On the three color-bearing
-    /// score types, a non-null ``prep_target`` additionally has color atoms
-    /// assigned to the molecules it holds; on ``Shape``, which never reads the
-    /// color term, the target is ignored. Only the constructor that owns the
-    /// snapshot passes a target; clones inherit an already-prepared set.
+    /// Build the ``OEOverlayOptions`` every search constructs its own
+    /// ``OEOverlay`` from; the name is left from when this held the overlay
+    /// itself. On the three color-bearing score types, a non-null
+    /// ``prep_target`` additionally has color atoms assigned to the molecules
+    /// it holds; on ``Shape``, which never reads the color term, the target is
+    /// ignored. Only the constructor that owns the snapshot passes a target;
+    /// clones inherit an already-prepared set.
     void InitOverlay(SharedData* prep_target);
 
     /// Measure the diagonal by scoring every molecule against itself, writing
