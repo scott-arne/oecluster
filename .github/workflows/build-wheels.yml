@@ -11,6 +11,10 @@ env:
   # is the first release with cp314 wheels, so the abi3 smoke test below cannot
   # run on Python 3.14 against anything older.
   OPENEYE_VERSION: "2026.1.0"
+  # One SWIG for every platform and every run. The generated oecluster.py must
+  # come from the same SWIG as the compiled extension, and an unpinned
+  # install changes the build whenever SWIG publishes a release.
+  SWIG_VERSION: "4.5.1"
   # oecluster builds oefp's C++ core into its own extension, and that core links
   # Arrow unconditionally (`find_package(ArrowPython REQUIRED)`), so pyarrow has
   # to be present at configure time even though nothing in oecluster's own
@@ -86,7 +90,7 @@ jobs:
             ${{ matrix.python }} ${{ matrix.python }}-devel \
             zlib-devel boost-devel boost-static boost-iostreams boost-filesystem \
             bzip2-devel xz-devel libzstd-devel \
-            swig patchelf cairo findutils
+            patchelf cairo findutils
           if [ -n "${{ matrix.gcc_toolset }}" ]; then
             dnf install -y "${{ matrix.gcc_toolset }}"
           fi
@@ -106,7 +110,7 @@ jobs:
           ${{ matrix.python }} -m venv /opt/venv
           echo "/opt/venv/bin" >> $GITHUB_PATH
           /opt/venv/bin/pip install --upgrade pip setuptools wheel
-          /opt/venv/bin/pip install scikit-build-core ninja "cmake<4" build swig auditwheel patchelf
+          /opt/venv/bin/pip install scikit-build-core ninja cmake build "swig==${{ env.SWIG_VERSION }}" auditwheel patchelf
           /opt/venv/bin/pip install "${{ env.PYARROW_REQUIREMENT }}"
 
       - name: Download OpenEye SDK from GCS
@@ -293,9 +297,9 @@ jobs:
 
       - name: Install build dependencies
         run: |
-          brew install swig boost icu4c
+          brew install boost icu4c
           pip install --upgrade pip setuptools wheel
-          pip install scikit-build-core ninja cmake build delocate
+          pip install scikit-build-core ninja cmake build delocate "swig==${{ env.SWIG_VERSION }}"
           pip install "${{ env.PYARROW_REQUIREMENT }}"
 
       - name: Download OpenEye SDK from GCS
@@ -452,7 +456,7 @@ jobs:
       - name: Install build dependencies
         run: |
           python -m pip install --upgrade pip setuptools wheel
-          python -m pip install scikit-build-core ninja cmake build swig pytest
+          python -m pip install scikit-build-core ninja cmake build "swig==${{ env.SWIG_VERSION }}" pytest
           python -m pip install "${{ env.PYARROW_REQUIREMENT }}"
 
       - name: Authenticate to Google Cloud

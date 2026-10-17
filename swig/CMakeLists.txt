@@ -110,6 +110,13 @@ if(NOT SKBUILD)
                     COMMAND codesign -f -s - ${_OECLUSTER_DEV_SO}
                     COMMENT "Adding pyarrow RPATH for editable dev install (oecluster)"
                 )
+            else()
+                message(WARNING
+                    "install_name_tool not found, so the editable oecluster "
+                    "extension gets no RPATH entry for pyarrow "
+                    "(${_OECLUSTER_DEV_PYARROW_DIR}) and will fail to import "
+                    "with \"Library not loaded: @rpath/libarrow...\". Install the "
+                    "Xcode Command Line Tools and reconfigure.")
             endif()
         elseif(UNIX)
             find_program(PATCHELF patchelf)
@@ -119,6 +126,14 @@ if(NOT SKBUILD)
                         "${_OECLUSTER_DEV_PYARROW_DIR}" ${_OECLUSTER_DEV_SO}
                     COMMENT "Adding pyarrow RPATH for editable dev install (oecluster)"
                 )
+            else()
+                message(WARNING
+                    "patchelf not found, so the editable oecluster extension "
+                    "gets no RPATH entry for pyarrow "
+                    "(${_OECLUSTER_DEV_PYARROW_DIR}) and will fail to import "
+                    "with \"libarrow.so...: cannot open shared object file\". "
+                    "Install patchelf (pip install patchelf, or the "
+                    "distribution package) and reconfigure.")
             endif()
         endif()
     else()
