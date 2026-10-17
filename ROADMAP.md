@@ -138,8 +138,12 @@ A owns the definitions; B owns the scale path.
 
 - **B1 (shipped 5.13.0).** `cluster_report`, `activity_landscape` and
   `modelability` score a comparison directly. Results are exact -- identical
-  to the matrix forms over a matrix filled through `Compare` -- with O(N)
-  memory and O(N^2) time.
+  to the matrix forms over a matrix holding, for each pair, the value the
+  unordered seam `pdist()` fills through reports -- with O(N) memory and
+  O(N^2) time. That seam is `Compare(min(i, j), max(i, j))` for every
+  comparison but ROCS, which since 5.25.0 scores both orientations and keeps
+  the better overlay, so a ROCS baseline is a `pdist()` matrix and not a
+  direct-`Compare` one.
 - **B2 (shipped 5.14.0).** `isim()` and `isim_report()` score binary
   fingerprint batches directly in O(N) time, trading exactness for scale:
   `isim()` is the union-weighted Tanimoto similarity of a fingerprint set,

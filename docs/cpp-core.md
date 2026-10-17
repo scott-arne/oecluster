@@ -50,7 +50,9 @@ provides the matching cross-distance engine for the rectangular NxM case.
 method. Implementations own their data and scorer state and must be cloneable so
 each worker thread evaluates pairs without sharing scorer internals. A
 comparison can optionally provide a batched `TryPDist()`/`TryCDist()` kernel;
-returning `false` asks the engine to fall back to per-pair `Compare()` calls.
+returning `false` asks the engine to score the pairs one at a time instead.
+`cdist()` does that with per-pair `Compare()` calls; `pdist()` goes through
+the unordered seam described next.
 
 `Compare(i, j)` is directional where the comparison is. Beside it sits a
 protected seam, `CompareUnordered(i, j)`, which defaults to `Compare(i, j)`

@@ -47,7 +47,10 @@ def _mols(smiles_list):
 
 
 def _compare_matrix(comparison):
-    """The matrix a lazy path must reproduce: every pair read via Compare."""
+    """The matrix a lazy path must reproduce: every pair at the unordered
+    seam's value, which is Compare(i, j) with i < j for every comparison
+    here, none of which overrides the seam.
+    """
     n = comparison.Size()
     storage = oecluster.DenseStorage(n)
     for i in range(n):

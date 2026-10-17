@@ -77,8 +77,9 @@ public:
      * @brief Optionally compute all pairwise values in bulk.
      *
      * Implementations that own a more efficient batch kernel can override this
-     * method. Returning ``false`` asks the generic engine to fall back to
-     * per-pair ``Compare()`` calls.
+     * method. Returning ``false`` asks ``pdist`` to fall back to scoring the
+     * pairs one at a time through the unordered seam below, which is
+     * ``Compare(min(i, j), max(i, j))`` unless the comparison overrides it.
      *
      * :param storage: Storage backend to write results into.
      * :param options: Pairwise computation options.
