@@ -361,9 +361,12 @@ pair on every call and on every clone. `cluster_report`'s exact median
 rereads pairs above its 2^20-value
 budget, so a comparison that breaks this voids the exactness. It is a
 documented precondition, not a checked one. Given it, each result is
-bit-identical to the storage overload over a matrix holding the values
-`Compare` returns, except that a zero median is always `+0.0` on both
-overloads.
+bit-identical to the storage overload over a matrix holding the
+unordered-seam value for each pair, except that a zero median is always
+`+0.0` on both overloads. For every comparison but ROCS that is what
+`Compare(min(i, j), max(i, j))` returns; for ROCS the seam scores both
+orientations and keeps the better overlay, so the baseline to build is a
+`pdist()` matrix and not a direct-`Compare` one.
 
 All three comparison overloads refuse a zero `chunk_size` with
 `std::invalid_argument`, then
