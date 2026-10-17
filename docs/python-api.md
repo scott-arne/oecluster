@@ -780,10 +780,15 @@ result = oecluster.bitbirch_refine(
 
 All three return a `BitBirchResult` with `labels`, `clusters`, `centroids`, and
 `cluster_sizes`, and every cluster in it has at least one member. At that last
-point `bitbirch_refine()` departs from the Python reference: its prune pass can
-empty a leaf subcluster, which the reference reports as an empty cluster and
-`bitbirch_refine()` drops. The member lists are ordered by member count,
-largest first, so a dropped one is trailing and no label moves.
+point `bitbirch_refine()` departs from the Python reference, in two passes that
+can empty a leaf subcluster. Its prune pass can empty one, which the reference
+reports as an empty cluster and `bitbirch_refine()` drops. Its reassignment
+pass empties one whenever a selected centroid wins no members -- which
+near-identical centroids among the top-K cause, since a tie goes to the lower
+centroid index -- and that one is dropped too, where the reference leaves the
+subcluster holding members it has already placed in another cluster. The member
+lists are ordered by member count, largest first, so a dropped one is trailing
+and no label moves.
 
 The `mode` parameter accepts `"strict_parity"` (exact
 reference-implementation parity for the fit) or `"fast"` (partition-merge
@@ -977,7 +982,10 @@ row order whatever `num_threads` is.
 `isim_report()` refuses it the same way and with the same message, since it
 reuses `cluster_report()`'s native partition checks. `bitbirch_refine()` used
 to hit that refusal by returning the leaf subcluster its prune pass emptied as
-an empty member list; it now drops that subcluster.
+an empty member list; it now drops that subcluster. It also used to hit the
+neighbouring `sample N appears in clusters A and B` refusal, from the
+reassignment pass leaving a starved subcluster holding members it had already
+placed elsewhere; that subcluster is now dropped as well.
 
 ### Internal validity indices
 

@@ -131,11 +131,13 @@ BitBirchResult bitbirch_recluster(
 /**
  * @brief Fit BitBirch and apply requested refinement passes.
  *
- * The prune pass can leave a leaf subcluster with no members. Such a
- * subcluster is dropped rather than reported, a deliberate divergence from
- * the Python reference, which reports it as an empty cluster. Member lists
- * are ordered by member count, largest first, so a dropped one is trailing
- * and no label is renumbered.
+ * Two passes can leave a leaf subcluster with no members: prune, and
+ * reassignment when a selected centroid wins none. Such a subcluster is
+ * dropped rather than reported. Both are deliberate divergences from the
+ * Python reference, which reports the pruned one as an empty cluster and
+ * leaves the starved one holding members it has already placed in another
+ * cluster. Member lists are ordered by member count, largest first, so a
+ * dropped one is trailing and no label is renumbered.
  *
  * :param fingerprints: Dense binary fingerprint batch.
  * :param options: Refinement options.

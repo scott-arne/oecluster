@@ -488,6 +488,64 @@ def test_bitbirch_refine_reassign_threads_match_serial_on_duplicate_blocks():
     assert threaded.cluster_sizes == serial.cluster_sizes
 
 
+def _duplicate_prototype_bits(seed, *, prototypes=4, copies=3, cols=24, density=0.2):
+    # Repeated prototypes give reassign near-identical centroids to select.
+    # Ties resolve to the lower centroid index, so the later of two identical
+    # centroids can win no members at all, which is the starved case.
+    rng = np.random.default_rng(seed)
+    prototype_bits = (rng.random((prototypes, cols)) < density).astype(np.uint8)
+    for row in np.flatnonzero(prototype_bits.sum(axis=1) == 0):
+        prototype_bits[row, row % cols] = 1
+    return np.repeat(prototype_bits, copies, axis=0)
+
+
+def test_bitbirch_refine_reassign_drops_a_starved_cluster_instead_of_duplicating():
+    bits = _duplicate_prototype_bits(0)
+
+    observed = oecluster.bitbirch_refine(
+        _batch_from_bits(bits),
+        threshold=0.3,
+        branching_factor=3,
+        merge_criterion="diameter",
+        singly=False,
+        reassign_top_clusters=5,
+    )
+
+    # Five centroids are selected here and only four win members. Before the
+    # fix the fifth subcluster kept the members it had already handed to
+    # another, and the result carried sample 9 in two clusters.
+    assert observed.clusters == ((3, 4, 5), (10, 11, 9), (0, 1, 2), (6, 7, 8))
+    assert observed.labels.tolist() == [2, 2, 2, 0, 0, 0, 3, 3, 3, 1, 1, 1]
+    assert observed.cluster_sizes == (3, 3, 3, 3)
+
+
+@pytest.mark.parametrize("reassign_top_clusters", [3, 4, 5])
+@pytest.mark.parametrize("branching_factor", [2, 3])
+@pytest.mark.parametrize("threshold", [0.3, 0.5, 0.7])
+def test_bitbirch_refine_reassign_partitions_duplicate_bearing_inputs(
+        threshold, branching_factor, reassign_top_clusters):
+    """Every refined result assigns each input index to exactly one cluster."""
+    for seed in range(25):
+        bits = _duplicate_prototype_bits(seed)
+        observed = oecluster.bitbirch_refine(
+            _batch_from_bits(bits),
+            threshold=threshold,
+            branching_factor=branching_factor,
+            merge_criterion="diameter",
+            singly=False,
+            reassign_top_clusters=reassign_top_clusters,
+        )
+
+        assigned = [member for cluster in observed.clusters for member in cluster]
+        assert sorted(assigned) == list(range(len(bits))), (
+            f"seed={seed} threshold={threshold} "
+            f"branching_factor={branching_factor} "
+            f"reassign_top_clusters={reassign_top_clusters} "
+            f"clusters={observed.clusters}")
+        assert observed.cluster_sizes == tuple(
+            len(cluster) for cluster in observed.clusters)
+
+
 def test_bitbirch_refine_redistribute_largest_cluster_requires_parent_pointers():
     bits = _prune_redistribution_fixture_bits()
 

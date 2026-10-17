@@ -8,7 +8,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
-#include <map>
 #include <stdexcept>
 
 #include "oecluster/ThreadPool.h"
@@ -561,28 +560,43 @@ void BitBirchTree::ReassignTopClusters(
         }
     }
 
-    std::map<size_t, Cluster> reassigned;
+    std::vector<Cluster> reassigned(selected_count);
     for (size_t index = 0; index < selected_members.size(); ++index) {
         reassigned[assigned_centroids[index]].push_back(selected_members[index]);
     }
 
-    size_t subcluster_index = 0;
-    for (const auto& [_, members] : reassigned) {
-        if (subcluster_index >= selected_count) {
-            break;
-        }
-        BitBirchSubcluster* subcluster = ordered[subcluster_index];
+    // One bucket per selected centroid, written back to that centroid's own
+    // subcluster, so a centroid that won no members empties its subcluster.
+    // Starvation is reachable: numpy_argmax_greater resolves a tie to the lower
+    // index, so near-identical centroids starve the later one. Writing only the
+    // centroids that won members, into slots taken in order, left the remaining
+    // selected subclusters holding the members they already had -- members this
+    // pass had pooled and written into another slot -- so a sample could end up
+    // in two clusters.
+    //
+    // An emptied subcluster gets the all-ones zero-sample centroid BinaryCentroid
+    // returns for an empty summary. Nothing reads it: refine's only step after
+    // this one is Result(), which sorts size-descending and stops at the first
+    // empty subcluster, so the emptied ones are trailing and are dropped.
+    //
+    // A deliberate divergence from the Python reference, which has the same
+    // defect: run on 2026-10-17 from the sibling checkout the parity tests use,
+    // it put sample 9 in two clusters on the twelve-fingerprint fixture behind
+    // test_bitbirch_refine_reassign_drops_a_starved_cluster_instead_of_duplicating.
+    // No parity test is weakened by this: every one that reassigns uses top=2,
+    // where both selected centroids always win members.
+    for (size_t centroid_index = 0; centroid_index < selected_count; ++centroid_index) {
+        BitBirchSubcluster* subcluster = ordered[centroid_index];
         BitBirchLinearSum linear_sum(size_bits_, 0);
-        for (const size_t member : members) {
+        for (const size_t member : reassigned[centroid_index]) {
             UpdateLinearSumFromWords(linear_sum, fingerprints.RowWords(member), size_bits_);
         }
-        subcluster->members = members;
-        subcluster->n_samples = members.size();
+        subcluster->members = std::move(reassigned[centroid_index]);
+        subcluster->n_samples = subcluster->members.size();
         subcluster->linear_sum = std::move(linear_sum);
         subcluster->centroid_words =
             BinaryCentroid(subcluster->linear_sum, subcluster->n_samples);
         subcluster->centroid_popcount = PopCountWords(subcluster->centroid_words);
-        ++subcluster_index;
     }
 }
 
