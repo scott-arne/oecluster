@@ -2,6 +2,51 @@
 
 This file starts at 5.0.0; earlier releases are not recorded here.
 
+## [5.25.1] - 2026-10-17
+
+### Fixed
+
+- **`bitbirch_refine(reassign_top_clusters=k)` could return the same sample in
+  two clusters.** The pass pooled the members of the `k` largest leaf
+  subclusters, assigned each member to its nearest of the `k` centroids, then
+  wrote the centroids that won members into the selected subclusters in order,
+  taking one slot per winning centroid. A centroid that won no members took no
+  slot, so the selected subclusters past the last slot taken were never
+  written and kept the members they had before the pass -- members this same
+  pass had already written into an earlier subcluster. Each centroid now
+  writes back to its own subcluster, and a centroid that won no members
+  empties its subcluster instead, which `Result()` drops as of 5.25.0.
+- **The trigger is a centroid that wins no members, not reassignment as
+  such.** It needs `k` above the number of the `k` selected centroids that can
+  win anything, which in turn needs near-identical centroids among the `k`
+  largest subclusters: a tie resolves to the lower centroid index, so the
+  later of two equal centroids is starved. Duplicate fingerprints in the input
+  are the ordinary route there. Over the 450-point sweep now committed as
+  `test_bitbirch_refine_reassign_partitions_duplicate_bearing_inputs` -- 25
+  seeds of four 24-bit prototypes repeated three times each, by thresholds
+  0.3/0.5/0.7, by branching factors 2/3, by `reassign_top_clusters` 3/4/5 --
+  8 points duplicated a sample before this release and none do now. **Only
+  those 8 move, and where the defect fired the result loses a cluster**: on
+  the twelve-fingerprint fixture behind
+  `test_bitbirch_refine_reassign_drops_a_starved_cluster_instead_of_duplicating`
+  five clusters become four, the duplicate `(9,)` is gone, and `num_clusters`,
+  `len(result)`, `cluster_sizes`, `centroids` and the duplicated sample's
+  `labels` entry change with it. Each of the 8 lost exactly one cluster, in
+  every case a trailing one holding a member another cluster also held;
+  results from the other 442 points are byte-identical to 5.25.0's. `bitbirch()` and `bitbirch_recluster()` never run this pass, and
+  neither does `bitbirch_refine()` with `reassign_top_clusters=0`.
+- A `select_parameter()` grid point that reached the defect raised
+  `RuntimeError: isim_report: sample 9 appears in clusters 1 and 4` and ended
+  the sweep; sweeping `reassign_top_clusters` over `[3, 4, 5]` on that fixture
+  now scores all three points and picks 5.
+- **Reference parity is deliberately given up here, as it was for the emptied
+  subcluster in 5.25.0.** The Python reference has the same defect: run on
+  2026-10-17 from the sibling checkout the parity tests import, it put sample
+  9 in two clusters on that same fixture, which is what the native pass
+  returned before this release. No parity test changed -- every one of them
+  that reassigns uses `top=2`, where both selected centroids always win
+  members.
+
 ## [5.25.0] - 2026-10-16
 
 ### Changed
