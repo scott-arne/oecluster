@@ -567,12 +567,19 @@ void BitBirchTree::ReassignTopClusters(
 
     // One bucket per selected centroid, written back to that centroid's own
     // subcluster, so a centroid that won no members empties its subcluster.
-    // Starvation is reachable: numpy_argmax_greater resolves a tie to the lower
-    // index, so near-identical centroids starve the later one. Writing only the
-    // centroids that won members, into slots taken in order, left the remaining
-    // selected subclusters holding the members they already had -- members this
-    // pass had pooled and written into another slot -- so a sample could end up
-    // in two clusters.
+    // Writing only the centroids that won members, into slots taken in order,
+    // left the remaining selected subclusters holding the members they already
+    // had -- members this pass had pooled and written into another slot -- so a
+    // sample could end up in two clusters.
+    //
+    // Any centroid that is nearest for none of the pooled members is starved;
+    // nothing about the input is required for that. Two measured routes:
+    // numpy_argmax_greater resolves a tie to the lower index, so the later of
+    // two equal centroids wins nothing; and a centroid no member prefers wins
+    // nothing either, the measured case being the all-zero majority centroid
+    // BinaryCentroid returns for a cluster with no bit held by half its
+    // members, which TanimotoWords scores 0 against any fingerprint that has
+    // a bit set.
     //
     // An emptied subcluster gets the all-ones zero-sample centroid BinaryCentroid
     // returns for an empty summary. Nothing reads it: refine's only step after

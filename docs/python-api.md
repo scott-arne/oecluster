@@ -783,10 +783,14 @@ All three return a `BitBirchResult` with `labels`, `clusters`, `centroids`, and
 point `bitbirch_refine()` departs from the Python reference, in two passes that
 can empty a leaf subcluster. Its prune pass can empty one, which the reference
 reports as an empty cluster and `bitbirch_refine()` drops. Its reassignment
-pass empties one whenever a selected centroid wins no members -- which
-near-identical centroids among the top-K cause, since a tie goes to the lower
-centroid index -- and that one is dropped too, where the reference leaves the
-subcluster holding members it has already placed in another cluster. The member
+pass empties one whenever a selected centroid is the nearest centroid of none
+of the pooled members, and that one is dropped too, where the reference leaves
+the subcluster holding members it has already placed in another cluster.
+Neither duplicate fingerprints nor near-identical centroids are needed for
+that: a tie goes to the lower centroid index, so equal centroids starve the
+later one, but so does any centroid no member prefers -- an all-zero majority
+centroid, which scores zero against every fingerprint that has a bit set, is
+the measured case. The member
 lists are ordered by member count, largest first, so a dropped one is trailing
 and no label moves.
 

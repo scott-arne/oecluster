@@ -489,9 +489,10 @@ def test_bitbirch_refine_reassign_threads_match_serial_on_duplicate_blocks():
 
 
 def _duplicate_prototype_bits(seed, *, prototypes=4, copies=3, cols=24, density=0.2):
-    # Repeated prototypes give reassign near-identical centroids to select.
-    # Ties resolve to the lower centroid index, so the later of two identical
-    # centroids can win no members at all, which is the starved case.
+    # Repeated prototypes give reassign equal centroids to select, and a tie
+    # resolves to the lower centroid index, so the later of two equal centroids
+    # can win no members at all. That is one route to a starved centroid, not
+    # the only one: the fixture below starves one with no duplicate anywhere.
     rng = np.random.default_rng(seed)
     prototype_bits = (rng.random((prototypes, cols)) < density).astype(np.uint8)
     for row in np.flatnonzero(prototype_bits.sum(axis=1) == 0):
@@ -517,6 +518,42 @@ def test_bitbirch_refine_reassign_drops_a_starved_cluster_instead_of_duplicating
     assert observed.clusters == ((3, 4, 5), (10, 11, 9), (0, 1, 2), (6, 7, 8))
     assert observed.labels.tolist() == [2, 2, 2, 0, 0, 0, 3, 3, 3, 1, 1, 1]
     assert observed.cluster_sizes == (3, 3, 3, 3)
+
+
+def test_bitbirch_refine_reassign_starves_a_centroid_with_distinct_fingerprints():
+    # A starved centroid needs no duplicate fingerprint and no pair of
+    # near-identical centroids. All 24 rows here are distinct, the greatest
+    # Tanimoto between any two of the five selected centroids is 0.0909, and
+    # the ten-member cluster's majority centroid is all-zero, so it scores
+    # zero against every row and is the nearest centroid of none of them.
+    rng = np.random.default_rng(2)
+    bits = (rng.random((24, 32)) < 0.18).astype(np.uint8)
+    assert len(np.unique(bits, axis=0)) == len(bits)
+    kwargs = {
+        "threshold": 0.1,
+        "branching_factor": 2,
+        "merge_criterion": "diameter",
+        "singly": False,
+    }
+
+    fitted = oecluster.bitbirch(_batch_from_bits(bits), **kwargs)
+    observed = oecluster.bitbirch_refine(
+        _batch_from_bits(bits), reassign_top_clusters=5, **kwargs)
+
+    # Reassignment collapses the six fitted clusters to five. Before the fix
+    # the starved centroid's subcluster kept (4, 12), which the reassignment
+    # had already placed in another cluster, and the result reported six.
+    assert len(fitted.clusters) == 6
+    assert observed.clusters == (
+        (14, 15, 19, 21, 22, 4, 12),
+        (9, 20, 2, 3, 5, 6, 8),
+        (7, 13, 10, 11, 17),
+        (18, 0, 1, 16),
+        (23,),
+    )
+    assert sorted(
+        member for cluster in observed.clusters for member in cluster
+    ) == list(range(len(bits)))
 
 
 @pytest.mark.parametrize("reassign_top_clusters", [3, 4, 5])
