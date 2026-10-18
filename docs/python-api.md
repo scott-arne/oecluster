@@ -992,7 +992,8 @@ to hit that refusal by returning the leaf subcluster its prune pass emptied as
 an empty member list; it now drops that subcluster. It also used to hit the
 neighbouring `sample N appears in clusters A and B` refusal, from the
 reassignment pass leaving a trailing selected subcluster holding members it
-had already placed elsewhere whenever a centroid won no members; each centroid
+had already placed elsewhere, which happened when more selected centroids won
+no members than there were already-empty selected subclusters; each centroid
 now writes back to its own subcluster, and a starved centroid's subcluster is
 emptied and dropped.
 
