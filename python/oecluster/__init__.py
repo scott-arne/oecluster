@@ -4306,10 +4306,13 @@ def bitbirch_refine(fingerprints, *, threshold=0.65, branching_factor=50,
         is dropped rather than reported when the prune pass empties it, and
         when reassignment leaves it starved because its centroid won no
         members. Both diverge from the Python reference deliberately: it
-        reports the pruned one as an empty cluster, and leaves the starved
-        one holding members it has already placed in another cluster.
-        Clusters are ordered by member count, largest first, so a dropped
-        one is trailing and no label is renumbered.
+        reports the pruned one as an empty cluster, and on reassignment it
+        writes the centroids that won members into the first selected
+        subclusters in order and leaves the rest untouched, so with ``s``
+        starved centroids its last ``s`` selected subclusters keep members it
+        has already placed in another cluster, unless they were empty to
+        begin with. Clusters are ordered by member count, largest first, so a
+        dropped one is trailing and no label is renumbered.
     """
     _require_oefp_batch(fingerprints, "bitbirch_refine")
     if threshold < 0.0:

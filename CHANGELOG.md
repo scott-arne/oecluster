@@ -16,34 +16,35 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   this same pass had already written into an earlier subcluster. Each centroid
   now writes back to its own subcluster, and a centroid that won no members
   empties its subcluster instead, which `Result()` drops as of 5.25.0.
-- **What duplicated a sample is an unwritten selected slot that still held
-  members.** A selected centroid that is the nearest centroid of none of the
-  pooled members -- a starved centroid -- is what left a slot unwritten, and
-  the duplication followed only where that slot still held members of its
-  own, the pass having already written those members into another cluster. A
-  starved centroid whose subcluster was empty when the pass began costs
-  nothing: the old writer left it empty, this one writes it empty, and
-  `Result()` drops it either way. `redistribute_largest_cluster` is how a
-  selected subcluster comes to be empty already; on the four-row fixture behind
+- **What duplicated a sample was more starved centroids than already-empty
+  selected subclusters.** A starved centroid is a selected centroid that is
+  the nearest centroid of none of the pooled members. With `s` of them the old
+  writer filled only the first `k - s` selected slots, so the last `s` went
+  unwritten whichever centroids had starved -- not the starved centroids' own
+  subclusters. The selected subclusters are ordered by member count, so any
+  already empty sort last: when at least `s` of them were empty the unwritten
+  slots held nothing and no sample was duplicated, and otherwise at least one
+  unwritten slot still held members this pass had already written into
+  another cluster. `redistribute_largest_cluster` is how a selected subcluster
+  comes to be empty already. On the four-row fixture behind
   `test_bitbirch_refine_reassign_leaves_an_already_empty_selected_slot_alone`
-  one of the five selected centroids is starved and the result is identical
-  under both writers.
+  one centroid is starved and one selected subcluster is already empty, and
+  the result is identical under both writers.
 - **Starving a centroid needs neither duplicate fingerprints nor
   near-identical centroids.** Two routes are measured. A tie resolves to the
   lower centroid index, so the later of two equal centroids is starved, and
   duplicate fingerprints are the ordinary way to make two centroids equal;
   that is the route the sweep below takes. A centroid no member prefers is
   starved just as surely, with every fingerprint distinct: over 24 distinct
-  32-bit fingerprints (NumPy
-  `default_rng(2)`, density 0.18) at threshold 0.1, branching factor 2 and
-  `reassign_top_clusters=5`, the ten-member cluster's majority centroid is
+  32-bit fingerprints (NumPy `default_rng(2)`, density 0.18) at threshold 0.1,
+  branching factor 2 and `reassign_top_clusters=5`, the ten-member cluster's
+  majority centroid is
   all-zero, so it scores 0 against every fingerprint and wins none of the 23
   pooled members, while the greatest Tanimoto between any two of the five
   selected centroids is 0.0909. **Distinct fingerprints are not on their own
   a reason to think a result was unaffected.**
 - **Where the duplication occurred the result loses a cluster -- one per
-  unwritten slot that still held members -- and nothing moves where it did
-  not occur.** Over the 450-point sweep now committed as
+  unwritten slot that still held members.** Over the 450-point sweep now committed as
   `test_bitbirch_refine_reassign_partitions_duplicate_bearing_inputs` -- 25
   seeds of four 24-bit prototypes repeated three times each, by thresholds
   0.3/0.5/0.7, by branching factors 2/3, by `reassign_top_clusters` 3/4/5 --

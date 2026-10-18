@@ -784,17 +784,18 @@ point `bitbirch_refine()` departs from the Python reference, in two passes that
 can empty a leaf subcluster. Its prune pass can empty one, which the reference
 reports as an empty cluster and `bitbirch_refine()` drops. Its reassignment
 pass empties one whenever a selected centroid is the nearest centroid of none
-of the pooled members, and that one is dropped too. Where such a subcluster
-still held members when the pass began, the reference leaves it holding them
-and so reports them in two clusters at once; where it was already empty --
-which `redistribute_largest_cluster` can arrange -- nothing differs. Neither
-duplicate fingerprints nor near-identical centroids are needed to starve a
-centroid: a tie goes to the lower centroid index, so equal centroids starve
-the later one, but so does any centroid no member prefers -- an all-zero
-majority centroid, which scores zero against every fingerprint that has a bit
-set, is the measured case. The member
-lists are ordered by member count, largest first, so a dropped one is trailing
-and no label moves.
+of the pooled members, and that one is dropped too. The reference does not
+empty the starved centroid's subcluster. It writes the centroids that won
+members into the first selected subclusters in order and leaves the rest as
+they were, so with `s` starved centroids its last `s` selected subclusters
+keep their members -- members it has already placed in another cluster --
+unless they were empty to begin with, which `redistribute_largest_cluster`
+can arrange. Neither duplicate fingerprints nor near-identical centroids are
+needed to starve a centroid: a tie goes to the lower centroid index, so equal
+centroids starve the later one, but so does any centroid no member prefers --
+an all-zero majority centroid, which scores zero against every fingerprint
+that has a bit set, is the measured case. The member lists are ordered by
+member count, largest first, so a dropped one is trailing and no label moves.
 
 The `mode` parameter accepts `"strict_parity"` (exact
 reference-implementation parity for the fit) or `"fast"` (partition-merge
@@ -990,8 +991,10 @@ reuses `cluster_report()`'s native partition checks. `bitbirch_refine()` used
 to hit that refusal by returning the leaf subcluster its prune pass emptied as
 an empty member list; it now drops that subcluster. It also used to hit the
 neighbouring `sample N appears in clusters A and B` refusal, from the
-reassignment pass leaving a starved subcluster holding members it had already
-placed elsewhere; that subcluster is now dropped as well.
+reassignment pass leaving a trailing selected subcluster holding members it
+had already placed elsewhere whenever a centroid won no members; each centroid
+now writes back to its own subcluster, and a starved centroid's subcluster is
+emptied and dropped.
 
 ### Internal validity indices
 

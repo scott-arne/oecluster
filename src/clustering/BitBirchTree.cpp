@@ -573,12 +573,13 @@ void BitBirchTree::ReassignTopClusters(
     // sample could end up in two clusters.
     //
     // A starved centroid is one that is nearest for none of the pooled
-    // members. Under the old writer it is what left a slot unwritten; the
-    // duplication needed that slot to still hold members, which a slot already
-    // emptied by RedistributeLargestCluster does not, so that case was and is
-    // harmless.
-    // Nothing about the input is required to starve a centroid. Two measured
-    // routes:
+    // members. With s of them the old writer filled only the first k - s
+    // slots, so the last s went unwritten whichever centroids had starved.
+    // `ordered` is sorted by member count, so selected subclusters already
+    // emptied by RedistributeLargestCluster are last: no sample was duplicated
+    // while at least s of them were empty, and otherwise an unwritten slot
+    // still held members. Nothing about the input is required to starve a
+    // centroid. Two measured routes:
     // numpy_argmax_greater resolves a tie to the lower index, so the later of
     // two equal centroids wins nothing; and a centroid no member prefers wins
     // nothing either, the measured case being the all-zero majority centroid

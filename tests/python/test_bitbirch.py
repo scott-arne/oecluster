@@ -540,9 +540,12 @@ def test_bitbirch_refine_reassign_starves_a_centroid_with_distinct_fingerprints(
     observed = oecluster.bitbirch_refine(
         _batch_from_bits(bits), reassign_top_clusters=5, **kwargs)
 
-    # Reassignment collapses the six fitted clusters to five. Before the fix
-    # the starved centroid's subcluster kept (4, 12), which the reassignment
-    # had already placed in another cluster, and the result reported six.
+    # Reassignment collapses the six fitted clusters to five. The starved
+    # centroid is the largest selected subcluster's, but before the fix the
+    # stale slot was the smallest: the old writer filled the first four
+    # selected slots and left the fifth holding (4, 12), which the
+    # reassignment had already placed in another cluster, so the result
+    # reported six.
     assert len(fitted.clusters) == 6
     assert observed.clusters == (
         (14, 15, 19, 21, 22, 4, 12),
@@ -645,11 +648,13 @@ def _refine_emptied_subcluster(bits):
 
 
 def test_bitbirch_refine_reassign_leaves_an_already_empty_selected_slot_alone():
-    # The boundary of the duplication fix. Prune empties a leaf subcluster
-    # here, and reassignment then selects it and starves its centroid. The old
-    # writer left that slot unwritten and this one writes it empty, but it held
-    # nothing to leave behind either way, which is why this case never
-    # duplicated a member and does not move now.
+    # The boundary of the duplication fix. Prune empties a leaf subcluster,
+    # which sorts last among the five selected, and reassignment starves one
+    # centroid. The old writer left only the last selected slot unwritten,
+    # which was that empty one, and the new writer empties the starved
+    # centroid's own slot, which here is the same one. Neither leaves a slot
+    # holding members, so this case never duplicated a member and does not
+    # move now.
     bits = _emptied_subcluster_fixture_bits()
     pruned = _refine_emptied_subcluster(bits)
 
