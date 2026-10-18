@@ -572,8 +572,13 @@ void BitBirchTree::ReassignTopClusters(
     // had -- members this pass had pooled and written into another slot -- so a
     // sample could end up in two clusters.
     //
-    // Any centroid that is nearest for none of the pooled members is starved;
-    // nothing about the input is required for that. Two measured routes:
+    // A starved centroid is one that is nearest for none of the pooled
+    // members. Under the old writer it is what left a slot unwritten; the
+    // duplication needed that slot to still hold members, which a slot already
+    // emptied by RedistributeLargestCluster does not, so that case was and is
+    // harmless.
+    // Nothing about the input is required to starve a centroid. Two measured
+    // routes:
     // numpy_argmax_greater resolves a tie to the lower index, so the later of
     // two equal centroids wins nothing; and a centroid no member prefers wins
     // nothing either, the measured case being the all-zero majority centroid
@@ -590,8 +595,10 @@ void BitBirchTree::ReassignTopClusters(
     // defect: run on 2026-10-17 from the sibling checkout the parity tests use,
     // it put sample 9 in two clusters on the twelve-fingerprint fixture behind
     // test_bitbirch_refine_reassign_drops_a_starved_cluster_instead_of_duplicating.
-    // No parity test is weakened by this: every one that reassigns uses top=2,
-    // where both selected centroids always win members.
+    // No parity test is weakened by this. Every one that reassigns uses top=2,
+    // which rules nothing out -- tied centroids starve the second one there too
+    // -- but each still agrees with the defective reference under this writer,
+    // so none of their fixtures reaches the defect.
     for (size_t centroid_index = 0; centroid_index < selected_count; ++centroid_index) {
         BitBirchSubcluster* subcluster = ordered[centroid_index];
         BitBirchLinearSum linear_sum(size_bits_, 0);

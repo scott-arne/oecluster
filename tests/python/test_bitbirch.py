@@ -644,6 +644,30 @@ def _refine_emptied_subcluster(bits):
     )
 
 
+def test_bitbirch_refine_reassign_leaves_an_already_empty_selected_slot_alone():
+    # The boundary of the duplication fix. Prune empties a leaf subcluster
+    # here, and reassignment then selects it and starves its centroid. The old
+    # writer left that slot unwritten and this one writes it empty, but it held
+    # nothing to leave behind either way, which is why this case never
+    # duplicated a member and does not move now.
+    bits = _emptied_subcluster_fixture_bits()
+    pruned = _refine_emptied_subcluster(bits)
+
+    reassigned = oecluster.bitbirch_refine(
+        _batch_from_bits(bits),
+        threshold=0.8,
+        branching_factor=2,
+        merge_criterion="diameter",
+        singly=False,
+        redistribute_largest_cluster=True,
+        reassign_top_clusters=5,
+    )
+
+    assert reassigned.clusters == pruned.clusters
+    assert reassigned.labels.tolist() == pruned.labels.tolist()
+    assert reassigned.cluster_sizes == pruned.cluster_sizes
+
+
 def test_bitbirch_refine_prune_matches_the_reference_but_drops_the_emptied_subcluster():
     bits = _emptied_subcluster_fixture_bits()
     expected_labels, expected_clusters = _reference_refine_prune(

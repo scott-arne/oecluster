@@ -12,28 +12,38 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   wrote the centroids that won members into the selected subclusters in order,
   taking one slot per winning centroid. A centroid that won no members took no
   slot, so the selected subclusters past the last slot taken were never
-  written and kept the members they had before the pass -- members this same
-  pass had already written into an earlier subcluster. Each centroid now
-  writes back to its own subcluster, and a centroid that won no members
+  written and kept whatever members they held before the pass -- any of which
+  this same pass had already written into an earlier subcluster. Each centroid
+  now writes back to its own subcluster, and a centroid that won no members
   empties its subcluster instead, which `Result()` drops as of 5.25.0.
-- **The trigger is any selected centroid that wins no members, and it needs
-  neither duplicate fingerprints nor near-identical centroids.** It fired
-  whenever fewer than `k` of the `k` selected centroids were the nearest
-  centroid of at least one pooled member, and the subclusters of the rest
-  were the ones left stale. Two routes to a starved centroid are measured. A tie resolves to the lower centroid index, so the later of
-  two equal centroids is starved, and duplicate fingerprints are the ordinary
-  way to make two centroids equal; that is the route the sweep below takes. A
-  centroid no member prefers is starved just as surely, with every
-  fingerprint distinct: over 24 distinct 32-bit fingerprints (NumPy
+- **What duplicated a sample is an unwritten selected slot that still held
+  members.** A selected centroid that is the nearest centroid of none of the
+  pooled members -- a starved centroid -- is what left a slot unwritten, and
+  the duplication followed only where that slot still held members of its
+  own, the pass having already written those members into another cluster. A
+  starved centroid whose subcluster was empty when the pass began costs
+  nothing: the old writer left it empty, this one writes it empty, and
+  `Result()` drops it either way. `redistribute_largest_cluster` is how a
+  selected subcluster comes to be empty already; on the four-row fixture behind
+  `test_bitbirch_refine_reassign_leaves_an_already_empty_selected_slot_alone`
+  one of the five selected centroids is starved and the result is identical
+  under both writers.
+- **Starving a centroid needs neither duplicate fingerprints nor
+  near-identical centroids.** Two routes are measured. A tie resolves to the
+  lower centroid index, so the later of two equal centroids is starved, and
+  duplicate fingerprints are the ordinary way to make two centroids equal;
+  that is the route the sweep below takes. A centroid no member prefers is
+  starved just as surely, with every fingerprint distinct: over 24 distinct
+  32-bit fingerprints (NumPy
   `default_rng(2)`, density 0.18) at threshold 0.1, branching factor 2 and
   `reassign_top_clusters=5`, the ten-member cluster's majority centroid is
   all-zero, so it scores 0 against every fingerprint and wins none of the 23
   pooled members, while the greatest Tanimoto between any two of the five
   selected centroids is 0.0909. **Distinct fingerprints are not on their own
   a reason to think a result was unaffected.**
-- **Where the defect fired the result loses a cluster per starved centroid,
-  and nothing moves where it did not fire.** Over
-  the 450-point sweep now committed as
+- **Where the duplication occurred the result loses a cluster -- one per
+  unwritten slot that still held members -- and nothing moves where it did
+  not occur.** Over the 450-point sweep now committed as
   `test_bitbirch_refine_reassign_partitions_duplicate_bearing_inputs` -- 25
   seeds of four 24-bit prototypes repeated three times each, by thresholds
   0.3/0.5/0.7, by branching factors 2/3, by `reassign_top_clusters` 3/4/5 --
@@ -57,9 +67,11 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   2026-10-17 from the sibling checkout the parity tests import, it put sample
   9 in two clusters on the twelve-fingerprint fixture and samples 4 and 12 in
   two on the distinct-fingerprint one, which is what the native pass returned
-  before this release. No parity test changed -- every one of them
-  that reassigns uses `top=2`, where both selected centroids always win
-  members.
+  before this release. No parity test changed. Every one that reassigns uses
+  `top=2`, and none of their fixtures reaches the defect: each still agrees with
+  the defective reference under the corrected writer, which it could not if a
+  sample were duplicated there. `top=2` itself rules nothing out -- two tied
+  centroids starve the second one there as well.
 
 ## [5.25.0] - 2026-10-16
 
