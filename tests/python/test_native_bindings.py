@@ -235,15 +235,17 @@ def _graph_conformer_series():
 
 
 def test_rocs_comparison_accepts_graph_molecules(native):
-    """The OEMolBase overload, added because the docs all build OEGraphMol.
+    """An OEGraphMol list, which every doc example builds, is accepted.
 
-    Before it existed this list raised a bare SWIG "Wrong number or type of
-    arguments" TypeError, naming no argument and suggesting no remedy.
+    Before the bindings accepted it this list raised a bare SWIG "Wrong number
+    or type of arguments" TypeError, naming no argument and suggesting no
+    remedy. It now goes through the same list conversion as an OEMol list,
+    each OEGraphMol as the one conformer it carries.
     """
     comparison = native.ROCSComparison(_graph_conformer_series(), native.ROCSOptions())
     assert comparison.ComparisonName() == "rocs"
     assert comparison.Size() == 3
-    # As in test_rocs_comparison_accepts_molecules: this is an overload test,
+    # As in test_rocs_comparison_accepts_molecules: this is a conversion test,
     # not a scoring test, so it asks only that the molecules survived the
     # crossing into C++.
     value = comparison.Compare(0, 1)
@@ -301,21 +303,22 @@ def _non_active_reference(multi):
     return oechem.OEMol(multi.GetConf(oechem.OEHasConfIdx(others[-1])))
 
 
-def test_oemol_input_still_binds_the_conformer_preserving_overload(native):
-    """The hazard the OEMolBase overload introduces, pinned as a property.
+def test_oemol_input_keeps_its_conformers_on_both_constructor_forms(native):
+    """A multiconformer ``OEMol`` must arrive in C++ with its ensemble.
 
-    ``ROCSComparison`` has two constructors an ``OEMol`` list satisfies both
-    of: ``vector<shared_ptr<OEMol>>`` and ``vector<OEMolBase*>``, the latter
-    matching because an ``OEMol`` is an ``OEMolBase``. Only the first preserves
-    conformers; the second copies through an ``OEMolBase&`` view, which for a
-    multiconformer ``OEMol`` is its active conformer alone. Which one binds is
-    decided by typemap precedence in ``swig/oecluster.i`` -- explicitly, since
-    an equal precedence leaves it to a tie-break that was measured to rank them
-    one way for one-argument calls and the opposite way for two-argument ones.
+    ROCS's bindings take every molecule list through one conversion, which
+    copies an ``OEMol`` through ``OEMol(const OEMCMolBase&)`` and so keeps
+    every conformer. Before it, a second constructor took ``vector<OEMolBase*>``
+    and copied through an ``OEMolBase&`` view, which for a multiconformer
+    ``OEMol`` is its active conformer alone, and typemap precedence was all
+    that kept an ``OEMol`` list off it. With equal precedence SWIG's tie-break
+    ranked the two one way for one-argument calls and the opposite way for
+    two-argument ones.
 
-    Two arguments here on purpose. That is the form ``_comparisons.py`` builds,
-    so it is the form ``pdist(..., "rocs")`` reaches, and it is the form that
-    was broken while the one-argument form stayed correct.
+    Both forms are pinned because SWIG still emits a separate dispatch case
+    for each. The two-argument one is what ``_comparisons.py`` builds, so it
+    is the form ``pdist(..., "rocs")`` reaches, and it was the broken one
+    while the one-argument form stayed correct.
 
     The assertion is a property, not a literal: the ensemble and the same
     molecule collapsed to its active conformer must score *differently*. A
@@ -330,48 +333,44 @@ def test_oemol_input_still_binds_the_conformer_preserving_overload(native):
     reference = _non_active_reference(multi)
 
     # OEGraphMol is the active-conformer view, so round-tripping through it
-    # produces exactly the loss the wrong overload would cause. Rebuilt as an
-    # OEMol so that this list binds the same constructor the kept case does,
-    # leaving the ensemble as the only difference between the two calls.
+    # produces exactly the loss a collapsing conversion would cause. Rebuilt as
+    # an OEMol so that both lists hold the same types, leaving the ensemble as
+    # the only difference between the two calls.
     collapsed_mol = oechem.OEMol(oechem.OEGraphMol(multi))
     assert collapsed_mol.NumConfs() == 1
     assert multi.NumConfs() > collapsed_mol.NumConfs()
 
-    kept = native.ROCSComparison([reference, multi], options).Compare(0, 1)
-    collapsed = native.ROCSComparison([reference, collapsed_mol], options).Compare(0, 1)
+    for form, extra in (("two-argument", (options,)), ("one-argument", ())):
+        kept = native.ROCSComparison([reference, multi], *extra).Compare(0, 1)
+        collapsed = native.ROCSComparison(
+            [reference, collapsed_mol], *extra).Compare(0, 1)
 
-    # The property. Dropping the ensemble makes the first call compute the
-    # second, and this margin is what goes to zero when it does.
-    assert collapsed - kept > 0.1, (
-        "the multiconformer OEMol scored as its active conformer alone, so the "
-        f"ensemble was dropped crossing into C++: kept={kept}, "
-        f"collapsed={collapsed}")
+        # The property. Dropping the ensemble makes the first call compute the
+        # second, and this margin is what goes to zero when it does.
+        assert collapsed - kept > 0.1, (
+            f"the {form} form scored the multiconformer OEMol as its active "
+            "conformer alone, so the ensemble was dropped crossing into C++: "
+            f"kept={kept}, collapsed={collapsed}")
 
-    # Corroboration, not the point: a reachable conformer overlays its own
-    # reference exactly, which says the ensemble arrived intact rather than
-    # merely arriving different.
-    assert kept == pytest.approx(0.0, abs=1e-3)
+        # Corroboration, not the point: a reachable conformer overlays its own
+        # reference exactly, which says the ensemble arrived intact rather than
+        # merely arriving different. The exact overlay scores zero here under
+        # shape and under the default score alike.
+        assert kept == pytest.approx(0.0, abs=1e-3)
 
 
-def test_mixed_molecule_lists_resolve_asymmetrically_by_their_first_element(native):
-    """Both orderings of a list mixing OEGraphMol with OEMol.
+def test_mixed_molecule_lists_read_every_oemol_whatever_the_order(native):
+    """Both orderings of a list mixing OEGraphMol with OEMol, on both forms.
 
-    Both typechecks sample element 0 only, so the first element alone decides
-    which overload the whole list binds -- and the two orderings are therefore
-    not symmetric.
+    The conversion copies each element by its own type, so the ``OEMol`` keeps
+    its ensemble whether it comes first or second. Both typechecks used to
+    sample element 0 only: ``[OEGraphMol, OEMol]`` bound the ``OEMolBase``
+    overload and scored the ``OEMol`` on its active conformer, while
+    ``[OEMol, OEGraphMol]`` bound the strict one and refused the
+    ``OEGraphMol``.
 
-    ``[OEGraphMol, OEMol]`` fails the strict check at element 0 and binds the
-    OEMolBase overload, which accepts every element. This is the one ordering
-    where a caller can still lose an ensemble: an OEMol later in the list is
-    converted through an OEMolBase view. It is accepted rather than refused
-    because refusing it would mean rejecting the OEGraphMol lists this overload
-    exists to admit.
-
-    ``[OEMol, OEGraphMol]`` passes the strict check at element 0, and that
-    typemap validates *every* element rather than sampling one, so the
-    OEGraphMol at index 1 is refused by name. Pinned on both the one- and
-    two-argument forms: precedence used to order those two groups oppositely,
-    and this refusal survived on one form while vanishing on the other.
+    ``Compare(i, j)`` overlays ``j`` onto ``i``, so the reversed list is read
+    as ``(1, 0)`` to keep the same reference and fit.
     """
     from openeye import oechem
 
@@ -380,46 +379,41 @@ def test_mixed_molecule_lists_resolve_asymmetrically_by_their_first_element(nati
     options.score_type = native.ROCSScoreType_Shape
     reference = _non_active_reference(multi)
     graph_reference = oechem.OEGraphMol(reference)
-
-    # Accepted, and the ensemble is lost -- element 0 put the whole list on the
-    # OEMolBase overload. Asserted against the collapsed score rather than a
-    # literal, which is what makes the conformer loss the claim.
     collapsed_mol = oechem.OEMol(oechem.OEGraphMol(multi))
-    mixed = native.ROCSComparison([graph_reference, multi], options).Compare(0, 1)
-    collapsed = native.ROCSComparison([reference, collapsed_mol], options).Compare(0, 1)
-    assert mixed == pytest.approx(collapsed, abs=1e-6)
 
-    # The reverse ordering is refused, on both argument-count forms.
-    reverse = [reference, oechem.OEGraphMol(multi)]
-    with pytest.raises(TypeError, match="List item is not an OEMol object"):
-        native.ROCSComparison(reverse, options)
-    with pytest.raises(TypeError, match="List item is not an OEMol object"):
-        native.ROCSComparison(reverse)
+    for form, extra in (("two-argument", (options,)), ("one-argument", ())):
+        kept = native.ROCSComparison([reference, multi], *extra).Compare(0, 1)
+        collapsed = native.ROCSComparison(
+            [reference, collapsed_mol], *extra).Compare(0, 1)
+        assert collapsed - kept > 0.1, "fixture cannot discriminate"
+
+        forward = native.ROCSComparison(
+            [graph_reference, multi], *extra).Compare(0, 1)
+        reverse = native.ROCSComparison(
+            [multi, graph_reference], *extra).Compare(1, 0)
+        assert forward == pytest.approx(kept, abs=1e-6), form
+        assert reverse == pytest.approx(kept, abs=1e-6), form
 
 
-def test_the_molbase_typecheck_is_ranked_behind_the_strict_one():
-    """The precedence the three tests above rest on, asserted from the source.
+def test_the_molecule_typecheck_is_ranked_behind_the_design_unit_one():
+    """The order of SuperposeComparison's two list typechecks, from the source.
 
-    Those three all sit behind ``importorskip("openeye.oeomega")``, so on a
-    machine without that license the entire guard against a precedence
-    regression disappears. This one has no license gate.
+    ``SWIG_TYPECHECK_POINTER`` is 0, and the design-unit typecheck carries it.
+    The ``vector<OEMolBase*>`` typecheck carries a numeric value above it, so
+    the design-unit overload is examined first in every argument-count group.
+    Equal precedence would leave the order to SWIG's unspecified tie-break,
+    which was measured, on the ROCS constructors this value used to order, to
+    rank a pair one way for one-argument calls and the opposite way for
+    two-argument ones. ROCS and MCS no longer expose a ``vector<OEMolBase*>``
+    constructor, so Superpose is what the value orders now. What depends on
+    it today is where both typechecks accept: an empty list, and a first
+    element whose type check raises, which ``test_a_check_that_raises_only_once_is_lost``
+    in ``test_binding_lifetime.py`` shows reaching the design-unit conversion.
 
-    ``SWIG_TYPECHECK_POINTER`` is 0, and the strict
-    ``vector<shared_ptr<OEMol>>`` typecheck carries it. Giving the permissive
-    ``vector<OEMolBase*>`` typecheck the same value makes the two an exact tie,
-    which SWIG then resolves by a rule it does not specify -- measured to rank
-    them one way for one-argument calls and the opposite way for two-argument
-    ones, which is how every ``pdist(..., "rocs")`` call came to drop
-    conformers while the one-argument form stayed correct. Any value above
-    zero breaks the tie in the strict typemap's favour, since lower precedence
-    is examined first. Comments are stripped before the search so that the long
-    note explaining this, which quotes both spellings, cannot satisfy it.
-
-    Same limit as ``test_the_new_entry_points_release_the_gil``: this describes
-    the interface, not the built artifact, so a stale ``_oecluster.so`` passes
-    it. What it covers is the window before a rebuild -- where a tidy-up
-    substituting the symbolic constant back would land. Where an Omega license
-    exists, the behavioural tests above remain the real guard.
+    Comments are stripped before the search so that the note explaining this,
+    which quotes both spellings, cannot satisfy it. Same limit as
+    ``test_the_new_entry_points_release_the_gil``: this describes the
+    interface, not the built artifact, so a stale ``_oecluster.so`` passes it.
     """
     interface = pathlib.Path(__file__).resolve().parents[2] / "swig" / "oecluster.i"
     text = _SWIG_COMMENT.sub("", interface.read_text(encoding="utf-8"))
@@ -432,18 +426,19 @@ def test_the_molbase_typecheck_is_ranked_behind_the_strict_one():
             f"expected exactly one typecheck typemap for {cpp_type}, found {found}")
         return found[0].strip()
 
-    strict = precedence_of("const std::vector<std::shared_ptr<OEChem::OEMol>>&")
-    permissive = precedence_of("const std::vector<OEChem::OEMolBase*>&")
+    design_unit = precedence_of(
+        "const std::vector<std::shared_ptr<OEBio::OEDesignUnit>>&")
+    molecule = precedence_of("const std::vector<OEChem::OEMolBase*>&")
 
-    assert strict == "SWIG_TYPECHECK_POINTER", (
-        "this test compares the permissive typecheck against the strict one's "
-        f"precedence; the strict one now reads {strict!r}")
-    assert permissive != strict, (
-        "equal precedence restores the tie whose unspecified resolution dropped "
-        "conformers from every pdist(..., 'rocs') call")
-    assert permissive.isdigit() and int(permissive) > 0, (
-        "the permissive typecheck needs a numeric precedence above zero so the "
-        f"strict one is examined first; found {permissive!r}")
+    assert design_unit == "SWIG_TYPECHECK_POINTER", (
+        "this test compares the molecule typecheck against the design-unit "
+        f"one's precedence; the design-unit one now reads {design_unit!r}")
+    assert molecule != design_unit, (
+        "equal precedence hands the order of Superpose's two overloads to an "
+        "unspecified tie-break")
+    assert molecule.isdigit() and int(molecule) > 0, (
+        "the molecule typecheck needs a numeric precedence above zero so the "
+        f"design-unit one is examined first; found {molecule!r}")
 
 
 def test_sar_coherence_is_bound(native):

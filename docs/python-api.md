@@ -3525,50 +3525,33 @@ accepted. An `OEGraphMol` carries a single conformer, so `BestOverlay` has one
 pose to choose from instead of an ensemble. Pass an `OEMol` whenever conformer
 search matters. Every molecule still needs real 3D coordinates either way.
 
-**Do not mix the two types in one list.** The first element alone decides how
-the whole list is read. If it is an `OEGraphMol`, every later element is taken
-as a single conformer too, so an `OEMol` further down the list is silently
-reduced to its active conformer and scored on that alone -- no error, no
-warning, just a different number:
+**A list may mix the two types, in any order.** Each molecule is read by its
+own type wherever it sits -- an `OEMol` with every conformer, an `OEGraphMol` as
+its one conformer -- so no element's type changes how another is read. `cdist`
+builds one comparison over `items_a + items_b`, and the same holds across its
+two sets:
 
 ```python
-# Wrong: mol keeps only its active conformer, because graph_mol came first.
-oecluster.pdist([graph_mol, mol], "rocs")
-
-# Raises TypeError: List item is not an OEMol object.
-oecluster.pdist([mol, graph_mol], "rocs")
-```
-
-The two orderings are not symmetric: the second is refused because the stricter
-path validates every element, while the first is accepted because refusing it
-would also refuse the all-`OEGraphMol` lists this comparison now exists to take.
-Convert up front -- `oechem.OEMol(graph_mol)` -- when a list would otherwise be
-mixed.
-
-**`cdist` extends that rule across its two sets.** It builds one comparison over
-`items_a + items_b`, so the first element of set A decides how *both* sets are
-read, and two individually homogeneous sets -- the arrangement the warning above
-would seem to permit -- still interact. An `OEGraphMol` in set A discards set
-B's conformers:
-
-```python
-# 0.238: multi is reduced to its active conformer, because set A holds an
-# OEGraphMol.
+# 0.0 from both: multi keeps its ensemble whatever set A holds, and
+# BestOverlay recovers the pose the reference was taken from.
 oecluster.cdist([graph_ref], [multi], "rocs", score_type="shape")
-
-# 0.0: set A holds an OEMol, so multi keeps its ensemble and BestOverlay
-# recovers the pose the reference was taken from.
 oecluster.cdist([mol_ref], [multi], "rocs", score_type="shape")
 
-# Raises TypeError: List item is not an OEMol object.
+# 0.238: multi is the reference here, and only the fit's conformers are
+# searched, so multi is overlaid as its active conformer.
 oecluster.cdist([multi], [graph_ref], "rocs", score_type="shape")
 ```
 
 `multi` is a three-conformer `OEMol`, and `mol_ref` and `graph_ref` are the same
-non-active conformer of it as an `OEMol` and as an `OEGraphMol`. The two accepted
-calls differ by 0.238 on a [0, 1] scale for the same chemistry, and neither
-raises nor warns. Convert both sets up front when they would not otherwise agree
-on a type.
+non-active conformer of it as an `OEMol` and as an `OEGraphMol`. The 0.238 comes
+from the direction described above, not from the input type:
+`cdist([multi], [mol_ref])` returns the same number, and `pdist` over either
+pair returns 0.0, because it scores both orientations and keeps the better.
+
+Earlier releases let the first element decide how the whole list was read. An
+`OEGraphMol` there reduced every later `OEMol` to its active conformer with no
+error -- the first call above returned 0.238 -- and the reverse ordering raised
+`TypeError`. A mixed list can therefore score differently than it did then.
 
 ### Superpose
 
@@ -3846,25 +3829,19 @@ six-bond ring as benzene, which is why it scores 1.0 against its parent.
 Drug-like input has none of these, so the denominator is a heavy-atom bond
 count in practice but not by construction.
 
-**Mixing `OEMol` and `OEGraphMol` is accepted in one direction only.** The
-rule is the one `rocs` documents above: the first element decides how the whole
-list is read, and `cdist` concatenates `items_a + items_b` before deciding, so
-set A's first element decides for set B as well. Nothing is lost to the score
-here -- MCS never reads coordinates, so the collapsed view of a multi-conformer
-`OEMol` scores exactly as its ensemble would -- but which calls are *accepted*
-is still asymmetric, and the refusal reaches across the set boundary:
+**Mixing `OEMol` and `OEGraphMol` is accepted in any order**, in one list or
+across `cdist`'s two sets, because each molecule is read by its own type, as
+`rocs` documents above. MCS never reads coordinates, so the type changes nothing
+about the score either:
 
 ```python
-# 0.143 = 1 - 6/7, benzene against toluene. Accepted: the OEGraphMol at index 0
-# of the concatenation puts both sets on the permissive overload.
+# 0.143 = 1 - 6/7, benzene against toluene, from both calls.
 oecluster.cdist([graph_mol], [oemol], "mcs")
-
-# Raises TypeError: List item is not an OEMol object.
 oecluster.cdist([oemol], [graph_mol], "mcs")
 ```
 
-`pdist([graph_mol, oemol], "mcs")` and `pdist([oemol, graph_mol], "mcs")` split
-the same way, for the same reason.
+Earlier releases refused the second call, and `pdist([oemol, graph_mol], "mcs")`
+with it, because the first element decided which lists were accepted.
 
 `match_level` chooses how strictly atoms and bonds must correspond: `"loose"` is
 atomic number only with bonds unconstrained, so benzene matches cyclohexane

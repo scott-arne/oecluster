@@ -2302,13 +2302,10 @@ def pdist(items,
     """
     Compute pairwise distances for a collection of items using a comparison.
 
-    Warning: the first element of ``items`` decides how the whole list is
-    read. For ``rocs`` an ``OEGraphMol`` there silently reduces every later
-    ``OEMol`` to its active conformer and the scores move with it; the reverse
-    ordering raises ``TypeError`` instead. Convert up front with
-    ``oechem.OEMol(...)`` when a list would otherwise be mixed. ``mcs`` follows
-    the same rule for which lists are accepted, but its scores are unchanged.
-    See the ROCS and MCS sections of ``docs/python-api.md``.
+    For ``rocs`` and ``mcs`` a list may mix ``OEMol`` and ``OEGraphMol`` in
+    any order: each molecule is read by its own type, an ``OEMol`` with every
+    conformer and an ``OEGraphMol`` as its one conformer. See the ROCS and MCS
+    sections of ``docs/python-api.md``.
 
     :param items: List of molecules, design units, or other items.
     :param comparison: Comparison method: "fingerprint", "rocs", "superpose",
@@ -2488,15 +2485,11 @@ def cdist(items_a, items_b, comparison, *,
     distinct reference/fit predicates), ``cdist(A, B)`` is not guaranteed to equal
     ``cdist(B, A).T``.
 
-    Warning: one comparison is built over the concatenation ``items_a +
-    items_b``, so the first element of ``items_a`` decides how *both* sets are
-    read, set A's own later elements included. For ``rocs`` an ``OEGraphMol``
-    there silently reduces every later ``OEMol`` to its active conformer and
-    the scores move with it. ``mcs`` is reduced the same way but scores
-    identically, never reading coordinates, so for it only which calls are
-    *accepted* differs. The reverse ordering raises ``TypeError`` instead. See
-    the ROCS and MCS sections of ``docs/python-api.md`` for the measured
-    effect.
+    One comparison is built over the concatenation ``items_a + items_b``. For
+    ``rocs`` and ``mcs`` each molecule in it is read by its own type, so
+    neither set's contents change how the other is read: an ``OEMol`` keeps
+    every conformer and an ``OEGraphMol`` is its one conformer, whichever set
+    holds it. See the ROCS and MCS sections of ``docs/python-api.md``.
 
     :param items_a: Reference items (rows of the result).
     :param items_b: Fit items (columns of the result).
@@ -8271,12 +8264,10 @@ class ROCSComparison:
         """
         Construct a ROCSComparison.
 
-        :param mols: List of OEMolBase molecules with 3D coordinates. The
-            first element decides how the whole list is read: if it is an
-            ``OEGraphMol``, every later ``OEMol`` is silently reduced to its
-            active conformer, and the reverse ordering raises ``TypeError``.
-            Convert with ``oechem.OEMol(...)`` first when the list would
-            otherwise be mixed.
+        :param mols: List of OEMolBase molecules with 3D coordinates. Each
+            is read by its own type, wherever it sits: an ``OEMol`` with
+            every conformer, and anything else, such as an ``OEGraphMol``, as
+            one conformer.
         :param similarity: Return similarity instead of distance.
         :returns: C++ ROCSComparison object.
         """
@@ -8477,9 +8468,8 @@ class MCSComparison:
         triangle-inequality violation has been observed, but none is proven
         either, so the matrix reports ``triangle`` as ``"unknown"``.
 
-        :param mols: List of OEMolBase molecules. The first element decides
-            which mixed lists are accepted, as for ``ROCSComparison``, but the
-            scores are unchanged because coordinates are never read.
+        :param mols: List of OEMolBase molecules, in any mix of types and
+            any order.
         :param search_mode: ``"approximate"`` (default) or ``"exhaustive"``.
             Exhaustive is one to three orders of magnitude slower and is not
             reliably better: on a 53-bond against 54-bond macrolide pair it took

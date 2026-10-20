@@ -278,10 +278,10 @@ def test_multiconformer_molecule_stays_one_item():
 
 def test_pdist_accepts_graph_molecules():
     # Every example in README.md and docs/python-api.md builds an OEGraphMol,
-    # and this comparison rejected that list outright until the OEMolBase
-    # overload was added. Pinned against the OEMol score as well as against the
-    # literal: an overload that resolved differently for the two input types
-    # would still produce a number, so only comparing them catches it.
+    # and this comparison rejected that list outright until the bindings
+    # accepted it. Pinned against the OEMol score as well as against the
+    # literal: a conversion that read the two input types differently would
+    # still produce a number, so only comparing them catches it.
     graph = oecluster.pdist(_graph_pair(BENZENE, TOLUENE), "mcs")
     oemol = oecluster.pdist(_pair(BENZENE, TOLUENE), "mcs")
     assert graph.num_samples == 2
@@ -291,8 +291,8 @@ def test_pdist_accepts_graph_molecules():
 
 def test_direct_constructor_accepts_graph_molecules():
     # The top-level wrapper hands its item list straight to the SWIG class, so
-    # the new overload has to resolve on this route too and not only through
-    # the registry that pdist goes by.
+    # the list conversion has to accept it on this route too and not only
+    # through the registry that pdist goes by.
     comparison = oecluster.MCSComparison(_graph_pair(BENZENE, TOLUENE))
     assert comparison.Size() == 2
     assert comparison.Compare(0, 1) == pytest.approx(0.142857, abs=1e-6)
@@ -301,10 +301,10 @@ def test_direct_constructor_accepts_graph_molecules():
     assert native_comparison.Compare(0, 1) == pytest.approx(0.142857, abs=1e-6)
 
     # Both calls above pass options, and a defaulted argument expands into its
-    # own SWIG dispatch case with its own overload ranking -- the ranking that
-    # was measured to come out one way for one-argument calls and the opposite
-    # way for two-argument ones. So the no-options form is pinned separately
-    # rather than assumed to follow.
+    # own SWIG dispatch case. While a second constructor competed for the list,
+    # the ranking between them was measured to come out one way for
+    # one-argument calls and the opposite way for two-argument ones, so the
+    # no-options form is pinned separately rather than assumed to follow.
     defaulted = native.MCSComparison(_graph_pair(BENZENE, TOLUENE))
     assert defaulted.Compare(0, 1) == pytest.approx(0.142857, abs=1e-6)
 

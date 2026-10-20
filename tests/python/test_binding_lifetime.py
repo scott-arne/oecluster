@@ -57,7 +57,9 @@ def test_clearing_the_list_mid_call_does_not_crash(call):
     assert int(count) > 0
 
 
-def test_a_refused_list_releases_its_molecules():
+@pytest.mark.parametrize(
+    "name", ["FingerprintComparison", "ROCSComparison", "MCSComparison"])
+def test_a_refused_list_releases_its_molecules(name):
     """The error path must drop the references the conversion took.
 
     A leaked reference is otherwise invisible: nothing crashes, the molecules
@@ -65,6 +67,8 @@ def test_a_refused_list_releases_its_molecules():
     after every good element has been converted. The native class is called
     directly so no Python-layer check can refuse the list before the typemap
     sees it; the anchored message proves the typemap is what refused it.
+    Fingerprint uses the ``OEMolBase`` list conversion, ROCS and MCS their
+    own, and each releases its tuple in its own freearg.
     """
     from oecluster import oecluster as native
 
@@ -76,7 +80,7 @@ def test_a_refused_list_releases_its_molecules():
         with pytest.raises(
                 TypeError,
                 match=r"^molecule list item 199 is a int, not an OEMolBase$"):
-            native.FingerprintComparison(mols)
+            getattr(native, name)(mols)
     assert sys.getrefcount(good) == before
 
 
@@ -92,13 +96,15 @@ class _RaisingClass:
 
 
 @pytest.mark.parametrize("comparison", [
-    oecluster.ROCSComparison, oecluster.MCSComparison], ids=["rocs", "mcs"])
-def test_a_raising_element_in_a_strict_oemol_list_propagates(comparison):
+    oecluster.ROCSComparison, oecluster.MCSComparison, oecluster.RMSDComparison],
+    ids=["rocs", "mcs", "rmsd"])
+def test_a_raising_later_element_in_a_molecule_list_propagates(comparison):
     """A check that raised has not answered, so its exception must surface.
 
-    The OEMol at index 0 selects the strict ``OEMol`` list conversion; the
-    element after it makes the isinstance check raise, which used to be
-    replaced by a generic TypeError about the element's type.
+    The element after the OEMol makes the isinstance check raise, which used
+    to be replaced by a generic TypeError about the element's type. ROCS and
+    MCS take the list through their own conversion, and RMSD through the
+    strict ``OEMol`` list conversion.
     """
     mol = oechem.OEMol()
     oechem.OESmilesToMol(mol, "c1ccccc1")
@@ -134,25 +140,28 @@ def _benzene(kind):
 
 
 @pytest.mark.parametrize(
-    "route", ["fingerprint", "rocs", "mcs", "superpose"])
+    "route", ["fingerprint", "rocs", "mcs", "rmsd", "superpose"])
 def test_a_raising_first_element_propagates(route):
     """The overload dispatcher must not turn a raising check into "no".
 
-    It reads element 0 alone, through a typecheck that cannot report an
-    error. Answering "no" there left every overload ruled out and replaced
-    the exception with the dispatcher's generic TypeError, before any
-    conversion ran.
+    For Fingerprint, RMSD and Superpose it reads element 0 alone, through a
+    typecheck that cannot report an error. Answering "no" there left every
+    overload ruled out and replaced the exception with the dispatcher's
+    generic TypeError, before any conversion ran. The exception surfaces
+    because the conversion repeats the check and ``_RaisingClass`` raises on
+    every read. An element that raises only on the first read is lost
+    instead; see ``test_a_check_that_raises_only_once_is_lost``.
 
-    The exception surfaces because the conversion repeats the check and
-    ``_RaisingClass`` raises on every read. An element that raises only on
-    the first read is lost instead; see
-    ``test_a_check_that_raises_only_once_is_lost``.
+    ROCS and MCS's dispatchers test only that the argument is a list, so for
+    them the conversion's check is the first read of the element, not a
+    repeat.
     """
     comparison, rest = {
         "fingerprint": (
             oecluster.FingerprintComparison, [_benzene(oechem.OEGraphMol)]),
         "rocs": (oecluster.ROCSComparison, [_benzene(oechem.OEMol)]),
         "mcs": (oecluster.MCSComparison, [_benzene(oechem.OEMol)]),
+        "rmsd": (oecluster.RMSDComparison, [_benzene(oechem.OEMol)]),
         "superpose": (oecluster.SuperposeComparison, [oechem.OEDesignUnit()]),
     }[route]
     with pytest.raises(LookupError, match="^no class$"):
@@ -247,13 +256,17 @@ def _raising_pointer(base, attribute):
     return subclass.__new__(subclass)
 
 
-@pytest.mark.parametrize("route", ["molbase", "oemol", "design_unit", "batch"])
+@pytest.mark.parametrize(
+    "route", ["molbase", "oemol", "any_molecule_oemol", "any_molecule_graph",
+              "design_unit", "batch"])
 def test_a_raising_pointer_read_propagates(route):
     """Reading the wrapped pointer can raise, too; that is not "no pointer".
 
     Only a missing attribute means the object wraps nothing. Any other
     exception used to be cleared and reported as a type or null-reference
-    error naming the wrong cause.
+    error naming the wrong cause. ``oemol`` is the strict ``OEMol`` list
+    conversion, which RMSD uses; the two ``any_molecule`` routes are the
+    ROCS and MCS conversion, given an OEMol and an OEGraphMol.
     """
     if route == "molbase":
         def call():
@@ -262,9 +275,19 @@ def test_a_raising_pointer_read_propagates(route):
                  _raising_pointer(oechem.OEGraphMol, "this")])
     elif route == "oemol":
         def call():
-            oecluster.ROCSComparison(
+            oecluster.RMSDComparison(
                 [_benzene(oechem.OEMol),
                  _raising_pointer(oechem.OEMol, "this")])
+    elif route == "any_molecule_oemol":
+        def call():
+            oecluster.ROCSComparison(
+                [_benzene(oechem.OEGraphMol),
+                 _raising_pointer(oechem.OEMol, "this")])
+    elif route == "any_molecule_graph":
+        def call():
+            oecluster.MCSComparison(
+                [_benzene(oechem.OEMol),
+                 _raising_pointer(oechem.OEGraphMol, "this")])
     elif route == "design_unit":
         def call():
             oecluster.SuperposeComparison(

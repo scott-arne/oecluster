@@ -629,10 +629,11 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, oereceptor, "Expected OERec
 // ============================================================================
 // Domain-specific typemaps for oecluster's container-based APIs
 // ============================================================================
-// FingerprintComparison and SuperposeComparison (mol overload) accept lists of
-// OEMolBase pointers. ROCSComparison and SuperposeComparison (DU overload) accept
-// lists of shared_ptr to OEMol / OEDesignUnit — these require a copy because
-// we do not own the Python-owned objects.
+// Molecule and design-unit list conversions. A vector of OEMolBase pointers
+// borrows the Python-owned molecules for the call; a vector of shared_ptr
+// copies each one, because we do not own the Python-owned objects.
+// ROCSComparison and MCSComparison take their lists through a conversion of
+// their own, defined after the strict OEMol list conversion.
 
 // ---- const std::vector<OEChem::OEMolBase*>& ----
 %typemap(in) const std::vector<OEChem::OEMolBase*>& (std::vector<OEChem::OEMolBase*> temp, PyObject* held = 0) {
@@ -688,45 +689,36 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, oereceptor, "Expected OERec
     Py_XDECREF(held$argnum);
 }
 
-// ``precedence=1``, a literal rather than ``SWIG_TYPECHECK_POINTER``, and load
-// bearing. A bare numeric is ordinary here -- four typechecks in this file use
-// ``precedence=10`` -- so the value is not an oddity to be tidied into a
-// symbolic constant. Substituting ``SWIG_TYPECHECK_POINTER`` back would be a
-// silent scoring regression, for the reason below.
+// ``precedence=1``, a literal rather than ``SWIG_TYPECHECK_POINTER``, and
+// deliberate. A bare numeric is ordinary here -- four typechecks in this file
+// use ``precedence=10`` -- so the value is not an oddity to be tidied into a
+// symbolic constant.
 //
-// MCSComparison and ROCSComparison each carry two constructors, one taking
-// this vector and one taking the strict ``shared_ptr<OEMol>`` vector below.
-// The two are not disjoint: an OEMol *is* an OEMolBase, so a list of OEMol
-// satisfies both typechecks, and whichever is examined first wins. Only the
-// strict one preserves conformers -- it converts through
-// ``OEMol(const OEMCMolBase&)``, where this one converts through
-// ``OEMol(const OEMolBase&)``, which is the active conformer alone.
+// What it orders is SuperposeComparison's two constructors: one takes this
+// vector, the other the design-unit vector below, whose typecheck sits at
+// ``SWIG_TYPECHECK_POINTER``, which is 0. SWIG ranks overloads by argument
+// count first and typemap precedence second, and lower precedence is examined
+// first, so the design-unit typecheck is examined ahead of this one in every
+// argument-count group. Equal precedence would hand the order to SWIG's
+// unspecified tie-break, which was measured, on the ROCS constructors this
+// value used to order, to rank a pair one way in the one-argument group and
+// the opposite way in the two-argument group.
 //
-// SWIG ranks overloads by argument count first and typemap precedence second,
-// and lower precedence is examined first. ``SWIG_TYPECHECK_POINTER`` is 0, so
-// leaving this at that value made it an exact tie with the strict typecheck
-// and handed the order to SWIG's unspecified tie-break. Declaration order does
-// not decide it: measured, the tie-break put the strict overload first in the
-// one-argument group and *second* in the two-argument group, so the same
-// declaration order produced opposite results in the two groups and no
-// ordering could fix both.
+// For a non-empty list whose first element both checks can answer, the two
+// typechecks are disjoint and the order changes nothing. It decides the cases
+// both accept: an empty list, which reaches the design-unit constructor and is
+// refused with the same "SuperposeComparison: empty structure list" either
+// constructor gives; and a first element whose isinstance check raises, which
+// both typechecks leave in play, so the design-unit conversion is the one that
+// repeats the check. Fingerprint and Descriptor have no competing overload for
+// it to order.
 //
-// That is worth stating plainly because of how it failed. The broken group was
-// the two-argument one, which is the only form _comparisons.py builds, so
-// every pdist(..., "rocs") call silently scored a multiconformer OEMol on its
-// active conformer -- while the one-argument form a casual probe would reach
-// for stayed correct and showed nothing wrong.
-//
-// Moving this to 1 breaks the tie explicitly: the strict typecheck stays at 0
-// and therefore ranks ahead in every argument-count group. Fingerprint and
-// Descriptor are unaffected, having no competing overload for precedence to
-// order; Superpose's two overloads are disjoint for non-empty lists, so its
-// order is now deterministic rather than lucky without changing which one
-// accepts a list. An *empty* list is the exception -- both typechecks fall
-// through to the same ``PyList_Check`` branch and so both accept it, and the
-// precedence change does reorder that case. Nothing observable moves, because
-// both constructors refuse an empty list with the same
-// "SuperposeComparison: empty structure list".
+// ROCSComparison and MCSComparison no longer take part. Each used to carry a
+// constructor taking this vector beside one taking the strict
+// ``shared_ptr<OEMol>`` vector, and this value was what kept a list of OEMol on
+// the conformer-preserving one. Their constructors taking this vector are now
+// %ignore'd, and both classes take every molecule list through the one
+// conversion defined after the strict typemap below.
 %typemap(typecheck, precedence=1) const std::vector<OEChem::OEMolBase*>& {
     if (PyList_Check($input) && PyList_Size($input) > 0) {
         $1 = _oecluster_may_be_oemolbase(PyList_GetItem($input, 0)) ? 1 : 0;
@@ -788,6 +780,98 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, oereceptor, "Expected OERec
     } else {
         $1 = PyList_Check($input) ? 1 : 0;
     }
+}
+
+// ---- ROCSComparison and MCSComparison: any OEMolBase, each by its own type ----
+// Each element is copied by its own type: an OEMCMolBase, which is what an
+// OEMol is, through ``OEMol(const OEMCMolBase&)``, keeping every conformer;
+// anything else through ``OEMol(const OEMolBase&)``, as the one conformer it
+// has. No element's type decides how another is read, so an element is read
+// the same wherever it sits. That used not to hold: each class also exposed a
+// constructor taking ``vector<OEMolBase*>``, which copies through the second
+// constructor alone, and the typechecks chose between the two by element 0,
+// so a list starting with an OEGraphMol scored every later OEMol on its
+// active conformer.
+//
+// RMSDComparison takes the same parameter type and must keep the strict
+// conversion above: it measures conformers and refuses an OEGraphMol. So this
+// is defined under a parameter name nothing declares and %apply'd to
+// ``mols`` only around the ROCSComparison.h and MCSComparison.h %includes,
+// %clear'ed after each. RMSDComparison.h is %included between those two,
+// which is why there are two windows rather than one. The windows key on the
+// parameter name: renaming ``mols`` in either header puts that class back on
+// the strict conversion with a clean build, which only the Python tests would
+// notice.
+//
+// The typecheck tests list-ness only. Both classes keep one- and
+// two-argument constructor forms, so SWIG still emits a dispatcher, and a
+// typecheck that rejected a bad element there would replace this conversion's
+// positional message with the dispatcher's generic "new_<Class>" one.
+%typemap(in) const std::vector<std::shared_ptr<OEChem::OEMol>>& ANY_MOLECULE_LIST
+        (std::vector<std::shared_ptr<OEChem::OEMol>> temp, PyObject* held = 0) {
+    if (!PyList_Check($input)) {
+        SWIG_exception_fail(SWIG_TypeError, "Expected a list of OEMolBase objects");
+    }
+    // Held, and read, for the same reasons as in the OEMolBase list
+    // conversion above, and released by the freearg below. Every element is
+    // copied before the call today; holding the tuple for the whole call
+    // anyway means a change that borrows instead of copying cannot reopen the
+    // lifetime hole that conversion closes.
+    held = PyList_AsTuple($input);
+    if (!held) {
+        SWIG_fail;
+    }
+    Py_ssize_t size = PyTuple_GET_SIZE(held);
+    temp.reserve(size);
+    for (Py_ssize_t i = 0; i < size; ++i) {
+        PyObject* item = PyTuple_GET_ITEM(held, i);
+        int is_mol = _oecluster_isinstance_oemolbase(item);
+        if (is_mol < 0) {
+            SWIG_fail;
+        }
+        if (!is_mol) {
+            _oecluster_molecule_item_error(i, item, ", not an OEMolBase");
+            SWIG_fail;
+        }
+        int is_multi = _oecluster_isinstance_oemcmolbase(item);
+        if (is_multi < 0) {
+            SWIG_fail;
+        }
+        void* ptr = _oecluster_extract_swig_ptr(item);
+        if (!ptr) {
+            if (!PyErr_Occurred()) {
+                _oecluster_molecule_item_error(i, item, " that wraps no molecule");
+            }
+            SWIG_fail;
+        }
+        // The same offset-0 base casts as the two conversions above. The copy
+        // runs before $action and so outside every %exception handler; it is
+        // caught here, the way the general handler would, rather than left to
+        // escape into the interpreter.
+        try {
+            if (is_multi) {
+                temp.push_back(std::make_shared<OEChem::OEMol>(
+                    *reinterpret_cast<OEChem::OEMCMolBase*>(ptr)));
+            } else {
+                temp.push_back(std::make_shared<OEChem::OEMol>(
+                    *reinterpret_cast<OEChem::OEMolBase*>(ptr)));
+            }
+        } catch (const std::exception& e) {
+            SWIG_exception_fail(SWIG_RuntimeError, e.what());
+        } catch (...) {
+            SWIG_exception_fail(SWIG_RuntimeError, "Unknown C++ exception copying a molecule");
+        }
+    }
+    $1 = &temp;
+}
+
+%typemap(typecheck, precedence=SWIG_TYPECHECK_POINTER) const std::vector<std::shared_ptr<OEChem::OEMol>>& ANY_MOLECULE_LIST {
+    $1 = PyList_Check($input) ? 1 : 0;
+}
+
+// Same GIL precondition as the OEMolBase list's freearg.
+%typemap(freearg) const std::vector<std::shared_ptr<OEChem::OEMol>>& ANY_MOLECULE_LIST {
+    Py_XDECREF(held$argnum);
 }
 
 // ---- const std::vector<std::shared_ptr<OEBio::OEDesignUnit>>& ----
@@ -1109,6 +1193,13 @@ OECLUSTER_GIL_EXCEPTION(OECluster::leiden, leiden)
 %ignore OECluster::RMSDComparison::RMSDComparison(std::shared_ptr<const SharedData>, const Options&);
 %ignore OECluster::MCSComparison::MCSComparison(std::shared_ptr<const SharedData>, const Options&);
 
+// Hidden from Python only; C++ callers keep both. The remaining constructor's
+// list conversion (ANY_MOLECULE_LIST) accepts every OEMolBase, so these would
+// only offer a second, active-conformer reading of the same list for SWIG's
+// dispatcher to choose by element 0.
+%ignore OECluster::ROCSComparison::ROCSComparison(const std::vector<OEChem::OEMolBase*>&, const Options& = Options());
+%ignore OECluster::MCSComparison::MCSComparison(const std::vector<OEChem::OEMolBase*>&, const Options& = Options());
+
 // Ignore SparseStorage internals that use unordered_map/shared_mutex/thread
 %ignore OECluster::SparseStorage::Entries;
 
@@ -1317,7 +1408,13 @@ public:
 // Comparison classes
 // ============================================================================
 %include "oecluster/comparisons/FingerprintComparison.h"
+// One of the two windows for ANY_MOLECULE_LIST; see its definition for why
+// RMSD must stay outside them.
+%apply const std::vector<std::shared_ptr<OEChem::OEMol>>& ANY_MOLECULE_LIST {
+    const std::vector<std::shared_ptr<OEChem::OEMol>>& mols
+};
 %include "oecluster/comparisons/ROCSComparison.h"
+%clear const std::vector<std::shared_ptr<OEChem::OEMol>>& mols;
 %include "oecluster/comparisons/SuperposeComparison.h"
 %include "oecluster/comparisons/DescriptorComparison.h"
 %include "oecluster/comparisons/RMSDComparison.h"
@@ -1365,7 +1462,12 @@ public:
     }
     $1 = static_cast<unsigned int>(val);
 }
+// The other ANY_MOLECULE_LIST window.
+%apply const std::vector<std::shared_ptr<OEChem::OEMol>>& ANY_MOLECULE_LIST {
+    const std::vector<std::shared_ptr<OEChem::OEMol>>& mols
+};
 %include "oecluster/comparisons/MCSComparison.h"
+%clear const std::vector<std::shared_ptr<OEChem::OEMol>>& mols;
 %clear unsigned int max_matches;
 
 // ============================================================================

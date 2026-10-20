@@ -156,29 +156,19 @@ public:
      * @brief Construct from molecules that need not be multiconformer.
      *
      * Molecules are snapshotted into ``OEMol`` internally, so an
-     * ``OEGraphMol`` is accepted directly. The comparison never reads
-     * coordinates, so nothing is lost by the narrower input type.
+     * ``OEGraphMol`` is accepted directly. Each is copied through
+     * ``OEMol(const OEMolBase&)``, which keeps one conformer -- for a
+     * multiconformer ``OEMol``, its active one. The comparison never reads
+     * coordinates, so nothing is lost by that or by the narrower input type.
      *
      * C++ callers have to spell the conversion: an ``OEGraphMol*`` does not
      * convert to an ``OEMolBase*`` implicitly, and a pointer ``static_cast``
      * is rejected as well. Write ``&static_cast<OEChem::OEMolBase&>(graph_mol)``.
-     * Callers arriving through the bindings never see this; the typemap
-     * converts for them.
      *
-     * An ``OEMol`` satisfies this overload's bindings typecheck as well as the
-     * strict one above, so something has to rank them. That something is
-     * typemap precedence, not declaration order: SWIG ranks by argument count
-     * first and precedence second, and equal precedence leaves the order to an
-     * unspecified tie-break that was measured to differ between argument-count
-     * groups. See the precedence note on the ``OEMolBase*`` typecheck in
+     * Not exposed to Python. The bindings take every molecule list through
+     * the strict overload, converting each element by its own type, as they
+     * do for ``ROCSComparison``; see ``ANY_MOLECULE_LIST`` in
      * ``swig/oecluster.i``.
-     *
-     * The ranking has to be right even though this class cannot suffer a wrong
-     * one. Binding here rather than above costs a multiconformer ``OEMol`` its
-     * non-active conformers, which is unobservable to a comparison that never
-     * reads coordinates -- hence "nothing is lost" above. The same typemap
-     * serves ``ROCSComparison``, where that loss changes every score, so the
-     * ordering is load-bearing there and merely correct here.
      *
      * :param mols: Pointers to molecules.
      * :param opts: MCS options.
@@ -205,9 +195,8 @@ public:
      * conversion to ``shared_ptr<OEMol>``.
      *
      * Hidden from SWIG deliberately. ``swig/oecluster.i`` ``%include``s this
-     * header, so an unguarded third constructor would add a third candidate to
-     * the overload dispatch whose ranking the precedence note in that file
-     * exists to pin. This is a C++ source-compatibility measure with no
+     * header and exposes the strict overload alone, through one list
+     * conversion. This is a C++ source-compatibility measure with no
      * bindings surface.
      *
      * :param mols: Shared pointers to molecules, as for the strict overload.
