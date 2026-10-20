@@ -3,10 +3,10 @@
 The GIL assertions in test_native_bindings.py read swig/oecluster.i, which
 describes the interface rather than what SWIG generated from it. A registration
 naming a function SWIG never wraps passes them, and so does an extension built
-before a registration existed. The tests here look at what the build produced:
-the first scans the wrapper source SWIG generated with the imported module, and
-the second times calls into the imported extension while a second thread tries
-to run.
+before a registration existed. The tests here look at what a build produced:
+the first scans the wrapper source in the build tree whose shadow module the
+import uses, and the second times calls into the imported extension while a
+second thread tries to run.
 """
 
 import logging
@@ -25,9 +25,14 @@ _INTERFACE = _REPO / "swig" / "oecluster.i"
 _BUILD_ROOT = _REPO / "build"
 
 # Both comment forms SWIG honours, stripped before registrations are read so
-# that a commented-out registration does not count as one.
-_SWIG_COMMENT = re.compile(r"/\*.*?\*/|//[^\n]*", re.DOTALL)
+# that a commented-out registration does not count as one. Double-quoted
+# strings are matched too and kept, so that a comment marker inside one, such
+# as the "/*" of a glob pattern, does not start a comment.
+_SWIG_COMMENT_OR_STRING = re.compile(r'"(?:\\.|[^"\\\n])*"|/\*.*?\*/|//[^\n]*', re.DOTALL)
 _REGISTRATION = re.compile(r"\bOECLUSTER_GIL_(?:MEMORY_)?EXCEPTION\(OECluster::(\w+),")
+# Looser than _REGISTRATION, to count the invocations it fails to parse.
+_INVOCATION = re.compile(r"\bOECLUSTER_GIL_\w*EXCEPTION\s*\(")
+_DEFINE_LINE = re.compile(r"^[ \t]*%define\b[^\n]*", re.MULTILINE)
 # No brace inside a SWIG wrapper body sits alone at the start of a line, so the
 # first line holding only "}" closes the function.
 _WRAPPER_FUNCTION = re.compile(r"^SWIGINTERN PyObject \*(_wrap_\w+)\(.*?^\}$",
@@ -35,6 +40,9 @@ _WRAPPER_FUNCTION = re.compile(r"^SWIGINTERN PyObject \*(_wrap_\w+)\(.*?^\}$",
 # The first line of both OECLUSTER_GIL_EXCEPTION and
 # OECLUSTER_GIL_MEMORY_EXCEPTION.
 _RELEASE_MARKER = "Py_BEGIN_ALLOW_THREADS"
+# Under build/, this repository builds into build/ itself (the default CMake
+# preset) and build/{wheel_tag} (pyproject's build-dir).
+_SHADOW_MODULE_PATTERNS = ("swig/_oecluster.py", "*/swig/_oecluster.py")
 
 
 def _registered_names(interface_text):
@@ -42,8 +50,20 @@ def _registered_names(interface_text):
 
     :param interface_text: The text of swig/oecluster.i.
     :returns: One unqualified name per registration.
+    :raises AssertionError: When an invocation of a GIL macro, outside
+        comments and ``%define`` lines, does not parse as a registration, since
+        the scan would otherwise leave it unchecked.
     """
-    return _REGISTRATION.findall(_SWIG_COMMENT.sub("", interface_text))
+    code = _SWIG_COMMENT_OR_STRING.sub(
+        lambda match: match.group(0) if match.group(0).startswith('"') else "",
+        interface_text)
+    names = _REGISTRATION.findall(code)
+    invocations = len(_INVOCATION.findall(_DEFINE_LINE.sub("", code)))
+    assert invocations == len(names), (
+        f"{invocations} GIL macro invocations, but only {len(names)} parse as "
+        "OECLUSTER_GIL_[MEMORY_]EXCEPTION(OECluster::<name>, ...); the rest "
+        "would go unchecked")
+    return names
 
 
 def _unreleased(names, wrapper_text):
@@ -76,40 +96,51 @@ def _unreleased(names, wrapper_text):
 
 
 def _bound_wrapper(build_root, module_file):
-    """Return the wrapper source generated with the imported module, or skip.
+    """Return the wrapper source in the build tree the import uses, or skip.
 
-    A build directory's swig/_oecluster.py is the file a wheel installs, and
-    the development build copies, as oecluster/oecluster.py, so a
-    byte-identical copy ties the imported module to the wrapper SWIG generated
-    beside it.
+    A build tree's swig/_oecluster.py is the shadow module a wheel installs,
+    and the development build copies, as oecluster/oecluster.py, so a
+    byte-identical copy identifies the build tree whose shadow module is
+    imported. It does not identify the extension: a GIL registration is an
+    ``%exception`` directive, which changes the C++ wrapper and never the
+    shadow module, so two trees whose interfaces differ only in registrations
+    match alike. The scan therefore assumes that the matching tree's wrapper is
+    the one the imported extension was compiled from. That fails when the
+    wrapper was regenerated but did not compile, or when a tree outside the
+    search, such as build-debug, wrote the imported module and an older tree
+    here matches it.
 
-    :param build_root: Directory searched recursively for swig/_oecluster.py.
+    :param build_root: Directory whose swig/ and */swig/ subdirectories are
+        searched for _oecluster.py.
     :param module_file: The imported oecluster.oecluster module's file.
-    :returns: Path of the matching directory's oeclusterPYTHON_wrap.cxx.
+    :returns: Path of the matching tree's oeclusterPYTHON_wrap.cxx.
     """
     module_bytes = module_file.read_bytes()
-    candidates = (sorted(path.parent for path in build_root.rglob("swig/_oecluster.py"))
+    candidates = (sorted(path.parent for pattern in _SHADOW_MODULE_PATTERNS
+                         for path in build_root.glob(pattern))
                   if build_root.is_dir() else [])
     matches = [directory for directory in candidates
                if (directory / "_oecluster.py").read_bytes() == module_bytes]
     if len(matches) == 1:
         return matches[0] / "oeclusterPYTHON_wrap.cxx"
     if matches:
-        pytest.skip(f"{len(matches)} build directories hold a swig/_oecluster.py "
-                    f"identical to {module_file}, so the wrapper behind it is "
+        pytest.skip(f"{len(matches)} build trees hold a swig/_oecluster.py "
+                    f"identical to {module_file}, so which wrapper to scan is "
                     f"ambiguous: {', '.join(map(str, matches))}")
     inspected = ", ".join(map(str, candidates)) or "none found"
-    pytest.skip(f"no swig/_oecluster.py under {build_root} is identical to "
+    pytest.skip(f"neither {build_root}/swig/_oecluster.py nor any "
+                f"{build_root}/*/swig/_oecluster.py is identical to "
                 f"{module_file}; directories inspected: {inspected}")
 
 
 def test_every_registered_wrapper_releases_the_gil():
     """Every function that runs a registered call releases the GIL.
 
-    Reads the wrapper source SWIG generated alongside the imported module,
-    and skips when no single build directory holds it. A registration SWIG
-    never applied, whether to a function it does not wrap or because the
-    directive sits after the declaration, leaves no marker to find.
+    Scans the wrapper source in the build tree whose shadow module the import
+    uses, assuming that wrapper is the one the imported extension was compiled
+    from (see _bound_wrapper), and skips when no single build tree matches. A
+    registration SWIG never applied, whether to a function it does not wrap or
+    because the directive sits after the declaration, leaves no marker to find.
     """
     from oecluster import oecluster as native
 
@@ -118,6 +149,40 @@ def test_every_registered_wrapper_releases_the_gil():
     assert names, f"no GIL registrations found in {_INTERFACE}"
     problems = _unreleased(names, wrapper.read_text(encoding="utf-8"))
     assert not problems, "\n".join(problems)
+
+
+# One registration among lines that name a GIL macro but are not registrations:
+# both %define lines and two commented-out invocations.
+_SYNTHETIC_INTERFACE = """\
+%define OECLUSTER_GIL_EXCEPTION(QUALIFIED, NAME)
+%enddef
+%define OECLUSTER_GIL_MEMORY_EXCEPTION(QUALIFIED, NAME)
+%enddef
+// OECLUSTER_GIL_EXCEPTION(OECluster::commented, commented)
+/* OECLUSTER_GIL_MEMORY_EXCEPTION(OECluster::blocked, blocked) */
+OECLUSTER_GIL_EXCEPTION(OECluster::first, first)
+"""
+
+
+def test_the_registration_parser_skips_defines_and_comments():
+    assert _registered_names(_SYNTHETIC_INTERFACE) == ["first"]
+
+
+@pytest.mark.parametrize("registration", [
+    "OECLUSTER_GIL_EXCEPTION( OECluster::spaced, spaced)",
+    "OECLUSTER_GIL_MEMORY_EXCEPTION(OECluster::detail::nested, nested)",
+], ids=["space-after-parenthesis", "nested-scope"])
+def test_a_registration_that_does_not_parse_is_refused(registration):
+    with pytest.raises(AssertionError, match="2 GIL macro invocations, but only 1 parse"):
+        _registered_names(_SYNTHETIC_INTERFACE + registration + "\n")
+
+
+def test_a_comment_marker_in_a_string_does_not_hide_a_registration():
+    text = (_SYNTHETIC_INTERFACE
+            + '%pythoncode %{\n_SOURCES = "src/*.py"\n%}\n'
+            + "OECLUSTER_GIL_EXCEPTION(OECluster::second, second)\n"
+            + "// a later */ that a comment opened inside the string would close on\n")
+    assert _registered_names(text) == ["first", "second"]
 
 
 # A call reads as released when the ticker's longest gap stays under this
