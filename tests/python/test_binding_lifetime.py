@@ -249,6 +249,52 @@ def test_a_check_that_raises_only_once_is_lost(route):
     assert flaky.reads >= 2
 
 
+class _RewritesTheList:
+    """A first element whose type read replaces the caller's list.
+
+    Its ``__class__`` answers ``OEDesignUnit``, so Superpose's design-unit
+    typecheck picks the design-unit constructor, and on that read it rewrites
+    ``items`` to a real design unit followed by a string.
+    """
+
+    def __init__(self, items):
+        self._items = items
+
+    @property
+    def __class__(self):
+        self._items[:] = [oechem.OEDesignUnit(), "x"]
+        return oechem.OEDesignUnit
+
+
+@pytest.mark.parametrize("held_elsewhere", [True, False],
+                         ids=["held-elsewhere", "held-only-by-the-list"])
+def test_a_list_rewritten_during_dispatch_is_checked_as_it_then_stands(
+        held_elsewhere):
+    """The design-unit typecheck reads element 0 during overload resolution,
+    before any conversion runs, and that read can run Python code. The
+    conversion then checks the list as it stands, so the string the rewrite
+    put at index 1 is refused by position.
+
+    In the second case the list holds the only reference to the first
+    element, so the rewrite drops it while the typecheck is still reading it.
+    The typecheck holds a reference of its own for the check; this case shows
+    that path completes, though only a memory sanitizer could show a stale
+    read.
+    """
+    from oecluster import oecluster as native
+
+    items = []
+    first = _RewritesTheList(items)
+    items.append(first)
+    items.append(oechem.OEDesignUnit())
+    if not held_elsewhere:
+        del first
+    with pytest.raises(
+            TypeError,
+            match=r"^design unit list item 1 is a str, not an OEDesignUnit$"):
+        native.SuperposeComparison(items)
+
+
 def _raising_pointer(base, attribute):
     """An instance of a ``base`` subclass whose ``attribute`` raises.
 

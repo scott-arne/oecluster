@@ -777,9 +777,10 @@ catch (const std::bad_alloc&) {
 // consulted for it.) Accepting every list means that, were this typecheck
 // examined first, it would take design-unit lists too, and the conversion
 // above would refuse each design unit as "not an OEMolBase". The
-// design-unit typecheck still reads element 0, and being examined first is
-// what keeps a list that starts with a design unit on the design-unit
-// constructor, leaving every other list to this one. Two lists reach the
+// design-unit typecheck still reads element 0 (its comment says what that
+// read can do to the list), and being examined first is what keeps a list
+// that starts with a design unit on the design-unit constructor, leaving
+// every other list to this one. Two lists reach the
 // design-unit constructor without element 0 being known to be a design unit:
 // an empty list, refused with the same "SuperposeComparison: empty structure
 // list" either constructor gives; and one whose first element's isinstance
@@ -1011,10 +1012,25 @@ catch (const std::bad_alloc&) {
 
 // Unlike the molecule list typechecks, this one still reads element 0: it is
 // what chooses between SuperposeComparison's two constructors. See the
-// comment at the OEMolBase list's typecheck.
+// comment at the OEMolBase list's typecheck for the order that relies on.
+//
+// What the caller's list is, for every molecule and design-unit list
+// conversion in this file: overload resolution can run Python code before
+// any conversion does. This check runs element 0's isinstance, which can
+// read its __class__, and an options argument's own type check can read its
+// ``this``. Either can change the list. The conversion SWIG then selects
+// snapshots and checks the list as it stands when that conversion runs, not
+// as it stood at call entry, and every element the conversion reads is
+// still checked and held for the call.
+//
+// Element 0 is held across the check because a __class__ that empties the
+// list can drop its last reference while isinstance is still reading it.
 %typemap(typecheck, precedence=SWIG_TYPECHECK_POINTER) const std::vector<std::shared_ptr<OEBio::OEDesignUnit>>& {
     if (PyList_Check($input) && PyList_Size($input) > 0) {
-        $1 = _oecluster_may_be_oedesignunit(PyList_GetItem($input, 0)) ? 1 : 0;
+        PyObject* first = PyList_GetItem($input, 0);
+        Py_XINCREF(first);
+        $1 = _oecluster_may_be_oedesignunit(first) ? 1 : 0;
+        Py_XDECREF(first);
     } else {
         $1 = PyList_Check($input) ? 1 : 0;
     }
