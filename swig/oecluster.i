@@ -635,6 +635,26 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, oereceptor, "Expected OERec
 // ROCSComparison and MCSComparison take their lists through a conversion of
 // their own, defined after the strict OEMol list conversion.
 
+// The catch clauses for an allocation inside a typemap body. A typemap runs
+// outside every %exception handler -- %exception wraps only $action -- so a
+// std::bad_alloc escaping one would leave the wrapper as a C++ exception and
+// terminate the interpreter. Follow a ``try`` with this. std::bad_alloc and
+// std::length_error become SWIG_MemoryError, as in
+// OECLUSTER_GIL_MEMORY_EXCEPTION and the consensus out typemaps below, and
+// SWIG_exception_fail reaches ``fail:``, so the wrapper's freearg typemaps
+// still run. WHAT completes "out of memory ...".
+%define OECLUSTER_TYPEMAP_ALLOCATION_CATCH(WHAT)
+catch (const std::bad_alloc&) {
+    SWIG_exception_fail(SWIG_MemoryError, "out of memory " WHAT);
+} catch (const std::length_error& e) {
+    SWIG_exception_fail(SWIG_MemoryError, e.what());
+} catch (const std::exception& e) {
+    SWIG_exception_fail(SWIG_RuntimeError, e.what());
+} catch (...) {
+    SWIG_exception_fail(SWIG_RuntimeError, "Unknown C++ exception " WHAT);
+}
+%enddef
+
 // ---- const std::vector<OEChem::OEMolBase*>& ----
 %typemap(in) const std::vector<OEChem::OEMolBase*>& (std::vector<OEChem::OEMolBase*> temp, PyObject* held = 0) {
     if (!PyList_Check($input)) {
@@ -652,7 +672,9 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, oereceptor, "Expected OERec
         SWIG_fail;
     }
     Py_ssize_t size = PyTuple_GET_SIZE(held);
-    temp.reserve(size);
+    try {
+        temp.reserve(size);
+    } OECLUSTER_TYPEMAP_ALLOCATION_CATCH("converting a molecule list")
     for (Py_ssize_t i = 0; i < size; ++i) {
         PyObject* item = PyTuple_GET_ITEM(held, i);
         // A check that raised has not answered, so its own exception is the
@@ -676,8 +698,11 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, oereceptor, "Expected OERec
             SWIG_fail;
         }
         // Same offset-0 base-cast assumption as the shared_ptr<OEMol> typemap
-        // below; see the comment there.
-        temp.push_back(reinterpret_cast<OEChem::OEMolBase*>(ptr));
+        // below; see the comment there. The reserve above means this cannot
+        // reallocate today; the guard keeps that from being load-bearing.
+        try {
+            temp.push_back(reinterpret_cast<OEChem::OEMolBase*>(ptr));
+        } OECLUSTER_TYPEMAP_ALLOCATION_CATCH("converting a molecule list")
     }
     $1 = &temp;
 }
@@ -733,7 +758,9 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, oereceptor, "Expected OERec
         SWIG_exception_fail(SWIG_TypeError, "Expected a list of OEMol objects");
     }
     Py_ssize_t size = PyList_Size($input);
-    temp.reserve(size);
+    try {
+        temp.reserve(size);
+    } OECLUSTER_TYPEMAP_ALLOCATION_CATCH("converting a molecule list")
     for (Py_ssize_t i = 0; i < size; ++i) {
         PyObject* item = PyList_GetItem($input, i);
         int is_instance = _oecluster_isinstance_oemol(item);
@@ -769,7 +796,9 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, oereceptor, "Expected OERec
         // conversion cannot be used instead: the pointer comes from another
         // extension module's type registry, which this module cannot query.
         auto* mcmol = reinterpret_cast<OEChem::OEMCMolBase*>(ptr);
-        temp.push_back(std::make_shared<OEChem::OEMol>(*mcmol));
+        try {
+            temp.push_back(std::make_shared<OEChem::OEMol>(*mcmol));
+        } OECLUSTER_TYPEMAP_ALLOCATION_CATCH("converting a molecule list")
     }
     $1 = &temp;
 }
@@ -825,7 +854,9 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, oereceptor, "Expected OERec
         SWIG_fail;
     }
     Py_ssize_t size = PyTuple_GET_SIZE(held);
-    temp.reserve(size);
+    try {
+        temp.reserve(size);
+    } OECLUSTER_TYPEMAP_ALLOCATION_CATCH("converting a molecule list")
     for (Py_ssize_t i = 0; i < size; ++i) {
         PyObject* item = PyTuple_GET_ITEM(held, i);
         int is_mol = _oecluster_isinstance_oemolbase(item);
@@ -848,9 +879,8 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, oereceptor, "Expected OERec
             SWIG_fail;
         }
         // The same offset-0 base casts as the two conversions above. The copy
-        // runs before $action and so outside every %exception handler; it is
-        // caught here, the way the general handler would, rather than left to
-        // escape into the interpreter.
+        // runs before $action, outside every %exception handler, so it is
+        // guarded here by OECLUSTER_TYPEMAP_ALLOCATION_CATCH.
         try {
             if (is_multi) {
                 temp.push_back(std::make_shared<OEChem::OEMol>(
@@ -859,11 +889,7 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, oereceptor, "Expected OERec
                 temp.push_back(std::make_shared<OEChem::OEMol>(
                     *reinterpret_cast<OEChem::OEMolBase*>(ptr)));
             }
-        } catch (const std::exception& e) {
-            SWIG_exception_fail(SWIG_RuntimeError, e.what());
-        } catch (...) {
-            SWIG_exception_fail(SWIG_RuntimeError, "Unknown C++ exception copying a molecule");
-        }
+        } OECLUSTER_TYPEMAP_ALLOCATION_CATCH("converting a molecule list")
     }
     $1 = &temp;
 }
@@ -883,7 +909,9 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, oereceptor, "Expected OERec
         SWIG_exception_fail(SWIG_TypeError, "Expected a list of OEDesignUnit objects");
     }
     Py_ssize_t size = PyList_Size($input);
-    temp.reserve(size);
+    try {
+        temp.reserve(size);
+    } OECLUSTER_TYPEMAP_ALLOCATION_CATCH("converting a design-unit list")
     for (Py_ssize_t i = 0; i < size; ++i) {
         PyObject* item = PyList_GetItem($input, i);
         int is_instance = _oecluster_isinstance_oedesignunit(item);
@@ -902,7 +930,9 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, oereceptor, "Expected OERec
         }
         // Make a COPY wrapped in shared_ptr (we do not own the Python object)
         auto* du = reinterpret_cast<OEBio::OEDesignUnit*>(ptr);
-        temp.push_back(std::make_shared<OEBio::OEDesignUnit>(*du));
+        try {
+            temp.push_back(std::make_shared<OEBio::OEDesignUnit>(*du));
+        } OECLUSTER_TYPEMAP_ALLOCATION_CATCH("converting a design-unit list")
     }
     $1 = &temp;
 }
@@ -922,20 +952,28 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, oereceptor, "Expected OERec
     } else if (PyCallable_Check($input)) {
         PyObject* callback = $input;
         Py_INCREF(callback);
-        // Use shared_ptr guard to ensure Py_DECREF when lambda is destroyed
-        auto guard = std::shared_ptr<PyObject>(callback, [](PyObject* p) {
-            PyGILState_STATE gstate = PyGILState_Ensure();
-            Py_DECREF(p);
-            PyGILState_Release(gstate);
-        });
-        $1 = [guard](size_t completed, size_t total) {
-            PyGILState_STATE gstate = PyGILState_Ensure();
-            PyObject* result = PyObject_CallFunction(guard.get(), "nn",
-                (Py_ssize_t)completed, (Py_ssize_t)total);
-            Py_XDECREF(result);
-            if (PyErr_Occurred()) PyErr_Clear();
-            PyGILState_Release(gstate);
-        };
+        // Both statements below can allocate: the shared_ptr its control
+        // block, and the std::function its copy of the lambda when that is
+        // stored on the heap. Neither leaks the reference taken above if it
+        // throws. shared_ptr calls the deleter itself when the control block
+        // cannot be allocated, and a throwing assignment unwinds through
+        // guard's destructor, before the catch runs.
+        try {
+            // Use shared_ptr guard to ensure Py_DECREF when lambda is destroyed
+            auto guard = std::shared_ptr<PyObject>(callback, [](PyObject* p) {
+                PyGILState_STATE gstate = PyGILState_Ensure();
+                Py_DECREF(p);
+                PyGILState_Release(gstate);
+            });
+            $1 = [guard](size_t completed, size_t total) {
+                PyGILState_STATE gstate = PyGILState_Ensure();
+                PyObject* result = PyObject_CallFunction(guard.get(), "nn",
+                    (Py_ssize_t)completed, (Py_ssize_t)total);
+                Py_XDECREF(result);
+                if (PyErr_Occurred()) PyErr_Clear();
+                PyGILState_Release(gstate);
+            };
+        } OECLUSTER_TYPEMAP_ALLOCATION_CATCH("converting a progress callback")
     } else {
         SWIG_exception_fail(SWIG_TypeError, "Expected callable or None for progress callback");
     }
