@@ -2,6 +2,155 @@
 
 This file starts at 5.0.0; earlier releases are not recorded here.
 
+## [5.26.0] - 2026-10-20
+
+### Changed
+
+- **ROCS now reads every conformer of an `OEMol` wherever it sits in a
+  molecule list, so a ROCS matrix built from a list that put an `OEGraphMol`
+  ahead of an `OEMol` can change under this release. Recompute it rather than
+  compare against a stored one.** The bindings exposed two `ROCSComparison`
+  constructors: one copied each molecule with every conformer and accepted
+  only `OEMol`, the other copied each molecule as its active conformer alone,
+  and the list's first element chose between them. A first element that was
+  a molecule other than an `OEMol` sent the whole list to the second, so every
+  `OEMol` after it was scored on its active conformer, with no error and no
+  warning. The second is no longer wrapped, and the first now takes every
+  list through one conversion that copies each element by its own type: an
+  `OEMol` with every conformer, anything else as the one conformer it has.
+  `ROCSComparison`, `pdist()`, `cdist()` and every function that takes
+  `comparison="rocs"` build that same native class, so they change together.
+  The C++ constructors are unchanged.
+- **Lists that were all `OEMol`, or all `OEGraphMol`, are unaffected.** Each
+  element reaches the copy it reached before -- `OEMol(const OEMCMolBase&)`
+  for an `OEMol`, keeping every conformer, and `OEMol(const OEMolBase&)` for
+  anything else -- so only a list that put a molecule other than an `OEMol`
+  ahead of an `OEMol` can score differently. A list with an `OEMol` first and
+  an `OEGraphMol` later used to raise instead; see below.
+- The size of the change, on one fixture: the one behind
+  `test_rocs_reads_every_conformer_whatever_the_list_order` in
+  `tests/python/test_rocs_conformer_order.py`. It is one Omega conformer of
+  `CCCCCC(=O)NCCc1ccccc1` as an `OEMol` (`query`) and as an `OEGraphMol` copy
+  (`query_graph`), against thirty Omega conformers of the same SMILES as an
+  `OEMol` (`flex`) whose active conformer is set to the one that overlays
+  `query_graph` worst. `pdist([query_graph, flex], "rocs", num_threads=1)`
+  reads 0.0 as a `combo_norm` distance, and so does the reverse order. The
+  active-conformer reading, which is what the previous release returned for
+  `[query_graph, flex]`, is 0.604896; the test computes it under this release
+  as `active_only`, from an `OEGraphMol` copy of `flex`. Measured on
+  2026-10-20 with OpenEye Toolkits 2026.1.0. Omega's conformers can differ
+  between toolkit versions, so those numbers belong to this fixture on that
+  toolkit, not to the molecule.
+- **`cdist()` inherited the order dependence through set A.** It builds one
+  comparison over `items_a + items_b`, so set A's first element decided how
+  both sets were read: an `OEGraphMol` there reduced every `OEMol` in either
+  set to its active conformer, and two sets that were each of one type, but
+  not the same one, still interacted. Each element is now read by its own
+  type, whichever set holds it. On the fixture above,
+  `cdist([query_graph], [flex], "rocs", num_threads=1)` reads 0.0, where the
+  active-conformer reading is 0.604896.
+- **Mixed lists that used to raise `TypeError` now construct, for ROCS and
+  MCS alike.** A first element that was an `OEMol` sent the list to the
+  `OEMol`-only constructor, which refused a later `OEGraphMol` with
+  `TypeError: List item is not an OEMol object`; through `cdist()` the
+  refusal reached across the sets, so `cdist([oemol], [graph_mol], ...)`
+  raised it too. `MCSComparison` had the same pair of constructors and takes
+  the same conversion now. MCS scores are topological and never read
+  coordinates, so for MCS only which lists are accepted changes: benzene as an
+  `OEGraphMol` against toluene as an `OEMol` reads 1/7 through `pdist()` in
+  either order and through `cdist()` in either direction, as
+  `test_mcs_accepts_a_mixed_list_in_either_order` pins. `RMSDComparison`
+  still accepts only `OEMol`.
+- **Reversing a ROCS `cdist()` asks a different question, and the answer
+  depends on direction, not type.** `cdist([flex], [query_graph], "rocs")`,
+  refused before, reads 0.604908 on the fixture above at `num_threads=1`, as
+  does `cdist([flex], [query], "rocs")`. Entry `[i, j]` of a `cdist()` block is
+  what `items_a[i]` finds when it searches `items_b[j]`'s conformers, so a
+  multi-conformer `OEMol` in set A is overlaid as its active conformer, here
+  the worst one, whatever set B holds. `pdist()` scores both orientations and
+  keeps the better, and reads 0.0 for the same pair.
+- **A refused list element is now reported by its position, its type and the
+  type expected, on every route into the list conversions, and the message
+  text changed.** Each molecule and design-unit list conversion used to refuse
+  an element with "List item is not an OEMolBase object",
+  "List item is not an OEMol object" or
+  "List item is not an OEDesignUnit object", naming no element. Where the bad
+  element came first on one of the six comparison constructors, the overload
+  dispatcher refused the list before any conversion ran, with
+  "Wrong number or type of arguments for overloaded function
+  'new_FingerprintComparison'" or its counterpart, naming a private symbol.
+  The messages now read
+  `molecule list item 2 is a int, not an OEMolBase` for
+  `FingerprintComparison`, `DescriptorComparison`, `ROCSComparison`,
+  `MCSComparison`, `SuperposeComparison` given molecules,
+  `descriptor_statistics()`, `murcko_scaffolds()` and `murcko()`;
+  `molecule list item 1 is a OEGraphMol, not an OEMol` for `RMSDComparison`;
+  and `design unit list item 1 is a str, not an OEDesignUnit` for
+  `SuperposeComparison` given design units. An instance that passes the type
+  check but wraps nothing, as one made by `__new__` without `__init__` does,
+  gets `molecule list item 1 is a OEGraphMol that wraps no molecule`, or
+  `... that wraps no design unit`. The index is the element's position in the
+  list the caller passed; `cdist()` names the set and counts within it, as in
+  `items_b item 1 is a int, not an OEMolBase`, rather than within the
+  `items_a + items_b` it builds over. The type is read from the type's
+  `__name__`, or given as `<unnamed type>` when that read raises an
+  `Exception` or returns something other than a string; any other exception
+  from the read, such as `KeyboardInterrupt` or `SystemExit`, propagates. A
+  caller matching on "List item is not" or on the dispatcher's message for
+  these inputs has to change.
+- `pdist()` and `cdist()` with `comparison="rmsd"` check every item before
+  expanding conformers, which they do by default, so a refused item gets the
+  message above, indexed before any expansion. An item could fail inside the
+  expansion before: an object with a `NumConfs` method reporting more than one
+  conformer raised `AttributeError` for its missing `GetTitle`, and an `OEMol`
+  made by `__new__` raised OEChem's own `TypeError` from `NumConfs`.
+
+### Fixed
+
+- **`murcko_scaffolds()` and `murcko()` could crash the interpreter when
+  another thread removed molecules from the list during the call.** Both
+  release the GIL while they extract scaffolds, and the list conversion
+  borrowed each molecule from the caller's list without taking a reference,
+  so emptying the list mid-call freed any molecule nothing else referenced
+  while native code was still reading it. Reproduced as a segmentation fault
+  inside scaffold extraction at `num_threads=1`:
+  `test_clearing_the_list_mid_call_does_not_crash` in
+  `tests/python/test_binding_lifetime.py` builds 20,000 `OEGraphMol`s and has
+  a second thread call `mols.clear()` after 0.2 s, and its child process died
+  on signal 11 under 5.25.1. The conversion now holds a reference to every
+  element until the call returns. No result changes. The other molecule and
+  design-unit list conversions hold references the same way, but the two
+  Murcko functions are the only list-taking entry points that release the
+  GIL.
+- **An exception raised by an element's own type check now reaches the
+  caller.** An element whose `__class__` raises, for example, used to have
+  that exception replaced by a `TypeError` about its type: the conversion's
+  refusal, or the dispatcher's generic message when the element came first.
+  It now propagates from every molecule and design-unit list conversion, from
+  the conversion of an `OEFPBatch` argument, and from RMSD's item check in
+  `pdist()` and `cdist()`, for a check that raises each time it is asked.
+  Reading the wrapped pointer is treated the same way: only `AttributeError`
+  from `this`, or from an `OEFPBatch`'s `_native`, means the object wraps
+  nothing, and any other exception propagates. An `oefp` whose batch types
+  cannot be loaded is reported by the import or attribute error that loading
+  raised, not as "Expected an oefp.OEFPBatch.".
+- An allocation failure inside the conversion of a molecule list, a
+  design-unit list or a progress callback now raises `MemoryError`, where it
+  used to leave the wrapper as an uncaught C++ exception and terminate the
+  interpreter. Found by reading the conversions, not reproduced.
+
+### Notes
+
+- The `%exception` registration for `OECluster::cdist` is removed, and that
+  changes nothing: SWIG generated no wrapper for that function, and
+  `cdist()` calls `cdist_into_address`, whose registration is unchanged. A
+  new `tests/python/test_gil_release.py` checks the build rather than the
+  interface file. It reads the generated wrapper and requires each of the 36
+  registered functions to reach its C++ call with the GIL released, skipping
+  with the reason when it cannot tell which build tree the imported module
+  came from; and it times `butina_cluster`, `k_medoids_cluster` and
+  `murcko_scaffolds` while a second thread tries to run.
+
 ## [5.25.1] - 2026-10-17
 
 ### Fixed
