@@ -136,9 +136,9 @@ static void* _oecluster_extract_swig_ptr(PyObject* obj) {
     return ptr;
 }
 
-// Sets TypeError "molecule list item <index> is a <type name><tail>". The
-// stable ABI makes PyTypeObject opaque, so the name is read from the type's
-// __name__ rather than tp_name.
+// Sets TypeError "molecule list item <index> is a <type name><tail>". Call it
+// with no exception pending. The stable ABI makes PyTypeObject opaque, so the
+// name is read from the type's __name__ rather than tp_name.
 static void _oecluster_molecule_item_error(Py_ssize_t index, PyObject* item, const char* tail) {
     PyObject* name = PyObject_GetAttrString((PyObject*)Py_TYPE(item), "__name__");
     if (!name || !PyUnicode_Check(name)) {
@@ -276,22 +276,35 @@ static bool _oecluster_check_oefp_abi() {
 }
 
 // ---- Type checker generator macro ----
-// Generates a cached isinstance checker for an OpenEye Python type.
+// Generates a cached isinstance check for an OpenEye Python type, in two forms.
+// _oecluster_isinstance_TAG returns 1 or 0, or -1 with the exception set when
+// the import or the check itself raised; a caller that can fail propagates it.
+// _oecluster_is_TAG is the yes/no form for callers that cannot: a typecheck
+// typemap has no way to report an error, and SWIG's overload dispatcher would
+// go on calling the API with it pending. That form clears the exception and
+// answers no, and its callers raise their own TypeError on a no.
 // TAG:    identifier suffix (e.g., oemolbase)
 // MODULE: Python module string (e.g., "openeye.oechem")
 // CLASS:  Python class name string (e.g., "OEMolBase")
 #define DEFINE_OE_TYPE_CHECKER(TAG, MODULE, CLASS) \
     static PyObject* _oecluster_oe_##TAG##_type = NULL; \
-    static bool _oecluster_is_##TAG(PyObject* obj) { \
+    static int _oecluster_isinstance_##TAG(PyObject* obj) { \
         if (!_oecluster_oe_##TAG##_type) { \
             PyObject* mod = PyImport_ImportModule(MODULE); \
-            if (mod) { \
-                _oecluster_oe_##TAG##_type = PyObject_GetAttrString(mod, CLASS); \
-                Py_DECREF(mod); \
-            } \
-            if (!_oecluster_oe_##TAG##_type) return false; \
+            if (!mod) return -1; \
+            _oecluster_oe_##TAG##_type = PyObject_GetAttrString(mod, CLASS); \
+            Py_DECREF(mod); \
+            if (!_oecluster_oe_##TAG##_type) return -1; \
         } \
-        return PyObject_IsInstance(obj, _oecluster_oe_##TAG##_type) == 1; \
+        return PyObject_IsInstance(obj, _oecluster_oe_##TAG##_type); \
+    } \
+    static bool _oecluster_is_##TAG(PyObject* obj) { \
+        int is_instance = _oecluster_isinstance_##TAG(obj); \
+        if (is_instance < 0) { \
+            PyErr_Clear(); \
+            return false; \
+        } \
+        return is_instance == 1; \
     }
 
 // ---- Type checker instantiations ----
@@ -547,11 +560,12 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, _oecluster_is_oereceptor, "
         SWIG_exception_fail(SWIG_TypeError, "Expected a list of OEMolBase objects");
     }
     // The tuple holds a reference to every element until the freearg typemap
-    // below releases it, so emptying the caller's list cannot free a molecule
-    // while native code reads the pointers taken here. An entry point that
-    // releases the GIL lets another thread do exactly that mid-call. The loop
-    // reads the tuple rather than the list because its checks can run Python
-    // code, which could resize the list under it.
+    // below releases it, so for the duration of the call, emptying the
+    // caller's list cannot free a molecule. An entry point that releases the
+    // GIL lets another thread do exactly that mid-call. Nothing here protects
+    // a pointer kept after the call returns. The loop reads the tuple rather
+    // than the list because its checks can run Python code, which could
+    // resize the list under it.
     held = PyList_AsTuple($input);
     if (!held) {
         SWIG_fail;
@@ -560,7 +574,13 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, _oecluster_is_oereceptor, "
     temp.reserve(size);
     for (Py_ssize_t i = 0; i < size; ++i) {
         PyObject* item = PyTuple_GET_ITEM(held, i);
-        if (!_oecluster_is_oemolbase(item)) {
+        // A check that raised has not answered, so its own exception is the
+        // report, not a claim about the item's type.
+        int is_mol = _oecluster_isinstance_oemolbase(item);
+        if (is_mol < 0) {
+            SWIG_fail;
+        }
+        if (!is_mol) {
             _oecluster_molecule_item_error(i, item, ", not an OEMolBase");
             SWIG_fail;
         }

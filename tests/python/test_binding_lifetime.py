@@ -20,8 +20,8 @@ _CLEAR_MID_CALL = textwrap.dedent("""
     stamps = {{}}
     def clear_later():
         time.sleep(0.2)
-        stamps["cleared"] = time.perf_counter()
         mols.clear()
+        stamps["cleared"] = time.perf_counter()
     worker = threading.Thread(target=clear_later)
     stamps["start"] = time.perf_counter()
     worker.start()
@@ -40,9 +40,10 @@ def test_clearing_the_list_mid_call_does_not_crash(call):
     """Another thread emptying the list must not free molecules the call reads.
 
     Run in a child process: before the fix this crashed the interpreter, which
-    would take the whole test session down with it. The timestamps prove the
-    list was emptied before the call returned; without them a fast machine
-    could finish first and pass without testing anything.
+    would take the whole test session down with it. The clear is stamped after
+    it finishes and the end by the statement after the call, so the ordering
+    shows the list was empty before the main thread got past the call; without
+    it a fast machine could finish first and pass without testing anything.
     """
     result = subprocess.run(
         [sys.executable, "-X", "faulthandler", "-c",

@@ -4025,7 +4025,7 @@ def _murcko_options(mols, scaffold, num_threads, caller):
     # reaching that dispatcher.
     #
     # ``list.__len__`` rather than ``not mols``: the typemap reads ``ob_size``
-    # through ``PyList_Size``, which an overridden ``__len__`` on a list
+    # through ``PyList_AsTuple``, which an overridden ``__len__`` on a list
     # subclass does not change. A subclass reporting a length it does not have
     # was therefore passed through to the native call, which refuses it as
     # RuntimeError where this function documents ValueError. The

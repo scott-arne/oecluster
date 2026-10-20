@@ -101,10 +101,11 @@ class TestValidationMirror:
     def test_a_list_subclass_that_lies_about_its_length_is_refused_as_empty(self):
         """The guard must read ob_size, as the typemap does.
 
-        ``not mols`` consults ``__bool__``/``__len__``, while the typemap reads
-        ``PyList_Size`` (swig/oecluster.i:529), so an empty subclass reporting 1
-        reached the native call and surfaced RuntimeError where ValueError is
-        documented.
+        ``not mols`` consults ``__bool__``/``__len__``, while the molecule-list
+        typemap in swig/oecluster.i copies the list with ``PyList_AsTuple``,
+        which reads ob_size and never calls ``__len__``, so an empty subclass
+        reporting 1 reached the native call and surfaced RuntimeError where
+        ValueError is documented.
         """
         class LyingList(list):
             def __len__(self):
@@ -209,6 +210,20 @@ class TestValidationMirror:
                 match=r"^molecule list item 1 is a OEGraphMol "
                       r"that wraps no molecule$"):
             entry_point([mols(BENZENE)[0], empty])
+
+    @pytest.mark.parametrize("entry_point", [
+        oecluster.murcko_scaffolds, oecluster.murcko])
+    def test_an_isinstance_check_that_raises_propagates(self, entry_point):
+        # isinstance() reads ``__class__``, which an object can make raise. The
+        # check has then not answered, so its exception must reach the caller
+        # rather than be folded into a "not an OEMolBase" verdict.
+        class Raising:
+            @property
+            def __class__(self):
+                raise LookupError("no class")
+
+        with pytest.raises(LookupError, match="^no class$"):
+            entry_point([mols(BENZENE)[0], Raising()])
 
     def test_an_element_whose_type_hides_its_name_still_gets_the_message(self):
         # The type name is read from ``__name__``, which a metaclass can make
