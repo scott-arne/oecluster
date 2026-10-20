@@ -142,10 +142,14 @@ static void* _oecluster_extract_swig_ptr(PyObject* obj) {
     return ptr;
 }
 
-// Sets TypeError "molecule list item <index> is a <type name><tail>". Call it
+// Sets TypeError "<noun> list item <index> is a <type name><tail>". Call it
 // with no exception pending. The stable ABI makes PyTypeObject opaque, so the
 // name is read from the type's __name__ rather than tp_name.
-static void _oecluster_molecule_item_error(Py_ssize_t index, PyObject* item, const char* tail) {
+// python/oecluster/_comparisons.py depends on this format: RMSD's item check
+// there raises a copy of it, and cdist recognises it by _LIST_ITEM_ERROR to
+// name the input set. A change to it must change both.
+static void _oecluster_list_item_error(const char* noun, Py_ssize_t index, PyObject* item,
+                                       const char* tail) {
     PyObject* name = PyObject_GetAttrString((PyObject*)Py_TYPE(item), "__name__");
     if (!name || !PyUnicode_Check(name)) {
         // A metaclass can make __name__ raise or return a non-string. The
@@ -158,8 +162,13 @@ static void _oecluster_molecule_item_error(Py_ssize_t index, PyObject* item, con
             return;
         }
     }
-    PyErr_Format(PyExc_TypeError, "molecule list item %zd is a %U%s", index, name, tail);
+    PyErr_Format(PyExc_TypeError, "%s list item %zd is a %U%s", noun, index, name, tail);
     Py_DECREF(name);
+}
+
+// The form every molecule list conversion uses.
+static void _oecluster_molecule_item_error(Py_ssize_t index, PyObject* item, const char* tail) {
+    _oecluster_list_item_error("molecule", index, item, tail);
 }
 
 static PyObject* _oecluster_oefp_batch_type = NULL;
@@ -729,14 +738,26 @@ catch (const std::bad_alloc&) {
 // value used to order, to rank a pair one way in the one-argument group and
 // the opposite way in the two-argument group.
 //
-// For a non-empty list whose first element both checks can answer, the two
-// typechecks are disjoint and the order changes nothing. It decides the cases
-// both accept: an empty list, which reaches the design-unit constructor and is
-// refused with the same "SuperposeComparison: empty structure list" either
-// constructor gives; and a first element whose isinstance check raises, which
-// both typechecks leave in play, so the design-unit conversion is the one that
-// repeats the check. Fingerprint and Descriptor have no competing overload for
-// it to order.
+// This typecheck tests list-ness only, which makes SuperposeComparison's
+// correctness depend on that order. FingerprintComparison,
+// DescriptorComparison and SuperposeComparison each keep one- and
+// two-argument constructor forms, so SWIG emits a dispatcher in front of
+// them, and a typecheck that rejected a bad element there would replace the
+// conversion's positional message with the dispatcher's generic
+// "new_<Class>" one, which names no element. (A function that takes this
+// vector with no overload has no dispatcher, so the typecheck is never
+// consulted for it.) Accepting every list means that, were this typecheck
+// examined first, it would take design-unit lists too, and the conversion
+// above would refuse each design unit as "not an OEMolBase". The
+// design-unit typecheck still reads element 0, and being examined first is
+// what keeps a list that starts with a design unit on the design-unit
+// constructor, leaving every other list to this one. Two lists reach the
+// design-unit constructor without element 0 being known to be a design unit:
+// an empty list, refused with the same "SuperposeComparison: empty structure
+// list" either constructor gives; and one whose first element's isinstance
+// check raises, which the design-unit typecheck leaves in play, so the
+// design-unit conversion is the one that repeats the check. Fingerprint and
+// Descriptor have no competing overload for the order to matter to.
 //
 // ROCSComparison and MCSComparison no longer take part. Each used to carry a
 // constructor taking this vector beside one taking the strict
@@ -745,37 +766,43 @@ catch (const std::bad_alloc&) {
 // %ignore'd, and both classes take every molecule list through the one
 // conversion defined after the strict typemap below.
 %typemap(typecheck, precedence=1) const std::vector<OEChem::OEMolBase*>& {
-    if (PyList_Check($input) && PyList_Size($input) > 0) {
-        $1 = _oecluster_may_be_oemolbase(PyList_GetItem($input, 0)) ? 1 : 0;
-    } else {
-        $1 = PyList_Check($input) ? 1 : 0;
-    }
+    $1 = PyList_Check($input) ? 1 : 0;
 }
 
 // ---- const std::vector<std::shared_ptr<OEChem::OEMol>>& ----
-%typemap(in) const std::vector<std::shared_ptr<OEChem::OEMol>>& (std::vector<std::shared_ptr<OEChem::OEMol>> temp) {
+%typemap(in) const std::vector<std::shared_ptr<OEChem::OEMol>>&
+        (std::vector<std::shared_ptr<OEChem::OEMol>> temp, PyObject* held = 0) {
     if (!PyList_Check($input)) {
         SWIG_exception_fail(SWIG_TypeError, "Expected a list of OEMol objects");
     }
-    Py_ssize_t size = PyList_Size($input);
+    // Held, and read, for the same reasons as in the OEMolBase list
+    // conversion above, and released by the freearg below. The message for a
+    // refused element reads that element's type after its check has run, and
+    // the check can run Python code that empties the caller's list.
+    held = PyList_AsTuple($input);
+    if (!held) {
+        SWIG_fail;
+    }
+    Py_ssize_t size = PyTuple_GET_SIZE(held);
     try {
         temp.reserve(size);
     } OECLUSTER_TYPEMAP_ALLOCATION_CATCH("converting a molecule list")
     for (Py_ssize_t i = 0; i < size; ++i) {
-        PyObject* item = PyList_GetItem($input, i);
+        PyObject* item = PyTuple_GET_ITEM(held, i);
         int is_instance = _oecluster_isinstance_oemol(item);
         if (is_instance < 0) {
             SWIG_fail;
         }
         if (!is_instance) {
-            SWIG_exception_fail(SWIG_TypeError, "List item is not an OEMol object");
+            _oecluster_molecule_item_error(i, item, ", not an OEMol");
+            SWIG_fail;
         }
         void* ptr = _oecluster_extract_swig_ptr(item);
         if (!ptr) {
-            if (PyErr_Occurred()) {
-                SWIG_fail;
+            if (!PyErr_Occurred()) {
+                _oecluster_molecule_item_error(i, item, " that wraps no molecule");
             }
-            SWIG_exception_fail(SWIG_TypeError, "List item is not an OEMol object");
+            SWIG_fail;
         }
         // Make a COPY wrapped in shared_ptr (we do not own the Python object).
         //
@@ -803,12 +830,17 @@ catch (const std::bad_alloc&) {
     $1 = &temp;
 }
 
+// Same GIL precondition as the OEMolBase list's freearg.
+%typemap(freearg) const std::vector<std::shared_ptr<OEChem::OEMol>>& {
+    Py_XDECREF(held$argnum);
+}
+
+// List-ness only, for the reason given at the OEMolBase list's typecheck:
+// RMSDComparison has one- and two-argument constructor forms, and a
+// typecheck that rejected a bad element would replace the positional message
+// above with the dispatcher's.
 %typemap(typecheck, precedence=SWIG_TYPECHECK_POINTER) const std::vector<std::shared_ptr<OEChem::OEMol>>& {
-    if (PyList_Check($input) && PyList_Size($input) > 0) {
-        $1 = _oecluster_may_be_oemol(PyList_GetItem($input, 0)) ? 1 : 0;
-    } else {
-        $1 = PyList_Check($input) ? 1 : 0;
-    }
+    $1 = PyList_Check($input) ? 1 : 0;
 }
 
 // ---- ROCSComparison and MCSComparison: any OEMolBase, each by its own type ----
@@ -904,29 +936,36 @@ catch (const std::bad_alloc&) {
 }
 
 // ---- const std::vector<std::shared_ptr<OEBio::OEDesignUnit>>& ----
-%typemap(in) const std::vector<std::shared_ptr<OEBio::OEDesignUnit>>& (std::vector<std::shared_ptr<OEBio::OEDesignUnit>> temp) {
+%typemap(in) const std::vector<std::shared_ptr<OEBio::OEDesignUnit>>&
+        (std::vector<std::shared_ptr<OEBio::OEDesignUnit>> temp, PyObject* held = 0) {
     if (!PyList_Check($input)) {
         SWIG_exception_fail(SWIG_TypeError, "Expected a list of OEDesignUnit objects");
     }
-    Py_ssize_t size = PyList_Size($input);
+    // Held, read and released as in the strict OEMol list conversion above.
+    held = PyList_AsTuple($input);
+    if (!held) {
+        SWIG_fail;
+    }
+    Py_ssize_t size = PyTuple_GET_SIZE(held);
     try {
         temp.reserve(size);
     } OECLUSTER_TYPEMAP_ALLOCATION_CATCH("converting a design-unit list")
     for (Py_ssize_t i = 0; i < size; ++i) {
-        PyObject* item = PyList_GetItem($input, i);
+        PyObject* item = PyTuple_GET_ITEM(held, i);
         int is_instance = _oecluster_isinstance_oedesignunit(item);
         if (is_instance < 0) {
             SWIG_fail;
         }
         if (!is_instance) {
-            SWIG_exception_fail(SWIG_TypeError, "List item is not an OEDesignUnit object");
+            _oecluster_list_item_error("design unit", i, item, ", not an OEDesignUnit");
+            SWIG_fail;
         }
         void* ptr = _oecluster_extract_swig_ptr(item);
         if (!ptr) {
-            if (PyErr_Occurred()) {
-                SWIG_fail;
+            if (!PyErr_Occurred()) {
+                _oecluster_list_item_error("design unit", i, item, " that wraps no design unit");
             }
-            SWIG_exception_fail(SWIG_TypeError, "List item is not an OEDesignUnit object");
+            SWIG_fail;
         }
         // Make a COPY wrapped in shared_ptr (we do not own the Python object)
         auto* du = reinterpret_cast<OEBio::OEDesignUnit*>(ptr);
@@ -937,6 +976,14 @@ catch (const std::bad_alloc&) {
     $1 = &temp;
 }
 
+// Same GIL precondition as the OEMolBase list's freearg.
+%typemap(freearg) const std::vector<std::shared_ptr<OEBio::OEDesignUnit>>& {
+    Py_XDECREF(held$argnum);
+}
+
+// Unlike the molecule list typechecks, this one still reads element 0: it is
+// what chooses between SuperposeComparison's two constructors. See the
+// comment at the OEMolBase list's typecheck.
 %typemap(typecheck, precedence=SWIG_TYPECHECK_POINTER) const std::vector<std::shared_ptr<OEBio::OEDesignUnit>>& {
     if (PyList_Check($input) && PyList_Size($input) > 0) {
         $1 = _oecluster_may_be_oedesignunit(PyList_GetItem($input, 0)) ? 1 : 0;
@@ -1236,8 +1283,7 @@ OECLUSTER_GIL_EXCEPTION(OECluster::leiden, leiden)
 
 // Hidden from Python only; C++ callers keep both. The remaining constructor's
 // list conversion (ANY_MOLECULE_LIST) accepts every OEMolBase, so these would
-// only offer a second, active-conformer reading of the same list for SWIG's
-// dispatcher to choose by element 0.
+// only offer a second, active-conformer reading of the same list.
 %ignore OECluster::ROCSComparison::ROCSComparison(const std::vector<OEChem::OEMolBase*>&, const Options& = Options());
 %ignore OECluster::MCSComparison::MCSComparison(const std::vector<OEChem::OEMolBase*>&, const Options& = Options());
 
@@ -1551,14 +1597,16 @@ public:
 %include "oecluster/clustering/KMedoids.h"
 // Both Murcko entry points default their options argument, and SWIG's usual
 // expansion of a default argument into two overloads puts an overload
-// dispatcher in front of them. That dispatcher consults only the first list
-// element through the typecheck typemap, and when it rejects a call it reports
+// dispatcher in front of them. When that dispatcher rejects a call it reports
 // its own message -- "Wrong number or type of arguments for overloaded function
-// 'murcko_cluster'" -- in place of the typemap's. The result named a C++ symbol
-// that murcko() does not expose, and said nothing about which element was
-// wrong. Compacting the defaults into one wrapper each removes the dispatcher,
-// so the molecule-list typemap's own message reaches the caller for every bad
-// element, as it already does for the unoverloaded descriptor_statistics.
+// 'murcko_cluster'" -- in place of the typemap's, naming a C++ symbol that
+// murcko() does not expose. The molecule-list typecheck it consults once read
+// the first list element, so a bad first element got that message, which said
+// nothing about which element was wrong; it now tests list-ness only, which
+// still leaves a non-list to the dispatcher. Compacting the defaults into one
+// wrapper each removes the dispatcher, so the molecule-list typemap's own
+// message reaches the caller for every input it refuses, as it already does
+// for the unoverloaded descriptor_statistics.
 %feature("compactdefaultargs") OECluster::murcko_scaffolds;
 %feature("compactdefaultargs") OECluster::murcko_cluster;
 %include "oecluster/clustering/MurckoScaffold.h"

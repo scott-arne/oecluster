@@ -180,14 +180,14 @@ class TestValidationMirror:
     @pytest.mark.parametrize("position", ["first", "last", "only"])
     def test_a_non_molecule_element_names_the_element(
             self, entry_point, position):
-        # The element's position used to decide the message. SWIG expands a
-        # defaulted argument into two overloads, and the resulting dispatcher
-        # consults the typecheck typemap, which looks only at element 0: a bad
-        # first element was rejected by the dispatcher with "Wrong number or
-        # type of arguments for overloaded function 'murcko_cluster'", while a
-        # bad later element reached the real typemap and got a message that
-        # says what is wrong. Asserting only on TypeError could not tell the
-        # two apart.
+        # The element's position used to decide the message. SWIG expanded
+        # the defaulted argument into two overloads, and the resulting
+        # dispatcher consulted the typecheck typemap, which then looked only
+        # at element 0: a bad first element was rejected by the dispatcher
+        # with "Wrong number or type of arguments for overloaded function
+        # 'murcko_cluster'", while a bad later element reached the real
+        # typemap and got a message that says what is wrong. Asserting only
+        # on TypeError could not tell the two apart.
         good = mols(BENZENE)[0]
         bad, index = {"first": ([1, good], 0), "last": ([good, 1], 1),
                       "only": ([1], 0)}[position]

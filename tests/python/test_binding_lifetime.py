@@ -57,9 +57,14 @@ def test_clearing_the_list_mid_call_does_not_crash(call):
     assert int(count) > 0
 
 
-@pytest.mark.parametrize(
-    "name", ["FingerprintComparison", "ROCSComparison", "MCSComparison"])
-def test_a_refused_list_releases_its_molecules(name):
+@pytest.mark.parametrize("name, kind, list_name, expected", [
+    ("FingerprintComparison", "OEGraphMol", "molecule list", "OEMolBase"),
+    ("ROCSComparison", "OEGraphMol", "molecule list", "OEMolBase"),
+    ("MCSComparison", "OEGraphMol", "molecule list", "OEMolBase"),
+    ("RMSDComparison", "OEMol", "molecule list", "OEMol"),
+    ("SuperposeComparison", "OEDesignUnit", "design unit list", "OEDesignUnit"),
+], ids=["fingerprint", "rocs", "mcs", "rmsd", "superpose"])
+def test_a_refused_list_releases_its_molecules(name, kind, list_name, expected):
     """The error path must drop the references the conversion took.
 
     A leaked reference is otherwise invisible: nothing crashes, the molecules
@@ -68,19 +73,21 @@ def test_a_refused_list_releases_its_molecules(name):
     directly so no Python-layer check can refuse the list before the typemap
     sees it; the anchored message proves the typemap is what refused it.
     Fingerprint uses the ``OEMolBase`` list conversion, ROCS and MCS their
-    own, and each releases its tuple in its own freearg.
+    own, RMSD the strict ``OEMol`` one and Superpose, given design units, the
+    design-unit one, and each releases its tuple in its own freearg.
     """
     from oecluster import oecluster as native
 
-    good = oechem.OEGraphMol()
-    oechem.OESmilesToMol(good, "c1ccccc1")
-    mols = [good] * 199 + [1]
+    good = getattr(oechem, kind)()
+    if kind != "OEDesignUnit":
+        oechem.OESmilesToMol(good, "c1ccccc1")
+    items = [good] * 199 + [1]
     before = sys.getrefcount(good)
     for _ in range(2000):
         with pytest.raises(
                 TypeError,
-                match=r"^molecule list item 199 is a int, not an OEMolBase$"):
-            getattr(native, name)(mols)
+                match=rf"^{list_name} item 199 is a int, not an {expected}$"):
+            getattr(native, name)(items)
     assert sys.getrefcount(good) == before
 
 
@@ -144,15 +151,15 @@ def _benzene(kind):
 def test_a_raising_first_element_propagates(route):
     """The overload dispatcher must not turn a raising check into "no".
 
-    For Fingerprint, RMSD and Superpose it reads element 0 alone, through a
-    typecheck that cannot report an error. Answering "no" there left every
+    For Superpose it reads element 0 alone, through the design-unit
+    typecheck, which cannot report an error. Answering "no" there left every
     overload ruled out and replaced the exception with the dispatcher's
     generic TypeError, before any conversion ran. The exception surfaces
     because the conversion repeats the check and ``_RaisingClass`` raises on
     every read. An element that raises only on the first read is lost
     instead; see ``test_a_check_that_raises_only_once_is_lost``.
 
-    ROCS and MCS's dispatchers test only that the argument is a list, so for
+    The other four dispatchers test only that the argument is a list, so for
     them the conversion's check is the first read of the element, not a
     repeat.
     """

@@ -405,10 +405,14 @@ def test_the_molecule_typecheck_is_ranked_behind_the_design_unit_one():
     which was measured, on the ROCS constructors this value used to order, to
     rank a pair one way for one-argument calls and the opposite way for
     two-argument ones. ROCS and MCS no longer expose a ``vector<OEMolBase*>``
-    constructor, so Superpose is what the value orders now. What depends on
-    it today is where both typechecks accept: an empty list, and a first
-    element whose type check raises, which ``test_a_check_that_raises_only_once_is_lost``
-    in ``test_binding_lifetime.py`` shows reaching the design-unit conversion.
+    constructor, so Superpose is what the value orders now. The molecule
+    typecheck accepts any list, so the order is what keeps every design-unit
+    list off the molecule constructor; ``test_superpose_still_takes_both_list_types``
+    in ``test_comparison_list_errors.py`` shows the behaviour. It also sends
+    two lists whose element 0 is not known to be a design unit to the
+    design-unit conversion: an empty one, and one whose first element's type
+    check raises, which ``test_a_check_that_raises_only_once_is_lost`` in
+    ``test_binding_lifetime.py`` shows.
 
     Comments are stripped before the search so that the note explaining this,
     which quotes both spellings, cannot satisfy it. Same limit as

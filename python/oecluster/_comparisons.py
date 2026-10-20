@@ -10,7 +10,9 @@ step (conformer expansion, complete-case filtering) without ``pdist`` and
 ``cdist`` growing a branch per comparison.
 """
 
+import contextlib
 import math
+import re
 import warnings
 from collections.abc import Callable
 from typing import Any
@@ -217,6 +219,49 @@ def normalize_items(comparison, items, kwargs):
     if normalizer is None:
         return list(items), []
     return normalizer(list(items), kwargs)
+
+
+# The message the native list conversions give a refused element, which
+# _require_oemol_items copies: "<noun> list item <index> is a <rest>", where
+# <rest> is the element's type name and why it was refused. It is formatted by
+# _oecluster_list_item_error in swig/oecluster.i.
+_LIST_ITEM_ERROR = re.compile(
+    r"\A(?:molecule|design unit) list item (\d+) is a (.+)\Z", re.DOTALL)
+
+
+@contextlib.contextmanager
+def items_named_by_set(*sets):
+    """
+    Name the input set in a refused-element ``TypeError`` raised inside.
+
+    ``cdist`` normalizes each input set on its own and then builds one
+    comparison over their concatenation, so a refused element's index is
+    within one set or within ``items_a + items_b``, depending on the step that
+    raised. Given three-item sets, a build's "molecule list item 5 is a int,
+    not an OEMolBase" becomes "items_b item 2 is a int, not an OEMolBase".
+
+    Only a plain ``TypeError`` whose whole message has the conversions' format
+    is rewritten, with the original chained as its cause. Any other exception,
+    or an index past the last set, is re-raised as it was.
+
+    :param sets: ``(name, size)`` pairs, one per set the guarded step was
+        given, in the order it concatenated them.
+    :raises TypeError: The rewritten message, raised from the original.
+    """
+    try:
+        yield
+    except TypeError as exc:
+        match = (_LIST_ITEM_ERROR.match(str(exc))
+                 if type(exc) is TypeError else None)
+        if match is None:
+            raise
+        index = int(match.group(1))
+        for name, size in sets:
+            if index < size:
+                raise TypeError(
+                    f"{name} item {index} is a {match.group(2)}") from exc
+            index -= size
+        raise
 
 
 def build_comparison(items, comparison, similarity, kwargs, *, symmetric):
@@ -1076,6 +1121,37 @@ def _expand_conformers_requested(kwargs):
     return bool(expand)
 
 
+def _require_oemol_items(items):
+    """
+    Refuse a non-``OEMol`` item, or one with no molecule behind it, in the
+    words of the strict ``OEMol`` list conversion.
+
+    Conformer expansion calls ``NumConfs`` and ``GetTitle`` on each item, so
+    an item that is not a molecule would otherwise fail there, with an error
+    naming a method rather than the item. Where nothing is expanded, the
+    native conversion refuses the item itself.
+
+    :param items: The items given to the RMSD comparison.
+    :raises TypeError: For the first item that is not an ``OEMol``, or is one
+        with no molecule behind it.
+    """
+    from openeye import oechem
+
+    for index, item in enumerate(items):
+        if not isinstance(item, oechem.OEMol):
+            raise TypeError(
+                f"molecule list item {index} is a {type(item).__name__}, "
+                "not an OEMol")
+        # An OEMol made by ``__new__`` without ``__init__`` has no ``this``,
+        # and its NumConfs raises OEChem's own TypeError naming the method.
+        # Any exception but AttributeError from the read propagates, as the
+        # native conversion propagates it.
+        if getattr(item, "this", None) is None:
+            raise TypeError(
+                f"molecule list item {index} is a {type(item).__name__} "
+                "that wraps no molecule")
+
+
 def _normalize_rmsd(items, kwargs):
     """
     Expand multi-conformer molecules into one molecule per pose.
@@ -1088,6 +1164,8 @@ def _normalize_rmsd(items, kwargs):
     """
     if not _expand_conformers_requested(kwargs):
         return items, []
+
+    _require_oemol_items(items)
 
     from openeye import oechem
 

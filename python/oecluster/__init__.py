@@ -2503,7 +2503,10 @@ def cdist(items_a, items_b, comparison, *,
     :param progress: Optional callback(completed, total).
     :param kwargs: Comparison-specific options.
     :returns: CrossDistanceMatrix of shape (len(items_a), len(items_b)).
-    :raises TypeError: If a prebuilt comparison object is passed, or unknown kwargs.
+    :raises TypeError: If a prebuilt comparison object is passed, or unknown
+        kwargs, or if an item is not one the comparison accepts. That message
+        names the set and the item's index within it, as in ``items_b item 2
+        is a int, not an OEMolBase``.
     :raises ValueError: If either input is empty, or cutoff > 0 with similarity=True.
     """
     if not isinstance(comparison, str):
@@ -2556,8 +2559,13 @@ def cdist(items_a, items_b, comparison, *,
     if not a or not b:
         raise ValueError("cdist requires non-empty input sets (set A or B is empty)")
 
-    a, excluded_a = _comparisons.normalize_items(comparison, a, kwargs)
-    b, excluded_b = _comparisons.normalize_items(comparison, b, kwargs)
+    # A refused element is reported by its index in the list the step was
+    # given: one set while normalizing, and ``a + b`` while building. Either
+    # way the index alone does not say which set the caller has to fix.
+    with _comparisons.items_named_by_set(("items_a", len(a))):
+        a, excluded_a = _comparisons.normalize_items(comparison, a, kwargs)
+    with _comparisons.items_named_by_set(("items_b", len(b))):
+        b, excluded_b = _comparisons.normalize_items(comparison, b, kwargs)
     n_a = len(a)
     n_b = len(b)
     if n_a == 0 or n_b == 0:
@@ -2566,8 +2574,9 @@ def cdist(items_a, items_b, comparison, *,
             f"for the {comparison!r} comparison left {n_a} item(s) in set A "
             f"and {n_b} in set B")
 
-    comparison_obj, comparison_name, params = _comparisons.build_comparison(
-        a + b, comparison, similarity, kwargs, symmetric=False)
+    with _comparisons.items_named_by_set(("items_a", n_a), ("items_b", n_b)):
+        comparison_obj, comparison_name, params = _comparisons.build_comparison(
+            a + b, comparison, similarity, kwargs, symmetric=False)
     if excluded_a:
         params['excluded_items_a'] = excluded_a
     if excluded_b:

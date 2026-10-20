@@ -133,8 +133,7 @@ def _call(comparison, route, mols, good):
     elif route == "pdist":
         oecluster.pdist(mols, comparison)
     elif route == "cdist":
-        # The bad element sits in set A, where its index in the concatenated
-        # list the comparison is built over is its index in set A.
+        # The bad element sits in set A, which cdist names.
         oecluster.cdist(mols, [good], comparison)
     else:
         native_class = getattr(native, _CLASSES[comparison])
@@ -146,10 +145,10 @@ def _call(comparison, route, mols, good):
         native_class(mols, options)
 
 
-def _expected_message(mols):
+def _expected_message(mols, list_name="molecule list"):
     index, bad = next((i, m) for i, m in enumerate(mols)
                       if not isinstance(m, oechem.OEMolBase))
-    return f"molecule list item {index} is a {type(bad).__name__}, not an OEMolBase"
+    return f"{list_name} item {index} is a {type(bad).__name__}, not an OEMolBase"
 
 
 @pytest.mark.parametrize("comparison", ["rocs", "mcs"])
@@ -173,7 +172,8 @@ def test_a_non_molecule_is_reported_by_position(comparison, route, position, kin
     with pytest.raises(TypeError) as caught:
         _call(comparison, route, mols, good)
     message = str(caught.value)
-    assert message == _expected_message(mols)
+    assert message == _expected_message(
+        mols, "items_a" if route == "cdist" else "molecule list")
     assert "new_" not in message
 
 
