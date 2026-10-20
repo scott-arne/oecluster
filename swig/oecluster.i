@@ -159,6 +159,8 @@ static void _oecluster_molecule_item_error(Py_ssize_t index, PyObject* item, con
 static PyObject* _oecluster_oefp_batch_type = NULL;
 static PyObject* _oecluster_oefp_native_batch_type = NULL;
 
+// A missing module or type means nothing can be a batch, so every failure
+// here is cleared and reported as false, leaving no exception pending.
 static bool _oecluster_import_oefp_batch_types() {
     if (_oecluster_oefp_batch_type && _oecluster_oefp_native_batch_type) {
         return true;
@@ -171,6 +173,10 @@ static bool _oecluster_import_oefp_batch_types() {
     }
     _oecluster_oefp_batch_type = PyObject_GetAttrString(oefp_mod, "OEFPBatch");
     Py_DECREF(oefp_mod);
+    if (!_oecluster_oefp_batch_type) {
+        PyErr_Clear();
+        return false;
+    }
 
     PyObject* native_mod = PyImport_ImportModule("oefp._native");
     if (!native_mod) {
@@ -180,18 +186,33 @@ static bool _oecluster_import_oefp_batch_types() {
     _oecluster_oefp_native_batch_type =
         PyObject_GetAttrString(native_mod, "_NativeOEFPBatch");
     Py_DECREF(native_mod);
+    if (!_oecluster_oefp_native_batch_type) {
+        PyErr_Clear();
+        return false;
+    }
+    return true;
+}
 
-    return _oecluster_oefp_batch_type && _oecluster_oefp_native_batch_type;
+// The same two forms, and the same rule for choosing between them, as the
+// checkers DEFINE_OE_TYPE_CHECKER generates below.
+static int _oecluster_isinstance_oefp_batch(PyObject* obj) {
+    if (!_oecluster_import_oefp_batch_types()) {
+        return 0;
+    }
+    int is_batch = PyObject_IsInstance(obj, _oecluster_oefp_batch_type);
+    if (is_batch != 0) {
+        return is_batch;
+    }
+    return PyObject_IsInstance(obj, _oecluster_oefp_native_batch_type);
 }
 
 static bool _oecluster_is_oefp_batch(PyObject* obj) {
-    if (!_oecluster_import_oefp_batch_types()) {
+    int is_batch = _oecluster_isinstance_oefp_batch(obj);
+    if (is_batch < 0) {
+        PyErr_Clear();
         return false;
     }
-    if (PyObject_IsInstance(obj, _oecluster_oefp_batch_type) == 1) {
-        return true;
-    }
-    return PyObject_IsInstance(obj, _oecluster_oefp_native_batch_type) == 1;
+    return is_batch == 1;
 }
 
 static void* _oecluster_extract_oefp_batch_ptr(PyObject* obj) {
@@ -278,11 +299,15 @@ static bool _oecluster_check_oefp_abi() {
 // ---- Type checker generator macro ----
 // Generates a cached isinstance check for an OpenEye Python type, in two forms.
 // _oecluster_isinstance_TAG returns 1 or 0, or -1 with the exception set when
-// the import or the check itself raised; a caller that can fail propagates it.
-// _oecluster_is_TAG is the yes/no form for callers that cannot: a typecheck
-// typemap has no way to report an error, and SWIG's overload dispatcher would
-// go on calling the API with it pending. That form clears the exception and
-// answers no, and its callers raise their own TypeError on a no.
+// the import or the check itself raised. _oecluster_is_TAG clears that
+// exception and answers no.
+//
+// The rule for choosing between them: every %typemap(in) calls
+// _oecluster_isinstance_TAG and propagates -1 with SWIG_fail, because a check
+// that raised has not answered and its exception is the report. Only a
+// %typemap(typecheck) calls _oecluster_is_TAG: it has no way to report an
+// error, and SWIG's overload dispatcher would go on calling the API with the
+// exception pending.
 // TAG:    identifier suffix (e.g., oemolbase)
 // MODULE: Python module string (e.g., "openeye.oechem")
 // CLASS:  Python class name string (e.g., "OEMolBase")
@@ -400,14 +425,19 @@ static PyObject* _oecluster_wrap_as_oe_grid(OESystem::OEScalarGrid* grid) {
 
 // Generate const-ref and non-const-ref typemaps for a cross-runtime OpenEye type.
 // CPP_TYPE: fully qualified C++ type (e.g., OEChem::OEMolBase)
-// CHECKER:  isinstance checker function name
+// TAG:      DEFINE_OE_TYPE_CHECKER suffix (e.g., oemolbase); the in typemaps
+//           call _oecluster_isinstance_TAG and the typechecks _oecluster_is_TAG
 // ERR_MSG:  error message on type mismatch
-%define OE_CROSS_RUNTIME_REF_TYPEMAPS(CPP_TYPE, CHECKER, ERR_MSG)
+%define OE_CROSS_RUNTIME_REF_TYPEMAPS(CPP_TYPE, TAG, ERR_MSG)
 
 %typemap(in) const CPP_TYPE& (void *argp = 0, int res = 0) {
     res = SWIG_ConvertPtr($input, &argp, $descriptor, 0);
     if (!SWIG_IsOK(res)) {
-        if (CHECKER($input)) {
+        int is_instance = _oecluster_isinstance_##TAG($input);
+        if (is_instance < 0) {
+            SWIG_fail;
+        }
+        if (is_instance) {
             argp = _oecluster_extract_swig_ptr($input);
             if (argp) res = SWIG_OK;
         }
@@ -424,13 +454,17 @@ static PyObject* _oecluster_wrap_as_oe_grid(OESystem::OEScalarGrid* grid) {
 %typemap(typecheck, precedence=10) const CPP_TYPE& {
     void *vptr = 0;
     int res = SWIG_ConvertPtr($input, &vptr, $descriptor, SWIG_POINTER_NO_NULL);
-    $1 = SWIG_IsOK(res) ? 1 : CHECKER($input) ? 1 : 0;
+    $1 = SWIG_IsOK(res) ? 1 : _oecluster_is_##TAG($input) ? 1 : 0;
 }
 
 %typemap(in) CPP_TYPE& (void *argp = 0, int res = 0) {
     res = SWIG_ConvertPtr($input, &argp, $descriptor, 0);
     if (!SWIG_IsOK(res)) {
-        if (CHECKER($input)) {
+        int is_instance = _oecluster_isinstance_##TAG($input);
+        if (is_instance < 0) {
+            SWIG_fail;
+        }
+        if (is_instance) {
             argp = _oecluster_extract_swig_ptr($input);
             if (argp) res = SWIG_OK;
         }
@@ -447,13 +481,13 @@ static PyObject* _oecluster_wrap_as_oe_grid(OESystem::OEScalarGrid* grid) {
 %typemap(typecheck, precedence=10) CPP_TYPE& {
     void *vptr = 0;
     int res = SWIG_ConvertPtr($input, &vptr, $descriptor, SWIG_POINTER_NO_NULL);
-    $1 = SWIG_IsOK(res) ? 1 : CHECKER($input) ? 1 : 0;
+    $1 = SWIG_IsOK(res) ? 1 : _oecluster_is_##TAG($input) ? 1 : 0;
 }
 
 %enddef
 
 // Generate nullable-pointer typemaps (accepts None) for a cross-runtime type.
-%define OE_CROSS_RUNTIME_NULLABLE_PTR_TYPEMAPS(CPP_TYPE, CHECKER, ERR_MSG)
+%define OE_CROSS_RUNTIME_NULLABLE_PTR_TYPEMAPS(CPP_TYPE, TAG, ERR_MSG)
 
 %typemap(in) const CPP_TYPE* (void *argp = 0, int res = 0) {
     if ($input == Py_None) {
@@ -461,7 +495,11 @@ static PyObject* _oecluster_wrap_as_oe_grid(OESystem::OEScalarGrid* grid) {
     } else {
         res = SWIG_ConvertPtr($input, &argp, $descriptor, 0);
         if (!SWIG_IsOK(res)) {
-            if (CHECKER($input)) {
+            int is_instance = _oecluster_isinstance_##TAG($input);
+            if (is_instance < 0) {
+                SWIG_fail;
+            }
+            if (is_instance) {
                 argp = _oecluster_extract_swig_ptr($input);
                 if (argp) res = SWIG_OK;
             }
@@ -479,7 +517,7 @@ static PyObject* _oecluster_wrap_as_oe_grid(OESystem::OEScalarGrid* grid) {
     } else {
         void *vptr = 0;
         int res = SWIG_ConvertPtr($input, &vptr, $descriptor, 0);
-        $1 = SWIG_IsOK(res) ? 1 : CHECKER($input) ? 1 : 0;
+        $1 = SWIG_IsOK(res) ? 1 : _oecluster_is_##TAG($input) ? 1 : 0;
     }
 }
 
@@ -493,49 +531,49 @@ static PyObject* _oecluster_wrap_as_oe_grid(OESystem::OEScalarGrid* grid) {
 // These are inert until a wrapped function signature uses the type.
 
 // ---- Molecule hierarchy (OEChem) ----
-OE_CROSS_RUNTIME_REF_TYPEMAPS(OEChem::OEMolBase,    _oecluster_is_oemolbase,    "Expected OEMolBase-derived object.")
-OE_CROSS_RUNTIME_REF_TYPEMAPS(OEChem::OEMCMolBase,  _oecluster_is_oemcmolbase,  "Expected OEMCMolBase-derived object (OEMCMolBase or OEMol).")
-OE_CROSS_RUNTIME_REF_TYPEMAPS(OEChem::OEMol,        _oecluster_is_oemol,        "Expected OEMol object.")
-OE_CROSS_RUNTIME_REF_TYPEMAPS(OEChem::OEGraphMol,   _oecluster_is_oegraphmol,   "Expected OEGraphMol object.")
-OE_CROSS_RUNTIME_REF_TYPEMAPS(OEChem::OEQMol,       _oecluster_is_oeqmol,       "Expected OEQMol object.")
+OE_CROSS_RUNTIME_REF_TYPEMAPS(OEChem::OEMolBase,    oemolbase,    "Expected OEMolBase-derived object.")
+OE_CROSS_RUNTIME_REF_TYPEMAPS(OEChem::OEMCMolBase,  oemcmolbase,  "Expected OEMCMolBase-derived object (OEMCMolBase or OEMol).")
+OE_CROSS_RUNTIME_REF_TYPEMAPS(OEChem::OEMol,        oemol,        "Expected OEMol object.")
+OE_CROSS_RUNTIME_REF_TYPEMAPS(OEChem::OEGraphMol,   oegraphmol,   "Expected OEGraphMol object.")
+OE_CROSS_RUNTIME_REF_TYPEMAPS(OEChem::OEQMol,       oeqmol,       "Expected OEQMol object.")
 
 // ---- Atom / bond / conformer / residue / match (OEChem) ----
-OE_CROSS_RUNTIME_REF_TYPEMAPS(OEChem::OEAtomBase,   _oecluster_is_oeatombase,   "Expected OEAtomBase-derived object.")
-OE_CROSS_RUNTIME_REF_TYPEMAPS(OEChem::OEBondBase,   _oecluster_is_oebondbase,   "Expected OEBondBase-derived object.")
-OE_CROSS_RUNTIME_REF_TYPEMAPS(OEChem::OEConfBase,   _oecluster_is_oeconfbase,   "Expected OEConfBase-derived object.")
-OE_CROSS_RUNTIME_REF_TYPEMAPS(OEChem::OEResidue,    _oecluster_is_oeresidue,    "Expected OEResidue object.")
-OE_CROSS_RUNTIME_REF_TYPEMAPS(OEChem::OEMatchBase,  _oecluster_is_oematchbase,  "Expected OEMatchBase-derived object.")
+OE_CROSS_RUNTIME_REF_TYPEMAPS(OEChem::OEAtomBase,   oeatombase,   "Expected OEAtomBase-derived object.")
+OE_CROSS_RUNTIME_REF_TYPEMAPS(OEChem::OEBondBase,   oebondbase,   "Expected OEBondBase-derived object.")
+OE_CROSS_RUNTIME_REF_TYPEMAPS(OEChem::OEConfBase,   oeconfbase,   "Expected OEConfBase-derived object.")
+OE_CROSS_RUNTIME_REF_TYPEMAPS(OEChem::OEResidue,    oeresidue,    "Expected OEResidue object.")
+OE_CROSS_RUNTIME_REF_TYPEMAPS(OEChem::OEMatchBase,  oematchbase,  "Expected OEMatchBase-derived object.")
 
 // ---- Molecule I/O (OEChem) ----
-OE_CROSS_RUNTIME_REF_TYPEMAPS(OEChem::oemolistream,  _oecluster_is_oemolistream, "Expected oemolistream object.")
-OE_CROSS_RUNTIME_REF_TYPEMAPS(OEChem::oemolostream,  _oecluster_is_oemolostream, "Expected oemolostream object.")
-OE_CROSS_RUNTIME_REF_TYPEMAPS(OEChem::OEMolDatabase, _oecluster_is_oemoldatabase,"Expected OEMolDatabase object.")
+OE_CROSS_RUNTIME_REF_TYPEMAPS(OEChem::oemolistream,  oemolistream, "Expected oemolistream object.")
+OE_CROSS_RUNTIME_REF_TYPEMAPS(OEChem::oemolostream,  oemolostream, "Expected oemolostream object.")
+OE_CROSS_RUNTIME_REF_TYPEMAPS(OEChem::OEMolDatabase, oemoldatabase,"Expected OEMolDatabase object.")
 
 // ---- Reactions (OEChem) ----
-OE_CROSS_RUNTIME_REF_TYPEMAPS(OEChem::OEUniMolecularRxn, _oecluster_is_oeunimolecularrxn, "Expected OEUniMolecularRxn object.")
+OE_CROSS_RUNTIME_REF_TYPEMAPS(OEChem::OEUniMolecularRxn, oeunimolecularrxn, "Expected OEUniMolecularRxn object.")
 
 // ---- Platform streams (OEPlatform) ----
-OE_CROSS_RUNTIME_REF_TYPEMAPS(OEPlatform::oeifstream, _oecluster_is_oeifstream, "Expected oeifstream object.")
-OE_CROSS_RUNTIME_REF_TYPEMAPS(OEPlatform::oeofstream, _oecluster_is_oeofstream, "Expected oeofstream object.")
-OE_CROSS_RUNTIME_REF_TYPEMAPS(OEPlatform::oeisstream, _oecluster_is_oeisstream, "Expected oeisstream object.")
-OE_CROSS_RUNTIME_REF_TYPEMAPS(OEPlatform::oeosstream, _oecluster_is_oeosstream, "Expected oeosstream object.")
+OE_CROSS_RUNTIME_REF_TYPEMAPS(OEPlatform::oeifstream, oeifstream, "Expected oeifstream object.")
+OE_CROSS_RUNTIME_REF_TYPEMAPS(OEPlatform::oeofstream, oeofstream, "Expected oeofstream object.")
+OE_CROSS_RUNTIME_REF_TYPEMAPS(OEPlatform::oeisstream, oeisstream, "Expected oeisstream object.")
+OE_CROSS_RUNTIME_REF_TYPEMAPS(OEPlatform::oeosstream, oeosstream, "Expected oeosstream object.")
 
 // ---- Records (OESystem) ----
-OE_CROSS_RUNTIME_REF_TYPEMAPS(OESystem::OERecord,    _oecluster_is_oerecord,    "Expected OERecord object.")
-OE_CROSS_RUNTIME_REF_TYPEMAPS(OESystem::OEMolRecord, _oecluster_is_oemolrecord, "Expected OEMolRecord object.")
+OE_CROSS_RUNTIME_REF_TYPEMAPS(OESystem::OERecord,    oerecord,    "Expected OERecord object.")
+OE_CROSS_RUNTIME_REF_TYPEMAPS(OESystem::OEMolRecord, oemolrecord, "Expected OEMolRecord object.")
 
 // ---- Bio / hierarchy (OEBio) ----
-OE_CROSS_RUNTIME_REF_TYPEMAPS(OEBio::OEDesignUnit,   _oecluster_is_oedesignunit, "Expected OEDesignUnit object.")
-OE_CROSS_RUNTIME_REF_TYPEMAPS(OEBio::OEHierView,     _oecluster_is_oehierview,   "Expected OEHierView object.")
-OE_CROSS_RUNTIME_REF_TYPEMAPS(OEBio::OEHierResidue,  _oecluster_is_oehierresidue,"Expected OEHierResidue object.")
-OE_CROSS_RUNTIME_REF_TYPEMAPS(OEBio::OEHierFragment,  _oecluster_is_oehierfragment,"Expected OEHierFragment object.")
-OE_CROSS_RUNTIME_REF_TYPEMAPS(OEBio::OEHierChain,    _oecluster_is_oehierchain,  "Expected OEHierChain object.")
-OE_CROSS_RUNTIME_REF_TYPEMAPS(OEBio::OEInteractionHint,          _oecluster_is_oeinteractionhint,          "Expected OEInteractionHint object.")
-OE_CROSS_RUNTIME_REF_TYPEMAPS(OEBio::OEInteractionHintContainer, _oecluster_is_oeinteractionhintcontainer, "Expected OEInteractionHintContainer object.")
+OE_CROSS_RUNTIME_REF_TYPEMAPS(OEBio::OEDesignUnit,   oedesignunit, "Expected OEDesignUnit object.")
+OE_CROSS_RUNTIME_REF_TYPEMAPS(OEBio::OEHierView,     oehierview,   "Expected OEHierView object.")
+OE_CROSS_RUNTIME_REF_TYPEMAPS(OEBio::OEHierResidue,  oehierresidue,"Expected OEHierResidue object.")
+OE_CROSS_RUNTIME_REF_TYPEMAPS(OEBio::OEHierFragment,  oehierfragment,"Expected OEHierFragment object.")
+OE_CROSS_RUNTIME_REF_TYPEMAPS(OEBio::OEHierChain,    oehierchain,  "Expected OEHierChain object.")
+OE_CROSS_RUNTIME_REF_TYPEMAPS(OEBio::OEInteractionHint,          oeinteractionhint,          "Expected OEInteractionHint object.")
+OE_CROSS_RUNTIME_REF_TYPEMAPS(OEBio::OEInteractionHintContainer, oeinteractionhintcontainer, "Expected OEInteractionHintContainer object.")
 
 // ---- Grid (OESystem) ----
-OE_CROSS_RUNTIME_REF_TYPEMAPS(OESystem::OEScalarGrid, _oecluster_is_oescalargrid, "Expected OEScalarGrid-derived object.")
-OE_CROSS_RUNTIME_NULLABLE_PTR_TYPEMAPS(OESystem::OEScalarGrid, _oecluster_is_oescalargrid, "Expected OEScalarGrid or None.")
+OE_CROSS_RUNTIME_REF_TYPEMAPS(OESystem::OEScalarGrid, oescalargrid, "Expected OEScalarGrid-derived object.")
+OE_CROSS_RUNTIME_NULLABLE_PTR_TYPEMAPS(OESystem::OEScalarGrid, oescalargrid, "Expected OEScalarGrid or None.")
 
 // OEScalarGrid return-type typemap (wraps C++ grid as native openeye.oegrid object)
 %typemap(out) OESystem::OEScalarGrid* {
@@ -544,7 +582,7 @@ OE_CROSS_RUNTIME_NULLABLE_PTR_TYPEMAPS(OESystem::OEScalarGrid, _oecluster_is_oes
 }
 
 // ---- Docking (OEDocking) ----
-OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, _oecluster_is_oereceptor, "Expected OEReceptor object.")
+OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, oereceptor, "Expected OEReceptor object.")
 
 // ============================================================================
 // Domain-specific typemaps for oecluster's container-based APIs
@@ -662,7 +700,11 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, _oecluster_is_oereceptor, "
     temp.reserve(size);
     for (Py_ssize_t i = 0; i < size; ++i) {
         PyObject* item = PyList_GetItem($input, i);
-        if (!_oecluster_is_oemol(item)) {
+        int is_instance = _oecluster_isinstance_oemol(item);
+        if (is_instance < 0) {
+            SWIG_fail;
+        }
+        if (!is_instance) {
             SWIG_exception_fail(SWIG_TypeError, "List item is not an OEMol object");
         }
         void* ptr = _oecluster_extract_swig_ptr(item);
@@ -710,7 +752,11 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, _oecluster_is_oereceptor, "
     temp.reserve(size);
     for (Py_ssize_t i = 0; i < size; ++i) {
         PyObject* item = PyList_GetItem($input, i);
-        if (!_oecluster_is_oedesignunit(item)) {
+        int is_instance = _oecluster_isinstance_oedesignunit(item);
+        if (is_instance < 0) {
+            SWIG_fail;
+        }
+        if (!is_instance) {
             SWIG_exception_fail(SWIG_TypeError, "List item is not an OEDesignUnit object");
         }
         void* ptr = _oecluster_extract_swig_ptr(item);
@@ -1030,7 +1076,11 @@ class OEFPBatch;
     if (!_oecluster_check_oefp_abi()) {
         SWIG_fail;
     }
-    if (!_oecluster_is_oefp_batch($input)) {
+    int is_batch = _oecluster_isinstance_oefp_batch($input);
+    if (is_batch < 0) {
+        SWIG_fail;
+    }
+    if (!is_batch) {
         SWIG_exception_fail(SWIG_TypeError, "Expected an oefp.OEFPBatch.");
     }
     argp = _oecluster_extract_oefp_batch_ptr($input);

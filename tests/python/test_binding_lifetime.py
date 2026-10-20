@@ -1,9 +1,10 @@
-"""Lifetime of Python objects the SWIG layer hands to native code."""
+"""The SWIG layer's input conversions: what they keep alive, what they report."""
 
 import subprocess
 import sys
 import textwrap
 
+import oecluster
 import pytest
 
 oechem = pytest.importorskip("openeye.oechem")
@@ -77,3 +78,50 @@ def test_a_refused_list_releases_its_molecules():
                 match=r"^molecule list item 199 is a int, not an OEMolBase$"):
             native.FingerprintComparison(mols)
     assert sys.getrefcount(good) == before
+
+
+class _RaisingClass:
+    """An object whose ``isinstance`` check raises instead of answering.
+
+    ``isinstance`` falls back to reading ``__class__``, which this refuses.
+    """
+
+    @property
+    def __class__(self):
+        raise LookupError("no class")
+
+
+@pytest.mark.parametrize("comparison", [
+    oecluster.ROCSComparison, oecluster.MCSComparison], ids=["rocs", "mcs"])
+def test_a_raising_element_in_a_strict_oemol_list_propagates(comparison):
+    """A check that raised has not answered, so its exception must surface.
+
+    The OEMol at index 0 selects the strict ``OEMol`` list conversion; the
+    element after it makes the isinstance check raise, which used to be
+    replaced by a generic TypeError about the element's type.
+    """
+    mol = oechem.OEMol()
+    oechem.OESmilesToMol(mol, "c1ccccc1")
+    with pytest.raises(LookupError, match="^no class$"):
+        comparison([mol, _RaisingClass()])
+
+
+def test_a_raising_element_in_a_design_unit_list_propagates():
+    """The same rule on the design-unit list conversion."""
+    with pytest.raises(LookupError, match="^no class$"):
+        oecluster.SuperposeComparison(
+            [oechem.OEDesignUnit(), _RaisingClass()])
+
+
+def test_a_raising_fingerprint_batch_check_propagates():
+    """The same rule on the fingerprint-batch conversion.
+
+    ``take_fingerprints`` has a single wrapper, so the object reaches the in
+    typemap itself rather than an overload dispatcher's typecheck, which has
+    no way to report an error.
+    """
+    pytest.importorskip("oefp")
+    from oecluster import oecluster as native
+
+    with pytest.raises(LookupError, match="^no class$"):
+        native.take_fingerprints(_RaisingClass(), [0])
