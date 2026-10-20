@@ -56,9 +56,9 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   refusal reached across the sets, so `cdist([oemol], [graph_mol], ...)`
   raised it too. `MCSComparison` had the same pair of constructors and takes
   the same conversion now. MCS scores are topological and never read
-  coordinates, so for MCS only which lists are accepted changes: benzene as an
-  `OEGraphMol` against toluene as an `OEMol` reads 1/7 through `pdist()` in
-  either order and through `cdist()` in either direction, as
+  coordinates, so for MCS a mixed list changes only in being accepted: benzene
+  as an `OEGraphMol` against toluene as an `OEMol` reads 1/7 through `pdist()`
+  in either order and through `cdist()` in either direction, as
   `test_mcs_accepts_a_mixed_list_in_either_order` pins. `RMSDComparison`
   still accepts only `OEMol`.
 - **Reversing a ROCS `cdist()` asks a different question, and the answer
@@ -69,10 +69,10 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   multi-conformer `OEMol` in set A is overlaid as its active conformer, here
   the worst one, whatever set B holds. `pdist()` scores both orientations and
   keeps the better, and reads 0.0 for the same pair.
-- **A refused list element is now reported by its position, its type and the
-  type expected, on every route into the list conversions, and the message
-  text changed.** Each molecule and design-unit list conversion used to refuse
-  an element with "List item is not an OEMolBase object",
+- **The list conversions now report a refused element by its position, its
+  type and the type expected, and the message text changed.** Each molecule
+  and design-unit list conversion used to refuse an element with
+  "List item is not an OEMolBase object",
   "List item is not an OEMol object" or
   "List item is not an OEDesignUnit object", naming no element. Where the bad
   element came first on one of the six comparison constructors, the overload
@@ -89,9 +89,11 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   `SuperposeComparison` given design units. An instance that passes the type
   check but wraps nothing, as one made by `__new__` without `__init__` does,
   gets `molecule list item 1 is a OEGraphMol that wraps no molecule`, or
-  `... that wraps no design unit`. The index is the element's position in the
-  list the caller passed; `cdist()` names the set and counts within it, as in
-  `items_b item 1 is a int, not an OEMolBase`, rather than within the
+  `... that wraps no design unit`; `pdist()` reads molecule titles for its
+  labels before building the comparison, and on such a molecule that read can
+  raise OEChem's own `TypeError` first. The index is the element's position
+  in the list the caller passed; `cdist()` names the set and counts within it,
+  as in `items_b item 1 is a int, not an OEMolBase`, rather than within the
   `items_a + items_b` it builds over. The type is read from the type's
   `__name__`, or given as `<unnamed type>` when that read raises an
   `Exception` or returns something other than a string; any other exception
@@ -122,29 +124,19 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   design-unit list conversions hold references the same way, but the two
   Murcko functions are the only entry points taking a molecule or design-unit
   list that release the GIL.
-- **An exception raised by an element's own type check reaches the caller on
-  every route into the molecule and design-unit list conversions, for a check
-  that raises each time it is asked.** Where a list reached one of those
-  conversions with no Python check ahead of it, an element whose `__class__`
-  raises, for example, used to have that exception replaced by a `TypeError`
-  about its type: the conversion's refusal, or the dispatcher's generic
-  message when the element came first. That held for the comparison classes
-  and their native constructors, `cdist()`, `murcko_scaffolds()`, `murcko()`,
-  `descriptor_statistics()`, `pdist(..., "descriptor")`, and the other
-  functions that build a comparison from items and a comparison name, such as
-  `maxmin_select()` and `vendi_score()`. `pdist()` with any other comparison
-  already raised the element's own exception, from the `isinstance` check its
-  label extraction ran before building the comparison. The native functions
-  that take an `OEFPBatch`, such as `isim` and `take_fingerprints` in
-  `oecluster.oecluster`, now propagate the same way, where they raised
-  "Wrong number or type of arguments for overloaded function 'isim'" or
-  "Expected an oefp.OEFPBatch."; the public `isim()` and `bitbirch()` already
-  raised it from their own checks. Reading the wrapped pointer is treated the
-  same way: only `AttributeError` from `this`, or from an `OEFPBatch`'s
-  `_native`, means the object wraps nothing, and any other exception
-  propagates. The native conversion now reports an `oefp` whose batch types
-  cannot be loaded by the import or attribute error that loading raised, not
-  as "Expected an oefp.OEFPBatch.".
+- **The list conversions now propagate an exception raised by an element's
+  type check, for a check that raises each time it is asked.** The native
+  molecule and design-unit list conversions and the `OEFPBatch` conversion
+  used to replace such an exception with a `TypeError` about the element's
+  type, and now let it reach the caller, as does the item check `pdist()` and
+  `cdist()` now run for RMSD. An `AttributeError` from `__class__` does not
+  count: Python's `isinstance` treats it as no match, so such an element is
+  refused with the positional `TypeError` above. An exception other than
+  `AttributeError` raised while reading an object's wrapped pointer now
+  propagates too, where the conversion used to discard it. Some Python entry
+  points check item types themselves first, for example `pdist()`'s label
+  extraction and the public `isim()` and `bitbirch()`, so what a caller sees
+  from those depends on that check.
 - An allocation failure inside the conversion of a molecule list, a
   design-unit list or a progress callback now raises `MemoryError`, where it
   used to leave the wrapper as an uncaught C++ exception and terminate the
