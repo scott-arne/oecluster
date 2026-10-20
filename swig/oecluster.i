@@ -136,6 +136,26 @@ static void* _oecluster_extract_swig_ptr(PyObject* obj) {
     return ptr;
 }
 
+// Sets TypeError "molecule list item <index> is a <type name><tail>". The
+// stable ABI makes PyTypeObject opaque, so the name is read from the type's
+// __name__ rather than tp_name.
+static void _oecluster_molecule_item_error(Py_ssize_t index, PyObject* item, const char* tail) {
+    PyObject* name = PyObject_GetAttrString((PyObject*)Py_TYPE(item), "__name__");
+    if (!name || !PyUnicode_Check(name)) {
+        // A metaclass can make __name__ raise or return a non-string. The
+        // caller still owes a TypeError naming the position, not whatever
+        // reading the name raised.
+        PyErr_Clear();
+        Py_XDECREF(name);
+        name = PyUnicode_FromString("<unnamed type>");
+        if (!name) {
+            return;
+        }
+    }
+    PyErr_Format(PyExc_TypeError, "molecule list item %zd is a %U%s", index, name, tail);
+    Py_DECREF(name);
+}
+
 static PyObject* _oecluster_oefp_batch_type = NULL;
 static PyObject* _oecluster_oefp_native_batch_type = NULL;
 
@@ -522,26 +542,48 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, _oecluster_is_oereceptor, "
 // we do not own the Python-owned objects.
 
 // ---- const std::vector<OEChem::OEMolBase*>& ----
-%typemap(in) const std::vector<OEChem::OEMolBase*>& (std::vector<OEChem::OEMolBase*> temp) {
+%typemap(in) const std::vector<OEChem::OEMolBase*>& (std::vector<OEChem::OEMolBase*> temp, PyObject* held = 0) {
     if (!PyList_Check($input)) {
         SWIG_exception_fail(SWIG_TypeError, "Expected a list of OEMolBase objects");
     }
-    Py_ssize_t size = PyList_Size($input);
+    // The tuple holds a reference to every element until the freearg typemap
+    // below releases it, so emptying the caller's list cannot free a molecule
+    // while native code reads the pointers taken here. An entry point that
+    // releases the GIL lets another thread do exactly that mid-call. The loop
+    // reads the tuple rather than the list because its checks can run Python
+    // code, which could resize the list under it.
+    held = PyList_AsTuple($input);
+    if (!held) {
+        SWIG_fail;
+    }
+    Py_ssize_t size = PyTuple_GET_SIZE(held);
     temp.reserve(size);
     for (Py_ssize_t i = 0; i < size; ++i) {
-        PyObject* item = PyList_GetItem($input, i);
+        PyObject* item = PyTuple_GET_ITEM(held, i);
         if (!_oecluster_is_oemolbase(item)) {
-            SWIG_exception_fail(SWIG_TypeError, "List item is not an OEMolBase object");
+            _oecluster_molecule_item_error(i, item, ", not an OEMolBase");
+            SWIG_fail;
         }
+        // An OEMolBase instance whose ``this`` is missing or null, such as one
+        // made by ``__new__`` without ``__init__``, passes the check above, so
+        // it gets its own message rather than being called a non-OEMolBase.
         void* ptr = _oecluster_extract_swig_ptr(item);
         if (!ptr) {
-            SWIG_exception_fail(SWIG_TypeError, "List item is not an OEMolBase object");
+            _oecluster_molecule_item_error(i, item, " that wraps no molecule");
+            SWIG_fail;
         }
         // Same offset-0 base-cast assumption as the shared_ptr<OEMol> typemap
         // below; see the comment there.
         temp.push_back(reinterpret_cast<OEChem::OEMolBase*>(ptr));
     }
     $1 = &temp;
+}
+
+// Py_XDECREF needs the GIL. This relies on every %exception handler having
+// reacquired it before the wrapper reaches freearg, on the fail: path as well
+// as on success.
+%typemap(freearg) const std::vector<OEChem::OEMolBase*>& {
+    Py_XDECREF(held$argnum);
 }
 
 // ``precedence=1``, a literal rather than ``SWIG_TYPECHECK_POINTER``, and load

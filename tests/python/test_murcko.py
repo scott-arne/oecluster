@@ -188,10 +188,43 @@ class TestValidationMirror:
         # says what is wrong. Asserting only on TypeError could not tell the
         # two apart.
         good = mols(BENZENE)[0]
-        bad = {"first": [1, good], "last": [good, 1], "only": [1]}[position]
-        with pytest.raises(TypeError,
-                           match=r"List item is not an OEMolBase object"):
+        bad, index = {"first": ([1, good], 0), "last": ([good, 1], 1),
+                      "only": ([1], 0)}[position]
+        with pytest.raises(
+                TypeError,
+                match=rf"^molecule list item {index} is a int, "
+                      r"not an OEMolBase$"):
             entry_point(bad)
+
+    @pytest.mark.parametrize("entry_point", [
+        oecluster.murcko_scaffolds, oecluster.murcko])
+    def test_an_unconstructed_molecule_is_not_called_a_non_molecule(
+            self, entry_point):
+        # ``__new__`` without ``__init__`` gives an object that is an
+        # OEMolBase but wraps no C++ molecule. It passes the isinstance check,
+        # so reporting it as "not an OEMolBase" would be false.
+        empty = oechem.OEGraphMol.__new__(oechem.OEGraphMol)
+        with pytest.raises(
+                TypeError,
+                match=r"^molecule list item 1 is a OEGraphMol "
+                      r"that wraps no molecule$"):
+            entry_point([mols(BENZENE)[0], empty])
+
+    def test_an_element_whose_type_hides_its_name_still_gets_the_message(self):
+        # The type name is read from ``__name__``, which a metaclass can make
+        # raise. The refusal must still be the positional TypeError rather
+        # than the metaclass's exception.
+        class Nameless(type):
+            @property
+            def __name__(cls):
+                raise RuntimeError("no name")
+
+        odd = Nameless("Odd", (), {})()
+        with pytest.raises(
+                TypeError,
+                match=r"^molecule list item 1 is a <unnamed type>, "
+                      r"not an OEMolBase$"):
+            oecluster.murcko_scaffolds([mols(BENZENE)[0], odd])
 
     def test_the_scaffold_verdict_precedes_the_empty_input_verdict(self):
         with pytest.raises(ValueError, match="framework.*generic"):
