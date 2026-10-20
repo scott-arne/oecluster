@@ -3,10 +3,13 @@
 The GIL assertions in test_native_bindings.py read swig/oecluster.i, which
 describes the interface rather than what SWIG generated from it. A registration
 naming a function SWIG never wraps passes them, and so does an extension built
-before a registration existed. The tests here look at what a build produced:
-the first scans the wrapper source in the build tree whose shadow module the
-import uses, and the second times calls into the imported extension while a
-second thread tries to run.
+before a registration existed. The tests here look at what a build produced.
+The first scans the wrapper source in the build tree whose shadow module the
+import uses, and requires each function that runs a registered call to make
+that call after a Py_BEGIN_ALLOW_THREADS line and before the next
+Py_END_ALLOW_THREADS line, with no preprocessor conditional between the release
+and the call. The second times calls into the imported extension while a second
+thread tries to run.
 """
 
 import logging
@@ -37,9 +40,13 @@ _DEFINE_LINE = re.compile(r"^[ \t]*%define\b[^\n]*", re.MULTILINE)
 # first line holding only "}" closes the function.
 _WRAPPER_FUNCTION = re.compile(r"^SWIGINTERN PyObject \*(_wrap_\w+)\(.*?^\}$",
                                re.MULTILINE | re.DOTALL)
-# The first line of both OECLUSTER_GIL_EXCEPTION and
-# OECLUSTER_GIL_MEMORY_EXCEPTION.
-_RELEASE_MARKER = "Py_BEGIN_ALLOW_THREADS"
+# The first and last lines of the body of both OECLUSTER_GIL_EXCEPTION and
+# OECLUSTER_GIL_MEMORY_EXCEPTION, each of which SWIG emits on a line of its own.
+_BEGIN_LINE = re.compile(r"^[ \t]*Py_BEGIN_ALLOW_THREADS[ \t]*$", re.MULTILINE)
+_END_LINE = re.compile(r"^[ \t]*Py_END_ALLOW_THREADS[ \t]*$", re.MULTILINE)
+_CONDITIONAL_LINE = re.compile(r"^[ \t]*#[ \t]*(?:if|ifdef|ifndef|elif|else|endif)\b",
+                               re.MULTILINE)
+_QUALIFIED_CALL = re.compile(r"\bOECluster::\w+\(")
 # Under build/, this repository builds into build/ itself (the default CMake
 # preset) and build/{wheel_tag} (pyproject's build-dir).
 _SHADOW_MODULE_PATTERNS = ("swig/_oecluster.py", "*/swig/_oecluster.py")
@@ -66,14 +73,59 @@ def _registered_names(interface_text):
     return names
 
 
+def _release_problem(function, body, name):
+    """Say why ``body`` does not call ``OECluster::<name>(`` released, or None.
+
+    :param function: The wrapper function's name, for the message.
+    :param body: The wrapper function's text.
+    :param name: The registered function name.
+    :returns: A description of the first violation found, or None.
+    """
+    # Blank string literals and comments, so that neither a marker nor a call
+    # quoted inside one counts.
+    code = _SWIG_COMMENT_OR_STRING.sub(
+        lambda match: '""' if match.group(0).startswith('"') else " ", body)
+    action = f"OECluster::{name}("
+    calls = [match.start() for match in re.finditer(rf"\bOECluster::{name}\(", code)]
+    if not calls:
+        held = sorted({f"{call}...)" for call in _QUALIFIED_CALL.findall(code)})
+        return (f"{function} never calls {action}...); it calls "
+                f"{', '.join(held) or 'nothing in OECluster::'}")
+    begins = [match.start() for match in _BEGIN_LINE.finditer(code)]
+    ends = [match.start() for match in _END_LINE.finditer(code)]
+    for call in calls:
+        opened = [begin for begin in begins if begin < call]
+        if not opened:
+            return f"{function} calls {action}...) before any Py_BEGIN_ALLOW_THREADS"
+        begin = opened[-1]
+        if any(begin < end < call for end in ends):
+            return (f"{function} calls {action}...) after a Py_END_ALLOW_THREADS "
+                    "closed the release before it")
+        if not any(end > call for end in ends):
+            return (f"{function} calls {action}...) with no Py_END_ALLOW_THREADS "
+                    "after it")
+        if _CONDITIONAL_LINE.search(code, begin, call):
+            return (f"{function} has a preprocessor conditional between "
+                    f"Py_BEGIN_ALLOW_THREADS and its call to {action}...)")
+    return None
+
+
 def _unreleased(names, wrapper_text):
-    """Describe each registered call the wrapper does not release the GIL for.
+    """Describe each registered call the wrapper does not run with the GIL released.
+
+    The functions that run a registered call are the leaves of an overloaded
+    name, ``_wrap_<name>__SWIG_<n>``, or ``_wrap_<name>`` for a name with none.
+    Ignoring comments and string literals, every ``OECluster::<name>(`` in such
+    a function must come after a line holding only ``Py_BEGIN_ALLOW_THREADS``,
+    with no line holding only ``Py_END_ALLOW_THREADS`` and no ``#if``,
+    ``#ifdef``, ``#ifndef``, ``#elif``, ``#else`` or ``#endif`` line between
+    the two, and a line holding only ``Py_END_ALLOW_THREADS`` must follow it.
 
     :param names: Registered function names.
     :param wrapper_text: The text of the generated oeclusterPYTHON_wrap.cxx.
     :returns: One line per registration with no wrapper function, and one per
-        function that runs a registered call without the release marker in its
-        own body.
+        function that never calls ``OECluster::<name>(`` or breaks the rule
+        above.
     """
     functions = {match.group(1): match.group(0)
                  for match in _WRAPPER_FUNCTION.finditer(wrapper_text)}
@@ -89,9 +141,10 @@ def _unreleased(names, wrapper_text):
         if not checked:
             problems.append(f"{name} is registered, but the wrapper has no "
                             f"_wrap_{name} function")
-        problems.extend(f"{name}: {function} does not contain {_RELEASE_MARKER}"
-                        for function in checked
-                        if _RELEASE_MARKER not in functions[function])
+        for function in checked:
+            problem = _release_problem(function, functions[function], name)
+            if problem is not None:
+                problems.append(f"{name}: {problem}")
     return problems
 
 
@@ -139,8 +192,9 @@ def test_every_registered_wrapper_releases_the_gil():
     Scans the wrapper source in the build tree whose shadow module the import
     uses, assuming that wrapper is the one the imported extension was compiled
     from (see _bound_wrapper), and skips when no single build tree matches. A
-    registration SWIG never applied, whether to a function it does not wrap or
-    because the directive sits after the declaration, leaves no marker to find.
+    registration SWIG never applied fails it: one naming a function SWIG does
+    not wrap has no wrapper function, and one placed after the declaration
+    leaves the call outside any release.
     """
     from oecluster import oecluster as native
 
@@ -183,6 +237,61 @@ def test_a_comment_marker_in_a_string_does_not_hide_a_registration():
             + "OECLUSTER_GIL_EXCEPTION(OECluster::second, second)\n"
             + "// a later */ that a comment opened inside the string would close on\n")
     assert _registered_names(text) == ["first", "second"]
+
+
+def _synthetic_wrapper(body):
+    """Wrap ``body`` in the shape SWIG gives an unoverloaded wrapper of demo."""
+    return ("SWIGINTERN PyObject *_wrap_demo(PyObject *self, PyObject *args) {\n"
+            "  PyObject *resultobj = 0;\n"
+            f"{body}"
+            "  return resultobj;\n"
+            "fail:\n"
+            "  return NULL;\n"
+            "}\n")
+
+
+def test_a_registered_call_inside_its_release_is_accepted():
+    body = ("  {\n"
+            "    Py_BEGIN_ALLOW_THREADS\n"
+            "    try {\n"
+            "      result = OECluster::demo(arg1);\n"
+            "    } catch (...) {\n"
+            "      Py_BLOCK_THREADS\n"
+            '      SWIG_exception(SWIG_RuntimeError, "Unknown C++ exception in " "demo");\n'
+            "    }\n"
+            "    Py_END_ALLOW_THREADS\n"
+            "  }\n")
+    assert _unreleased(["demo"], _synthetic_wrapper(body)) == []
+
+
+@pytest.mark.parametrize("body, reason", [
+    (("  result = OECluster::demo(arg1);\n"
+      "  Py_BEGIN_ALLOW_THREADS\n"
+      "  Py_END_ALLOW_THREADS\n"),
+     "before any Py_BEGIN_ALLOW_THREADS"),
+    (("#if 0\n"
+      "  Py_BEGIN_ALLOW_THREADS\n"
+      "#endif\n"
+      "  result = OECluster::demo(arg1);\n"
+      "#if 0\n"
+      "  Py_END_ALLOW_THREADS\n"
+      "#endif\n"),
+     "preprocessor conditional"),
+    (("  Py_BEGIN_ALLOW_THREADS\n"
+      "  prepare(arg1);\n"
+      "  Py_END_ALLOW_THREADS\n"
+      "  result = OECluster::demo(arg1);\n"),
+     "after a Py_END_ALLOW_THREADS"),
+    (("  Py_BEGIN_ALLOW_THREADS\n"
+      "  result = OECluster::other(arg1);\n"
+      "  Py_END_ALLOW_THREADS\n"),
+     "never calls OECluster::demo(...); it calls OECluster::other("),
+], ids=["marker-after-the-call", "marker-only-under-if-0", "call-after-the-end",
+        "no-call"])
+def test_a_registered_call_outside_its_release_is_refused(body, reason):
+    problems = _unreleased(["demo"], _synthetic_wrapper(body))
+    assert len(problems) == 1, problems
+    assert reason in problems[0], problems
 
 
 # A call reads as released when the ticker's longest gap stays under this
