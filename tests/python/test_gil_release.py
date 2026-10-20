@@ -329,6 +329,15 @@ def test_a_registered_call_inside_its_release_is_accepted():
     assert _unreleased(["demo"], _synthetic_wrapper(body)) == []
 
 
+def test_a_registration_with_no_wrapper_function_is_refused():
+    """A registration naming a function SWIG never wrapped, as the removed
+    ``cdist`` one did, has no function to check, and is reported rather than
+    passed."""
+    problems = _unreleased(["cdist"], _synthetic_wrapper(""))
+    assert problems == [
+        "cdist is registered, but the wrapper has no _wrap_cdist function"]
+
+
 @pytest.mark.parametrize("body, reason", [
     (("  result = OECluster::demo(arg1);\n"
       "  Py_BEGIN_ALLOW_THREADS\n"

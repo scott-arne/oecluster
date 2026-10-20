@@ -42,9 +42,9 @@ def _conformer_mols(smiles_list=None):
     ``ROCSComparison`` refuses a molecule whose recomputed OEChem dimension
     attribute -- an axis count, not a geometric rank -- is below three, and a
     molecule straight from a SMILES parse carries no coordinates at all, so
-    these fixtures have to come from Omega. The typemap needs ``OEMol``: an
-    ``OEGraphMol`` fails earlier and differently, with a SWIG ``TypeError``
-    rather than the dimension refusal.
+    these fixtures have to come from Omega. They are ``OEMol`` because Omega
+    takes an ``OEMCMolBase``; ROCS itself accepts an ``OEGraphMol`` that
+    carries 3D coordinates.
     """
     pytest.importorskip("openeye.oeomega")
     from openeye import oeomega

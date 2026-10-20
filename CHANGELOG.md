@@ -100,12 +100,14 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   from the read, such as `KeyboardInterrupt` or `SystemExit`, propagates. A
   caller matching on "List item is not" or on the dispatcher's message for
   these inputs has to change.
-- `pdist()` and `cdist()` with `comparison="rmsd"` check every item before
-  expanding conformers, which they do by default, so a refused item gets the
-  message above, indexed before any expansion. An item could fail inside the
-  expansion before: an object with a `NumConfs` method reporting more than one
-  conformer raised `AttributeError` for its missing `GetTitle`, and an `OEMol`
-  made by `__new__` raised OEChem's own `TypeError` from `NumConfs`.
+- `pdist()`, `cdist()` and the other functions that take a comparison name,
+  such as `vendi_score()` and `maxmin_select()`, check every item with
+  `comparison="rmsd"` before expanding conformers, which they do by default,
+  so a refused item gets the message above, indexed before any expansion. An
+  item could fail inside the expansion before: an object with a `NumConfs`
+  method reporting more than one conformer raised `AttributeError` for its
+  missing `GetTitle`, and an `OEMol` made by `__new__` raised OEChem's own
+  `TypeError` from `NumConfs`.
 
 ### Fixed
 

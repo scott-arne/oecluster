@@ -15,7 +15,8 @@ def _mols(smiles_list):
 
 
 def _multiconf_mols(smiles_list):
-    """ROCS and superpose need ``OEMol``; their typemaps reject ``OEGraphMol``."""
+    """``OEMol`` rather than ``OEGraphMol``, so that ``_conformer_mols`` can
+    embed them: Omega takes an ``OEMCMolBase``."""
     mols = []
     for idx, smi in enumerate(smiles_list):
         mol = oechem.OEMol()
