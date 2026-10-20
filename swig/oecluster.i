@@ -793,9 +793,12 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, oereceptor, "Expected OERec
 // so a list starting with an OEGraphMol scored every later OEMol on its
 // active conformer.
 //
-// RMSDComparison takes the same parameter type and must keep the strict
-// conversion above: it measures conformers and refuses an OEGraphMol. So this
-// is defined under a parameter name nothing declares and %apply'd to
+// RMSDComparison takes the same parameter type and keeps the strict
+// conversion above, which refuses an OEGraphMol. That is a scope decision,
+// not a scoring requirement: RMSD reads only each molecule's active
+// conformer, which an OEGraphMol supplies, but widening its conversion would
+// change what it accepts, and that is a separate decision. So this is defined
+// under a parameter name nothing declares and %apply'd to
 // ``mols`` only around the ROCSComparison.h and MCSComparison.h %includes,
 // %clear'ed after each. RMSDComparison.h is %included between those two,
 // which is why there are two windows rather than one. The windows key on the

@@ -193,9 +193,10 @@ def test_a_molecule_that_wraps_nothing_says_so(comparison, kind):
 
 
 def test_rmsd_still_refuses_a_graph_molecule():
-    """The ROCS and MCS conversion is scoped to their constructors. RMSD
-    measures conformers and keeps its strict ``OEMol`` conversion, on both
-    constructor forms."""
+    """The ROCS and MCS conversion is scoped to their constructors, so RMSD
+    still refuses an ``OEGraphMol`` on both constructor forms. That keeps
+    what RMSD accepts unchanged; it is not a scoring requirement, since RMSD
+    reads only each molecule's active conformer."""
     mols = [_parsed(oechem.OEMol, "c1ccccc1"), _parsed(oechem.OEGraphMol, "c1ccccc1")]
     with pytest.raises(TypeError, match=r"not an OEMol\b"):
         native.RMSDComparison(mols)
