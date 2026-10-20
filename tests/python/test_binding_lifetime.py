@@ -142,6 +142,11 @@ def test_a_raising_first_element_propagates(route):
     error. Answering "no" there left every overload ruled out and replaced
     the exception with the dispatcher's generic TypeError, before any
     conversion ran.
+
+    The exception surfaces because the conversion repeats the check and
+    ``_RaisingClass`` raises on every read. An element that raises only on
+    the first read is lost instead; see
+    ``test_a_check_that_raises_only_once_is_lost``.
     """
     comparison, rest = {
         "fingerprint": (
@@ -155,12 +160,76 @@ def test_a_raising_first_element_propagates(route):
 
 
 def test_a_raising_batch_check_on_an_overloaded_function_propagates():
-    """``isim`` has two overloads, so its typecheck runs before the typemap."""
+    """``isim`` has two overloads, so its typecheck runs before the typemap.
+
+    As above, this holds for a check that raises on every read.
+    """
     pytest.importorskip("oefp")
     from oecluster import oecluster as native
 
     with pytest.raises(LookupError, match="^no class$"):
         native.isim(_RaisingClass())
+
+
+class _RaisesOnceClass:
+    """An object whose first type read raises and whose later reads answer.
+
+    The first read of ``__class__`` raises ``LookupError``; every later read
+    reports ``target``. The keyword arguments lend it a real object's wrapped
+    pointer attribute, ``this`` or ``_native``, so a conversion that believes
+    a later read has something real to convert.
+    """
+
+    def __init__(self, target, **lent):
+        self.reads = 0
+        self._target = target
+        for name, value in lent.items():
+            setattr(self, name, value)
+
+    @property
+    def __class__(self):
+        self.reads += 1
+        if self.reads == 1:
+            raise LookupError("first read")
+        return self._target
+
+
+@pytest.mark.parametrize("route", ["superpose", "isim"])
+def test_a_check_that_raises_only_once_is_lost(route):
+    """The accepted limit of the propagation guarantee, chosen deliberately.
+
+    This outcome is not desired. It is pinned so that it stays visible and
+    any change to it shows up here.
+
+    A typecheck cannot report an error, so on a raising check it answers yes
+    and leaves the conversion to repeat the check and raise. That reports the
+    exception only when the repeat raises too. This object raises on its
+    first type read and answers on every later one, so the typecheck's read
+    raises, the conversion's read passes, and the call succeeds with the
+    ``LookupError`` lost. The binding layer accepts that rather than carry the
+    first exception across, because only a contrived object changes its type
+    answer between reads.
+
+    Superpose's design-unit overload and ``isim`` each read the argument in
+    an overload typecheck before converting it. The native module is called
+    directly so that no Python-layer check reads the object first.
+    """
+    from oecluster import oecluster as native
+
+    if route == "superpose":
+        real = oechem.OEDesignUnit()
+        flaky = _RaisesOnceClass(oechem.OEDesignUnit, this=real.this)
+        comparison = native.SuperposeComparison([flaky, oechem.OEDesignUnit()])
+        assert comparison.Size() == 2
+    else:
+        oefp = pytest.importorskip("oefp")
+        real = oefp.OEFPBatch.from_fingerprints(
+            [oefp.OEFP.from_on_bits(8, [1]), oefp.OEFP.from_on_bits(8, [1, 2])])
+        flaky = _RaisesOnceClass(oefp.OEFPBatch, _native=real._native)
+        assert native.isim(flaky) == native.isim(real)
+    # The first read raised, so its exception was swallowed by the typecheck;
+    # a later read answered, and the call went ahead on that answer.
+    assert flaky.reads >= 2
 
 
 def _raising_pointer(base, attribute):

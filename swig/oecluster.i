@@ -201,8 +201,11 @@ static int _oecluster_load_oefp_batch_types() {
     return 1;
 }
 
-// The same two forms, and the same rule for choosing between them, as the
-// checkers DEFINE_OE_TYPE_CHECKER generates below.
+// The same two forms, the same rule for choosing between them, and the same
+// limit on what the repeated check can report, as the checkers
+// DEFINE_OE_TYPE_CHECKER generates below. An overloaded function that takes
+// a batch, such as isim, reads the batch argument in a typecheck first, so it
+// is subject to that limit.
 static int _oecluster_isinstance_oefp_batch(PyObject* obj) {
     if (_oecluster_load_oefp_batch_types() < 0) {
         return -1;
@@ -323,10 +326,17 @@ static bool _oecluster_check_oefp_abi() {
 // that raised has not answered and its exception is the report. Only a
 // %typemap(typecheck) calls _oecluster_may_be_TAG. A typecheck cannot report
 // an error, but it can leave its overload in play: if SWIG selects that
-// overload, its in typemap repeats the check, so the exception reaches the
-// caller whenever the check raises again. Answering no would rule the
-// overload out, and when no other accepts the argument, replace the exception
-// with the dispatcher's generic TypeError.
+// overload, its in typemap repeats the check, and the check's own exception
+// reaches the caller only if the repeat raises too. Propagation is therefore
+// guaranteed only for a check that answers the same way twice. An object
+// whose __class__ or isinstance behaviour changes between consecutive reads
+// can raise on the typecheck's read and answer on the in typemap's. Its first
+// exception is then lost, and the in typemap goes by the second answer,
+// treating the object as that type or refusing it as the wrong one. Only a
+// contrived object does that, and the loss is accepted rather than guarded
+// against. Answering no would rule the overload out, and when no other
+// accepts the argument, replace the exception with the dispatcher's generic
+// TypeError.
 // TAG:    identifier suffix (e.g., oemolbase)
 // MODULE: Python module string (e.g., "openeye.oechem")
 // CLASS:  Python class name string (e.g., "OEMolBase")
