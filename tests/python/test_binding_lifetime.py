@@ -149,19 +149,20 @@ def _benzene(kind):
 @pytest.mark.parametrize(
     "route", ["fingerprint", "rocs", "mcs", "rmsd", "superpose"])
 def test_a_raising_first_element_propagates(route):
-    """The overload dispatcher must not turn a raising check into "no".
+    """A first element whose type check raises surfaces that exception, on
+    every constructor, rather than the dispatcher's generic TypeError.
 
-    For Superpose it reads element 0 alone, through the design-unit
-    typecheck, which cannot report an error. Answering "no" there left every
-    overload ruled out and replaced the exception with the dispatcher's
-    generic TypeError, before any conversion ran. The exception surfaces
-    because the conversion repeats the check and ``_RaisingClass`` raises on
-    every read. An element that raises only on the first read is lost
-    instead; see ``test_a_check_that_raises_only_once_is_lost``.
-
-    The other four dispatchers test only that the argument is a list, so for
-    them the conversion's check is the first read of the element, not a
-    repeat.
+    Fingerprint, RMSD, ROCS and MCS's dispatchers test only that the argument
+    is a list, so their conversion's check is the first read of the element.
+    Superpose's design-unit typecheck, examined first, reads element 0 and
+    answers "candidate" when the check raises, so the design-unit conversion
+    repeats the check and raises. Had it answered "no", the list would go to
+    the molecule overload, whose conversion raises the same exception, so
+    this case cannot tell the two answers apart; the candidate answer is
+    pinned by ``test_a_check_that_raises_only_once_is_lost``. For Superpose
+    the exception surfaces only because ``_RaisingClass`` raises on every
+    read; an element that raises on its first read alone is lost there, as
+    that test shows.
     """
     comparison, rest = {
         "fingerprint": (

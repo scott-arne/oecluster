@@ -4018,13 +4018,14 @@ def _murcko_options(mols, scaffold, num_threads, caller):
         raise ValueError(
             f"Unknown Murcko scaffold type: {scaffold!r}; "
             "expected 'framework' or 'generic'")
-    # The typemap below is a strict PyList_Check, so anything else is rejected
-    # there anyway -- but both entry points are overloaded, and SWIG's overload
-    # dispatcher discards the typemap's message in favour of "Wrong number or
-    # type of arguments for overloaded function 'murcko_cluster'", naming a
-    # symbol murcko() never told the caller about. Mirroring the check exactly
-    # keeps a tuple, which has a length and so used to slip through, from
-    # reaching that dispatcher.
+    # The native typemap is a strict PyList_Check, so it would refuse anything
+    # else too, as TypeError "Expected a list of OEMolBase objects", which
+    # names neither the function the caller called nor the argument.
+    # Mirroring the check exactly refuses the same inputs with the same
+    # exception type, in a message that names the public function. The mirror
+    # once also kept a tuple away from an overload dispatcher whose message
+    # named the C++ symbol 'murcko_cluster'; compacting the default arguments
+    # in swig/oecluster.i has since removed that dispatcher.
     #
     # ``list.__len__`` rather than ``not mols``: the typemap reads ``ob_size``
     # through ``PyList_AsTuple``, which an overridden ``__len__`` on a list

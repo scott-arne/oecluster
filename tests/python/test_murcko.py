@@ -153,11 +153,14 @@ class TestValidationMirror:
         # whole type. A generator escaped as "object of type 'generator' has
         # no len()" -- the right exception type, naming neither the function
         # nor what it wanted. A tuple has a length, so it passed the mirror and
-        # reached the native call, where SWIG's overload dispatcher reports
-        # "Wrong number or type of arguments for overloaded function
-        # 'murcko_cluster'" -- and murcko() never told the caller that symbol
-        # exists. The match is anchored on the full sentence so a message that
-        # merely contains the right words does not satisfy it.
+        # reached the native call, where SWIG's overload dispatcher, since
+        # removed, reported "Wrong number or type of arguments for overloaded
+        # function 'murcko_cluster'" -- and murcko() never told the caller
+        # that symbol exists. A tuple reaching the native call now would be
+        # refused by the typemap as "Expected a list of OEMolBase objects",
+        # which names no function either. The match is anchored on the full
+        # sentence so a message that merely contains the right words does not
+        # satisfy it.
         molecules = mols(BENZENE)
         bad_input = (
             (mol for mol in molecules) if label == "generator"

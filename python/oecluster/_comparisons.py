@@ -1123,7 +1123,7 @@ def _expand_conformers_requested(kwargs):
 
 def _require_oemol_items(items):
     """
-    Refuse a non-``OEMol`` item, or one with no molecule behind it, in the
+    Refuse a non-``OEMol`` item, or an ``OEMol`` with no ``this``, in the
     words of the strict ``OEMol`` list conversion.
 
     Conformer expansion calls ``NumConfs`` and ``GetTitle`` on each item, so
@@ -1133,7 +1133,9 @@ def _require_oemol_items(items):
 
     :param items: The items given to the RMSD comparison.
     :raises TypeError: For the first item that is not an ``OEMol``, or is one
-        with no molecule behind it.
+        with no ``this`` attribute, as an ``OEMol`` made by ``__new__``
+        without ``__init__`` has none. A ``this`` holding a null pointer is
+        not detected here.
     """
     from openeye import oechem
 
