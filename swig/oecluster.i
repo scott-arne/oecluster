@@ -142,12 +142,17 @@ static void* _oecluster_extract_swig_ptr(PyObject* obj) {
     return ptr;
 }
 
-// Sets TypeError "<noun> list item <index> is a <type name><tail>". Call it
+// Sets TypeError "<noun> list item <index> is a <type name><tail>", with
+// <index> also stored on the instance as ``_oecluster_item_index``. Call it
 // with no exception pending. The stable ABI makes PyTypeObject opaque, so the
 // name is read from the type's __name__ rather than tp_name.
-// python/oecluster/_comparisons.py depends on this format: RMSD's item check
-// there raises a copy of it, and cdist recognises it by _LIST_ITEM_ERROR to
-// name the input set. A change to it must change both.
+//
+// The attribute marks the error as a conversion's own. cdist renames only a
+// marked error, to name the input set (items_named_by_set in
+// python/oecluster/_comparisons.py), so an element whose check raised a
+// TypeError worded like this one keeps its identity. RMSD's Python item check
+// raises a marked copy of this message. A change to the format or the
+// attribute must change that module too.
 static void _oecluster_list_item_error(const char* noun, Py_ssize_t index, PyObject* item,
                                        const char* tail) {
     PyObject* name = PyObject_GetAttrString((PyObject*)Py_TYPE(item), "__name__");
@@ -162,8 +167,31 @@ static void _oecluster_list_item_error(const char* noun, Py_ssize_t index, PyObj
             return;
         }
     }
-    PyErr_Format(PyExc_TypeError, "%s list item %zd is a %U%s", noun, index, name, tail);
+    PyObject* message = PyUnicode_FromFormat("%s list item %zd is a %U%s", noun, index, name,
+                                             tail);
     Py_DECREF(name);
+    if (!message) {
+        return;
+    }
+    // Built as an instance and marked before it is raised, which needs none
+    // of the fetch-and-restore calls deprecated since 3.12.
+    PyObject* error = PyObject_CallFunctionObjArgs(PyExc_TypeError, message, NULL);
+    Py_DECREF(message);
+    if (!error) {
+        return;
+    }
+    PyObject* mark = PyLong_FromSsize_t(index);
+    if (!mark || PyObject_SetAttrString(error, "_oecluster_item_index", mark) < 0) {
+        // The failure to mark is what surfaces, not the unmarked TypeError:
+        // cdist would pass that through with an index into items_a + items_b
+        // and no set named, which reads as an index into the caller's set.
+        Py_XDECREF(mark);
+        Py_DECREF(error);
+        return;
+    }
+    Py_DECREF(mark);
+    PyErr_SetObject(PyExc_TypeError, error);
+    Py_DECREF(error);
 }
 
 // The form every molecule list conversion uses.

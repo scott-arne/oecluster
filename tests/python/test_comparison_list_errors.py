@@ -190,31 +190,49 @@ def test_rmsd_reports_a_molecule_that_wraps_nothing(route):
 # Each comparison, through both steps of cdist that can raise: the per-set
 # normalization, where descriptor's complete-case filter and RMSD's item check
 # report an index within the set, and the combined build, which reports one
-# within ``items_a + items_b``. The last column is that raw index.
-@pytest.mark.parametrize("comparison, kwargs, expected_name, raw_index", [
-    ("fingerprint", {}, "OEMolBase", 5),
-    ("rocs", {}, "OEMolBase", 5),
-    ("superpose", {}, "OEMolBase", 5),
-    ("sitehopper", {}, "OEMolBase", 5),
-    ("descriptor", {}, "OEMolBase", 2),
-    ("descriptor", {"missing": "propagate"}, "OEMolBase", 5),
-    ("rmsd", {}, "OEMol", 2),
-    ("rmsd", {"expand_conformers": False}, "OEMol", 5),
-    ("mcs", {}, "OEMolBase", 5),
-], ids=["fingerprint", "rocs", "superpose", "sitehopper", "descriptor",
-        "descriptor-propagate", "rmsd", "rmsd-unexpanded", "mcs"])
+# within ``items_a + items_b``. The last column says which step raises.
+_CDIST_COMPARISONS = pytest.mark.parametrize(
+    "comparison, kwargs, expected_name, while_normalizing", [
+        ("fingerprint", {}, "OEMolBase", False),
+        ("rocs", {}, "OEMolBase", False),
+        ("superpose", {}, "OEMolBase", False),
+        ("sitehopper", {}, "OEMolBase", False),
+        ("descriptor", {}, "OEMolBase", True),
+        ("descriptor", {"missing": "propagate"}, "OEMolBase", False),
+        ("rmsd", {}, "OEMol", True),
+        ("rmsd", {"expand_conformers": False}, "OEMol", False),
+        ("mcs", {}, "OEMolBase", False),
+    ], ids=["fingerprint", "rocs", "superpose", "sitehopper", "descriptor",
+            "descriptor-propagate", "rmsd", "rmsd-unexpanded", "mcs"])
+
+# Set sizes, where the bad element sits, and its index in ``items_a +
+# items_b``. "b-middle" is set B's item 2 where set A also has an item 2, so
+# an index with no set named is ambiguous, and its concatenated index, 5, is a
+# valid element of set B. "b-first" and "a-last" sit either side of the
+# boundary between the sets.
+_PLACEMENTS = {
+    "b-middle": (3, 6, "items_b", 2, 5),
+    "b-first": (2, 2, "items_b", 0, 2),
+    "a-last": (2, 2, "items_a", 1, 1),
+}
+
+
+@_CDIST_COMPARISONS
+@pytest.mark.parametrize("placement", sorted(_PLACEMENTS))
 def test_cdist_names_the_set_and_the_index_within_it(
-        comparison, kwargs, expected_name, raw_index):
-    """The bad element is set B's item 2. Set A also has an item 2, so an
-    index with no set named is ambiguous, and its index in ``items_a +
-    items_b``, 5, is a valid element of set B."""
+        comparison, kwargs, expected_name, while_normalizing, placement):
+    size_a, size_b, set_name, index, concatenated = _PLACEMENTS[placement]
     mol = _parsed(oechem.OEMol, "c1ccccc1")
-    items_a = [mol, mol, mol]
-    items_b = [mol, mol, 1, mol, mol, mol]
+    items_a = [mol] * size_a
+    items_b = [mol] * size_b
+    (items_a if set_name == "items_a" else items_b)[index] = 1
     with pytest.raises(TypeError) as caught:
         oecluster.cdist(items_a, items_b, comparison, **kwargs)
-    assert str(caught.value) == f"items_b item 2 is a int, not an {expected_name}"
-    # The report it replaced stays attached as the cause.
+    assert str(caught.value) == (
+        f"{set_name} item {index} is a int, not an {expected_name}")
+    # The report it replaced stays attached as the cause, with the index the
+    # raising step saw.
+    raw_index = index if while_normalizing else concatenated
     assert str(caught.value.__cause__) == (
         f"molecule list item {raw_index} is a int, not an {expected_name}")
 
@@ -235,19 +253,91 @@ def test_cdist_passes_any_other_type_error_through_untouched():
     assert caught.value.__cause__ is None
 
 
+class _ForgedRefusal:
+    """An element whose type check raises, on every read, a ``TypeError``
+    worded exactly like a conversion's refusal of some other element."""
+
+    def __init__(self):
+        self.raised = []
+
+    @property
+    def __class__(self):
+        error = TypeError("molecule list item 1 is a sentinel, not an OEMolBase")
+        self.raised.append(error)
+        raise error
+
+
+@pytest.mark.parametrize("comparison", ["rocs", "descriptor", "rmsd"])
+@pytest.mark.parametrize("route", ["pdist", "cdist"])
+def test_an_element_s_own_type_error_is_never_renamed(comparison, route):
+    """A check that raised has not answered, so its exception surfaces as it
+    was, whatever it says. ROCS raises from the combined build, descriptor
+    from its native filter and RMSD from its Python item check."""
+    mol = _parsed(oechem.OEMol, "c1ccccc1")
+    bad = _ForgedRefusal()
+    with pytest.raises(TypeError) as caught:
+        if route == "pdist":
+            oecluster.pdist([mol, bad], comparison)
+        else:
+            oecluster.cdist([mol], [mol, bad], comparison)
+    assert caught.value is bad.raised[-1]
+    assert caught.value.__cause__ is None
+
+
+class _NamelessMeta(type):
+    @property
+    def __name__(cls):
+        raise LookupError("no name")
+
+
+class _MisnamedMeta(type):
+    @property
+    def __name__(cls):
+        return 5
+
+
+@pytest.mark.parametrize("meta", [_NamelessMeta, _MisnamedMeta],
+                         ids=["raising", "non-string"])
+@pytest.mark.parametrize("kwargs", [{}, {"expand_conformers": False}],
+                         ids=["expanded", "unexpanded"])
+def test_rmsd_names_an_unnamed_type_as_the_conversion_does(meta, kwargs):
+    """A type's ``__name__`` can raise or be no string. The native message
+    then says ``<unnamed type>``, and RMSD's Python item check, which runs
+    only when expanding, must say the same."""
+    mol = _parsed(oechem.OEMol, "c1ccccc1")
+    odd = meta("Odd", (), {})()
+    expected = "item 1 is a <unnamed type>, not an OEMol"
+    _assert_reported([lambda: oecluster.pdist([mol, odd], "rmsd", **kwargs)],
+                     f"molecule list {expected}")
+    _assert_reported(
+        [lambda: oecluster.cdist([mol], [mol, odd], "rmsd", **kwargs)],
+        f"items_b {expected}")
+
+
+def _marked(message, index, cls=TypeError):
+    error = cls(message)
+    setattr(error, _comparisons._ITEM_INDEX_ATTRIBUTE, index)
+    return error
+
+
 class _TypeErrorSubclass(TypeError):
     pass
 
 
-@pytest.mark.parametrize("error", [
-    TypeError("see molecule list item 1 is a int, not an OEMolBase"),
-    TypeError("molecule list item one is a int, not an OEMolBase"),
-    TypeError("molecule list item 9 is a int, not an OEMolBase"),
-    _TypeErrorSubclass("molecule list item 1 is a int, not an OEMolBase"),
-], ids=["unanchored", "no-index", "past-both-sets", "subclass"])
-def test_only_the_conversion_message_is_renamed(error):
-    """Anything but the conversions' message raised as a plain ``TypeError``
-    comes out as the same exception object."""
+@pytest.mark.parametrize("make_error", [
+    lambda: TypeError("molecule list item 1 is a int, not an OEMolBase"),
+    lambda: _marked("molecule list item 1 is a int, not an OEMolBase", 1,
+                    _TypeErrorSubclass),
+    lambda: _marked("molecule list item 9 is a int, not an OEMolBase", 9),
+    lambda: _marked("molecule list item 1 is a int, not an OEMolBase", "1"),
+    lambda: _marked("see molecule list item 1 is a int, not an OEMolBase", 1),
+], ids=["unmarked", "subclass", "past-both-sets", "non-int-mark",
+        "unparsed-message"])
+def test_only_a_conversion_s_own_error_is_renamed(make_error):
+    """Anything but a plain ``TypeError`` carrying the conversions' mark and
+    their message comes out as the same exception object, however it is
+    worded."""
+    error = make_error()
     with (pytest.raises(TypeError) as caught,
           _comparisons.items_named_by_set(("items_a", 2), ("items_b", 3))):
         raise error
@@ -255,7 +345,8 @@ def test_only_the_conversion_message_is_renamed(error):
 
 
 def test_the_renamed_message_chains_the_conversion_message():
-    original = TypeError("design unit list item 3 is a int, not an OEDesignUnit")
+    original = _marked(
+        "design unit list item 3 is a int, not an OEDesignUnit", 3)
     with (pytest.raises(TypeError) as caught,
           _comparisons.items_named_by_set(("items_a", 2), ("items_b", 3))):
         raise original

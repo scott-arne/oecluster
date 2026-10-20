@@ -221,18 +221,24 @@ def normalize_items(comparison, items, kwargs):
     return normalizer(list(items), kwargs)
 
 
-# The message the native list conversions give a refused element, which
-# _require_oemol_items copies: "<noun> list item <index> is a <rest>", where
-# <rest> is the element's type name and why it was refused. It is formatted by
-# _oecluster_list_item_error in swig/oecluster.i.
+# The attribute a conversion's refusal stores the refused item's index under:
+# _oecluster_list_item_error in swig/oecluster.i sets it, and so does
+# _molecule_item_error here. It marks the TypeError as a conversion's own,
+# which is what items_named_by_set requires before renaming one.
+_ITEM_INDEX_ATTRIBUTE = "_oecluster_item_index"
+
+# A conversion's refusal message, "<noun> list item <index> is a <rest>",
+# where <rest> is the item's type name and why it was refused. Only <rest> is
+# read from it; the index comes from the mark.
 _LIST_ITEM_ERROR = re.compile(
-    r"\A(?:molecule|design unit) list item (\d+) is a (.+)\Z", re.DOTALL)
+    r"\A(?:molecule|design unit) list item \d+ is a (.+)\Z", re.DOTALL)
 
 
 @contextlib.contextmanager
 def items_named_by_set(*sets):
     """
-    Name the input set in a refused-element ``TypeError`` raised inside.
+    Name the input set in a conversion's refused-item ``TypeError`` raised
+    inside.
 
     ``cdist`` normalizes each input set on its own and then builds one
     comparison over their concatenation, so a refused element's index is
@@ -240,9 +246,11 @@ def items_named_by_set(*sets):
     raised. Given three-item sets, a build's "molecule list item 5 is a int,
     not an OEMolBase" becomes "items_b item 2 is a int, not an OEMolBase".
 
-    Only a plain ``TypeError`` whose whole message has the conversions' format
-    is rewritten, with the original chained as its cause. Any other exception,
-    or an index past the last set, is re-raised as it was.
+    Only a plain ``TypeError`` carrying the conversions' index mark, with
+    their message, is rewritten, and the original is chained as its cause.
+    Anything else is re-raised as it was: an unmarked ``TypeError``, however
+    it is worded -- such as one an element's own type check raised -- and a
+    mark past the last set.
 
     :param sets: ``(name, size)`` pairs, one per set the guarded step was
         given, in the order it concatenated them.
@@ -251,15 +259,17 @@ def items_named_by_set(*sets):
     try:
         yield
     except TypeError as exc:
-        match = (_LIST_ITEM_ERROR.match(str(exc))
+        index = (getattr(exc, _ITEM_INDEX_ATTRIBUTE, None)
                  if type(exc) is TypeError else None)
+        match = (_LIST_ITEM_ERROR.match(str(exc))
+                 if type(index) is int and index >= 0 else None)
         if match is None:
             raise
-        index = int(match.group(1))
+        # Not defended against: the mark deliberately forged on another error.
         for name, size in sets:
             if index < size:
                 raise TypeError(
-                    f"{name} item {index} is a {match.group(2)}") from exc
+                    f"{name} item {index} is a {match.group(1)}") from exc
             index -= size
         raise
 
@@ -1121,6 +1131,34 @@ def _expand_conformers_requested(kwargs):
     return bool(expand)
 
 
+def _molecule_item_error(index, item, tail):
+    """
+    Build the ``TypeError`` a native molecule list conversion raises for a
+    refused item, marked as a conversion's own.
+
+    As in ``_oecluster_list_item_error`` in swig/oecluster.i, the type name is
+    ``<unnamed type>`` when reading ``__name__`` raises an ``Exception`` or
+    gives something other than a string, and a ``str`` subclass contributes
+    its contents rather than its own ``__str__`` or ``__format__``.
+
+    :param index: The item's position in the list.
+    :param item: The refused item.
+    :param tail: Why it was refused, such as ``", not an OEMol"``.
+    :returns: The marked ``TypeError``, for the caller to raise.
+    """
+    name: object = None
+    try:
+        name = type(item).__name__
+    except Exception:  # noqa: BLE001, S110 - a failing name still owes the index
+        pass
+    if not isinstance(name, str):
+        name = "<unnamed type>"
+    error = TypeError(
+        f"molecule list item {index} is a {str.__str__(name)}{tail}")
+    setattr(error, _ITEM_INDEX_ATTRIBUTE, index)
+    return error
+
+
 def _require_oemol_items(items):
     """
     Refuse a non-``OEMol`` item, or an ``OEMol`` with no ``this``, in the
@@ -1141,17 +1179,13 @@ def _require_oemol_items(items):
 
     for index, item in enumerate(items):
         if not isinstance(item, oechem.OEMol):
-            raise TypeError(
-                f"molecule list item {index} is a {type(item).__name__}, "
-                "not an OEMol")
+            raise _molecule_item_error(index, item, ", not an OEMol")
         # An OEMol made by ``__new__`` without ``__init__`` has no ``this``,
         # and its NumConfs raises OEChem's own TypeError naming the method.
         # Any exception but AttributeError from the read propagates, as the
         # native conversion propagates it.
         if getattr(item, "this", None) is None:
-            raise TypeError(
-                f"molecule list item {index} is a {type(item).__name__} "
-                "that wraps no molecule")
+            raise _molecule_item_error(index, item, " that wraps no molecule")
 
 
 def _normalize_rmsd(items, kwargs):
