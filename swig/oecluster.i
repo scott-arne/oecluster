@@ -1197,7 +1197,6 @@ catch (const std::bad_alloc&) {
 %enddef
 
 OECLUSTER_GIL_EXCEPTION(OECluster::pdist, pdist)
-OECLUSTER_GIL_EXCEPTION(OECluster::cdist, cdist)
 OECLUSTER_GIL_EXCEPTION(OECluster::cdist_into_address, cdist_into_address)
 OECLUSTER_GIL_MEMORY_EXCEPTION(OECluster::butina_cluster, butina_cluster)
 OECLUSTER_GIL_EXCEPTION(OECluster::cluster_representative, cluster_representative)
