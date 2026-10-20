@@ -4,12 +4,19 @@ The GIL assertions in test_native_bindings.py read swig/oecluster.i, which
 describes the interface rather than what SWIG generated from it. A registration
 naming a function SWIG never wraps passes them, and so does an extension built
 before a registration existed. The tests here look at what a build produced.
+
 The first scans the wrapper source in the build tree whose shadow module the
-import uses, and requires each function that runs a registered call to make
-that call after a Py_BEGIN_ALLOW_THREADS line and before the next
-Py_END_ALLOW_THREADS line, with no preprocessor conditional between the release
-and the call. The second times calls into the imported extension while a second
-thread tries to run.
+import uses. For each function that runs a registered call, it replays the GIL
+state through the function's text, from held at the top through every release
+and re-acquire the text names, and requires the call to be reached released. It
+fails a function whose text it cannot follow: a release or re-acquire out of
+turn, a second call, a preprocessor conditional, a release that does not begin a
+statement, or a branch, label or block end between that release and the call. A
+GIL change or jump the text does not spell out, such as a helper function that
+re-acquires the GIL internally, is invisible to that scan.
+
+The second times calls into the imported extension while a second thread tries
+to run, which is the check for such a hidden re-acquire on the calls it covers.
 """
 
 import logging
@@ -40,10 +47,19 @@ _DEFINE_LINE = re.compile(r"^[ \t]*%define\b[^\n]*", re.MULTILINE)
 # first line holding only "}" closes the function.
 _WRAPPER_FUNCTION = re.compile(r"^SWIGINTERN PyObject \*(_wrap_\w+)\(.*?^\}$",
                                re.MULTILINE | re.DOTALL)
-# The first and last lines of the body of both OECLUSTER_GIL_EXCEPTION and
-# OECLUSTER_GIL_MEMORY_EXCEPTION, each of which SWIG emits on a line of its own.
-_BEGIN_LINE = re.compile(r"^[ \t]*Py_BEGIN_ALLOW_THREADS[ \t]*$", re.MULTILINE)
-_END_LINE = re.compile(r"^[ \t]*Py_END_ALLOW_THREADS[ \t]*$", re.MULTILINE)
+# The calls that change whether the running thread holds the GIL. SWIG's
+# SWIG_PYTHON_THREAD_* macros expand to PyGILState_Ensure, PyGILState_Release,
+# PyEval_SaveThread and PyEval_RestoreThread when SWIG's thread support is on,
+# and to nothing otherwise; they are counted as the calls they can become.
+_RELEASING = ("Py_BEGIN_ALLOW_THREADS", "Py_UNBLOCK_THREADS", "PyEval_SaveThread",
+              "PyEval_ReleaseThread", "PyGILState_Release",
+              "SWIG_PYTHON_THREAD_BEGIN_ALLOW", "SWIG_PYTHON_THREAD_END_BLOCK")
+_ACQUIRING = ("Py_END_ALLOW_THREADS", "Py_BLOCK_THREADS", "PyEval_RestoreThread",
+              "PyEval_AcquireThread", "PyGILState_Ensure",
+              "SWIG_PYTHON_THREAD_END_ALLOW", "SWIG_PYTHON_THREAD_BEGIN_BLOCK")
+_GIL_CALL = re.compile(rf"\b(?:{'|'.join(_RELEASING + _ACQUIRING)})\b")
+_BRANCH = re.compile(r"\b(?:if|else|for|while|do|switch|case|default|goto)\b")
+_LABEL = re.compile(r"(?:^|[;{}])[ \t]*(\w+)[ \t]*:(?!:)", re.MULTILINE)
 _CONDITIONAL_LINE = re.compile(r"^[ \t]*#[ \t]*(?:if|ifdef|ifndef|elif|else|endif)\b",
                                re.MULTILINE)
 _QUALIFIED_CALL = re.compile(r"\bOECluster::\w+\(")
@@ -73,6 +89,14 @@ def _registered_names(interface_text):
     return names
 
 
+def _blank(match):
+    """Blank a string literal to ``""`` and a comment to its own line breaks."""
+    text = match.group(0)
+    if text.startswith('"'):
+        return '""'
+    return "\n" * text.count("\n") or " "
+
+
 def _release_problem(function, body, name):
     """Say why ``body`` does not call ``OECluster::<name>(`` released, or None.
 
@@ -81,32 +105,64 @@ def _release_problem(function, body, name):
     :param name: The registered function name.
     :returns: A description of the first violation found, or None.
     """
-    # Blank string literals and comments, so that neither a marker nor a call
-    # quoted inside one counts.
-    code = _SWIG_COMMENT_OR_STRING.sub(
-        lambda match: '""' if match.group(0).startswith('"') else " ", body)
+    code = _SWIG_COMMENT_OR_STRING.sub(_blank, body)
+
+    def line(position):
+        return code.count("\n", 0, position) + 1
+
     action = f"OECluster::{name}("
     calls = [match.start() for match in re.finditer(rf"\bOECluster::{name}\(", code)]
     if not calls:
         held = sorted({f"{call}...)" for call in _QUALIFIED_CALL.findall(code)})
         return (f"{function} never calls {action}...); it calls "
                 f"{', '.join(held) or 'nothing in OECluster::'}")
-    begins = [match.start() for match in _BEGIN_LINE.finditer(code)]
-    ends = [match.start() for match in _END_LINE.finditer(code)]
-    for call in calls:
-        opened = [begin for begin in begins if begin < call]
-        if not opened:
-            return f"{function} calls {action}...) before any Py_BEGIN_ALLOW_THREADS"
-        begin = opened[-1]
-        if any(begin < end < call for end in ends):
-            return (f"{function} calls {action}...) after a Py_END_ALLOW_THREADS "
-                    "closed the release before it")
-        if not any(end > call for end in ends):
-            return (f"{function} calls {action}...) with no Py_END_ALLOW_THREADS "
-                    "after it")
-        if _CONDITIONAL_LINE.search(code, begin, call):
-            return (f"{function} has a preprocessor conditional between "
-                    f"Py_BEGIN_ALLOW_THREADS and its call to {action}...)")
+    if len(calls) > 1:
+        return (f"{function} calls {action}...) {len(calls)} times, and the replay "
+                "vouches for one call only")
+    call = calls[0]
+    conditional = _CONDITIONAL_LINE.search(code, 0, call)
+    if conditional:
+        return (f"{function} has a preprocessor conditional on line "
+                f"{line(conditional.start())}, before its call to {action}...)")
+
+    held, last = True, None
+    for match in _GIL_CALL.finditer(code, 0, call):
+        releases = match.group(0) in _RELEASING
+        if releases != held:
+            state = "released" if releases else "held"
+            return (f"{function} is malformed: {match.group(0)} on line "
+                    f"{line(match.start())} finds the GIL already {state}")
+        held, last = not releases, match
+    if held:
+        after = (f"after {last.group(0)} on line {line(last.start())}" if last
+                 else "with no release before it")
+        return f"{function} reaches {action}...) holding the GIL, {after}"
+
+    # The replay reads the text top to bottom. That is the order that runs only
+    # if the release it ended on always runs before the call: it must begin a
+    # statement, so no condition governs it alone, and the text between it and
+    # the call may hold no branch, no jump target, and no end of the block the
+    # release sits in, which would also run the destructor of a scoped release.
+    release = last.start()
+    preceding = code[:release].rstrip()
+    if preceding and preceding[-1] not in ";{}":
+        return (f"{function}'s {last.group(0)} on line {line(release)} does not "
+                "begin a statement, so a condition may skip it")
+    branch = _BRANCH.search(code, release, call)
+    if branch:
+        return (f"{function} has `{branch.group(0)}` on line {line(branch.start())}, "
+                f"between its release and its call to {action}...)")
+    label = _LABEL.search(code, release, call)
+    if label:
+        return (f"{function} has the label {label.group(1)}: on line "
+                f"{line(label.start(1))}, between its release and its call to "
+                f"{action}...)")
+    depth = 0
+    for position in range(release, call):
+        depth += {"{": 1, "}": -1}.get(code[position], 0)
+        if depth < 0:
+            return (f"{function} closes the block holding its release, on line "
+                    f"{line(position)}, before its call to {action}...)")
     return None
 
 
@@ -115,11 +171,20 @@ def _unreleased(names, wrapper_text):
 
     The functions that run a registered call are the leaves of an overloaded
     name, ``_wrap_<name>__SWIG_<n>``, or ``_wrap_<name>`` for a name with none.
-    Ignoring comments and string literals, every ``OECluster::<name>(`` in such
-    a function must come after a line holding only ``Py_BEGIN_ALLOW_THREADS``,
-    with no line holding only ``Py_END_ALLOW_THREADS`` and no ``#if``,
-    ``#ifdef``, ``#ifndef``, ``#elif``, ``#else`` or ``#endif`` line between
-    the two, and a line holding only ``Py_END_ALLOW_THREADS`` must follow it.
+    Comments and string literals blanked, each must call ``OECluster::<name>(``
+    exactly once, with no preprocessor conditional before the call, and must
+    pass a replay of its text from the top down to the call. The replay starts
+    with the GIL held; each call in _RELEASING releases it and each in
+    _ACQUIRING re-acquires it, and a release while released or a re-acquire
+    while held fails the function as malformed. The call must be reached
+    released. So that the text order is the order that runs, the release the
+    replay ended on must begin a statement, and between it and the call there
+    may be no if, else, for, while, do, switch, case, default or goto, no
+    label, and no brace closing the block the release sits in.
+
+    A GIL change or jump the text does not spell out, such as a helper function
+    that re-acquires the GIL internally, is invisible to this scan; layer 2's
+    runtime probes are the check for that, on the calls they cover.
 
     :param names: Registered function names.
     :param wrapper_text: The text of the generated oeclusterPYTHON_wrap.cxx.
@@ -268,7 +333,7 @@ def test_a_registered_call_inside_its_release_is_accepted():
     (("  result = OECluster::demo(arg1);\n"
       "  Py_BEGIN_ALLOW_THREADS\n"
       "  Py_END_ALLOW_THREADS\n"),
-     "before any Py_BEGIN_ALLOW_THREADS"),
+     "holding the GIL, with no release before it"),
     (("#if 0\n"
       "  Py_BEGIN_ALLOW_THREADS\n"
       "#endif\n"
@@ -281,13 +346,55 @@ def test_a_registered_call_inside_its_release_is_accepted():
       "  prepare(arg1);\n"
       "  Py_END_ALLOW_THREADS\n"
       "  result = OECluster::demo(arg1);\n"),
-     "after a Py_END_ALLOW_THREADS"),
+     "holding the GIL, after Py_END_ALLOW_THREADS"),
     (("  Py_BEGIN_ALLOW_THREADS\n"
       "  result = OECluster::other(arg1);\n"
       "  Py_END_ALLOW_THREADS\n"),
      "never calls OECluster::demo(...); it calls OECluster::other("),
+    (("  Py_BEGIN_ALLOW_THREADS\n"
+      "  Py_BLOCK_THREADS\n"
+      "  result = OECluster::demo(arg1);\n"
+      "  Py_UNBLOCK_THREADS\n"
+      "  Py_END_ALLOW_THREADS\n"),
+     "holding the GIL, after Py_BLOCK_THREADS"),
+    (("  Py_BEGIN_ALLOW_THREADS\n"
+      "  PyGILState_STATE state = PyGILState_Ensure();\n"
+      "  result = OECluster::demo(arg1);\n"
+      "  PyGILState_Release(state);\n"
+      "  Py_END_ALLOW_THREADS\n"),
+     "holding the GIL, after PyGILState_Ensure"),
+    (("  Py_BEGIN_ALLOW_THREADS\n"
+      "  Py_UNBLOCK_THREADS\n"
+      "  result = OECluster::demo(arg1);\n"
+      "  Py_END_ALLOW_THREADS\n"),
+     "malformed: Py_UNBLOCK_THREADS on line 4 finds the GIL already released"),
+    (("  Py_BEGIN_ALLOW_THREADS\n"
+      "  if (ready) {\n"
+      "    result = OECluster::demo(arg1);\n"
+      "  }\n"
+      "  Py_END_ALLOW_THREADS\n"),
+     "has `if` on line 4"),
+    (("  if (ready) {\n"
+      "    Py_BEGIN_ALLOW_THREADS\n"
+      "  }\n"
+      "  result = OECluster::demo(arg1);\n"
+      "  Py_END_ALLOW_THREADS\n"),
+     "closes the block"),
+    (("  if (ready)\n"
+      "    Py_BEGIN_ALLOW_THREADS\n"
+      "  result = OECluster::demo(arg1);\n"
+      "  Py_END_ALLOW_THREADS\n"),
+     "does not begin a statement"),
+    (("  goto released;\n"
+      "  Py_BEGIN_ALLOW_THREADS\n"
+      "released:\n"
+      "  result = OECluster::demo(arg1);\n"
+      "  Py_END_ALLOW_THREADS\n"),
+     "label released: on line 5"),
 ], ids=["marker-after-the-call", "marker-only-under-if-0", "call-after-the-end",
-        "no-call"])
+        "no-call", "blocked-before-the-call", "gilstate-ensure-before-the-call",
+        "double-release", "branch-after-the-release", "release-in-a-closed-block",
+        "release-under-a-braceless-if", "label-after-the-release"])
 def test_a_registered_call_outside_its_release_is_refused(body, reason):
     problems = _unreleased(["demo"], _synthetic_wrapper(body))
     assert len(problems) == 1, problems
