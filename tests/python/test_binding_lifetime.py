@@ -125,3 +125,119 @@ def test_a_raising_fingerprint_batch_check_propagates():
 
     with pytest.raises(LookupError, match="^no class$"):
         native.take_fingerprints(_RaisingClass(), [0])
+
+
+def _benzene(kind):
+    mol = kind()
+    oechem.OESmilesToMol(mol, "c1ccccc1")
+    return mol
+
+
+@pytest.mark.parametrize(
+    "route", ["fingerprint", "rocs", "mcs", "superpose"])
+def test_a_raising_first_element_propagates(route):
+    """The overload dispatcher must not turn a raising check into "no".
+
+    It reads element 0 alone, through a typecheck that cannot report an
+    error. Answering "no" there left every overload ruled out and replaced
+    the exception with the dispatcher's generic TypeError, before any
+    conversion ran.
+    """
+    comparison, rest = {
+        "fingerprint": (
+            oecluster.FingerprintComparison, [_benzene(oechem.OEGraphMol)]),
+        "rocs": (oecluster.ROCSComparison, [_benzene(oechem.OEMol)]),
+        "mcs": (oecluster.MCSComparison, [_benzene(oechem.OEMol)]),
+        "superpose": (oecluster.SuperposeComparison, [oechem.OEDesignUnit()]),
+    }[route]
+    with pytest.raises(LookupError, match="^no class$"):
+        comparison([_RaisingClass(), *rest])
+
+
+def test_a_raising_batch_check_on_an_overloaded_function_propagates():
+    """``isim`` has two overloads, so its typecheck runs before the typemap."""
+    pytest.importorskip("oefp")
+    from oecluster import oecluster as native
+
+    with pytest.raises(LookupError, match="^no class$"):
+        native.isim(_RaisingClass())
+
+
+def _raising_pointer(base, attribute):
+    """An instance of a ``base`` subclass whose ``attribute`` raises.
+
+    Built with ``__new__`` so ``__init__`` never tries to set the attribute.
+    The isinstance check passes, so the failure comes from reading the
+    wrapped pointer.
+    """
+    def refuse(self):
+        raise LookupError("no pointer")
+
+    subclass = type("Raising" + base.__name__, (base,),
+                    {attribute: property(refuse)})
+    return subclass.__new__(subclass)
+
+
+@pytest.mark.parametrize("route", ["molbase", "oemol", "design_unit", "batch"])
+def test_a_raising_pointer_read_propagates(route):
+    """Reading the wrapped pointer can raise, too; that is not "no pointer".
+
+    Only a missing attribute means the object wraps nothing. Any other
+    exception used to be cleared and reported as a type or null-reference
+    error naming the wrong cause.
+    """
+    if route == "molbase":
+        def call():
+            oecluster.murcko_scaffolds(
+                [_benzene(oechem.OEGraphMol),
+                 _raising_pointer(oechem.OEGraphMol, "this")])
+    elif route == "oemol":
+        def call():
+            oecluster.ROCSComparison(
+                [_benzene(oechem.OEMol),
+                 _raising_pointer(oechem.OEMol, "this")])
+    elif route == "design_unit":
+        def call():
+            oecluster.SuperposeComparison(
+                [oechem.OEDesignUnit(),
+                 _raising_pointer(oechem.OEDesignUnit, "this")])
+    else:
+        oefp = pytest.importorskip("oefp")
+        from oecluster import oecluster as native
+
+        def call():
+            native.take_fingerprints(
+                _raising_pointer(oefp.OEFPBatch, "_native"), [0])
+    with pytest.raises(LookupError, match="^no pointer$"):
+        call()
+
+
+_DEGRADED_OEFP = textwrap.dedent("""
+    import oefp
+    from oecluster import oecluster as native
+    batch = oefp.OEFPBatch.from_fingerprints(
+        [oefp.OEFP.from_on_bits(8, [1]), oefp.OEFP.from_on_bits(8, [2])])
+    del oefp.OEFPBatch
+    try:
+        native.take_fingerprints(batch, [0])
+    except Exception as exc:
+        print(type(exc).__name__, exc)
+    else:
+        print("accepted")
+""")
+
+
+def test_a_degraded_oefp_is_reported_as_itself():
+    """A broken ``oefp`` must not read as "Expected an oefp.OEFPBatch".
+
+    The batch-type lookup failing is the cause, and the caller is holding a
+    real batch. Run in a child process: deleting ``oefp.OEFPBatch`` here
+    would break every later test that builds a batch.
+    """
+    pytest.importorskip("oefp")
+    result = subprocess.run(
+        [sys.executable, "-c", _DEGRADED_OEFP],
+        check=False, capture_output=True, text=True, timeout=600)
+    assert result.returncode == 0, result.stderr[-2000:]
+    assert result.stdout.startswith("AttributeError "), result.stdout
+    assert "OEFPBatch" in result.stdout

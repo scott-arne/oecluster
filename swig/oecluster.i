@@ -125,10 +125,16 @@ struct _SwigPyObjectCompat {
     void *ptr;
 };
 
+// Returns the pointer an OpenEye proxy wraps. NULL with no exception pending
+// means it wraps nothing: it has no ``this``, or a null one. NULL with an
+// exception pending means reading ``this`` raised something other than
+// AttributeError, which the caller propagates rather than reporting a type.
 static void* _oecluster_extract_swig_ptr(PyObject* obj) {
     PyObject* thisAttr = PyObject_GetAttrString(obj, "this");
     if (!thisAttr) {
-        PyErr_Clear();
+        if (PyErr_ExceptionMatches(PyExc_AttributeError)) {
+            PyErr_Clear();
+        }
         return NULL;
     }
     void* ptr = ((_SwigPyObjectCompat*)thisAttr)->ptr;
@@ -159,45 +165,47 @@ static void _oecluster_molecule_item_error(Py_ssize_t index, PyObject* item, con
 static PyObject* _oecluster_oefp_batch_type = NULL;
 static PyObject* _oecluster_oefp_native_batch_type = NULL;
 
-// A missing module or type means nothing can be a batch, so every failure
-// here is cleared and reported as false, leaving no exception pending.
-static bool _oecluster_import_oefp_batch_types() {
+// Loads and caches oefp's two batch types. Returns 1, or -1 with the import or
+// attribute error pending: a broken oefp is a failure to report, not a reason
+// to call an object something other than a batch. Both are cached together,
+// so a partial failure leaves neither set.
+static int _oecluster_load_oefp_batch_types() {
     if (_oecluster_oefp_batch_type && _oecluster_oefp_native_batch_type) {
-        return true;
+        return 1;
     }
 
     PyObject* oefp_mod = PyImport_ImportModule("oefp");
     if (!oefp_mod) {
-        PyErr_Clear();
-        return false;
+        return -1;
     }
-    _oecluster_oefp_batch_type = PyObject_GetAttrString(oefp_mod, "OEFPBatch");
+    PyObject* batch_type = PyObject_GetAttrString(oefp_mod, "OEFPBatch");
     Py_DECREF(oefp_mod);
-    if (!_oecluster_oefp_batch_type) {
-        PyErr_Clear();
-        return false;
+    if (!batch_type) {
+        return -1;
     }
 
     PyObject* native_mod = PyImport_ImportModule("oefp._native");
     if (!native_mod) {
-        PyErr_Clear();
-        return false;
+        Py_DECREF(batch_type);
+        return -1;
     }
-    _oecluster_oefp_native_batch_type =
-        PyObject_GetAttrString(native_mod, "_NativeOEFPBatch");
+    PyObject* native_type = PyObject_GetAttrString(native_mod, "_NativeOEFPBatch");
     Py_DECREF(native_mod);
-    if (!_oecluster_oefp_native_batch_type) {
-        PyErr_Clear();
-        return false;
+    if (!native_type) {
+        Py_DECREF(batch_type);
+        return -1;
     }
-    return true;
+
+    _oecluster_oefp_batch_type = batch_type;
+    _oecluster_oefp_native_batch_type = native_type;
+    return 1;
 }
 
 // The same two forms, and the same rule for choosing between them, as the
 // checkers DEFINE_OE_TYPE_CHECKER generates below.
 static int _oecluster_isinstance_oefp_batch(PyObject* obj) {
-    if (!_oecluster_import_oefp_batch_types()) {
-        return 0;
+    if (_oecluster_load_oefp_batch_types() < 0) {
+        return -1;
     }
     int is_batch = PyObject_IsInstance(obj, _oecluster_oefp_batch_type);
     if (is_batch != 0) {
@@ -206,28 +214,35 @@ static int _oecluster_isinstance_oefp_batch(PyObject* obj) {
     return PyObject_IsInstance(obj, _oecluster_oefp_native_batch_type);
 }
 
-static bool _oecluster_is_oefp_batch(PyObject* obj) {
+static bool _oecluster_may_be_oefp_batch(PyObject* obj) {
     int is_batch = _oecluster_isinstance_oefp_batch(obj);
     if (is_batch < 0) {
         PyErr_Clear();
-        return false;
+        return true;
     }
     return is_batch == 1;
 }
 
+// Same contract as _oecluster_extract_swig_ptr. A high-level OEFPBatch wraps
+// the native batch in ``_native``; a native batch is read directly.
 static void* _oecluster_extract_oefp_batch_ptr(PyObject* obj) {
-    PyObject* native_obj = obj;
-    Py_INCREF(native_obj);
-    if (_oecluster_import_oefp_batch_types() &&
-        PyObject_IsInstance(obj, _oecluster_oefp_batch_type) == 1) {
-        Py_DECREF(native_obj);
-        native_obj = PyObject_GetAttrString(obj, "_native");
-        if (!native_obj) {
-            PyErr_Clear();
-            return NULL;
-        }
+    if (_oecluster_load_oefp_batch_types() < 0) {
+        return NULL;
     }
-
+    int is_high_level = PyObject_IsInstance(obj, _oecluster_oefp_batch_type);
+    if (is_high_level < 0) {
+        return NULL;
+    }
+    if (!is_high_level) {
+        return _oecluster_extract_swig_ptr(obj);
+    }
+    PyObject* native_obj = PyObject_GetAttrString(obj, "_native");
+    if (!native_obj) {
+        if (PyErr_ExceptionMatches(PyExc_AttributeError)) {
+            PyErr_Clear();
+        }
+        return NULL;
+    }
     void* ptr = _oecluster_extract_swig_ptr(native_obj);
     Py_DECREF(native_obj);
     return ptr;
@@ -299,15 +314,19 @@ static bool _oecluster_check_oefp_abi() {
 // ---- Type checker generator macro ----
 // Generates a cached isinstance check for an OpenEye Python type, in two forms.
 // _oecluster_isinstance_TAG returns 1 or 0, or -1 with the exception set when
-// the import or the check itself raised. _oecluster_is_TAG clears that
-// exception and answers no.
+// the import or the check itself raised. _oecluster_may_be_TAG clears that
+// exception and answers yes, because a check that raised has not ruled the
+// object out.
 //
 // The rule for choosing between them: every %typemap(in) calls
 // _oecluster_isinstance_TAG and propagates -1 with SWIG_fail, because a check
 // that raised has not answered and its exception is the report. Only a
-// %typemap(typecheck) calls _oecluster_is_TAG: it has no way to report an
-// error, and SWIG's overload dispatcher would go on calling the API with the
-// exception pending.
+// %typemap(typecheck) calls _oecluster_may_be_TAG. A typecheck cannot report
+// an error, but it can leave its overload in play: if SWIG selects that
+// overload, its in typemap repeats the check, so the exception reaches the
+// caller whenever the check raises again. Answering no would rule the
+// overload out, and when no other accepts the argument, replace the exception
+// with the dispatcher's generic TypeError.
 // TAG:    identifier suffix (e.g., oemolbase)
 // MODULE: Python module string (e.g., "openeye.oechem")
 // CLASS:  Python class name string (e.g., "OEMolBase")
@@ -323,11 +342,11 @@ static bool _oecluster_check_oefp_abi() {
         } \
         return PyObject_IsInstance(obj, _oecluster_oe_##TAG##_type); \
     } \
-    static bool _oecluster_is_##TAG(PyObject* obj) { \
+    static bool _oecluster_may_be_##TAG(PyObject* obj) { \
         int is_instance = _oecluster_isinstance_##TAG(obj); \
         if (is_instance < 0) { \
             PyErr_Clear(); \
-            return false; \
+            return true; \
         } \
         return is_instance == 1; \
     }
@@ -426,7 +445,8 @@ static PyObject* _oecluster_wrap_as_oe_grid(OESystem::OEScalarGrid* grid) {
 // Generate const-ref and non-const-ref typemaps for a cross-runtime OpenEye type.
 // CPP_TYPE: fully qualified C++ type (e.g., OEChem::OEMolBase)
 // TAG:      DEFINE_OE_TYPE_CHECKER suffix (e.g., oemolbase); the in typemaps
-//           call _oecluster_isinstance_TAG and the typechecks _oecluster_is_TAG
+//           call _oecluster_isinstance_TAG and the typechecks
+//           _oecluster_may_be_TAG
 // ERR_MSG:  error message on type mismatch
 %define OE_CROSS_RUNTIME_REF_TYPEMAPS(CPP_TYPE, TAG, ERR_MSG)
 
@@ -439,7 +459,11 @@ static PyObject* _oecluster_wrap_as_oe_grid(OESystem::OEScalarGrid* grid) {
         }
         if (is_instance) {
             argp = _oecluster_extract_swig_ptr($input);
-            if (argp) res = SWIG_OK;
+            if (argp) {
+                res = SWIG_OK;
+            } else if (PyErr_Occurred()) {
+                SWIG_fail;
+            }
         }
     }
     if (!SWIG_IsOK(res)) {
@@ -454,7 +478,7 @@ static PyObject* _oecluster_wrap_as_oe_grid(OESystem::OEScalarGrid* grid) {
 %typemap(typecheck, precedence=10) const CPP_TYPE& {
     void *vptr = 0;
     int res = SWIG_ConvertPtr($input, &vptr, $descriptor, SWIG_POINTER_NO_NULL);
-    $1 = SWIG_IsOK(res) ? 1 : _oecluster_is_##TAG($input) ? 1 : 0;
+    $1 = SWIG_IsOK(res) ? 1 : _oecluster_may_be_##TAG($input) ? 1 : 0;
 }
 
 %typemap(in) CPP_TYPE& (void *argp = 0, int res = 0) {
@@ -466,7 +490,11 @@ static PyObject* _oecluster_wrap_as_oe_grid(OESystem::OEScalarGrid* grid) {
         }
         if (is_instance) {
             argp = _oecluster_extract_swig_ptr($input);
-            if (argp) res = SWIG_OK;
+            if (argp) {
+                res = SWIG_OK;
+            } else if (PyErr_Occurred()) {
+                SWIG_fail;
+            }
         }
     }
     if (!SWIG_IsOK(res)) {
@@ -481,7 +509,7 @@ static PyObject* _oecluster_wrap_as_oe_grid(OESystem::OEScalarGrid* grid) {
 %typemap(typecheck, precedence=10) CPP_TYPE& {
     void *vptr = 0;
     int res = SWIG_ConvertPtr($input, &vptr, $descriptor, SWIG_POINTER_NO_NULL);
-    $1 = SWIG_IsOK(res) ? 1 : _oecluster_is_##TAG($input) ? 1 : 0;
+    $1 = SWIG_IsOK(res) ? 1 : _oecluster_may_be_##TAG($input) ? 1 : 0;
 }
 
 %enddef
@@ -501,7 +529,11 @@ static PyObject* _oecluster_wrap_as_oe_grid(OESystem::OEScalarGrid* grid) {
             }
             if (is_instance) {
                 argp = _oecluster_extract_swig_ptr($input);
-                if (argp) res = SWIG_OK;
+                if (argp) {
+                    res = SWIG_OK;
+                } else if (PyErr_Occurred()) {
+                    SWIG_fail;
+                }
             }
         }
         if (!SWIG_IsOK(res)) {
@@ -517,7 +549,7 @@ static PyObject* _oecluster_wrap_as_oe_grid(OESystem::OEScalarGrid* grid) {
     } else {
         void *vptr = 0;
         int res = SWIG_ConvertPtr($input, &vptr, $descriptor, 0);
-        $1 = SWIG_IsOK(res) ? 1 : _oecluster_is_##TAG($input) ? 1 : 0;
+        $1 = SWIG_IsOK(res) ? 1 : _oecluster_may_be_##TAG($input) ? 1 : 0;
     }
 }
 
@@ -627,7 +659,9 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, oereceptor, "Expected OERec
         // it gets its own message rather than being called a non-OEMolBase.
         void* ptr = _oecluster_extract_swig_ptr(item);
         if (!ptr) {
-            _oecluster_molecule_item_error(i, item, " that wraps no molecule");
+            if (!PyErr_Occurred()) {
+                _oecluster_molecule_item_error(i, item, " that wraps no molecule");
+            }
             SWIG_fail;
         }
         // Same offset-0 base-cast assumption as the shared_ptr<OEMol> typemap
@@ -685,7 +719,7 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, oereceptor, "Expected OERec
 // "SuperposeComparison: empty structure list".
 %typemap(typecheck, precedence=1) const std::vector<OEChem::OEMolBase*>& {
     if (PyList_Check($input) && PyList_Size($input) > 0) {
-        $1 = _oecluster_is_oemolbase(PyList_GetItem($input, 0)) ? 1 : 0;
+        $1 = _oecluster_may_be_oemolbase(PyList_GetItem($input, 0)) ? 1 : 0;
     } else {
         $1 = PyList_Check($input) ? 1 : 0;
     }
@@ -709,6 +743,9 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, oereceptor, "Expected OERec
         }
         void* ptr = _oecluster_extract_swig_ptr(item);
         if (!ptr) {
+            if (PyErr_Occurred()) {
+                SWIG_fail;
+            }
             SWIG_exception_fail(SWIG_TypeError, "List item is not an OEMol object");
         }
         // Make a COPY wrapped in shared_ptr (we do not own the Python object).
@@ -737,7 +774,7 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, oereceptor, "Expected OERec
 
 %typemap(typecheck, precedence=SWIG_TYPECHECK_POINTER) const std::vector<std::shared_ptr<OEChem::OEMol>>& {
     if (PyList_Check($input) && PyList_Size($input) > 0) {
-        $1 = _oecluster_is_oemol(PyList_GetItem($input, 0)) ? 1 : 0;
+        $1 = _oecluster_may_be_oemol(PyList_GetItem($input, 0)) ? 1 : 0;
     } else {
         $1 = PyList_Check($input) ? 1 : 0;
     }
@@ -761,6 +798,9 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, oereceptor, "Expected OERec
         }
         void* ptr = _oecluster_extract_swig_ptr(item);
         if (!ptr) {
+            if (PyErr_Occurred()) {
+                SWIG_fail;
+            }
             SWIG_exception_fail(SWIG_TypeError, "List item is not an OEDesignUnit object");
         }
         // Make a COPY wrapped in shared_ptr (we do not own the Python object)
@@ -772,7 +812,7 @@ OE_CROSS_RUNTIME_REF_TYPEMAPS(OEDocking::OEReceptor, oereceptor, "Expected OERec
 
 %typemap(typecheck, precedence=SWIG_TYPECHECK_POINTER) const std::vector<std::shared_ptr<OEBio::OEDesignUnit>>& {
     if (PyList_Check($input) && PyList_Size($input) > 0) {
-        $1 = _oecluster_is_oedesignunit(PyList_GetItem($input, 0)) ? 1 : 0;
+        $1 = _oecluster_may_be_oedesignunit(PyList_GetItem($input, 0)) ? 1 : 0;
     } else {
         $1 = PyList_Check($input) ? 1 : 0;
     }
@@ -1085,13 +1125,16 @@ class OEFPBatch;
     }
     argp = _oecluster_extract_oefp_batch_ptr($input);
     if (!argp) {
+        if (PyErr_Occurred()) {
+            SWIG_fail;
+        }
         SWIG_exception_fail(SWIG_NullReferenceError, "Null OEFPBatch reference.");
     }
     $1 = reinterpret_cast< $1_ltype >(argp);
 }
 
 %typemap(typecheck, precedence=10) const OEFP::OEFPBatch& {
-    $1 = _oecluster_is_oefp_batch($input) ? 1 : 0;
+    $1 = _oecluster_may_be_oefp_batch($input) ? 1 : 0;
 }
 
 // ============================================================================
