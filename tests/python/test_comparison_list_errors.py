@@ -301,9 +301,9 @@ class _MisnamedMeta(type):
 @pytest.mark.parametrize("kwargs", [{}, {"expand_conformers": False}],
                          ids=["expanded", "unexpanded"])
 def test_rmsd_names_an_unnamed_type_as_the_conversion_does(meta, kwargs):
-    """A type's ``__name__`` can raise or be no string. The native message
-    then says ``<unnamed type>``, and RMSD's Python item check, which runs
-    only when expanding, must say the same."""
+    """A type's ``__name__`` can raise an ``Exception`` or be no string. The
+    native message then says ``<unnamed type>``, and RMSD's Python item check,
+    which runs only when expanding, must say the same."""
     mol = _parsed(oechem.OEMol, "c1ccccc1")
     odd = meta("Odd", (), {})()
     expected = "item 1 is a <unnamed type>, not an OEMol"
@@ -312,6 +312,84 @@ def test_rmsd_names_an_unnamed_type_as_the_conversion_does(meta, kwargs):
     _assert_reported(
         [lambda: oecluster.cdist([mol], [mol, odd], "rmsd", **kwargs)],
         f"items_b {expected}")
+
+
+class _ExitingMeta(type):
+    """Makes a type whose ``__name__``, while the type's ``armed`` is true,
+    raises an exit request and keeps it in the type's ``raised`` list.
+
+    ``SystemExit`` stands in for ``KeyboardInterrupt`` too, since pytest takes
+    an escaping ``KeyboardInterrupt`` as an interrupt of the whole session.
+    Unarmed, the name is answered, because pytest reads it to describe a
+    failing call's arguments and survives only an ``Exception`` from it.
+    """
+
+    @property
+    def __name__(cls):
+        if not cls.armed:
+            return "Odd"
+        error = SystemExit("no name")
+        cls.raised.append(error)
+        raise error
+
+
+def _exiting_item():
+    return _ExitingMeta("Odd", (), {"armed": False, "raised": []})()
+
+
+def _assert_exit_propagates(calls, item):
+    """Each call raises the very ``SystemExit`` that reading the name of
+    ``item``'s type raised, rather than a ``TypeError`` naming the item."""
+    kind = type(item)
+    for call in calls:
+        kind.armed = True
+        try:
+            with pytest.raises(SystemExit) as caught:
+                call()
+        finally:
+            kind.armed = False
+        assert caught.value is kind.raised[-1]
+
+
+@pytest.mark.parametrize("kwargs", [{}, {"expand_conformers": False}],
+                         ids=["expanded", "unexpanded"])
+def test_rmsd_lets_an_exit_request_through_the_type_name(kwargs):
+    """Of what reading ``__name__`` can raise, only an ``Exception`` becomes
+    ``<unnamed type>``. An exit request propagates, from RMSD's Python item
+    check when expanding and from the native conversion when not."""
+    mol = _parsed(oechem.OEMol, "c1ccccc1")
+    odd = _exiting_item()
+    _assert_exit_propagates(
+        [lambda: oecluster.pdist([mol, odd], "rmsd", **kwargs),
+         lambda: oecluster.cdist([mol], [mol, odd], "rmsd", **kwargs)], odd)
+
+
+# The comparison, the noun its refusal names the list by and the type it
+# expects. Superpose is given design units, so the design-unit conversion is
+# the one refusing.
+_RAW_CONVERSIONS = {
+    "rmsd": ("molecule", "OEMol"),
+    "fingerprint": ("molecule", "OEMolBase"),
+    "superpose": ("design unit", "OEDesignUnit"),
+}
+
+
+@pytest.mark.parametrize("comparison", sorted(_RAW_CONVERSIONS))
+def test_a_raw_conversion_applies_the_one_type_name_rule(comparison):
+    """The raw constructors, in both forms: a ``__name__`` that raises an
+    ``Exception`` or is no string gives ``<unnamed type>``, and one that
+    raises an exit request lets it through."""
+    noun, expected_name = _RAW_CONVERSIONS[comparison]
+    good = (oechem.OEDesignUnit() if comparison == "superpose"
+            else _parsed(oechem.OEMol, "c1ccccc1"))
+    for meta in (_NamelessMeta, _MisnamedMeta):
+        calls, _ = _calls(comparison, "native", [good, meta("Odd", (), {})()],
+                          good)
+        _assert_reported(calls, f"{noun} list item 1 is a <unnamed type>, "
+                                f"not an {expected_name}")
+    odd = _exiting_item()
+    calls, _ = _calls(comparison, "native", [good, odd], good)
+    _assert_exit_propagates(calls, odd)
 
 
 def _marked(message, index, cls=TypeError):

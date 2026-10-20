@@ -1138,8 +1138,10 @@ def _molecule_item_error(index, item, tail):
 
     As in ``_oecluster_list_item_error`` in swig/oecluster.i, the type name is
     ``<unnamed type>`` when reading ``__name__`` raises an ``Exception`` or
-    gives something other than a string, and a ``str`` subclass contributes
-    its contents rather than its own ``__str__`` or ``__format__``.
+    gives something other than a string. Any other ``BaseException``, such as
+    ``KeyboardInterrupt`` or ``SystemExit``, propagates unchanged. A ``str``
+    subclass contributes its contents rather than its own ``__str__`` or
+    ``__format__``.
 
     :param index: The item's position in the list.
     :param item: The refused item.

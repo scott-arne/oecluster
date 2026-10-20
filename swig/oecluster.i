@@ -144,8 +144,10 @@ static void* _oecluster_extract_swig_ptr(PyObject* obj) {
 
 // Sets TypeError "<noun> list item <index> is a <type name><tail>", with
 // <index> also stored on the instance as ``_oecluster_item_index``. Call it
-// with no exception pending. The stable ABI makes PyTypeObject opaque, so the
-// name is read from the type's __name__ rather than tp_name.
+// with no exception pending. It returns with one pending, that TypeError or
+// whatever stopped it being built, for the caller to propagate. The stable
+// ABI makes PyTypeObject opaque, so the name is read from the type's __name__
+// rather than tp_name.
 //
 // The attribute marks the error as a conversion's own. cdist renames only a
 // marked error, to name the input set (items_named_by_set in
@@ -155,11 +157,18 @@ static void* _oecluster_extract_swig_ptr(PyObject* obj) {
 // attribute must change that module too.
 static void _oecluster_list_item_error(const char* noun, Py_ssize_t index, PyObject* item,
                                        const char* tail) {
+    // A metaclass can make __name__ raise or return a non-string. An Exception
+    // from the read, or a non-string, gives "<unnamed type>": the caller
+    // still owes a TypeError naming the position, not whatever reading the
+    // name raised. Any other BaseException, such as KeyboardInterrupt or
+    // SystemExit, propagates unchanged, because a name lookup must not
+    // swallow an interrupt or an exit request. RMSD's Python item check
+    // applies the same rule.
     PyObject* name = PyObject_GetAttrString((PyObject*)Py_TYPE(item), "__name__");
+    if (!name && !PyErr_ExceptionMatches(PyExc_Exception)) {
+        return;
+    }
     if (!name || !PyUnicode_Check(name)) {
-        // A metaclass can make __name__ raise or return a non-string. The
-        // caller still owes a TypeError naming the position, not whatever
-        // reading the name raised.
         PyErr_Clear();
         Py_XDECREF(name);
         name = PyUnicode_FromString("<unnamed type>");

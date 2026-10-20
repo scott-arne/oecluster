@@ -230,8 +230,8 @@ class TestValidationMirror:
 
     def test_an_element_whose_type_hides_its_name_still_gets_the_message(self):
         # The type name is read from ``__name__``, which a metaclass can make
-        # raise. The refusal must still be the positional TypeError rather
-        # than the metaclass's exception.
+        # raise. When it raises an Exception, the refusal must still be the
+        # positional TypeError rather than the metaclass's exception.
         class Nameless(type):
             @property
             def __name__(cls):
