@@ -120,20 +120,31 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   on signal 11 under 5.25.1. The conversion now holds a reference to every
   element until the call returns. No result changes. The other molecule and
   design-unit list conversions hold references the same way, but the two
-  Murcko functions are the only list-taking entry points that release the
-  GIL.
-- **An exception raised by an element's own type check now reaches the
-  caller.** An element whose `__class__` raises, for example, used to have
-  that exception replaced by a `TypeError` about its type: the conversion's
-  refusal, or the dispatcher's generic message when the element came first.
-  It now propagates from every molecule and design-unit list conversion, from
-  the conversion of an `OEFPBatch` argument, and from RMSD's item check in
-  `pdist()` and `cdist()`, for a check that raises each time it is asked.
-  Reading the wrapped pointer is treated the same way: only `AttributeError`
-  from `this`, or from an `OEFPBatch`'s `_native`, means the object wraps
-  nothing, and any other exception propagates. An `oefp` whose batch types
-  cannot be loaded is reported by the import or attribute error that loading
-  raised, not as "Expected an oefp.OEFPBatch.".
+  Murcko functions are the only entry points taking a molecule or design-unit
+  list that release the GIL.
+- **An exception raised by an element's own type check reaches the caller on
+  every route into the molecule and design-unit list conversions, for a check
+  that raises each time it is asked.** Where a list reached one of those
+  conversions with no Python check ahead of it, an element whose `__class__`
+  raises, for example, used to have that exception replaced by a `TypeError`
+  about its type: the conversion's refusal, or the dispatcher's generic
+  message when the element came first. That held for the comparison classes
+  and their native constructors, `cdist()`, `murcko_scaffolds()`, `murcko()`,
+  `descriptor_statistics()`, `pdist(..., "descriptor")`, and the other
+  functions that build a comparison from items and a comparison name, such as
+  `maxmin_select()` and `vendi_score()`. `pdist()` with any other comparison
+  already raised the element's own exception, from the `isinstance` check its
+  label extraction ran before building the comparison. The native functions
+  that take an `OEFPBatch`, such as `isim` and `take_fingerprints` in
+  `oecluster.oecluster`, now propagate the same way, where they raised
+  "Wrong number or type of arguments for overloaded function 'isim'" or
+  "Expected an oefp.OEFPBatch."; the public `isim()` and `bitbirch()` already
+  raised it from their own checks. Reading the wrapped pointer is treated the
+  same way: only `AttributeError` from `this`, or from an `OEFPBatch`'s
+  `_native`, means the object wraps nothing, and any other exception
+  propagates. The native conversion now reports an `oefp` whose batch types
+  cannot be loaded by the import or attribute error that loading raised, not
+  as "Expected an oefp.OEFPBatch.".
 - An allocation failure inside the conversion of a molecule list, a
   design-unit list or a progress callback now raises `MemoryError`, where it
   used to leave the wrapper as an uncaught C++ exception and terminate the
