@@ -144,26 +144,27 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   used to leave the wrapper as an uncaught C++ exception and terminate the
   interpreter. Found by reading the conversions, not reproduced.
 - **An object that passes oecluster's Python type check for an OpenEye or
-  oefp type, but wraps a C++ object that is not of that type, is now
-  refused, except that `ROCSComparison` and `MCSComparison` read a molecule
-  as the kind of molecule it really wraps.** Such an object can be one whose
-  `__class__` misreports its type, or one that holds another object's
-  `this`. The molecule list, design-unit list and `OEFPBatch` conversions
-  decided an object's C++ type with `isinstance` and then used the pointer
-  it wraps as that type, unchecked. Each now finds the SWIG type stored with
-  that pointer in the SWIG runtime that created it, OpenEye's or the one
-  oecluster shares with oefp, and converts the pointer through that
-  runtime's own cast list. The `isinstance` checks still run before this and
-  keep their messages. A molecule or design unit that does not convert to the
-  type required is refused with the positional `TypeError` described under
+  oefp type, but whose SWIG type says it wraps a C++ object that is not of
+  that type, is now refused, except that `ROCSComparison` and
+  `MCSComparison` read a molecule as the kind of molecule its SWIG type
+  records.** Such an object can be one whose `__class__` misreports its
+  type, or one that holds another object's `this`. The molecule list,
+  design-unit list and `OEFPBatch` conversions decided an object's C++ type
+  with `isinstance` and then used the pointer it wraps as that type,
+  unchecked. Each now finds the SWIG type stored with that pointer in the
+  SWIG runtime that created it, OpenEye's or the one oecluster shares with
+  oefp, and converts the pointer through that runtime's own cast list. The
+  `isinstance` checks still run before this and keep their messages. A
+  molecule or design unit whose SWIG type does not convert to the type
+  required is refused with the positional `TypeError` described under
   Changed, and a batch with a `TypeError` reading
   `Expected an oefp.OEFPBatch.`, the batch conversion's existing message.
   ROCS and MCS take any molecule, so a molecule that claims one kind of
-  molecule but wraps another is read as the one it wraps: an `OEGraphMol`
-  whose `__class__` reports `OEMol` is copied as its one conformer, where
-  `RMSDComparison` refuses it. An object that passes the type check but
-  whose SWIG type is in no runtime oecluster can read raises `RuntimeError`,
-  as
+  molecule but whose SWIG type records another is read as the one its SWIG
+  type records: an `OEGraphMol` whose `__class__` reports `OEMol` is copied
+  as its one conformer, where `RMSDComparison` refuses it. An object that
+  passes the type check but whose SWIG type is in no runtime oecluster can
+  read raises `RuntimeError`, as
   `molecule list item is a <type> whose SWIG type is in no SWIG runtime oecluster can read (loaded: <runtimes>)`,
   with `design unit` in place of `molecule` for a design-unit list and
   `argument` in place of `molecule list item` for a batch. `<runtimes>` lists
@@ -172,9 +173,12 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   position. These conversions also keep the `this` they verified alive for
   as long as they use its pointer, so when `this` is a new object on each
   read, the C++ object it owns is no longer freed while oecluster still uses
-  it. Arguments of oecluster's own types still convert through SWIG's
-  standard conversion, which drops its reference to `this` before the
-  pointer is used. These hazards existed in v5.25.1 and earlier.
+  it. These hazards existed in 5.25.1 and earlier. Arguments of oecluster's
+  own types still convert through SWIG's standard conversion, which drops
+  its reference to `this` before the pointer is used. Some Python entry
+  points check or read items themselves first, for example `pdist()`'s
+  label extraction and the public `isim()` and `bitbirch()`, so what a
+  caller sees from those depends on that step.
 
 ### Notes
 
