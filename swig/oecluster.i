@@ -142,12 +142,34 @@ static void* _oecluster_extract_swig_ptr(PyObject* obj) {
     return ptr;
 }
 
+// Returns a new reference to the name an error message gives item's type, or
+// NULL with an exception pending for the caller to propagate. The stable ABI
+// makes PyTypeObject opaque, so the name is read from the type's __name__
+// rather than tp_name.
+//
+// A metaclass can make __name__ raise or return a non-string. An Exception
+// from the read, or a non-string, gives "<unnamed type>": the caller still
+// owes its own error, not whatever reading the name raised. Any other
+// BaseException, such as KeyboardInterrupt or SystemExit, propagates
+// unchanged, because a name lookup must not swallow an interrupt or an exit
+// request. RMSD's Python item check applies the same rule.
+static PyObject* _oecluster_item_type_name(PyObject* item) {
+    PyObject* name = PyObject_GetAttrString((PyObject*)Py_TYPE(item), "__name__");
+    if (!name && !PyErr_ExceptionMatches(PyExc_Exception)) {
+        return NULL;
+    }
+    if (!name || !PyUnicode_Check(name)) {
+        PyErr_Clear();
+        Py_XDECREF(name);
+        name = PyUnicode_FromString("<unnamed type>");
+    }
+    return name;
+}
+
 // Sets TypeError "<noun> list item <index> is a <type name><tail>", with
 // <index> also stored on the instance as ``_oecluster_item_index``. Call it
 // with no exception pending. It returns with one pending, that TypeError or
-// whatever stopped it being built, for the caller to propagate. The stable
-// ABI makes PyTypeObject opaque, so the name is read from the type's __name__
-// rather than tp_name.
+// whatever stopped it being built, for the caller to propagate.
 //
 // The attribute marks the error as a conversion's own. cdist renames only a
 // marked error, to name the input set (items_named_by_set in
@@ -157,24 +179,9 @@ static void* _oecluster_extract_swig_ptr(PyObject* obj) {
 // attribute must change that module too.
 static void _oecluster_list_item_error(const char* noun, Py_ssize_t index, PyObject* item,
                                        const char* tail) {
-    // A metaclass can make __name__ raise or return a non-string. An Exception
-    // from the read, or a non-string, gives "<unnamed type>": the caller
-    // still owes a TypeError naming the position, not whatever reading the
-    // name raised. Any other BaseException, such as KeyboardInterrupt or
-    // SystemExit, propagates unchanged, because a name lookup must not
-    // swallow an interrupt or an exit request. RMSD's Python item check
-    // applies the same rule.
-    PyObject* name = PyObject_GetAttrString((PyObject*)Py_TYPE(item), "__name__");
-    if (!name && !PyErr_ExceptionMatches(PyExc_Exception)) {
+    PyObject* name = _oecluster_item_type_name(item);
+    if (!name) {
         return;
-    }
-    if (!name || !PyUnicode_Check(name)) {
-        PyErr_Clear();
-        Py_XDECREF(name);
-        name = PyUnicode_FromString("<unnamed type>");
-        if (!name) {
-            return;
-        }
     }
     PyObject* message = PyUnicode_FromFormat("%s list item %zd is a %U%s", noun, index, name,
                                              tail);
@@ -206,6 +213,378 @@ static void _oecluster_list_item_error(const char* noun, Py_ssize_t index, PyObj
 // The form every molecule list conversion uses.
 static void _oecluster_molecule_item_error(Py_ssize_t index, PyObject* item, const char* tail) {
     _oecluster_list_item_error("molecule", index, item, tail);
+}
+
+// ---- Cross-runtime type verification ----
+// _oecluster_swig_cast decides whether an object from another SWIG module
+// wraps a given C++ type from the SWIG descriptor its ``this`` carries, not
+// from anything the Python object reports about itself. It looks for that
+// descriptor by pointer identity in each runtime it can read: this module's
+// runtime 5, which oefp shares, and OpenEye's runtime 4. Nothing reached
+// through the descriptor is used until a runtime's table is found to hold
+// it. The pointer is then converted through that runtime's own cast list,
+// which applies whatever adjustment the C++ conversion needs.
+
+// Runtime-4 layouts. OpenEye's bindings use SWIG runtime "4", whose
+// swig_cast_info is { type, converter, next, prev }; this module compiles
+// runtime "5", whose fourth member is an unsigned index instead, so runtime 4
+// is read through these private mirrors.
+struct _oecluster_swig4_type_info;
+struct _oecluster_swig4_cast_info {
+    _oecluster_swig4_type_info* type;
+    void* (*converter)(void*, int*);
+    _oecluster_swig4_cast_info* next;
+    _oecluster_swig4_cast_info* prev;
+};
+struct _oecluster_swig4_type_info {
+    const char* name;
+    const char* str;
+    void* dcast;
+    _oecluster_swig4_cast_info* cast;
+    void* clientdata;
+    int owndata;
+};
+struct _oecluster_swig4_module_info {
+    _oecluster_swig4_type_info** types;
+    size_t size;
+    _oecluster_swig4_module_info* next;
+    void* type_initial;
+    void* cast_initial;
+    void* clientdata;
+};
+// The SwigPyObject prefix both runtimes share.
+struct _oecluster_swig_object_prefix {
+    PyObject_HEAD
+    void* ptr;
+    void* ty;
+};
+
+// Releases the reference _oecluster_swig_cast hands back in *held when the
+// scope ends. Like every Py_XDECREF, it must run with the GIL held.
+struct _oecluster_held_ref {
+    PyObject* ref = nullptr;
+    ~_oecluster_held_ref() { Py_XDECREF(ref); }
+};
+
+// type.__dict__["__name__"] and type.__dict__["__basicsize__"], read once and
+// kept for the process.
+static PyObject* _oecluster_type_name_getter = NULL;
+static PyObject* _oecluster_type_basicsize_getter = NULL;
+
+// Returns 1 when this_obj's type is really named SwigPyObject and is really
+// large enough for _oecluster_swig_object_prefix, 0 when it is not, or -1
+// with an exception pending. "Really" means read through type's own
+// descriptors, called on the type: attribute lookup on the type goes through
+// its metaclass, which can report any name and any size. A Python class
+// passes only by being genuinely that large, so reading ptr and ty stays
+// within the object.
+static int _oecluster_is_swig_object(PyObject* this_obj) {
+    if (!_oecluster_type_name_getter || !_oecluster_type_basicsize_getter) {
+        PyObject* type_dict = PyObject_GetAttrString((PyObject*)&PyType_Type, "__dict__");
+        if (!type_dict) {
+            return -1;
+        }
+        PyObject* name_getter = PyMapping_GetItemString(type_dict, "__name__");
+        PyObject* size_getter =
+            name_getter ? PyMapping_GetItemString(type_dict, "__basicsize__") : NULL;
+        Py_DECREF(type_dict);
+        if (!size_getter) {
+            Py_XDECREF(name_getter);
+            return -1;
+        }
+        _oecluster_type_name_getter = name_getter;
+        _oecluster_type_basicsize_getter = size_getter;
+    }
+    PyObject* type = (PyObject*)Py_TYPE(this_obj);
+    PyObject* name = PyObject_CallMethod(_oecluster_type_name_getter, "__get__", "(O)", type);
+    if (!name) {
+        return -1;
+    }
+    bool named = PyUnicode_Check(name) &&
+                 PyUnicode_CompareWithASCIIString(name, "SwigPyObject") == 0;
+    Py_DECREF(name);
+    if (!named) {
+        return 0;
+    }
+    PyObject* size = PyObject_CallMethod(_oecluster_type_basicsize_getter, "__get__", "(O)",
+                                         type);
+    if (!size) {
+        return -1;
+    }
+    Py_ssize_t basicsize = PyLong_AsSsize_t(size);
+    Py_DECREF(size);
+    if (basicsize == -1 && PyErr_Occurred()) {
+        return -1;
+    }
+    return basicsize >= (Py_ssize_t)sizeof(_oecluster_swig_object_prefix) ? 1 : 0;
+}
+
+// Returns 1 when ty is a descriptor in runtime 5's table, the circular list
+// of every runtime-5 module loaded (this one, and oefp's once it is
+// imported); otherwise 0.
+static int _oecluster_runtime5_holds(void* ty) {
+    swig_module_info* head = SWIG_GetModule(0);
+    if (!head) {
+        return 0;
+    }
+    swig_module_info* module = head;
+    do {
+        for (size_t i = 0; i < module->size; ++i) {
+            if ((void*)module->types[i] == ty) {
+                return 1;
+            }
+        }
+        module = module->next;
+    } while (module && module != head);
+    return 0;
+}
+
+// Runtime 4's module list, once found. It is static memory in an OpenEye
+// extension module, which is never unloaded, and runtime-4 modules imported
+// later join the same circular list, so it is kept for the process.
+static _oecluster_swig4_module_info* _oecluster_swig4_head = NULL;
+
+// Returns 1 with *head set to runtime 4's module list, 0 when runtime 4 is not
+// loaded, or -1 with an exception pending. Runtime 4 appears only once an
+// OpenEye module is imported, which can be after this module's first
+// conversion, so only a success is kept and a failure is retried on the next
+// call. swig_runtime_data4 is looked up in sys.modules, never imported: an
+// import of an absent module would search the disk for it.
+static int _oecluster_runtime4(_oecluster_swig4_module_info** head) {
+    if (_oecluster_swig4_head) {
+        *head = _oecluster_swig4_head;
+        return 1;
+    }
+    void* pointer = NULL;
+    PyObject* runtime = PyMapping_GetItemString(PyImport_GetModuleDict(), "swig_runtime_data4");
+    if (runtime) {
+        PyObject* capsule = PyObject_GetAttrString(runtime, "type_pointer_capsule");
+        Py_DECREF(runtime);
+        if (capsule) {
+            pointer = PyCapsule_GetPointer(capsule, "swig_runtime_data4.type_pointer_capsule");
+            Py_DECREF(capsule);
+        }
+    }
+    if (!pointer) {
+        // Each step that returned NULL left an exception. An Exception means
+        // runtime 4 is absent or not what SWIG publishes; any other
+        // BaseException, such as KeyboardInterrupt, propagates.
+        if (!PyErr_ExceptionMatches(PyExc_Exception)) {
+            return -1;
+        }
+        PyErr_Clear();
+        return 0;
+    }
+    _oecluster_swig4_head = (_oecluster_swig4_module_info*)pointer;
+    *head = _oecluster_swig4_head;
+    return 1;
+}
+
+// Returns 1 when ty is a descriptor in one of runtime 4's modules, otherwise 0.
+static int _oecluster_runtime4_holds(_oecluster_swig4_module_info* head, void* ty) {
+    _oecluster_swig4_module_info* module = head;
+    do {
+        for (size_t i = 0; i < module->size; ++i) {
+            if ((void*)module->types[i] == ty) {
+                return 1;
+            }
+        }
+        module = module->next;
+    } while (module && module != head);
+    return 0;
+}
+
+// Returns runtime 4's descriptor with the mangled name name, or NULL when it
+// has none. SWIG gives a name one descriptor across all of a runtime's
+// modules, so the first match is the only one.
+static _oecluster_swig4_type_info* _oecluster_runtime4_find(_oecluster_swig4_module_info* head,
+                                                            const char* name) {
+    _oecluster_swig4_module_info* module = head;
+    do {
+        for (size_t i = 0; i < module->size; ++i) {
+            const char* candidate = module->types[i]->name;
+            if (candidate && strcmp(candidate, name) == 0) {
+                return module->types[i];
+            }
+        }
+        module = module->next;
+    } while (module && module != head);
+    return NULL;
+}
+
+// Decides whether obj wraps target, this module's descriptor for a C++
+// pointer type, and if so converts the pointer obj wraps to that type.
+// Returns:
+//  1: *out holds the converted pointer, and *held a new reference to the
+//     verified SwigPyObject that contains it. The caller releases *held only
+//     once it no longer uses *out: a ``this`` produced on each read owns its
+//     C++ object, and *held may be the only reference keeping it alive.
+//  0: obj is not the target type, which includes a ``this`` that is not
+//     really a SwigPyObject.
+//  2: obj wraps nothing: it has no ``this``, or its ``this`` is a
+//     SwigPyObject whose descriptor was found and whose pointer is null.
+//  3: obj's ``this`` carries a null descriptor, or one no readable runtime
+//     holds.
+// -1: an exception is pending for the caller to propagate: reading ``this``
+//     raised something other than AttributeError, reading its type failed,
+//     looking up runtime 4 raised a BaseException that is not an Exception,
+//     or the conversion reported new memory.
+// On every return but 1, *out and *held are NULL; 0, 2 and 3 leave no
+// exception pending.
+//
+// No verdict is cached. The same descriptor is asked about different
+// targets, such as OEMolBase and then OEMCMolBase, and an answer for one is
+// not an answer for the other.
+static int _oecluster_swig_cast(PyObject* obj, swig_type_info* target, void** out,
+                                PyObject** held) {
+    *out = NULL;
+    *held = NULL;
+    _oecluster_held_ref this_obj;
+    this_obj.ref = PyObject_GetAttrString(obj, "this");
+    if (!this_obj.ref) {
+        if (!PyErr_ExceptionMatches(PyExc_AttributeError)) {
+            return -1;
+        }
+        PyErr_Clear();
+        return 2;
+    }
+    int is_swig_object = _oecluster_is_swig_object(this_obj.ref);
+    if (is_swig_object != 1) {
+        return is_swig_object;
+    }
+    const _oecluster_swig_object_prefix* swig_this =
+        (const _oecluster_swig_object_prefix*)this_obj.ref;
+    void* ty = swig_this->ty;
+    void* ptr = swig_this->ptr;
+    if (!ty) {
+        return 3;
+    }
+    void* converted = NULL;
+    int newmemory = 0;
+    if (_oecluster_runtime5_holds(ty)) {
+        if (!ptr) {
+            return 2;
+        }
+        swig_cast_info* cast = SWIG_TypeCheckStruct((swig_type_info*)ty, target);
+        if (!cast) {
+            return 0;
+        }
+        converted = SWIG_TypeCast(cast, ptr, &newmemory);
+    } else {
+        _oecluster_swig4_module_info* runtime4 = NULL;
+        int loaded = _oecluster_runtime4(&runtime4);
+        if (loaded < 0) {
+            return -1;
+        }
+        if (!loaded || !_oecluster_runtime4_holds(runtime4, ty)) {
+            return 3;
+        }
+        if (!ptr) {
+            return 2;
+        }
+        // Runtime 4's own type checks move the cast they find to the front of
+        // this list. They and this walk both run with the GIL held, so the
+        // walk never sees the list mid-change.
+        _oecluster_swig4_type_info* target4 = _oecluster_runtime4_find(runtime4, target->name);
+        _oecluster_swig4_cast_info* cast = target4 ? target4->cast : NULL;
+        while (cast && (void*)cast->type != ty) {
+            cast = cast->next;
+        }
+        if (!cast) {
+            return 0;
+        }
+        converted = cast->converter ? cast->converter(ptr, &newmemory) : ptr;
+    }
+    if (newmemory) {
+        // The new object is left unreleased: this code knows neither its type
+        // nor how to free it.
+        PyObject* name = _oecluster_item_type_name(obj);
+        if (name) {
+            PyErr_Format(PyExc_RuntimeError,
+                         "converting %U reported new memory, which oecluster cannot release",
+                         name);
+            Py_DECREF(name);
+        }
+        return -1;
+    }
+    *out = converted;
+    *held = this_obj.ref;
+    this_obj.ref = nullptr;
+    return 1;
+}
+
+// Returns a new reference to the names of the swig_runtime_data<N> modules
+// in sys.modules, sorted and joined with ", ", or "none" when there are none.
+// Returns NULL with an exception pending if the list cannot be built.
+static PyObject* _oecluster_loaded_runtimes() {
+    PyObject* keys = PyMapping_Keys(PyImport_GetModuleDict());
+    if (!keys) {
+        return NULL;
+    }
+    PyObject* result = NULL;
+    PyObject* runtimes = PyList_New(0);
+    PyObject* prefix = PyUnicode_FromString("swig_runtime_data");
+    if (runtimes && prefix) {
+        Py_ssize_t count = PyList_Size(keys);
+        Py_ssize_t i = 0;
+        for (; i < count; ++i) {
+            PyObject* key = PyList_GetItem(keys, i);
+            Py_ssize_t match = PyUnicode_Check(key)
+                                   ? PyUnicode_Tailmatch(key, prefix, 0, PY_SSIZE_T_MAX, -1)
+                                   : 0;
+            if (match < 0 || (match == 1 && PyList_Append(runtimes, key) < 0)) {
+                break;
+            }
+        }
+        if (i == count && PyList_Sort(runtimes) == 0) {
+            if (PyList_Size(runtimes) == 0) {
+                result = PyUnicode_FromString("none");
+            } else {
+                PyObject* separator = PyUnicode_FromString(", ");
+                if (separator) {
+                    result = PyUnicode_Join(separator, runtimes);
+                    Py_DECREF(separator);
+                }
+            }
+        }
+    }
+    Py_XDECREF(prefix);
+    Py_XDECREF(runtimes);
+    Py_DECREF(keys);
+    return result;
+}
+
+// Sets RuntimeError for an item _oecluster_swig_cast answered 3 for, as
+// "<noun> list item is a <type name> whose SWIG type is ..." from a list
+// conversion, or "argument is a <type name> whose SWIG type is ..." when noun
+// is NULL. Call it with no exception pending. It returns with one pending,
+// that RuntimeError or whatever stopped it being built, for the caller to
+// propagate. The message carries no index: cdist renames only a marked
+// TypeError, so an index would reach the caller as one into
+// items_a + items_b.
+static void _oecluster_unreadable_runtime_error(const char* noun, PyObject* item) {
+    PyObject* name = _oecluster_item_type_name(item);
+    if (!name) {
+        return;
+    }
+    PyObject* loaded = _oecluster_loaded_runtimes();
+    if (!loaded) {
+        Py_DECREF(name);
+        return;
+    }
+    if (noun) {
+        PyErr_Format(PyExc_RuntimeError,
+                     "%s list item is a %U whose SWIG type is in no SWIG runtime oecluster "
+                     "can read (loaded: %U)",
+                     noun, name, loaded);
+    } else {
+        PyErr_Format(PyExc_RuntimeError,
+                     "argument is a %U whose SWIG type is in no SWIG runtime oecluster can "
+                     "read (loaded: %U)",
+                     name, loaded);
+    }
+    Py_DECREF(loaded);
+    Py_DECREF(name);
 }
 
 static PyObject* _oecluster_oefp_batch_type = NULL;
@@ -491,6 +870,38 @@ static PyObject* _oecluster_wrap_as_oe_grid(OESystem::OEScalarGrid* grid) {
     swig_this->ptr = grid;
     Py_DECREF(thisAttr);
     return oe_grid;
+}
+%}
+
+// Descriptors for OpenEye pointer types, for use as _oecluster_swig_cast's
+// targets. Declaring them puts them in this module's type table whether or
+// not a wrapped function names them. _swig_cast_verdict looks them up by
+// name, and _oecluster_swig_cast searches runtime 4 by the same names.
+%types(OEChem::OEMolBase *, OEChem::OEMCMolBase *, OEBio::OEDesignUnit *,
+       OESystem::OEScalarGrid *);
+
+%rename(_swig_cast_verdict) oecluster_swig_cast_verdict;
+%feature("docstring") oecluster_swig_cast_verdict
+"For tests only. Returns the code oecluster's cross-runtime type check gives obj
+against the descriptor named target_name: 1 converts, 0 does not, 2 wraps
+nothing, 3 is in no readable SWIG runtime.";
+%inline %{
+// For tests only: the helper's verdict for obj against the descriptor named
+// target_name, with the converted pointer and the held reference discarded.
+PyObject* oecluster_swig_cast_verdict(PyObject* obj, const char* target_name) {
+    swig_type_info* target = SWIG_MangledTypeQuery(target_name);
+    if (!target) {
+        PyErr_Format(PyExc_ValueError, "no descriptor named %s in oecluster", target_name);
+        return NULL;
+    }
+    void* out = NULL;
+    PyObject* held = NULL;
+    int code = _oecluster_swig_cast(obj, target, &out, &held);
+    Py_XDECREF(held);
+    if (code < 0) {
+        return NULL;
+    }
+    return PyLong_FromLong(code);
 }
 %}
 
