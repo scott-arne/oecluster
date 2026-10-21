@@ -6,11 +6,16 @@ and converts through that runtime's cast graph. The verdict is 1 when the
 object converts to the target, 0 when it does not, 2 when it wraps nothing,
 3 when its descriptor is in no runtime this module can read.
 
-The molecule and design-unit list conversions decide each element's type
-with this check, after the ``isinstance`` call each still makes. Before
-they used it, some inputs reached undefined behaviour in them. The tests of
-those inputs run in a child interpreter under faulthandler, so a crash fails
-the test instead of ending the session.
+Every conversion oecluster writes for an object from another SWIG module
+decides the object's type with this check, after any ``isinstance`` call it
+still makes: the molecule and design-unit list conversions, the
+fingerprint-batch conversion and the generic OpenEye reference conversions.
+The grid return path checks the grid it creates the same way. No wrapped
+function reaches the generic conversions or the grid path, so the tests here
+cover the lists and the batch. Before the conversions used the check, some
+inputs reached undefined behaviour in them. The tests of those inputs run in
+a child interpreter under faulthandler, so a crash fails the test instead of
+ending the session.
 """
 
 import subprocess
@@ -621,4 +626,65 @@ def test_a_converted_list_releases_every_this_it_verified():
     before = sys.getrefcount(this)
     for _ in range(50):
         native.FingerprintComparison([good] * 200)
+    assert sys.getrefcount(this) == before
+
+
+# ---- The fingerprint-batch conversion ----
+
+_BATCH_HOLDING_A_MOLECULE = r'''
+    import oefp
+    from oefp import _native as oefp_native
+
+
+    class Posing:
+        """``isinstance`` calls it ``kind``, since its ``__class__`` answers
+        ``kind``, and it carries the one attribute it is given."""
+
+        def __init__(self, kind, name, value):
+            self.kind = kind
+            setattr(self, name, value)
+
+        __class__ = property(lambda self: self.kind)
+
+
+    mol = parsed(oechem.OEGraphMol, "c1ccccc1")
+    report("high-level",
+           lambda: native.isim(Posing(oefp.OEFPBatch, "_native", mol)))
+    report("native",
+           lambda: native.isim(
+               Posing(oefp_native._NativeOEFPBatch, "this", mol.this)))
+'''
+
+
+def test_a_batch_that_wraps_a_molecule_is_refused():
+    """An object the batch check accepts, because its ``__class__`` answers
+    a batch type, but which wraps a molecule, is refused as no batch: a
+    high-level batch whose ``_native`` is a molecule, and a native batch
+    whose ``this`` is a molecule's."""
+    pytest.importorskip("oefp")
+    outcomes = _run_child(_BATCH_HOLDING_A_MOLECULE)
+    refused = "raised TypeError: Expected an oefp.OEFPBatch."
+    assert outcomes == {"high-level": refused, "native": refused}
+
+
+def test_a_batch_conversion_releases_the_this_it_verified():
+    """Guards the new reference handling, so it is not red before it: the
+    batch conversion used to keep no reference to ``this`` at all.
+
+    The conversion holds the ``this`` it verified until the call returns or
+    fails. A high-level batch and its native batch are each converted, by a
+    call that returns and by one that fails after the conversion, on a
+    metric ``isim`` refuses. A leak would add 800 references."""
+    oefp = pytest.importorskip("oefp")
+    batch = oefp.OEFPBatch.from_fingerprints(
+        [oefp.OEFP.from_on_bits(8, [1]), oefp.OEFP.from_on_bits(8, [1, 2])])
+    options = native.ISimOptions()
+    options.metric = "cosine"
+    this = batch._native.this
+    before = sys.getrefcount(this)
+    for _ in range(200):
+        for item in (batch, batch._native):
+            native.isim(item)
+            with pytest.raises(RuntimeError, match="metric must be"):
+                native.isim(item, options)
     assert sys.getrefcount(this) == before

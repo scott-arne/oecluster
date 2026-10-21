@@ -108,40 +108,28 @@ namespace OESystem {
 // ============================================================================
 // Cross-runtime SWIG compatibility layer
 // ============================================================================
-// OpenEye's Python bindings use SWIG runtime v4; our module uses v5.
-// Since the runtimes are separate, SWIG_TypeQuery cannot access OpenEye types.
-// We use Python isinstance for type safety and directly extract the void*
-// pointer from the SwigPyObject struct layout (stable across SWIG versions).
+// OpenEye's Python bindings use SWIG runtime 4; this module uses runtime 5,
+// which oefp shares. SWIG_TypeQuery searches only this module's runtime, so
+// it cannot see OpenEye's types, and the conversions below read an object's
+// ``this`` themselves. The SWIG descriptor that ``this`` carries decides the
+// C++ type, not anything the Python object reports about itself:
+// - the descriptor is looked up in the runtime that created it: runtime 5
+//   through SWIG's own functions, and runtime 4 through private mirrors of
+//   its structures;
+// - the pointer is converted through that runtime's cast list;
+// - a null descriptor, or one that no readable runtime holds, raises
+//   RuntimeError.
+// _oecluster_swig_cast, under "Cross-runtime type verification" below, does
+// this for each of these conversions and for the grid return path. A
+// conversion's isinstance check, where it makes one, runs before the
+// descriptor is read and keeps its messages and its exception propagation.
+// Overload typechecks never read the descriptor: they only choose an
+// overload, and the conversion SWIG then selects reads it.
 //
-// This approach enables passing OpenEye objects between Python and C++ without
+// This passes OpenEye and oefp objects between Python and C++ without
 // serialization. The macros below generate the boilerplate for each type.
 
 %{
-// Minimal SwigPyObject layout compatible across SWIG runtime versions.
-// The actual struct may have more fields, but ptr is always first after
-// PyObject_HEAD.
-struct _SwigPyObjectCompat {
-    PyObject_HEAD
-    void *ptr;
-};
-
-// Returns the pointer an OpenEye proxy wraps. NULL with no exception pending
-// means it wraps nothing: it has no ``this``, or a null one. NULL with an
-// exception pending means reading ``this`` raised something other than
-// AttributeError, which the caller propagates rather than reporting a type.
-static void* _oecluster_extract_swig_ptr(PyObject* obj) {
-    PyObject* thisAttr = PyObject_GetAttrString(obj, "this");
-    if (!thisAttr) {
-        if (PyErr_ExceptionMatches(PyExc_AttributeError)) {
-            PyErr_Clear();
-        }
-        return NULL;
-    }
-    void* ptr = ((_SwigPyObjectCompat*)thisAttr)->ptr;
-    Py_DECREF(thisAttr);
-    return ptr;
-}
-
 // Returns a new reference to the name an error message gives item's type, or
 // NULL with an exception pending for the caller to propagate. The stable ABI
 // makes PyTypeObject opaque, so the name is read from the type's __name__
@@ -606,6 +594,16 @@ static void _oecluster_unreadable_runtime_error(const char* noun, PyObject* item
     Py_DECREF(name);
 }
 
+// The fallback of the OE_CROSS_RUNTIME_*_TYPEMAPS macros, for an argument
+// SWIG_ConvertPtr has not converted with this module's descriptor. It returns
+// _oecluster_swig_cast's code, with *argp and *held set as that describes.
+// It lives here, not in the macros, so that it is compiled in every build:
+// a macro's body is compiled only where a wrapped function expands it.
+static int _oecluster_foreign_ref(PyObject* input, swig_type_info* descriptor, void** argp,
+                                  PyObject** held) {
+    return _oecluster_swig_cast(input, descriptor, argp, held);
+}
+
 static PyObject* _oecluster_oefp_batch_type = NULL;
 static PyObject* _oecluster_oefp_native_batch_type = NULL;
 
@@ -670,29 +668,41 @@ static bool _oecluster_may_be_oefp_batch(PyObject* obj) {
     return is_batch == 1;
 }
 
-// Same contract as _oecluster_extract_swig_ptr. A high-level OEFPBatch wraps
-// the native batch in ``_native``; a native batch is read directly.
-static void* _oecluster_extract_oefp_batch_ptr(PyObject* obj) {
+// Returns _oecluster_swig_cast's code for obj against target, this module's
+// descriptor for OEFP::OEFPBatch *, which the typemap passes in. A high-level
+// OEFPBatch wraps the native batch in ``_native``, so the native batch is the
+// object checked; any other object is checked itself. ``_native`` is read
+// under the rule for ``this``: AttributeError means the object wraps nothing,
+// 2, and any other exception is -1, left pending.
+//
+// On 1, *held is the helper's own reference to the verified ``this``. A
+// ``this`` that owns its C++ batch keeps it alive by itself, so ``_native``
+// is released here, whatever the code.
+static int _oecluster_extract_oefp_batch_ptr(PyObject* obj, swig_type_info* target, void** out,
+                                             PyObject** held) {
+    *out = NULL;
+    *held = NULL;
     if (_oecluster_load_oefp_batch_types() < 0) {
-        return NULL;
+        return -1;
     }
     int is_high_level = PyObject_IsInstance(obj, _oecluster_oefp_batch_type);
     if (is_high_level < 0) {
-        return NULL;
+        return -1;
     }
     if (!is_high_level) {
-        return _oecluster_extract_swig_ptr(obj);
+        return _oecluster_swig_cast(obj, target, out, held);
     }
     PyObject* native_obj = PyObject_GetAttrString(obj, "_native");
     if (!native_obj) {
-        if (PyErr_ExceptionMatches(PyExc_AttributeError)) {
-            PyErr_Clear();
+        if (!PyErr_ExceptionMatches(PyExc_AttributeError)) {
+            return -1;
         }
-        return NULL;
+        PyErr_Clear();
+        return 2;
     }
-    void* ptr = _oecluster_extract_swig_ptr(native_obj);
+    int code = _oecluster_swig_cast(native_obj, target, out, held);
     Py_DECREF(native_obj);
-    return ptr;
+    return code;
 }
 
 // The installed oefp wheel and this extension each carry their own compiled
@@ -775,8 +785,9 @@ static bool _oecluster_check_oefp_abi() {
 // guaranteed only for a check that answers the same way twice. An object
 // whose __class__ or isinstance behaviour changes between consecutive reads
 // can raise on the typecheck's read and answer on the in typemap's. Its first
-// exception is then lost, and the in typemap goes by the second answer,
-// treating the object as that type or refusing it as the wrong one. Only a
+// exception is then lost, and the in typemap goes by the second answer: it
+// refuses the object on a no, and on a yes passes it to the descriptor check,
+// which decides the type (see the cross-runtime comment above). Only a
 // contrived object does that, and the loss is accepted rather than guarded
 // against. Answering no would rule the overload out, and when no other
 // accepts the argument, replace the exception with the dispatcher's generic
@@ -877,17 +888,29 @@ static PyObject* _oecluster_wrap_as_oe_grid(OESystem::OEScalarGrid* grid) {
         delete grid;
         return NULL;
     }
-    PyObject* thisAttr = PyObject_GetAttrString(oe_grid, "this");
-    if (!thisAttr) {
-        PyErr_Clear();
-        Py_DECREF(oe_grid);
+    // Nothing is deleted or written through until the new object's ``this``
+    // is verified as an OEScalarGrid. The write then goes to the exact
+    // SwigPyObject that was verified, not to whatever a second read of
+    // ``this`` returns. A newly constructed object owns its pointer, so once
+    // grid is stored there, that object frees it. A check that raised keeps
+    // its own exception, as at every other conversion.
+    _oecluster_held_ref verified_this;
+    void* old_ptr = NULL;
+    int cast = _oecluster_swig_cast(oe_grid, SWIGTYPE_p_OESystem__OEScalarGrid, &old_ptr,
+                                    &verified_this.ref);
+    if (cast != 1) {
         delete grid;
+        // Nothing the new object holds has been touched, so releasing it
+        // frees whatever it owns.
+        Py_DECREF(oe_grid);
+        if (cast != -1) {
+            PyErr_SetString(PyExc_RuntimeError,
+                            "oecluster could not verify the OEScalarGrid it created");
+        }
         return NULL;
     }
-    _SwigPyObjectCompat* swig_this = (_SwigPyObjectCompat*)thisAttr;
-    delete reinterpret_cast<OESystem::OEScalarGrid*>(swig_this->ptr);
-    swig_this->ptr = grid;
-    Py_DECREF(thisAttr);
+    delete static_cast<OESystem::OEScalarGrid*>(old_ptr);
+    ((_oecluster_swig_object_prefix*)verified_this.ref)->ptr = grid;
     return oe_grid;
 }
 %}
@@ -929,6 +952,14 @@ PyObject* oecluster_swig_cast_verdict(PyObject* obj, const char* target_name) {
 // ============================================================================
 
 // Generate const-ref and non-const-ref typemaps for a cross-runtime OpenEye type.
+// Each in typemap tries SWIG_ConvertPtr with this module's descriptor first.
+// Failing that, an object the TAG check accepts goes to
+// _oecluster_foreign_ref, and its descriptor decides the cast: an object that
+// is not the type, or wraps nothing, gets ERR_MSG, and one whose runtime
+// cannot be read gets the unreadable-runtime RuntimeError. The verified
+// ``this`` is kept until the matching freearg releases it, once the call
+// has returned or failed.
+// The nullable-pointer macro below follows the same rule.
 // CPP_TYPE: fully qualified C++ type (e.g., OEChem::OEMolBase)
 // TAG:      DEFINE_OE_TYPE_CHECKER suffix (e.g., oemolbase); the in typemaps
 //           call _oecluster_isinstance_TAG and the typechecks
@@ -936,7 +967,7 @@ PyObject* oecluster_swig_cast_verdict(PyObject* obj, const char* target_name) {
 // ERR_MSG:  error message on type mismatch
 %define OE_CROSS_RUNTIME_REF_TYPEMAPS(CPP_TYPE, TAG, ERR_MSG)
 
-%typemap(in) const CPP_TYPE& (void *argp = 0, int res = 0) {
+%typemap(in) const CPP_TYPE& (void *argp = 0, int res = 0, PyObject* held = 0) {
     res = SWIG_ConvertPtr($input, &argp, $descriptor, 0);
     if (!SWIG_IsOK(res)) {
         int is_instance = _oecluster_isinstance_##TAG($input);
@@ -944,10 +975,13 @@ PyObject* oecluster_swig_cast_verdict(PyObject* obj, const char* target_name) {
             SWIG_fail;
         }
         if (is_instance) {
-            argp = _oecluster_extract_swig_ptr($input);
-            if (argp) {
+            int cast = _oecluster_foreign_ref($input, $descriptor, &argp, &held);
+            if (cast == 1) {
                 res = SWIG_OK;
-            } else if (PyErr_Occurred()) {
+            } else if (cast == 3) {
+                _oecluster_unreadable_runtime_error(NULL, $input);
+                SWIG_fail;
+            } else if (cast < 0) {
                 SWIG_fail;
             }
         }
@@ -959,6 +993,10 @@ PyObject* oecluster_swig_cast_verdict(PyObject* obj, const char* target_name) {
         SWIG_exception_fail(SWIG_NullReferenceError, "Null reference.");
     }
     $1 = reinterpret_cast< $1_ltype >(argp);
+}
+
+%typemap(freearg) const CPP_TYPE& {
+    Py_XDECREF(held$argnum);
 }
 
 %typemap(typecheck, precedence=10) const CPP_TYPE& {
@@ -967,7 +1005,7 @@ PyObject* oecluster_swig_cast_verdict(PyObject* obj, const char* target_name) {
     $1 = SWIG_IsOK(res) ? 1 : _oecluster_may_be_##TAG($input) ? 1 : 0;
 }
 
-%typemap(in) CPP_TYPE& (void *argp = 0, int res = 0) {
+%typemap(in) CPP_TYPE& (void *argp = 0, int res = 0, PyObject* held = 0) {
     res = SWIG_ConvertPtr($input, &argp, $descriptor, 0);
     if (!SWIG_IsOK(res)) {
         int is_instance = _oecluster_isinstance_##TAG($input);
@@ -975,10 +1013,13 @@ PyObject* oecluster_swig_cast_verdict(PyObject* obj, const char* target_name) {
             SWIG_fail;
         }
         if (is_instance) {
-            argp = _oecluster_extract_swig_ptr($input);
-            if (argp) {
+            int cast = _oecluster_foreign_ref($input, $descriptor, &argp, &held);
+            if (cast == 1) {
                 res = SWIG_OK;
-            } else if (PyErr_Occurred()) {
+            } else if (cast == 3) {
+                _oecluster_unreadable_runtime_error(NULL, $input);
+                SWIG_fail;
+            } else if (cast < 0) {
                 SWIG_fail;
             }
         }
@@ -990,6 +1031,10 @@ PyObject* oecluster_swig_cast_verdict(PyObject* obj, const char* target_name) {
         SWIG_exception_fail(SWIG_NullReferenceError, "Null reference.");
     }
     $1 = reinterpret_cast< $1_ltype >(argp);
+}
+
+%typemap(freearg) CPP_TYPE& {
+    Py_XDECREF(held$argnum);
 }
 
 %typemap(typecheck, precedence=10) CPP_TYPE& {
@@ -1003,7 +1048,7 @@ PyObject* oecluster_swig_cast_verdict(PyObject* obj, const char* target_name) {
 // Generate nullable-pointer typemaps (accepts None) for a cross-runtime type.
 %define OE_CROSS_RUNTIME_NULLABLE_PTR_TYPEMAPS(CPP_TYPE, TAG, ERR_MSG)
 
-%typemap(in) const CPP_TYPE* (void *argp = 0, int res = 0) {
+%typemap(in) const CPP_TYPE* (void *argp = 0, int res = 0, PyObject* held = 0) {
     if ($input == Py_None) {
         $1 = NULL;
     } else {
@@ -1014,10 +1059,13 @@ PyObject* oecluster_swig_cast_verdict(PyObject* obj, const char* target_name) {
                 SWIG_fail;
             }
             if (is_instance) {
-                argp = _oecluster_extract_swig_ptr($input);
-                if (argp) {
+                int cast = _oecluster_foreign_ref($input, $descriptor, &argp, &held);
+                if (cast == 1) {
                     res = SWIG_OK;
-                } else if (PyErr_Occurred()) {
+                } else if (cast == 3) {
+                    _oecluster_unreadable_runtime_error(NULL, $input);
+                    SWIG_fail;
+                } else if (cast < 0) {
                     SWIG_fail;
                 }
             }
@@ -1027,6 +1075,10 @@ PyObject* oecluster_swig_cast_verdict(PyObject* obj, const char* target_name) {
         }
         $1 = reinterpret_cast< $1_ltype >(argp);
     }
+}
+
+%typemap(freearg) const CPP_TYPE* {
+    Py_XDECREF(held$argnum);
 }
 
 %typemap(typecheck, precedence=10) const CPP_TYPE* {
@@ -1850,7 +1902,7 @@ namespace OEFP {
 class OEFPBatch;
 }
 
-%typemap(in) const OEFP::OEFPBatch& (void *argp = 0) {
+%typemap(in) const OEFP::OEFPBatch& (void *argp = 0, PyObject* held = 0) {
     if (!_oecluster_check_oefp_abi()) {
         SWIG_fail;
     }
@@ -1861,14 +1913,30 @@ class OEFPBatch;
     if (!is_batch) {
         SWIG_exception_fail(SWIG_TypeError, "Expected an oefp.OEFPBatch.");
     }
-    argp = _oecluster_extract_oefp_batch_ptr($input);
-    if (!argp) {
-        if (PyErr_Occurred()) {
-            SWIG_fail;
-        }
+    // An overridden __class__ can satisfy the check above, so the descriptor
+    // decides the cast. The verified ``this`` is kept until the freearg
+    // below, because the call reads the batch through the pointer.
+    int cast = _oecluster_extract_oefp_batch_ptr($input, $descriptor(OEFP::OEFPBatch *), &argp,
+                                                 &held);
+    if (cast == 0) {
+        SWIG_exception_fail(SWIG_TypeError, "Expected an oefp.OEFPBatch.");
+    }
+    if (cast == 2) {
         SWIG_exception_fail(SWIG_NullReferenceError, "Null OEFPBatch reference.");
     }
+    if (cast == 3) {
+        _oecluster_unreadable_runtime_error(NULL, $input);
+        SWIG_fail;
+    }
+    if (cast != 1) {
+        SWIG_fail;
+    }
     $1 = reinterpret_cast< $1_ltype >(argp);
+}
+
+// Same GIL precondition as the OEMolBase list's freearg.
+%typemap(freearg) const OEFP::OEFPBatch& {
+    Py_XDECREF(held$argnum);
 }
 
 %typemap(typecheck, precedence=10) const OEFP::OEFPBatch& {
