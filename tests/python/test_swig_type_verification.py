@@ -533,12 +533,16 @@ def test_a_this_produced_on_each_read_is_computed_on(call, shaped_pair):
 
     The list repeats two items 40 times each. The OEMolBase list reads each
     element's ``this`` once, so 80 molecules are produced; ROCS and MCS read
-    it twice, once per cast, so 160 are. Eighty items are more than one of
-    Murcko's 64-item chunks, so with ``num_threads=2`` Murcko starts a
-    worker for each of its two chunks, and both read the produced molecules
-    with the GIL released. That holds while OpenEye's memory pool mode
-    allows threads, as its default does; under any other mode Murcko reads
-    them on one thread."""
+    it twice, once per cast, so 160 are.
+
+    What this pins for Fingerprint and Murcko is that the verified ``this``
+    objects outlive the call, which reads the molecules with the GIL
+    released. Eighty items make two of Murcko's 64-item chunks, and with
+    ``num_threads=2`` it may start two workers, which it does when
+    OpenEye's memory pool mode allows threads, as the default does. Workers
+    claim chunks as they become free, so which worker reads which chunk is
+    not fixed, and one may read both. The test therefore allows two workers
+    to read at once but does not claim that they do."""
     outcomes = _run_child(_PRODUCED, call, shaped_pair)
     assert outcomes["plain"].startswith("returned "), outcomes
     assert outcomes["produced"] == outcomes["plain"]
