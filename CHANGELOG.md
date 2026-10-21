@@ -159,10 +159,13 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   required is refused with the positional `TypeError` described under
   Changed, and a batch with a `TypeError` reading
   `Expected an oefp.OEFPBatch.`, the batch conversion's existing message.
-  ROCS and MCS take any molecule, so a molecule that claims one kind of
-  molecule but whose SWIG type records another is read as the one its SWIG
-  type records: an `OEGraphMol` whose `__class__` reports `OEMol` is copied
-  as its one conformer, where `RMSDComparison` refuses it. An object that
+  A molecule or design-unit list item whose `this` is not a SwigPyObject at
+  all is refused with that positional `TypeError` too, where 5.25.1 read the
+  object's memory as a pointer. ROCS and MCS take any molecule, so a
+  molecule that claims one kind of molecule but whose SWIG type records
+  another is read as the one its SWIG type records: an `OEGraphMol` whose
+  `__class__` reports `OEMol` is copied as its one conformer, where
+  `RMSDComparison` refuses it. An object that
   passes the type check but whose SWIG type is in no runtime oecluster can
   read raises `RuntimeError`, as
   `molecule list item is a <type> whose SWIG type is in no SWIG runtime oecluster can read (loaded: <runtimes>)`,

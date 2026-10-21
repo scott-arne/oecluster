@@ -343,11 +343,13 @@ _CHILD_PRELUDE = textwrap.dedent(r'''
 ''')
 
 
-def _run_child(body, *args):
-    """Runs the prelude and ``body`` in a fresh interpreter under
-    faulthandler, with ``args`` as ``sys.argv[1:]``, and returns what each
-    label reported, as ``{label: "returned ..." or "raised ..."}``."""
-    script = _CHILD_PRELUDE + textwrap.dedent(body)
+def _run_child(body, *args, imports_first=""):
+    """Runs ``imports_first``, the prelude and ``body`` in a fresh
+    interpreter under faulthandler, with ``args`` as ``sys.argv[1:]``, and
+    returns what each label reported, as
+    ``{label: "returned ..." or "raised ..."}``. ``imports_first`` runs
+    before the prelude imports ``openeye.oechem``."""
+    script = imports_first + _CHILD_PRELUDE + textwrap.dedent(body)
     result = subprocess.run(
         [sys.executable, "-X", "faulthandler", "-c", script,
          *(str(arg) for arg in args)],
@@ -627,6 +629,97 @@ def test_a_converted_list_releases_every_this_it_verified():
     for _ in range(50):
         native.FingerprintComparison([good] * 200)
     assert sys.getrefcount(this) == before
+
+
+_LATE_OECHEM = r'''
+    from openeye import oedepict
+
+
+    def conformers(oeomega, n):
+        mol = parsed(oechem.OEMol, "CCCCCC(=O)NCCc1ccccc1")
+        omega = oeomega.OEOmega()
+        omega.SetMaxConfs(n)
+        omega.SetStrictStereo(False)
+        assert omega(mol)
+        return mol
+
+
+    # The molecules live in a function, which frees them when it returns. In
+    # this import order, molecules still held by module globals at exit can
+    # make SWIG print "memory leak" lines on stdout, with or without
+    # oecluster imported.
+    def check():
+        mol = parsed(oechem.OEMol, "CCO")
+        # RMSD refuses a molecule with no coordinates; 2D ones are enough.
+        assert oedepict.OEPrepareDepiction(mol)
+        graph = parsed(oechem.OEGraphMol, "CCO")
+        report("OEMol", lambda: native._swig_cast_verdict(
+            mol, "_p_OEChem__OEMCMolBase"))
+        report("OEGraphMol", lambda: native._swig_cast_verdict(
+            graph, "_p_OEChem__OEMCMolBase"))
+        report("rmsd",
+               lambda: type(oecluster.RMSDComparison([mol, mol])).__name__)
+        try:
+            from openeye import oeomega
+        except ImportError:
+            print("rocs", "skipped", sep="\t")
+            return
+        query_graph = oechem.OEGraphMol(conformers(oeomega, 1))
+        flex = conformers(oeomega, 30)
+        # Each conformer's distance from the query, as a one-conformer copy.
+        alone = {
+            conf.GetIdx(): oecluster.ROCSComparison(
+                [query_graph, oechem.OEGraphMol(conf)]).Compare(0, 1)
+            for conf in flex.GetConfs()}
+        worst = max(alone, key=alone.get)
+        for conf in flex.GetConfs():
+            if conf.GetIdx() == worst:
+                flex.SetActive(conf)
+        report("best conformer", lambda: min(alone.values()))
+        report("active conformer", lambda: alone[worst])
+        report("rocs", lambda: float(oecluster.pdist(
+            [query_graph, flex], "rocs", num_threads=1).condensed[0]))
+
+
+    check()
+'''
+
+
+def test_casts_are_found_whatever_the_openeye_import_order():
+    """Runtime 4 merges a cast list that more than one OpenEye module
+    defines. A module that is not the first to register a type adds its
+    casts into that type by name, each still pointing at the module's own
+    copy of the type it casts from. So with ``openeye.oegraphsim`` and
+    ``openeye.oedepict`` imported before ``openeye.oechem``, OEMCMolBase's
+    entry for ``_p_OEMolWrapper`` is not the descriptor an OEMol's ``this``
+    carries, though it has its name. SWIG's own runtime-4 check matches
+    entries by name, and so must the helper. The rest of this suite imports
+    ``openeye.oechem`` first, so this child is the one place the other
+    order is tested.
+
+    An OEMol converts to OEMCMolBase and an OEGraphMol still does not, since
+    no entry in that list has its name. RMSD accepts OEMols. ROCS reads all
+    30 conformers of an OEMol whose active conformer is its worst overlay,
+    so it scores the best one. The ROCS part needs ``openeye.oeomega``; the
+    child skips it without Omega, and the test then reports a skip after
+    checking the rest.
+    """
+    outcomes = _run_child(
+        _LATE_OECHEM,
+        imports_first="from openeye import oedepict, oegraphsim\n")
+    assert outcomes["OEMol"] == "returned 1", outcomes
+    assert outcomes["OEGraphMol"] == "returned 0", outcomes
+    assert outcomes["rmsd"] == "returned 'RMSDComparison'", outcomes
+    if outcomes["rocs"] == "skipped":
+        pytest.skip("openeye.oeomega is unavailable, so the child did not "
+                    "check ROCS's conformer reading")
+    scores = {}
+    for label in ("best conformer", "active conformer", "rocs"):
+        assert outcomes[label].startswith("returned "), outcomes
+        scores[label] = float(outcomes[label].removeprefix("returned "))
+    assert scores["active conformer"] - scores["best conformer"] > 0.1, (
+        "fixture cannot discriminate")
+    assert scores["rocs"] == pytest.approx(scores["best conformer"], abs=1e-6)
 
 
 # ---- The fingerprint-batch conversion ----

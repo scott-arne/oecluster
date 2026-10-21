@@ -212,7 +212,8 @@ static void _oecluster_molecule_item_error(Py_ssize_t index, PyObject* item, con
 // runtime 5, which oefp shares, and OpenEye's runtime 4. Nothing reached
 // through the descriptor is used until a runtime's table is found to hold
 // it. The pointer is then converted through that runtime's own cast list,
-// which applies whatever adjustment the C++ conversion needs.
+// which applies whatever adjustment the C++ conversion needs. Runtime 4's
+// cast entries are matched by name, as SWIG's own runtime-4 check does.
 
 // Runtime-4 layouts. OpenEye's bindings use SWIG runtime "4", whose
 // swig_cast_info is { type, converter, next, prev }; this module compiles
@@ -389,8 +390,10 @@ static int _oecluster_runtime4_holds(_oecluster_swig4_module_info* head, void* t
 }
 
 // Returns runtime 4's descriptor with the mangled name name, or NULL when it
-// has none. SWIG gives a name one descriptor across all of a runtime's
-// modules, so the first match is the only one.
+// has none. Every module's types table holds the descriptor registered under
+// a name, whichever module registered it first, so every match is the same
+// descriptor in any import order. Cast entries are not canonicalised that
+// way; _oecluster_swig_cast matches them by name.
 static _oecluster_swig4_type_info* _oecluster_runtime4_find(_oecluster_swig4_module_info* head,
                                                             const char* name) {
     _oecluster_swig4_module_info* module = head;
@@ -476,13 +479,31 @@ static int _oecluster_swig_cast(PyObject* obj, swig_type_info* target, void** ou
         if (!ptr) {
             return 2;
         }
+        // ty's membership was checked by identity, but a cast entry is matched
+        // by its type's name too, because runtime 4 does not canonicalise
+        // cast entries. A module that is not the first to register a type adds
+        // its casts into that type by name, each still pointing at the
+        // module's own copy of the type it casts from. With openeye.oegraphsim
+        // imported before openeye.oechem, OEMCMolBase's _p_OEMolWrapper entry
+        // is oechem's copy, not the descriptor an OEMol's ``this`` carries.
+        // SWIG's own runtime-4 check compares names for the same reason.
+        // Matching by name admits no type the list does not name: OEMCMolBase's
+        // list has no _p_OEGraphMolWrapper entry under any name, in either
+        // import order. ty is a genuine descriptor once found, and each
+        // entry's type is runtime 4's own, so both names are safe to read.
+        //
         // Runtime 4's own type checks move the cast they find to the front of
         // this list. They and this walk both run with the GIL held, so the
         // walk never sees the list mid-change.
         _oecluster_swig4_type_info* target4 = _oecluster_runtime4_find(runtime4, target->name);
+        const char* ty_name = ((const _oecluster_swig4_type_info*)ty)->name;
         _oecluster_swig4_cast_info* cast = target4 ? target4->cast : NULL;
-        while (cast && (void*)cast->type != ty) {
-            cast = cast->next;
+        for (; cast; cast = cast->next) {
+            const char* cast_name = cast->type->name;
+            if ((void*)cast->type == ty ||
+                (ty_name && cast_name && strcmp(cast_name, ty_name) == 0)) {
+                break;
+            }
         }
         if (!cast) {
             return 0;
