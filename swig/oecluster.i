@@ -260,9 +260,14 @@ struct _oecluster_swig_object_prefix {
 };
 
 // Releases the reference _oecluster_swig_cast hands back in *held when the
-// scope ends. Like every Py_XDECREF, it must run with the GIL held.
+// scope ends. Like every Py_XDECREF, it must run with the GIL held. Declare
+// one, pass &guard.ref, and set ref to null to hand the reference over.
+// Copying is deleted because a copy would release the same reference twice.
 struct _oecluster_held_ref {
     PyObject* ref = nullptr;
+    _oecluster_held_ref() = default;
+    _oecluster_held_ref(const _oecluster_held_ref&) = delete;
+    _oecluster_held_ref& operator=(const _oecluster_held_ref&) = delete;
     ~_oecluster_held_ref() { Py_XDECREF(ref); }
 };
 

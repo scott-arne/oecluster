@@ -1,10 +1,10 @@
 """A cross-runtime object's C++ type comes from its SWIG descriptor.
 
-The helper behind every cross-runtime conversion finds the descriptor a
-``this`` carries in the SWIG runtime that created it, and converts through
-that runtime's cast graph. ``_swig_cast_verdict`` exposes its verdict: 1 when
-the object converts to the target, 0 when it does not, 2 when it wraps
-nothing, 3 when its descriptor is in no runtime this module can read.
+oecluster's cross-runtime type check, which ``_swig_cast_verdict`` exposes,
+finds the descriptor a ``this`` carries in the SWIG runtime that created it,
+and converts through that runtime's cast graph. The verdict is 1 when the
+object converts to the target, 0 when it does not, 2 when it wraps nothing,
+3 when its descriptor is in no runtime this module can read.
 """
 
 import subprocess
@@ -33,8 +33,9 @@ _BATCH = "_p_OEFP__OEFPBatch"
 ], ids=["graph-mcmol", "mol-mcmol", "graph-molbase", "mol-molbase",
         "qmol-molbase", "du-molbase", "du-du"])
 def test_the_verdict_follows_openeye_s_cast_graph(make, target, verdict):
-    """Pins the facts the conversions rely on. If OpenEye changes its type
-    hierarchy, these fail instead of a conversion changing silently."""
+    """Pins the OpenEye cast-graph facts these verdicts depend on. If OpenEye
+    changes its type hierarchy, these fail instead of a verdict changing
+    silently."""
     assert native._swig_cast_verdict(make(), target) == verdict
 
 
@@ -200,13 +201,15 @@ class _FreshThis:
 
 
 def test_a_this_produced_on_each_read_is_held():
-    """Pins step 5's hand-over of the verified ``this`` in ``*held``.
+    """Pins that the hook's path through the helper nets zero references.
 
-    A ``this`` made on each read is kept alive only by the helper's own
-    reference, which on 1 passes to the caller rather than being dropped
-    before the pointer is used. The hook then releases it once: a molecule's
-    ``this`` keeps its reference count across many calls, and the molecule
-    is still usable afterwards.
+    A ``this`` made on each read, which only the helper's reference keeps
+    alive, gives 1 on every one of many reads. A molecule's ``this`` keeps
+    its reference count across many calls, so nothing leaks and nothing is
+    released twice, and the molecule is still usable afterwards. The
+    hand-over in ``*held`` itself is not visible here: the hook discards the
+    converted pointer and releases ``*held`` at once, so a helper that
+    dropped ``this`` early would pass too.
     """
     fresh = _FreshThis()
     for _ in range(200):
