@@ -1,11 +1,11 @@
-"""The build drops a cached SWIG path that no longer exists.
+"""The build re-derives SWIG's library path and version on every configure.
 
-A homebrew SWIG bump deletes the versioned Cellar directory CMakeCache.txt
-recorded as SWIG_DIR, and FindSWIG neither re-checks a cached path nor
-recomputes a cached SWIG_VERSION. cmake/DropStaleSwigCache.cmake drops a
-vanished SWIG_EXECUTABLE together with SWIG_DIR and SWIG_VERSION, and a
-vanished SWIG_DIR together with SWIG_VERSION while keeping a live executable,
-so find_package(SWIG) detects afresh what it needs to.
+FindSWIG trusts a cached SWIG_DIR and SWIG_VERSION whatever executable they
+came from, and a cached SWIG_EXECUTABLE whether or not it still exists, so a
+homebrew SWIG bump that deletes the versioned Cellar directory recorded as
+SWIG_DIR breaks the build. cmake/DropStaleSwigCache.cmake drops SWIG_DIR and
+SWIG_VERSION before every find_package(SWIG), so both come from the executable,
+and drops SWIG_EXECUTABLE only when its path has vanished.
 """
 
 import re
@@ -19,28 +19,34 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 GUARD = REPO_ROOT / "cmake" / "DropStaleSwigCache.cmake"
 # The probe project asks for the version the stable-ABI build needs.
 MIN_SWIG = (4, 4, 1)
+CACHE_TYPES = {"SWIG_EXECUTABLE": "FILEPATH", "SWIG_DIR": "PATH", "SWIG_VERSION": "STRING"}
 
 
-def _swig_version():
-    swig = shutil.which("swig")
-    if swig is None:
-        return None
-    output = subprocess.run([swig, "-version"], capture_output=True, text=True,
-                            timeout=60, check=False).stdout
-    match = re.search(r"SWIG Version (\d+)\.(\d+)\.(\d+)", output)
-    return tuple(int(part) for part in match.groups()) if match else (0, 0, 0)
+def _swig_version(swig):
+    """The version ``swig -version`` reports, read the way FindSWIG reads it."""
+    result = subprocess.run([str(swig), "-version"], capture_output=True,
+                            text=True, timeout=60, check=False)
+    match = re.search(r"SWIG Version[^0-9.]*([0-9.]+)", result.stdout + result.stderr)
+    return match.group(1) if match else None
 
 
-FOUND_SWIG = _swig_version()
+def _too_old(version):
+    if version is None:
+        return True
+    return tuple(int(part) for part in version.split(".") if part) < MIN_SWIG
+
+
+SWIG_ON_PATH = shutil.which("swig")
+FOUND_SWIG = _swig_version(SWIG_ON_PATH) if SWIG_ON_PATH else None
 
 pytestmark = [
     pytest.mark.skipif(
-        shutil.which("cmake") is None or FOUND_SWIG is None,
+        shutil.which("cmake") is None or SWIG_ON_PATH is None,
         reason="needs cmake and swig on PATH"),
     pytest.mark.skipif(
-        FOUND_SWIG is not None and FOUND_SWIG < MIN_SWIG,
+        SWIG_ON_PATH is not None and _too_old(FOUND_SWIG),
         reason=f"needs SWIG {'.'.join(map(str, MIN_SWIG))} or newer on PATH, "
-               f"found {'.'.join(map(str, FOUND_SWIG or ()))}"),
+               f"found {FOUND_SWIG or 'an unreadable version'}"),
 ]
 
 
@@ -54,7 +60,10 @@ def _configure(tmp_path, **cache):
         "find_package(SWIG 4.4.1 REQUIRED)\n")
     build = tmp_path / "build"
     args = ["cmake", "-S", str(project), "-B", str(build)]
-    args += [f"-D{key}={value}" for key, value in cache.items()]
+    # Typed, as CMakeCache.txt holds them. An untyped -D does not reproduce a
+    # cached -NOTFOUND marker: find_program leaves an untyped
+    # -DSWIG_EXECUTABLE=SWIG_EXECUTABLE-NOTFOUND unresolved.
+    args += [f"-D{key}:{CACHE_TYPES[key]}={value}" for key, value in cache.items()]
     result = subprocess.run(args, capture_output=True, text=True, timeout=120,
                             check=False)
     cached = {}
@@ -71,7 +80,7 @@ def _dropped(result):
     """Map each variable the guard reported dropping to the path it named."""
     dropped = {}
     for line in result.stdout.splitlines():
-        match = re.match(r"^-- Dropping cached (SWIG_EXECUTABLE|SWIG_DIR), .*: (.+)$", line)
+        match = re.match(r"^-- Dropping cached (SWIG_\w+), .*: (.+)$", line)
         if match:
             dropped[match.group(1)] = Path(match.group(2))
     return dropped
@@ -79,22 +88,30 @@ def _dropped(result):
 
 def _swiglib(swig):
     """The library directories ``swig -swiglib`` reports, as FindSWIG reads them."""
-    output = subprocess.run([swig, "-swiglib"], capture_output=True, text=True,
-                            timeout=60, check=True).stdout
+    output = subprocess.run([str(swig), "-swiglib"], capture_output=True,
+                            text=True, timeout=60, check=True).stdout
     return {Path(line.strip()) for line in output.splitlines() if line.strip()}
+
+
+def _assert_derived_from_executable(cached):
+    """SWIG_DIR and SWIG_VERSION describe the cached SWIG_EXECUTABLE."""
+    swig = cached["SWIG_EXECUTABLE"]
+    assert Path(swig).exists()
+    assert Path(cached["SWIG_DIR"]) in _swiglib(swig)
+    assert cached["SWIG_VERSION"] == _swig_version(swig)
 
 
 def _user_swig(tmp_path):
     """A live SWIG executable at a path find_program would never choose, the
     way a user passes -DSWIG_EXECUTABLE for a SWIG outside PATH."""
-    found = Path(shutil.which("swig"))
+    found = Path(SWIG_ON_PATH)
     user_swig = tmp_path / "user-bin" / found.name
     user_swig.parent.mkdir()
     try:
         user_swig.symlink_to(found)
     except OSError:
         # Creating a symlink can need a privilege on Windows. A copy is still a
-        # live executable outside PATH, which is all this case needs.
+        # live executable outside PATH, which is all these cases need.
         shutil.copy2(found, user_swig)
     return user_swig
 
@@ -104,12 +121,8 @@ def test_both_paths_vanished(tmp_path):
         tmp_path, SWIG_EXECUTABLE="/nonexistent/swig",
         SWIG_DIR="/nonexistent/swig-lib", SWIG_VERSION="99.0.0")
     assert result.returncode == 0, result.stdout + result.stderr
-    assert Path(cached["SWIG_EXECUTABLE"]).exists()
-    assert Path(cached["SWIG_DIR"]).is_dir()
-    assert cached["SWIG_VERSION"] != "99.0.0"
-    assert _dropped(result) == {
-        "SWIG_EXECUTABLE": Path("/nonexistent/swig"),
-        "SWIG_DIR": Path("/nonexistent/swig-lib")}
+    _assert_derived_from_executable(cached)
+    assert _dropped(result) == {"SWIG_EXECUTABLE": Path("/nonexistent/swig")}
 
 
 def test_only_the_library_directory_vanished(tmp_path):
@@ -123,25 +136,48 @@ def test_only_the_library_directory_vanished(tmp_path):
         SWIG_DIR="/nonexistent/swig-lib", SWIG_VERSION="99.0.0")
     assert result.returncode == 0, result.stdout + result.stderr
     assert Path(cached["SWIG_EXECUTABLE"]) == user_swig
-    assert Path(cached["SWIG_DIR"]) in _swiglib(user_swig)
-    assert cached["SWIG_VERSION"] != "99.0.0"
-    assert _dropped(result) == {"SWIG_DIR": Path("/nonexistent/swig-lib")}
+    _assert_derived_from_executable(cached)
+    assert _dropped(result) == {}
 
 
 def test_only_the_executable_vanished(tmp_path):
-    """A vanished executable takes its library directory with it, even one
-    that still exists: the re-detected executable gets its own library, not
-    the old one. The cached directory is a live decoy so that keeping it
-    shows."""
+    """A vanished executable does not leave its library directory behind,
+    even one that still exists: the re-detected executable gets its own
+    library. The cached directory is a live decoy so that keeping it shows."""
     old_library = tmp_path / "old-swig-lib"
     old_library.mkdir()
     result, cached = _configure(
         tmp_path, SWIG_EXECUTABLE="/nonexistent/swig",
         SWIG_DIR=old_library.as_posix(), SWIG_VERSION="99.0.0")
     assert result.returncode == 0, result.stdout + result.stderr
-    assert Path(cached["SWIG_EXECUTABLE"]).exists()
-    assert Path(cached["SWIG_DIR"]) in _swiglib(cached["SWIG_EXECUTABLE"])
-    assert cached["SWIG_VERSION"] != "99.0.0"
-    assert _dropped(result) == {
-        "SWIG_EXECUTABLE": Path("/nonexistent/swig"),
-        "SWIG_DIR": old_library}
+    _assert_derived_from_executable(cached)
+    assert _dropped(result) == {"SWIG_EXECUTABLE": Path("/nonexistent/swig")}
+
+
+def test_live_library_directory_of_another_swig(tmp_path):
+    """Both cached paths exist, but SWIG_DIR is not the executable's library,
+    as when the cache names an older SWIG's library. Existence alone cannot
+    tell, so the library and version are re-derived from the executable,
+    which the user chose and which survives."""
+    user_swig = _user_swig(tmp_path)
+    other_library = tmp_path / "other-swig-lib"
+    other_library.mkdir()
+    result, cached = _configure(
+        tmp_path, SWIG_EXECUTABLE=user_swig.as_posix(),
+        SWIG_DIR=other_library.as_posix(), SWIG_VERSION="99.0.0")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert Path(cached["SWIG_EXECUTABLE"]) == user_swig
+    _assert_derived_from_executable(cached)
+    assert _dropped(result) == {}
+
+
+def test_notfound_markers_with_a_stale_version(tmp_path):
+    """FindSWIG searches again for a -NOTFOUND path but keeps a cached
+    SWIG_VERSION, so the version check would judge the SWIG it finds by a
+    version it never reported."""
+    result, cached = _configure(
+        tmp_path, SWIG_EXECUTABLE="SWIG_EXECUTABLE-NOTFOUND",
+        SWIG_DIR="SWIG_DIR-NOTFOUND", SWIG_VERSION="1.0.0")
+    assert result.returncode == 0, result.stdout + result.stderr
+    _assert_derived_from_executable(cached)
+    assert _dropped(result) == {}
