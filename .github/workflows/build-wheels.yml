@@ -37,6 +37,20 @@ env:
   PIP_RETRIES: "10"
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      # Pinned to the version used locally, so a ruff release cannot fail CI
+      # without a change here.
+      - name: Ruff
+        run: |
+          pip install ruff==0.17.0
+          ruff check python tests benchmarks
+
   build-linux:
     permissions:
       contents: read
@@ -643,7 +657,7 @@ jobs:
           python -c "import oecluster, sys; print('oecluster', oecluster.__version__, 'imported under', sys.version)"
 
   publish:
-    needs: [collect-wheels, abi3-smoke]
+    needs: [collect-wheels, abi3-smoke, lint]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     environment: pypi

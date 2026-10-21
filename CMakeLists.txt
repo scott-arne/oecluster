@@ -106,6 +106,7 @@ FetchContent_MakeAvailable(oeselect)
 
 if(OECLUSTER_BUILD_PYTHON)
     find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/DropStaleSwigCache.cmake)
     # SWIG 4.4.0 picks Python 3.13-only C API calls from the header version
     # instead of Py_LIMITED_API, so its stable-ABI wrapper does not compile
     # against Python 3.13+ headers. 4.4.1 fixed it (swig/swig#3283).
