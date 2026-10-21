@@ -520,42 +520,56 @@ static int _oecluster_swig_cast(PyObject* obj, swig_type_info* target, void** ou
 
 // Returns a new reference to the names of the swig_runtime_data<N> modules
 // in sys.modules, sorted and joined with ", ", or "none" when there are none.
-// Returns NULL with an exception pending if the list cannot be built.
+// Returns NULL with an exception pending if the list cannot be built. After
+// any failure only releases run before it returns, so no other call runs
+// with that exception pending.
 static PyObject* _oecluster_loaded_runtimes() {
     PyObject* keys = PyMapping_Keys(PyImport_GetModuleDict());
     if (!keys) {
         return NULL;
     }
-    PyObject* result = NULL;
-    PyObject* runtimes = PyList_New(0);
     PyObject* prefix = PyUnicode_FromString("swig_runtime_data");
-    if (runtimes && prefix) {
-        Py_ssize_t count = PyList_Size(keys);
-        Py_ssize_t i = 0;
-        for (; i < count; ++i) {
-            PyObject* key = PyList_GetItem(keys, i);
-            Py_ssize_t match = PyUnicode_Check(key)
-                                   ? PyUnicode_Tailmatch(key, prefix, 0, PY_SSIZE_T_MAX, -1)
-                                   : 0;
-            if (match < 0 || (match == 1 && PyList_Append(runtimes, key) < 0)) {
-                break;
-            }
-        }
-        if (i == count && PyList_Sort(runtimes) == 0) {
-            if (PyList_Size(runtimes) == 0) {
-                result = PyUnicode_FromString("none");
-            } else {
-                PyObject* separator = PyUnicode_FromString(", ");
-                if (separator) {
-                    result = PyUnicode_Join(separator, runtimes);
-                    Py_DECREF(separator);
-                }
-            }
+    if (!prefix) {
+        Py_DECREF(keys);
+        return NULL;
+    }
+    PyObject* runtimes = PyList_New(0);
+    if (!runtimes) {
+        Py_DECREF(prefix);
+        Py_DECREF(keys);
+        return NULL;
+    }
+    Py_ssize_t count = PyList_Size(keys);
+    for (Py_ssize_t i = 0; i < count; ++i) {
+        PyObject* key = PyList_GetItem(keys, i);
+        Py_ssize_t match = PyUnicode_Check(key)
+                               ? PyUnicode_Tailmatch(key, prefix, 0, PY_SSIZE_T_MAX, -1)
+                               : 0;
+        if (match < 0 || (match == 1 && PyList_Append(runtimes, key) < 0)) {
+            Py_DECREF(runtimes);
+            Py_DECREF(prefix);
+            Py_DECREF(keys);
+            return NULL;
         }
     }
-    Py_XDECREF(prefix);
-    Py_XDECREF(runtimes);
+    Py_DECREF(prefix);
     Py_DECREF(keys);
+    if (PyList_Sort(runtimes) < 0) {
+        Py_DECREF(runtimes);
+        return NULL;
+    }
+    if (PyList_Size(runtimes) == 0) {
+        Py_DECREF(runtimes);
+        return PyUnicode_FromString("none");
+    }
+    PyObject* separator = PyUnicode_FromString(", ");
+    if (!separator) {
+        Py_DECREF(runtimes);
+        return NULL;
+    }
+    PyObject* result = PyUnicode_Join(separator, runtimes);
+    Py_DECREF(separator);
+    Py_DECREF(runtimes);
     return result;
 }
 
