@@ -4,7 +4,7 @@ FindSWIG trusts a cached SWIG_DIR and SWIG_VERSION whatever executable they
 came from, and a cached SWIG_EXECUTABLE whether or not it still exists, so a
 homebrew SWIG bump that deletes the versioned Cellar directory recorded as
 SWIG_DIR breaks the build. cmake/DropStaleSwigCache.cmake drops SWIG_DIR and
-SWIG_VERSION before every find_package(SWIG), so both come from the executable,
+SWIG_VERSION before every find_package(SWIG), so FindSWIG derives both again,
 and drops SWIG_EXECUTABLE only when its path has vanished.
 """
 
@@ -157,7 +157,7 @@ def test_only_the_executable_vanished(tmp_path):
 def test_live_library_directory_of_another_swig(tmp_path):
     """Both cached paths exist, but SWIG_DIR is not the executable's library,
     as when the cache names an older SWIG's library. Existence alone cannot
-    tell, so the library and version are re-derived from the executable,
+    tell, so both are dropped and derived again, here from the executable,
     which the user chose and which survives."""
     user_swig = _user_swig(tmp_path)
     other_library = tmp_path / "other-swig-lib"

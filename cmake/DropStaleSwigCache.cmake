@@ -9,9 +9,16 @@
 # from whatever library SWIG_DIR names.
 #
 # This guard drops SWIG_DIR and SWIG_VERSION from the cache on every
-# configure, and find_package(SWIG) re-derives both from the executable. That
-# costs two short SWIG runs per configure, and it means a SWIG_DIR set by hand
-# does not survive a configure.
+# configure, and find_package(SWIG) derives both again: SWIG_VERSION from the
+# executable, and SWIG_DIR by searching for swig.swg, with the directories the
+# executable's -swiglib answer names as the last candidates. That costs two
+# short SWIG runs per configure, and it means a SWIG_DIR set by hand does not
+# survive a configure.
+#
+# The guard does not change FindSWIG's search policy. That search looks in
+# CMAKE_INCLUDE_PATH and CMake's other search locations before the -swiglib
+# directories, so a SWIG library placed in one of those locations is chosen on
+# any configure, fresh or not.
 #
 # SWIG_EXECUTABLE is dropped only when it names a path that no longer exists,
 # so that find_package(SWIG) searches for SWIG again. A live executable,
