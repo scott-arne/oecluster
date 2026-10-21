@@ -1200,8 +1200,8 @@ catch (const std::bad_alloc&) {
         if (PyTuple_SetItem(this_refs, i, verified) < 0) {
             SWIG_fail;
         }
-        // The reserve above means this cannot reallocate today; the guard
-        // keeps that from being load-bearing.
+        // The reserve above means this cannot reallocate today; the catch
+        // below keeps that from being load-bearing.
         try {
             temp.push_back(static_cast<OEChem::OEMolBase*>(ptr));
         } OECLUSTER_TYPEMAP_ALLOCATION_CATCH("converting a molecule list")
@@ -1422,7 +1422,7 @@ catch (const std::bad_alloc&) {
         }
         // The descriptor chooses the copy. Reading ``this`` again can give a
         // different object, so each pointer is copied only while the
-        // reference verified alongside it is held.
+        // reference verified alongside it is kept.
         _oecluster_held_ref verified_multi_this;
         void* multi_ptr = NULL;
         int multi = _oecluster_swig_cast(item, $descriptor(OEChem::OEMCMolBase *), &multi_ptr,

@@ -7,10 +7,10 @@ object converts to the target, 0 when it does not, 2 when it wraps nothing,
 3 when its descriptor is in no runtime this module can read.
 
 The molecule and design-unit list conversions decide each element's type
-with this check, after the ``isinstance`` call each still makes. The tests
-of those conversions whose inputs reached undefined behaviour before they
-did run in a child interpreter under faulthandler, so a crash fails the test
-instead of ending the session.
+with this check, after the ``isinstance`` call each still makes. Before
+they used it, some inputs reached undefined behaviour in them. The tests of
+those inputs run in a child interpreter under faulthandler, so a crash fails
+the test instead of ending the session.
 """
 
 import subprocess
@@ -236,8 +236,11 @@ def test_a_this_produced_on_each_read_is_held():
 
 # ---- The molecule and design-unit list conversions ----
 
-# Run ahead of each child's own body. Each class is an object whose Python
-# type and wrapped C++ object disagree. OpenEye's own ``__init__`` reads
+# Run ahead of each child's own body. Each class is an object whose own
+# account of itself a conversion must not trust: ``Spoof``'s ``__class__``
+# names a type it is not, a ``Borrowing`` item's ``this`` is another
+# object's, and ``Producing``'s ``this`` is a new object on each read, which
+# nothing but the reader keeps alive. OpenEye's own ``__init__`` reads
 # ``this`` while it constructs, and a ``this`` that answered another object
 # then would be linked to the new one, so ``Borrowing`` and ``Producing``
 # raise AttributeError for ``this``, as an instance with none does, until
@@ -511,9 +514,9 @@ _PRODUCED = r'''
             lambda items: oecluster.MCSComparison(items).Compare(0, 1),
     }
     first, second = read(path)
-    report("plain", lambda: calls[call]([first, second] * 20))
+    report("plain", lambda: calls[call]([first, second] * 40))
     report("produced",
-           lambda: calls[call]([Producing(first), Producing(second)] * 20))
+           lambda: calls[call]([Producing(first), Producing(second)] * 40))
 '''
 
 
@@ -526,9 +529,16 @@ def test_a_this_produced_on_each_read_is_computed_on(call, shaped_pair):
     verified until it has no further use for the pointer: until the call
     returns for the OEMolBase list, which Fingerprint and Murcko take, and
     until the element is copied for ROCS and MCS. So each computes on the
-    molecules the reads produced, as on the plain molecules they copy. The
-    list repeats two items, so 40 molecules are produced, and Murcko reads
-    them on two worker threads."""
+    molecules the reads produced, as on the plain molecules they copy.
+
+    The list repeats two items 40 times each. The OEMolBase list reads each
+    element's ``this`` once, so 80 molecules are produced; ROCS and MCS read
+    it twice, once per cast, so 160 are. Eighty items are more than one of
+    Murcko's 64-item chunks, so with ``num_threads=2`` Murcko starts a
+    worker for each of its two chunks, and both read the produced molecules
+    with the GIL released. That holds while OpenEye's memory pool mode
+    allows threads, as its default does; under any other mode Murcko reads
+    them on one thread."""
     outcomes = _run_child(_PRODUCED, call, shaped_pair)
     assert outcomes["plain"].startswith("returned "), outcomes
     assert outcomes["produced"] == outcomes["plain"]
