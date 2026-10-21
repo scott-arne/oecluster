@@ -599,19 +599,18 @@ def test_positive_num_threads_and_chunk_size_are_forwarded(monkeypatch):
 
 
 def test_an_absurd_num_threads_is_capped_at_the_item_count():
-    """An oversized worker request must be capped, not attempted.
+    """An absurd num_threads gives the single-threaded answer.
 
     The Python layer only rejects values above size_t, so 2^61 is well inside
-    what it accepts and reaches the native code intact: this exercises the cap
-    rather than the representation check. Uncapped, this magnitude exceeds the
-    thread vector's max_size, so the reserve throws before any thread is
-    created and the exception escapes as a RuntimeError -- that is what this
-    test observes. The cap matters more at the magnitudes below it, which are
-    too expensive to assert here: those are genuinely attempted, so a six-item
-    problem may consume extreme resources or fail to return promptly, and a
-    creation that fails partway trips std::terminate while unwinding a vector
-    of joinable threads, killing the interpreter with no traceback. Capped, the
-    answer is the single-threaded one.
+    what it accepts and reaches the native code intact: this exercises the
+    native handling rather than the representation check. Two things bound
+    the workers there. k_medoids_cluster in KMedoids.cpp caps num_threads at
+    the item count before it builds its distance runner, and
+    detail::launch_workers starts at most one worker per chunk whatever pool
+    size it is given. With six items and the default chunk_size every pass is
+    one chunk, so each pass here runs on one worker. The test pins the answer,
+    not the cap: launch_workers alone keeps this call bounded, so removing the
+    k-medoids cap would not fail it.
     """
     import oecluster
 

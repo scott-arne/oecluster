@@ -238,6 +238,23 @@ class TestVersionPins:
         assert match is not None, "no __version__ assignment in swig/oecluster.i"
         assert match.group(1) == oecluster.__version__
 
+    def test_built_extension_matches_the_package(self):
+        """The compiled extension, its shadow module and the package agree.
+
+        The three OECLUSTER_VERSION_* constants are compiled into the
+        extension; __version__ on oecluster.oecluster is written into the
+        generated shadow module by %pythoncode. A mismatch with the package
+        version means the extension was built from an older source, for
+        example after a version bump without rebuilding oecluster_python.
+        """
+        from oecluster import oecluster as native
+        compiled = (f"{native.OECLUSTER_VERSION_MAJOR}."
+                    f"{native.OECLUSTER_VERSION_MINOR}."
+                    f"{native.OECLUSTER_VERSION_PATCH}")
+        assert compiled == native.__version__ == oecluster.__version__, (
+            f"compiled {compiled}, shadow module {native.__version__}, package "
+            f"{oecluster.__version__}: rebuild oecluster_python")
+
     def test_changelog_documents_this_version(self):
         """The release notes name the version being released."""
         text = (REPO_ROOT / "CHANGELOG.md").read_text()

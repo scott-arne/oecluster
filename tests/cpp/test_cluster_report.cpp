@@ -2008,8 +2008,9 @@ TEST(ClusterReportTest, PartitionErrorOutranksNonFiniteDistance) {
 // A representative method ClusterReportOptions cannot configure is a
 // configuration error, and no repair of the distance matrix rescues it, so it
 // is named ahead of the finiteness refusal. INVARIANT 1, same precedence
-// argument as the partition check above. The clean case pins the refusal the
-// header documents at ClusterReport.h:198-202, which no other test covers.
+// argument as the partition check above. The clean case pins the
+// HighestNeighborhood refusal `ClusterReport.h` documents for `cluster_report`,
+// which no other test covers.
 TEST(ClusterReportTest, UnsupportedRepresentativeMethodOutranksNonFiniteDistance) {
     const ClusteringResult result = MakeResult({0, 0, 0, 1, 1, 1});
     ClusterReportOptions options;

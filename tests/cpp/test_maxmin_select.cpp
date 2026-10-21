@@ -478,8 +478,12 @@ TEST(MaxMinSelectComparisonTest, AcceptsAnExtremeChunkSize) {
 
 // chunk_size 1 keeps every fold on the ThreadPool path; a larger chunk would
 // take the single-chunk serial shortcut and never construct the workers the
-// cap exists to bound. Uncapped, the pool's reserve for this count terminates
-// the process, as KMedoidsThreadCapTest documents.
+// cap exists to bound. This row pins that an absurd count returns the same
+// selection as the storage overload. ChunkedComparisons caps the count at the
+// item count before it builds its pool and reserves its clone free list to the
+// pool's thread count; uncapped, 2^61 exceeds that vector's max_size, so the
+// reserve throws std::length_error and this row fails.
+// detail::launch_workers starts at most one worker per chunk either way.
 TEST(MaxMinSelectComparisonTest, CapsAnAbsurdThreadCount) {
     const size_t n = 9;
     const std::vector<double> condensed = Scrambled(n);
