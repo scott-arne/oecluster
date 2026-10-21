@@ -121,10 +121,11 @@ namespace OESystem {
 //   RuntimeError.
 // _oecluster_swig_cast, under "Cross-runtime type verification" below, does
 // this for each of these conversions and for the grid return path. A
-// conversion's isinstance check, where it makes one, runs before the
-// descriptor is read and keeps its messages and its exception propagation.
-// Overload typechecks never read the descriptor: they only choose an
-// overload, and the conversion SWIG then selects reads it.
+// conversion's isinstance check, where it makes one, runs before
+// _oecluster_swig_cast reads the descriptor, and keeps its messages and its
+// exception propagation. Overload typechecks never call _oecluster_swig_cast:
+// they only choose an overload, and the conversion SWIG then selects calls
+// it.
 //
 // This passes OpenEye and oefp objects between Python and C++ without
 // serialization. The macros below generate the boilerplate for each type.
