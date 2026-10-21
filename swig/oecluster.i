@@ -1132,7 +1132,8 @@ catch (const std::bad_alloc&) {
 %enddef
 
 // ---- const std::vector<OEChem::OEMolBase*>& ----
-%typemap(in) const std::vector<OEChem::OEMolBase*>& (std::vector<OEChem::OEMolBase*> temp, PyObject* held = 0) {
+%typemap(in) const std::vector<OEChem::OEMolBase*>&
+        (std::vector<OEChem::OEMolBase*> temp, PyObject* held = 0, PyObject* this_refs = 0) {
     if (!PyList_Check($input)) {
         SWIG_exception_fail(SWIG_TypeError, "Expected a list of OEMolBase objects");
     }
@@ -1143,11 +1144,20 @@ catch (const std::bad_alloc&) {
     // a pointer kept after the call returns. The loop reads the tuple rather
     // than the list because its checks can run Python code, which could
     // resize the list under it.
+    //
+    // this_refs holds, for the same span, the ``this`` each pointer was
+    // verified and converted from. Holding the element is not enough: a
+    // ``this`` produced on each read owns its C++ object, and nothing but
+    // the reference _oecluster_swig_cast hands back keeps that object alive.
     held = PyList_AsTuple($input);
     if (!held) {
         SWIG_fail;
     }
     Py_ssize_t size = PyTuple_GET_SIZE(held);
+    this_refs = PyTuple_New(size);
+    if (!this_refs) {
+        SWIG_fail;
+    }
     try {
         temp.reserve(size);
     } OECLUSTER_TYPEMAP_ALLOCATION_CATCH("converting a molecule list")
@@ -1163,21 +1173,37 @@ catch (const std::bad_alloc&) {
             _oecluster_molecule_item_error(i, item, ", not an OEMolBase");
             SWIG_fail;
         }
-        // An OEMolBase instance whose ``this`` is missing or null, such as one
-        // made by ``__new__`` without ``__init__``, passes the check above, so
-        // it gets its own message rather than being called a non-OEMolBase.
-        void* ptr = _oecluster_extract_swig_ptr(item);
-        if (!ptr) {
-            if (!PyErr_Occurred()) {
+        // An overridden __class__ can satisfy the check above, so the
+        // descriptor the item's ``this`` carries decides the cast. An
+        // OEMolBase instance whose ``this`` is missing or null, such as one
+        // made by ``__new__`` without ``__init__``, passes the check above,
+        // so it gets its own message rather than being called a
+        // non-OEMolBase.
+        _oecluster_held_ref verified_this;
+        void* ptr = NULL;
+        int cast = _oecluster_swig_cast(item, $descriptor(OEChem::OEMolBase *), &ptr,
+                                        &verified_this.ref);
+        if (cast != 1) {
+            if (cast == 0) {
+                _oecluster_molecule_item_error(i, item, ", not an OEMolBase");
+            } else if (cast == 2) {
                 _oecluster_molecule_item_error(i, item, " that wraps no molecule");
+            } else if (cast == 3) {
+                _oecluster_unreadable_runtime_error("molecule", item);
             }
             SWIG_fail;
         }
-        // Same offset-0 base-cast assumption as the shared_ptr<OEMol> typemap
-        // below; see the comment there. The reserve above means this cannot
-        // reallocate today; the guard keeps that from being load-bearing.
+        // PyTuple_SetItem steals the reference even when it fails, so the
+        // guard gives it up first.
+        PyObject* verified = verified_this.ref;
+        verified_this.ref = nullptr;
+        if (PyTuple_SetItem(this_refs, i, verified) < 0) {
+            SWIG_fail;
+        }
+        // The reserve above means this cannot reallocate today; the guard
+        // keeps that from being load-bearing.
         try {
-            temp.push_back(reinterpret_cast<OEChem::OEMolBase*>(ptr));
+            temp.push_back(static_cast<OEChem::OEMolBase*>(ptr));
         } OECLUSTER_TYPEMAP_ALLOCATION_CATCH("converting a molecule list")
     }
     $1 = &temp;
@@ -1188,6 +1214,7 @@ catch (const std::bad_alloc&) {
 // as on success.
 %typemap(freearg) const std::vector<OEChem::OEMolBase*>& {
     Py_XDECREF(held$argnum);
+    Py_XDECREF(this_refs$argnum);
 }
 
 // ``precedence=1``, a literal rather than ``SWIG_TYPECHECK_POINTER``, and
@@ -1265,15 +1292,6 @@ catch (const std::bad_alloc&) {
             _oecluster_molecule_item_error(i, item, ", not an OEMol");
             SWIG_fail;
         }
-        void* ptr = _oecluster_extract_swig_ptr(item);
-        if (!ptr) {
-            if (!PyErr_Occurred()) {
-                _oecluster_molecule_item_error(i, item, " that wraps no molecule");
-            }
-            SWIG_fail;
-        }
-        // Make a COPY wrapped in shared_ptr (we do not own the Python object).
-        //
         // The cast target is OEMCMolBase, not OEMol. OpenEye's Python bindings
         // hand out an OEMolWrapper*, which derives from OEMCMolBase but is not
         // an OEChem::OEMol -- that type is a bare handle holding an
@@ -1282,15 +1300,27 @@ catch (const std::bad_alloc&) {
         // segfaults. OEMol(const OEMCMolBase&) is the documented converting
         // constructor for exactly this, and it preserves conformers.
         //
-        // The cast is a base-class cast through a type-erased void*, so it is
-        // correct only while the OEMCMolBase subobject sits at offset 0 in
-        // OEMolWrapper. That holds today -- OEMCMolBase -> OEMolBase ->
-        // OESystem::OEBase is single, non-virtual inheritance throughout -- but
-        // multiple or virtual bases would shift the subobject, and this cast
-        // would then read the wrong bytes without crashing. SWIG's own base
-        // conversion cannot be used instead: the pointer comes from another
-        // extension module's type registry, which this module cannot query.
-        auto* mcmol = reinterpret_cast<OEChem::OEMCMolBase*>(ptr);
+        // Whether the item wraps an OEMCMolBase is decided by the descriptor
+        // its ``this`` carries, not by the check above, which an overridden
+        // __class__ can satisfy: an object whose __class__ answers OEMol but
+        // which wraps an OEGraphMol is refused here. verified_this keeps the
+        // object ptr points to alive until the copy is made.
+        _oecluster_held_ref verified_this;
+        void* ptr = NULL;
+        int cast = _oecluster_swig_cast(item, $descriptor(OEChem::OEMCMolBase *), &ptr,
+                                        &verified_this.ref);
+        if (cast != 1) {
+            if (cast == 0) {
+                _oecluster_molecule_item_error(i, item, ", not an OEMol");
+            } else if (cast == 2) {
+                _oecluster_molecule_item_error(i, item, " that wraps no molecule");
+            } else if (cast == 3) {
+                _oecluster_unreadable_runtime_error("molecule", item);
+            }
+            SWIG_fail;
+        }
+        // Make a COPY wrapped in shared_ptr (we do not own the Python object).
+        auto* mcmol = static_cast<OEChem::OEMCMolBase*>(ptr);
         try {
             temp.push_back(std::make_shared<OEChem::OEMol>(*mcmol));
         } OECLUSTER_TYPEMAP_ALLOCATION_CATCH("converting a molecule list")
@@ -1348,7 +1378,9 @@ catch (const std::bad_alloc&) {
     // conversion above, and released by the freearg below. Every element is
     // copied before the call today; holding the tuple for the whole call
     // anyway means a change that borrows instead of copying cannot reopen the
-    // lifetime hole that conversion closes.
+    // hole an emptied list opens. Such a change would also have to keep each
+    // verified ``this`` for the call, as that conversion does: here each one
+    // is released once its element is copied.
     held = PyList_AsTuple($input);
     if (!held) {
         SWIG_fail;
@@ -1367,27 +1399,54 @@ catch (const std::bad_alloc&) {
             _oecluster_molecule_item_error(i, item, ", not an OEMolBase");
             SWIG_fail;
         }
+        // Kept so that an exception it raises still propagates. Its answer no
+        // longer chooses the copy: an overridden __class__ can make it true
+        // for an object that wraps an OEGraphMol.
         int is_multi = _oecluster_isinstance_oemcmolbase(item);
         if (is_multi < 0) {
             SWIG_fail;
         }
-        void* ptr = _oecluster_extract_swig_ptr(item);
-        if (!ptr) {
-            if (!PyErr_Occurred()) {
+        _oecluster_held_ref verified_this;
+        void* ptr = NULL;
+        int cast = _oecluster_swig_cast(item, $descriptor(OEChem::OEMolBase *), &ptr,
+                                        &verified_this.ref);
+        if (cast != 1) {
+            if (cast == 0) {
+                _oecluster_molecule_item_error(i, item, ", not an OEMolBase");
+            } else if (cast == 2) {
                 _oecluster_molecule_item_error(i, item, " that wraps no molecule");
+            } else if (cast == 3) {
+                _oecluster_unreadable_runtime_error("molecule", item);
             }
             SWIG_fail;
         }
-        // The same offset-0 base casts as the two conversions above. The copy
-        // runs before $action, outside every %exception handler, so it is
-        // guarded here by OECLUSTER_TYPEMAP_ALLOCATION_CATCH.
+        // The descriptor chooses the copy. Reading ``this`` again can give a
+        // different object, so each pointer is copied only while the
+        // reference verified alongside it is held.
+        _oecluster_held_ref verified_multi_this;
+        void* multi_ptr = NULL;
+        int multi = _oecluster_swig_cast(item, $descriptor(OEChem::OEMCMolBase *), &multi_ptr,
+                                         &verified_multi_this.ref);
+        if (multi == 2) {
+            _oecluster_molecule_item_error(i, item, " that wraps no molecule");
+            SWIG_fail;
+        }
+        if (multi == 3) {
+            _oecluster_unreadable_runtime_error("molecule", item);
+            SWIG_fail;
+        }
+        if (multi < 0) {
+            SWIG_fail;
+        }
+        // The copy runs before $action, outside every %exception handler, so
+        // it is guarded here by OECLUSTER_TYPEMAP_ALLOCATION_CATCH.
         try {
-            if (is_multi) {
+            if (multi == 1) {
                 temp.push_back(std::make_shared<OEChem::OEMol>(
-                    *reinterpret_cast<OEChem::OEMCMolBase*>(ptr)));
+                    *static_cast<OEChem::OEMCMolBase*>(multi_ptr)));
             } else {
                 temp.push_back(std::make_shared<OEChem::OEMol>(
-                    *reinterpret_cast<OEChem::OEMolBase*>(ptr)));
+                    *static_cast<OEChem::OEMolBase*>(ptr)));
             }
         } OECLUSTER_TYPEMAP_ALLOCATION_CATCH("converting a molecule list")
     }
@@ -1428,15 +1487,24 @@ catch (const std::bad_alloc&) {
             _oecluster_list_item_error("design unit", i, item, ", not an OEDesignUnit");
             SWIG_fail;
         }
-        void* ptr = _oecluster_extract_swig_ptr(item);
-        if (!ptr) {
-            if (!PyErr_Occurred()) {
+        // As in the strict OEMol list conversion, the descriptor decides the
+        // cast, and verified_this keeps the object alive until it is copied.
+        _oecluster_held_ref verified_this;
+        void* ptr = NULL;
+        int cast = _oecluster_swig_cast(item, $descriptor(OEBio::OEDesignUnit *), &ptr,
+                                        &verified_this.ref);
+        if (cast != 1) {
+            if (cast == 0) {
+                _oecluster_list_item_error("design unit", i, item, ", not an OEDesignUnit");
+            } else if (cast == 2) {
                 _oecluster_list_item_error("design unit", i, item, " that wraps no design unit");
+            } else if (cast == 3) {
+                _oecluster_unreadable_runtime_error("design unit", item);
             }
             SWIG_fail;
         }
         // Make a COPY wrapped in shared_ptr (we do not own the Python object)
-        auto* du = reinterpret_cast<OEBio::OEDesignUnit*>(ptr);
+        auto* du = static_cast<OEBio::OEDesignUnit*>(ptr);
         try {
             temp.push_back(std::make_shared<OEBio::OEDesignUnit>(*du));
         } OECLUSTER_TYPEMAP_ALLOCATION_CATCH("converting a design-unit list")
