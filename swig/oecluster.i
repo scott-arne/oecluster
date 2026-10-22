@@ -1617,47 +1617,36 @@ catch (const std::bad_alloc&) {
     }
 }
 
-// ---- std::function<void(size_t, size_t)> progress callback ----
-%typemap(in) std::function<void(size_t, size_t)> {
-    if ($input == Py_None) {
-        $1 = nullptr;
-    } else if (PyCallable_Check($input)) {
-        PyObject* callback = $input;
-        Py_INCREF(callback);
-        // Both statements below can allocate: the shared_ptr its control
-        // block, and the std::function its copy of the lambda when that is
-        // stored on the heap. Neither leaks the reference taken above if it
-        // throws. shared_ptr calls the deleter itself when the control block
-        // cannot be allocated, and a throwing assignment unwinds through
-        // guard's destructor, before the catch runs.
-        try {
-            // Use shared_ptr guard to ensure Py_DECREF when lambda is destroyed
-            auto guard = std::shared_ptr<PyObject>(callback, [](PyObject* p) {
-                PyGILState_STATE gstate = PyGILState_Ensure();
-                Py_DECREF(p);
-                PyGILState_Release(gstate);
-            });
-            $1 = [guard](size_t completed, size_t total) {
-                PyGILState_STATE gstate = PyGILState_Ensure();
-                PyObject* result = PyObject_CallFunction(guard.get(), "nn",
-                    (Py_ssize_t)completed, (Py_ssize_t)total);
-                Py_XDECREF(result);
-                if (PyErr_Occurred()) PyErr_Clear();
-                PyGILState_Release(gstate);
-            };
-        } OECLUSTER_TYPEMAP_ALLOCATION_CATCH("converting a progress callback")
-    } else {
-        SWIG_exception_fail(SWIG_TypeError, "Expected callable or None for progress callback");
+// ---- std::function<void(size_t, size_t)> progress callback helpers ----
+// The progress typemaps themselves sit with the PDistOptions redeclaration.
+%{
+// The callable a progress callback typemap wraps. Named, rather than a lambda,
+// so the progress getter can recognise it with std::function::target and
+// hand back the Python callable it holds.
+struct _oecluster_progress_callback {
+    std::shared_ptr<PyObject> callable;
+    void operator()(size_t completed, size_t total) const {
+        PyGILState_STATE gstate = PyGILState_Ensure();
+        PyObject* result = PyObject_CallFunction(callable.get(), "nn",
+            (Py_ssize_t)completed, (Py_ssize_t)total);
+        Py_XDECREF(result);
+        if (PyErr_Occurred()) PyErr_Clear();
+        PyGILState_Release(gstate);
     }
-}
+};
 
-%typemap(typecheck, precedence=SWIG_TYPECHECK_POINTER) std::function<void(size_t, size_t)> {
-    $1 = ($input == Py_None || PyCallable_Check($input)) ? 1 : 0;
+// Builds the std::function for a callable, under the caller's allocation
+// guard; the shared_ptr's deleter drops the reference with the GIL held.
+static std::function<void(size_t, size_t)> _oecluster_make_progress(PyObject* callable) {
+    Py_INCREF(callable);
+    std::shared_ptr<PyObject> guard(callable, [](PyObject* p) {
+        PyGILState_STATE gstate = PyGILState_Ensure();
+        Py_DECREF(p);
+        PyGILState_Release(gstate);
+    });
+    return _oecluster_progress_callback{guard};
 }
-
-%typemap(freearg) std::function<void(size_t, size_t)> {
-    // Prevent copy-on-scope-exit; the shared_ptr guard handles Py_DECREF
-}
+%}
 
 // ---- Return by value ----
 // SWIG's stock typemap copies the returned value onto the heap after
@@ -2074,6 +2063,77 @@ public:
 // PDistOptions and pdist function
 // Redeclare PDistOptions to handle the std::function member.
 // ============================================================================
+// SWIG 4.5.1 applies no %exception to member-variable accessors, so a
+// std::bad_alloc from copying a std::function in the progress setter would
+// escape the extension and terminate the interpreter; every copy below sits
+// in its own typemap's catch ladder instead. %naturalvar passes the member by
+// const reference, which moves the getter's copy out of the accessor: the out
+// typemap reads the callable through the reference rather than returning a
+// heap copy SWIG has no destructor for, and the setter's one copy happens in
+// memberin, where it can be guarded. %naturalvar acts only on types SWIG
+// knows as classes, and nothing else in the interface declares
+// std::function, hence the declaration below. It is parse-only, so it never
+// reaches the wrapper, and the empty-name %template() registers the type
+// without generating a proxy class. The typemaps and %naturalvar are named
+// for the member ``progress`` so that they claim no other parameter or member
+// of this type, since their messages speak of progress callbacks.
+namespace std {
+  template <typename> class function;
+  template <typename RET, typename... ARGS> class function<RET(ARGS...)> {};
+}
+%template() std::function<void(size_t, size_t)>;
+
+%naturalvar OECluster::PDistOptions::progress;
+%naturalvar OECluster::CDistOptions::progress;
+
+%typemap(in) const std::function<void(size_t, size_t)>& progress
+        (std::function<void(size_t, size_t)> temp) {
+    if ($input == Py_None) {
+        temp = nullptr;
+    } else if (PyCallable_Check($input)) {
+        // _oecluster_make_progress takes a reference, then makes two
+        // allocations: the shared_ptr its control block, and the
+        // std::function its copy of the functor when that is stored on the
+        // heap. Neither leaks the reference if it throws. shared_ptr calls
+        // the deleter itself when the control block cannot be allocated, and
+        // a throwing std::function construction unwinds through guard's
+        // destructor, before the catch runs.
+        try {
+            temp = _oecluster_make_progress($input);
+        } OECLUSTER_TYPEMAP_ALLOCATION_CATCH("converting a progress callback")
+    } else {
+        SWIG_exception_fail(SWIG_TypeError, "Expected callable or None for progress callback");
+    }
+    $1 = &temp;
+}
+
+%typemap(typecheck, precedence=SWIG_TYPECHECK_POINTER) const std::function<void(size_t, size_t)>& progress {
+    $1 = ($input == Py_None || PyCallable_Check($input)) ? 1 : 0;
+}
+
+%typemap(freearg) const std::function<void(size_t, size_t)>& progress {
+}
+
+%typemap(memberin) std::function<void(size_t, size_t)> progress {
+    try {
+        $1 = *$input;
+    } OECLUSTER_TYPEMAP_ALLOCATION_CATCH("setting a progress callback")
+}
+
+%typemap(out) const std::function<void(size_t, size_t)>& progress {
+    if (!*$1) {
+        $result = Py_None;
+        Py_INCREF($result);
+    } else if (const _oecluster_progress_callback* held =
+                   $1->target<_oecluster_progress_callback>()) {
+        $result = held->callable.get();
+        Py_INCREF($result);
+    } else {
+        SWIG_exception_fail(SWIG_RuntimeError,
+                            "progress holds a C++ callback that has no Python form");
+    }
+}
+
 namespace OECluster {
 
 class PairwiseComparison;
