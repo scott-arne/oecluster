@@ -5,7 +5,7 @@ came from, and a cached SWIG_EXECUTABLE whether or not it still exists, so a
 homebrew SWIG bump that deletes the versioned Cellar directory recorded as
 SWIG_DIR breaks the build. cmake/DropStaleSwigCache.cmake drops SWIG_DIR and
 SWIG_VERSION before every find_package(SWIG), so FindSWIG derives both again,
-and drops SWIG_EXECUTABLE only when its path has vanished.
+and drops SWIG_EXECUTABLE only when it is an absolute path that has vanished.
 """
 
 import re
@@ -64,8 +64,11 @@ def _configure(tmp_path, **cache):
     # cached -NOTFOUND marker: find_program leaves an untyped
     # -DSWIG_EXECUTABLE=SWIG_EXECUTABLE-NOTFOUND unresolved.
     args += [f"-D{key}:{CACHE_TYPES[key]}={value}" for key, value in cache.items()]
+    # CMake resolves a relative path in if(EXISTS) against its working
+    # directory, and the repository root holds a swig/ directory, so a bare
+    # "swig" would exist there.
     result = subprocess.run(args, capture_output=True, text=True, timeout=120,
-                            check=False)
+                            check=False, cwd=tmp_path)
     cached = {}
     cache_file = build / "CMakeCache.txt"
     if cache_file.exists():
@@ -180,4 +183,18 @@ def test_notfound_markers_with_a_stale_version(tmp_path):
         SWIG_DIR="SWIG_DIR-NOTFOUND", SWIG_VERSION="1.0.0")
     assert result.returncode == 0, result.stdout + result.stderr
     _assert_derived_from_executable(cached)
+    assert _dropped(result) == {}
+
+
+def test_bare_program_name_is_kept(tmp_path):
+    """A bare program name, as in -DSWIG_EXECUTABLE=swig, is not a path that
+    vanished: FindSWIG runs it as given, through PATH. EXISTS is false for a
+    relative name, so a guard that tested existence alone dropped it and let
+    find_program choose, which can be a different binary. The name is the
+    basename shutil.which found, so it is swig.exe on Windows."""
+    name = Path(SWIG_ON_PATH).name
+    result, cached = _configure(tmp_path, SWIG_EXECUTABLE=name)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert cached["SWIG_EXECUTABLE"] == name
+    assert "Dropping cached SWIG_EXECUTABLE" not in result.stdout
     assert _dropped(result) == {}

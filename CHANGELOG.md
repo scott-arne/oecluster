@@ -64,12 +64,18 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   configures. A Homebrew upgrade that removes the old version's directory
   broke the build that way. `cmake/DropStaleSwigCache.cmake` now drops
   `SWIG_DIR` and `SWIG_VERSION` from the cache on every configure, so
-  `find_package(SWIG)` derives both again, and drops a cached
-  `SWIG_EXECUTABLE` whose path no longer exists, so that SWIG is searched for
-  again. A live executable, including one passed with `-DSWIG_EXECUTABLE`, is
-  kept. **`SWIG_DIR` can no longer be set in the cache: a value passed with
-  `-DSWIG_DIR` is dropped on the very configure that passes it, and FindSWIG's
-  own search sets it again.** A normal variable named `SWIG_DIR`, set by a
+  `find_package(SWIG)` derives both again. It drops a cached
+  `SWIG_EXECUTABLE` only when it is an absolute path that no longer exists,
+  so that SWIG is searched for again. A live executable, including one passed
+  with `-DSWIG_EXECUTABLE`, is kept, and so is a bare program name such as
+  `swig`. Re-passing `-DSWIG_EXECUTABLE` over a cache that holds an older
+  SWIG now works without deleting `CMakeCache.txt`, and the configure error
+  for an unsuitable SWIG no longer says to delete it. **`SWIG_DIR` can no
+  longer be set in the cache: a value passed with `-DSWIG_DIR` is dropped on
+  the very configure that passes it, and FindSWIG's own search sets it
+  again.** To point that search at another SWIG library, pass
+  `-DCMAKE_INCLUDE_PATH=<dir>`, naming the directory that holds `swig.swg`;
+  it stays in the cache. A normal variable named `SWIG_DIR`, set by a
   toolchain file or a parent project, is not touched and still wins. The
   guard runs only when CMake configures, and a plain `cmake --build` after a
   SWIG upgrade does not re-run CMake, so run `cmake <build-dir>` first.

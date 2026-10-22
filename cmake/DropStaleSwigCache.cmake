@@ -22,9 +22,11 @@
 # directories, so a SWIG library placed in one of those locations is chosen on
 # any configure, fresh or not.
 #
-# SWIG_EXECUTABLE is dropped only when it names a path that no longer exists,
-# so that find_package(SWIG) searches for SWIG again. A live executable,
-# including one passed with -DSWIG_EXECUTABLE, is always kept.
+# SWIG_EXECUTABLE is dropped only when it is an absolute path that no longer
+# exists, so that find_package(SWIG) searches for SWIG again. A live
+# executable, including one passed with -DSWIG_EXECUTABLE, is always kept. So
+# is a bare program name such as swig, which if(EXISTS) cannot judge: the
+# guard leaves it to FindSWIG as given.
 #
 # The guard runs only when CMake configures. CMake does not treat the SWIG
 # installation as a regeneration input, so after a SWIG upgrade a plain
@@ -34,6 +36,7 @@
 set(_oecluster_swig_executable "$CACHE{SWIG_EXECUTABLE}")
 if(_oecluster_swig_executable
         AND NOT _oecluster_swig_executable MATCHES "-NOTFOUND$"
+        AND IS_ABSOLUTE "${_oecluster_swig_executable}"
         AND NOT EXISTS "${_oecluster_swig_executable}")
     message(STATUS "Dropping cached SWIG_EXECUTABLE, which names a path that "
                    "no longer exists: ${_oecluster_swig_executable}")

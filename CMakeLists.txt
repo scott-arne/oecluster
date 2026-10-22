@@ -123,9 +123,8 @@ if(OECLUSTER_BUILD_PYTHON)
             "OECLUSTER_BUILD_PYTHON is ON but no suitable SWIG was found "
             "(the stable-ABI build needs 4.4.1 or newer; SWIG 4.4.0, which "
             "Ubuntu 26.04 ships, is too old). Install a newer SWIG (pip install "
-            "swig==4.5.1) and pass -DSWIG_EXECUTABLE=<path>, deleting "
-            "CMakeCache.txt first if an older SWIG is cached, or configure "
-            "with -DOECLUSTER_BUILD_PYTHON=OFF for a C++-only build.")
+            "swig==4.5.1) and re-run CMake with -DSWIG_EXECUTABLE=<path>, or "
+            "configure with -DOECLUSTER_BUILD_PYTHON=OFF for a C++-only build.")
     endif()
 endif()
 
