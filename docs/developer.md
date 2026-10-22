@@ -47,6 +47,19 @@ python -m invoke serve-docs --watch
 The same targets are available through the Makefile in `docs/` (`make html`,
 `make check`, `make clean`).
 
+Unlike the generated files above, `docs/api/swig-classes.rst` is generated
+from the built extension and committed, because the documentation build mocks
+that extension. `tests/python/test_swig_reference_page.py` fails when the page
+is out of date. Regenerate it with:
+
+```bash
+python -m invoke docs-swig-reference
+```
+
+The task describes whichever `oecluster` the interpreter imports, so rebuild
+the `oecluster_python` target first; otherwise the page records the previous
+build.
+
 ### How The C++ Reference Is Generated
 
 Exhale runs Doxygen over `include/oecluster` during the Sphinx build and emits
@@ -77,7 +90,8 @@ Run the Python suite with the same interpreter:
 
 The package version is read live from `python/oecluster/__init__.py` in an
 editable install, so a documentation-only change to docstrings does not require
-rebuilding the extension before the autodoc pass picks it up.
+rebuilding the extension before the autodoc pass picks it up, though the
+committed SWIG class page still has to be regenerated.
 
 ### Thread Sanitizer
 
