@@ -31,6 +31,56 @@ def test_progress_reads_none_when_unset_or_cleared(options_type):
     assert options.progress is None
 
 
+@pytest.mark.parametrize("options_type", OPTIONS)
+def test_progress_holds_one_reference_to_the_callable(options_type):
+    """Deltas only: the interpreter's own references to a function vary.
+
+    The count is checked after every read, not only after the loop, so a
+    getter that hands out a reference it does not own fails on the first read
+    rather than freeing the callable a read later and crashing the session.
+    """
+    def callback(completed, total):
+        pass
+    base = sys.getrefcount(callback)
+    options = options_type()
+    options.progress = callback
+    assert sys.getrefcount(callback) == base + 1
+    for _ in range(1000):
+        assert options.progress is callback
+        assert sys.getrefcount(callback) == base + 1
+    options.progress = callback
+    assert sys.getrefcount(callback) == base + 1
+    with pytest.raises(TypeError):
+        options.progress = 5
+    assert sys.getrefcount(callback) == base + 1
+    assert options.progress is callback
+    options.progress = None
+    assert sys.getrefcount(callback) == base
+    options.progress = callback
+    del options
+    assert sys.getrefcount(callback) == base
+
+
+@pytest.mark.parametrize("options_type", OPTIONS)
+def test_setting_progress_on_a_null_self_does_not_crash(options_type):
+    """SWIG accepts None as a null self, so the setter must not assign
+    through it. Run in a child process, since the failure is a crash."""
+    script = (
+        "from oecluster import oecluster as n\n"
+        f"setter = n.{options_type.__name__}.progress.fset\n"
+        "try:\n"
+        "    setter(None, lambda a, b: None)\n"
+        "except Exception as e:\n"
+        "    print('raised', type(e).__name__, e)\n"
+        "else:\n"
+        "    print('returned')\n")
+    result = subprocess.run([sys.executable, "-X", "faulthandler", "-c", script],
+                            capture_output=True, text=True, timeout=120,
+                            check=False)
+    assert result.returncode == 0, (result.returncode, result.stdout,
+                                    result.stderr[-2000:])
+
+
 def test_a_cdist_progress_callable_is_called():
     """cdist builds its options through the same conversion, so a progress
     callable passed to it must still be called. pdist's is covered in

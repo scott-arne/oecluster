@@ -2067,16 +2067,17 @@ public:
 // std::bad_alloc from copying a std::function in the progress setter would
 // escape the extension and terminate the interpreter; every copy below sits
 // in its own typemap's catch ladder instead. %naturalvar passes the member by
-// const reference, which moves the getter's copy out of the accessor: the out
-// typemap reads the callable through the reference rather than returning a
-// heap copy SWIG has no destructor for, and the setter's one copy happens in
-// memberin, where it can be guarded. %naturalvar acts only on types SWIG
-// knows as classes, and nothing else in the interface declares
-// std::function, hence the declaration below. It is parse-only, so it never
-// reaches the wrapper, and the empty-name %template() registers the type
-// without generating a proxy class. The typemaps and %naturalvar are named
-// for the member ``progress`` so that they claim no other parameter or member
-// of this type, since their messages speak of progress callbacks.
+// const reference, so the getter copies nothing: the out typemap reads the
+// callable through the reference rather than returning a heap copy SWIG has
+// no destructor for, and the setter's const-reference in typemap applies.
+// The setter's one copy is the assignment in memberin, where it can be
+// guarded. %naturalvar acts only on types SWIG knows as classes, and nothing
+// else in the interface declares std::function, hence the declaration below.
+// It is parse-only, so it never reaches the wrapper, and the empty-name
+// %template() registers the type without generating a proxy class. The
+// typemaps and %naturalvar are named for the member ``progress`` so that they
+// claim no other parameter or member of this type, since their messages speak
+// of progress callbacks.
 namespace std {
   template <typename> class function;
   template <typename RET, typename... ARGS> class function<RET(ARGS...)> {};
@@ -2107,17 +2108,15 @@ namespace std {
     $1 = &temp;
 }
 
-%typemap(typecheck, precedence=SWIG_TYPECHECK_POINTER) const std::function<void(size_t, size_t)>& progress {
-    $1 = ($input == Py_None || PyCallable_Check($input)) ? 1 : 0;
-}
-
-%typemap(freearg) const std::function<void(size_t, size_t)>& progress {
-}
-
+// A memberin typemap replaces SWIG's whole assignment, including its
+// ``if (arg1)``, and SWIG_ConvertPtr accepts None as a null self, so the
+// check is restored here.
 %typemap(memberin) std::function<void(size_t, size_t)> progress {
-    try {
-        $1 = *$input;
-    } OECLUSTER_TYPEMAP_ALLOCATION_CATCH("setting a progress callback")
+    if ($self) {
+        try {
+            $1 = *$input;
+        } OECLUSTER_TYPEMAP_ALLOCATION_CATCH("setting a progress callback")
+    }
 }
 
 %typemap(out) const std::function<void(size_t, size_t)>& progress {
