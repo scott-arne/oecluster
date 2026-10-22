@@ -62,9 +62,13 @@ def test_progress_holds_one_reference_to_the_callable(options_type):
 
 
 @pytest.mark.parametrize("options_type", OPTIONS)
-def test_setting_progress_on_a_null_self_does_not_crash(options_type):
-    """SWIG accepts None as a null self, so the setter must not assign
-    through it. Run in a child process, since the failure is a crash."""
+def test_setting_progress_on_a_null_self_returns_silently(options_type):
+    """SWIG accepts None as a null self, and the setter's ``if (arg1)`` guard
+    makes a silent return the only defined result, so the test pins exactly
+    that. Without the guard the setter assigns through a null pointer: it can
+    crash, or raise TypeError where the compiler drops SWIG_ConvertPtr's None
+    branch, so surviving the call is not enough. Run in a child process,
+    since the failure can be a crash."""
     script = (
         "from oecluster import oecluster as n\n"
         f"setter = n.{options_type.__name__}.progress.fset\n"
@@ -77,8 +81,9 @@ def test_setting_progress_on_a_null_self_does_not_crash(options_type):
     result = subprocess.run([sys.executable, "-X", "faulthandler", "-c", script],
                             capture_output=True, text=True, timeout=120,
                             check=False)
-    assert result.returncode == 0, (result.returncode, result.stdout,
-                                    result.stderr[-2000:])
+    report = (result.returncode, result.stdout, result.stderr[-2000:])
+    assert result.returncode == 0, report
+    assert result.stdout.strip() == "returned", report
 
 
 def test_a_cdist_progress_callable_is_called():
