@@ -188,10 +188,12 @@ def test_notfound_markers_with_a_stale_version(tmp_path):
 
 def test_bare_program_name_is_kept(tmp_path):
     """A bare program name, as in -DSWIG_EXECUTABLE=swig, is not a path that
-    vanished: FindSWIG runs it as given, through PATH. EXISTS is false for a
-    relative name, so a guard that tested existence alone dropped it and let
-    find_program choose, which can be a different binary. The name is the
-    basename shutil.which found, so it is swig.exe on Windows."""
+    vanished, so the guard leaves it to FindSWIG as given; CMake itself may
+    first resolve such a name against the working directory, which is why
+    this runs from tmp_path. EXISTS is false for a relative name, so a guard
+    that tested existence alone dropped it and let find_program choose,
+    which can be a different binary. The name is the basename shutil.which
+    found, so it is swig.exe on Windows."""
     name = Path(SWIG_ON_PATH).name
     result, cached = _configure(tmp_path, SWIG_EXECUTABLE=name)
     assert result.returncode == 0, result.stdout + result.stderr
