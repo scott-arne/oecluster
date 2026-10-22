@@ -11,8 +11,9 @@ they need direct control over the C++ classes.
 
 A generated reference for the classes and functions defined in the `oecluster`
 package is in [](api/python). The option and storage structs that come straight
-from the SWIG bindings -- `FingerprintOptions`, `ButinaOptions` and
-`DenseStorage` among them -- are outside it. This page is the narrative guide.
+from the SWIG bindings and that the package exports -- `FingerprintOptions`,
+`ButinaOptions` and `DenseStorage` among them -- are described on the generated
+SWIG class page, [](api/swig-classes). This page is the narrative guide.
 
 ## Distance Matrices
 
