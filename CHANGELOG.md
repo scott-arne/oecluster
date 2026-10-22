@@ -2,6 +2,75 @@
 
 This file starts at 5.0.0; earlier releases are not recorded here.
 
+## [5.26.1] - 2026-10-21
+
+### Fixed
+
+- **Reading `PDistOptions.progress` or `CDistOptions.progress` now returns
+  the callable that was set, or `None` when none is.** It used to return an
+  opaque `std::function` object, set or not, that Python could not call: a
+  heap copy of the C++ callback that SWIG had no destructor for. Every read
+  leaked one, and SWIG printed
+  `swig/python detected a memory leak of type 'std::function< void (size_t,size_t) > *', no destructor found.`
+  as each returned object was freed. A copy of a set callback also held the
+  callable, so a single read kept the callable alive after the options were
+  cleared and deleted. Setting the member is unchanged: it takes a callable
+  or `None`, refuses anything else with
+  `TypeError: Expected callable or None for progress callback`, and a call on
+  a `None` self, such as `PDistOptions.progress.fset(None, callback)`, still
+  does nothing. `pdist()` and `cdist()` only set the member, so they behave as
+  before.
+- An allocation failure while the setter copies a progress callback into the
+  options now raises `MemoryError: out of memory setting a progress callback`,
+  where it would have left the wrapper as an uncaught C++ exception and
+  terminated the interpreter. SWIG wraps no member accessor in the
+  extension's exception handling, so the `MemoryError` that 5.26.0 added for
+  converting a progress callback covered neither the setter's assignment nor
+  the getter's copy. The getter now copies nothing. Found by reading the
+  wrapper, not reproduced.
+- The `leiden()` docstring's overlap formula renders as written. docutils
+  parsed `|N+(i) & N+(j)|` as a reference to an undefined substitution, so
+  every documentation build since 5.14.0, which added `leiden()`, reported
+  `ERROR: Undefined substitution referenced: "N+(i) & N+(j)".` and marked the
+  formula as an error on the Python API page. It is now an inline literal.
+- The C++ API page now includes its class hierarchy. Exhale writes the
+  hierarchy as an include whose longest line is 17,432 characters, over
+  docutils' default `line_length_limit` of 10,000, so docutils rejected the
+  include and the page was built without it. A new `docs/docutils.conf`
+  raises the limit to 100,000.
+- **Re-running CMake on an existing build directory now picks up a SWIG
+  upgrade.** FindSWIG trusts its cache: it asks the executable for its
+  library directory only when `SWIG_DIR` is unset, empty or `-NOTFOUND`, and
+  for its version only when `SWIG_VERSION` is, so a build directory went on
+  generating the wrapper from the SWIG library it was first configured with,
+  through any number of configures. A Homebrew upgrade that removes the old
+  version's directory broke the build that way.
+  `cmake/DropStaleSwigCache.cmake` now drops `SWIG_DIR` and `SWIG_VERSION`
+  from the cache on every configure, so `find_package(SWIG)` derives both
+  again, and drops a cached `SWIG_EXECUTABLE` whose path no longer exists, so
+  that SWIG is searched for again. A live executable, including one passed
+  with `-DSWIG_EXECUTABLE`, is kept, and a `SWIG_DIR` set by hand no longer
+  survives a configure. The guard runs only when CMake configures, and a
+  plain `cmake --build` after a SWIG upgrade does not re-run CMake, so run
+  `cmake <build-dir>` first.
+
+### Added
+
+- **`docs/api/swig-classes.rst`, a reference page for the 18 SWIG option and
+  storage classes that the `oecluster` package exports**, such as
+  `PDistOptions` and `DenseStorage`. The documentation build mocks the compiled
+  extension, so autodoc cannot describe these classes. `docs/swig_reference.py`
+  writes the page from the built extension, and
+  `python -m invoke docs-swig-reference` runs it. The page describes whichever
+  `oecluster` the interpreter imports, so rebuild `oecluster_python` before
+  regenerating it. `tests/python/test_swig_reference_page.py` fails when the
+  committed page differs from what the current build generates. Classes
+  reached only through `oecluster.oecluster`, such as `ClusterReportOptions`
+  and `RMSDOptions`, are not on the page.
+- The wheel workflow has a `lint` job that runs ruff 0.17.0 over `python`,
+  `tests` and `benchmarks`. The `publish` job, which runs only for a `v*` tag,
+  now requires it, so a release cannot publish while ruff fails.
+
 ## [5.26.0] - 2026-10-20
 
 ### Changed

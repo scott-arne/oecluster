@@ -2381,11 +2381,11 @@ public:
 // ============================================================================
 #define OECLUSTER_VERSION_MAJOR 5
 #define OECLUSTER_VERSION_MINOR 26
-#define OECLUSTER_VERSION_PATCH 0
+#define OECLUSTER_VERSION_PATCH 1
 
 // ============================================================================
 // Module-level Python convenience code
 // ============================================================================
 %pythoncode %{
-__version__ = "5.26.0"
+__version__ = "5.26.1"
 %}
