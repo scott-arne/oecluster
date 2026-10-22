@@ -7984,7 +7984,7 @@ def leiden(items, *, k=None, objective="modularity", resolution=1.0,
 
     The k-nearest-neighbor graph is reweighted by shared-nearest-neighbor
     Jaccard: with N+(i) the ``k`` neighbors of i plus i itself, the edge
-    {i, j} weighs s / (2(k + 1) - s) for s = |N+(i) & N+(j)|. Only pairs in
+    {i, j} weighs s / (2(k + 1) - s) for s = ``|N+(i) & N+(j)|``. Only pairs in
     which one item names the other get an edge, and edges below ``prune``
     are dropped. Leiden (Traag, Waltman and van Eck, 2019) then optimizes
     ``objective`` on that graph; every returned cluster is connected.
