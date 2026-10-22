@@ -27,6 +27,7 @@ benchmarks
 
 cpp-core
 api/python
+api/swig-classes
 api/cpp
 developer
 mcs-measurements

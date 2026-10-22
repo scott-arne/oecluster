@@ -26,3 +26,11 @@ CLI Wrapper
 .. automodule:: oecluster._cli
    :members:
    :undoc-members:
+
+SWIG Option and Storage Classes
+-------------------------------
+
+The option and storage classes SWIG generates (for example
+:class:`oecluster.PDistOptions` and :class:`oecluster.DenseStorage`) are
+described on :doc:`swig-classes`, which is generated from the built
+extension.

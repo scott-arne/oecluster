@@ -54,6 +54,12 @@ def docs_check(ctx):
 
 
 @task
+def docs_swig_reference(ctx):
+    """Regenerate docs/api/swig-classes.rst from the built extension."""
+    ctx.run(f"{sys.executable} {DOCS_DIR / 'swig_reference.py'} --write")
+
+
+@task
 def serve_docs(ctx, port=8000, clean=False, watch=False):
     """Build documentation and serve it at localhost.
 
