@@ -67,11 +67,12 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   `find_package(SWIG)` derives both again, and drops a cached
   `SWIG_EXECUTABLE` whose path no longer exists, so that SWIG is searched for
   again. A live executable, including one passed with `-DSWIG_EXECUTABLE`, is
-  kept. **`SWIG_DIR` can no longer be set by hand: a value passed with
+  kept. **`SWIG_DIR` can no longer be set in the cache: a value passed with
   `-DSWIG_DIR` is dropped on the very configure that passes it, and FindSWIG's
-  own search sets it on every configure.** The guard runs only when CMake
-  configures, and a plain `cmake --build` after a SWIG upgrade does not re-run
-  CMake, so run `cmake <build-dir>` first.
+  own search sets it again.** A normal variable named `SWIG_DIR`, set by a
+  toolchain file or a parent project, is not touched and still wins. The
+  guard runs only when CMake configures, and a plain `cmake --build` after a
+  SWIG upgrade does not re-run CMake, so run `cmake <build-dir>` first.
 
 ## [5.26.0] - 2026-10-20
 
