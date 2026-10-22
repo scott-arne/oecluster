@@ -90,8 +90,9 @@ Run the Python suite with the same interpreter:
 
 The package version is read live from `python/oecluster/__init__.py` in an
 editable install, so a documentation-only change to docstrings does not require
-rebuilding the extension before the autodoc pass picks it up, though the
-committed SWIG class page still has to be regenerated.
+rebuilding the extension before the autodoc pass picks it up, though a change
+to one of the SWIG class docstrings set there still needs
+`python -m invoke docs-swig-reference`.
 
 ### Thread Sanitizer
 
