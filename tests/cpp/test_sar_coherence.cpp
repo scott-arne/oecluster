@@ -1178,12 +1178,15 @@ TEST(ActivityLandscapeTest, IsInvariantUnderTheThreadCount) {
 }
 
 // num_threads is a size_t, so "more threads than the machine could ever run"
-// is a value a caller can pass. The cap at the row count is what keeps
-// ThreadPool from being asked to create that many OS threads, and the answer
-// must still be the single-threaded one. The chunk-size division is safe for a
-// separate reason: the thread count it divides by is itself bounded by the row
-// count, not by num_threads.
-TEST(ActivityLandscapeTest, CapsAnAbsurdThreadCount) {
+// is a value a caller can pass, and the answer must still be the
+// single-threaded one. MatrixSweep caps the count at the row count before it
+// builds its pool, but this row cannot tell whether it did: the sweep bounds
+// its thread count by the row count whatever the pool reports, so the chunk
+// size is the same either way, and detail::launch_workers starts at most one
+// worker per chunk. Removing the cap would not fail it. That bound on the
+// thread count is also what makes the chunk-size division safe: it divides by
+// a count no larger than the row count, not by num_threads.
+TEST(ActivityLandscapeTest, AnAbsurdThreadCountGivesTheSingleThreadedAnswer) {
     OECluster::DenseStorage storage(4);
     FillStorage(storage, {0.1, 0.2, 0.3, 0.15, 0.25, 0.35});
     const std::vector<double> activity = {1.0, 2.0, 4.0, 8.0};
@@ -1657,10 +1660,10 @@ TEST(ModelabilityTest, IsInvariantUnderTheThreadCount) {
     }
 }
 
-// The same cap as `activity_landscape`, tested the same way: an absurd
-// num_threads must not be handed to ThreadPool as a thread count, and the
-// answer must not change.
-TEST(ModelabilityTest, CapsAnAbsurdThreadCount) {
+// The same sweep as `activity_landscape`, tested the same way: an absurd
+// num_threads must not change the answer. As there, this row cannot tell
+// whether the cap applied, and removing it would not fail it.
+TEST(ModelabilityTest, AnAbsurdThreadCountGivesTheSingleThreadedAnswer) {
     OECluster::DenseStorage storage(4);
     FillStorage(storage, {0.1, 0.8, 0.9, 0.7, 0.6, 0.2});
     const std::vector<std::string> classes = {"A", "A", "B", "B"};

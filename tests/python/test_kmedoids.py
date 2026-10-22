@@ -598,7 +598,7 @@ def test_positive_num_threads_and_chunk_size_are_forwarded(monkeypatch):
     assert opts.chunk_size == 1024
 
 
-def test_an_absurd_num_threads_is_capped_at_the_item_count():
+def test_an_absurd_num_threads_gives_the_single_threaded_answer():
     """An absurd num_threads gives the single-threaded answer.
 
     The Python layer only rejects values above size_t, so 2^61 is well inside

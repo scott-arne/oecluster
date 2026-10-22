@@ -46,8 +46,8 @@ public:
         // ParallelFor's ceiling arithmetic.
         const size_t chunk = std::min(chunk_size_, range);
         if (chunk == range) {
-            // One chunk: ParallelFor would start every worker to run it on
-            // one of them, once per row or candidate.
+            // One chunk: ParallelFor would start a thread to run it, once per
+            // row or candidate, where running it here starts none.
             Lease lease(*this);
             body(*lease.clone, 0, range);
             return;

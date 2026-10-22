@@ -337,8 +337,11 @@ TEST(SphereExclusionTest, NeighborsIgnoresAHugeChunkSize) {
 }
 
 // The neighbor order hands num_threads to the threshold-graph builder, which
-// parallelizes over pairs; the request is capped at the item count.
-TEST(SphereExclusionTest, NeighborsCapsAnAbsurdThreadCount) {
+// parallelizes over pairs; the request is capped at the item count, so each
+// pass over the 36 pairs in chunks of one starts nine workers rather than 36.
+// This row pins the answer and cannot see the worker count, so removing the
+// cap would not fail it.
+TEST(SphereExclusionTest, NeighborsAnAbsurdThreadCountGivesTheSameClusters) {
     const size_t n = 9;
     const DenseStorage storage =
         MakeStorage(n, Positions({0, 1, 3, 7, 8, 12, 13, 20, 21}));

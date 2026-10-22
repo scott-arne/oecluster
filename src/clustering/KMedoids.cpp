@@ -379,13 +379,17 @@ KMedoidsResult k_medoids_cluster(const StorageBackend& storage,
     // oversized request is attempted rather than refused. The pool itself now
     // absorbs the two ways that used to go badly: detail::launch_workers
     // starts at most one worker per chunk, and detail::launch_threads joins
-    // every thread it managed to start before rethrowing a spawn failure. What
-    // the cap still buys is that an extreme value never reaches the pool at
-    // all, which keeps the resource cost bounded by the problem rather than by
-    // what the caller typed. A num_threads of 0 means "use the hardware
-    // concurrency" and has to keep meaning that; validation guarantees
-    // n >= n_clusters >= 1, so the minimum passes that 0 through untouched and
-    // can never manufacture one from a nonzero request.
+    // every thread it managed to start before rethrowing a spawn failure. So
+    // the cap changes nothing observable today: every pass runs over n items
+    // in chunks of at least one, so launch_workers starts the same number of
+    // workers, at most n, with or without it; ThreadPool only stores the
+    // count it is given; and nothing on this path reads NumThreads(). It is
+    // kept as a guard: a pass that sized per-worker state from NumThreads(),
+    // as PDist.cpp sizes its clones, would see at most n for any nonzero
+    // request. A num_threads of 0 means "use the hardware concurrency" and
+    // has to keep meaning that; validation guarantees n >= n_clusters >= 1,
+    // so the minimum passes that 0 through untouched and can never
+    // manufacture one from a nonzero request.
     const size_t num_threads = std::min(options.num_threads, n);
 
     if (options.n_clusters == n) {
@@ -461,8 +465,9 @@ KMedoidsResult k_medoids_cluster(PairwiseComparison& comparison,
             "instead");
     }
 
-    // Capped exactly as the storage overload caps it, and for the same
-    // reasons; see the comment there.
+    // Capped exactly as the storage overload caps it; see the comment there.
+    // The runner's ChunkedComparisons applies the same cap to its own pool,
+    // so this one changes nothing observable either.
     detail::StreamingDistanceRunner distances(comparison, KMEDOIDS_NAME,
                                               std::min(options.num_threads, n),
                                               options.chunk_size);

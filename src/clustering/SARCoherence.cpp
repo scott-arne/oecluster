@@ -183,17 +183,17 @@ public:
     // distance between samples a and b. Callers guarantee n >= 2.
     template <typename Body>
     void Run(std::size_t n, Body&& body) const {
-        // Capped at the row count before the pool is built. num_threads is a
-        // size_t on a public options struct, so this cap is the only thing
-        // standing between a caller and ThreadPool trying to spawn 2^61 OS
-        // threads. It is not what makes 8 * threads below safe to form: the
-        // next statement bounds threads by n whatever the pool reports, so the
-        // product is at most 8n. A num_threads of 0 bypasses the cap by
-        // design, because it means "use the hardware concurrency" -- so a
-        // small n still spawns that many workers for what is a single chunk,
-        // matching how HDBSCAN and Agglomerative already size their pools.
-        // Because n >= 2, no value other than that deliberate 0 can reach zero
-        // here.
+        // Capped at the row count before the pool is built, though the cap
+        // changes nothing observable today. num_threads is a size_t on a
+        // public options struct, but the next statement bounds threads by n
+        // whatever the pool reports, so the chunk size comes out the same with
+        // or without the cap, and detail::launch_workers starts at most one
+        // worker per chunk, of which there are at most n. That bound on
+        // threads is also what makes 8 * threads below safe to form: the
+        // product is at most 8n. A num_threads of 0 passes through the cap by
+        // design, because it means "use the hardware concurrency"; a run that
+        // is a single chunk still starts one worker. Because n >= 2, no value
+        // other than that deliberate 0 can reach zero here.
         ThreadPool pool(std::min<std::size_t>(num_threads_, n));
         const std::size_t threads =
             std::max<std::size_t>(1, std::min<std::size_t>(pool.NumThreads(), n));
@@ -241,9 +241,11 @@ public:
     void Run(std::size_t n, Body&& body) const {
         const std::size_t rows_per_unit =
             std::max<std::size_t>(min_rows_, chunk_size_ / (n - 1));
-        // Zero is resolved here rather than in the pool so the item cap
-        // applies to it too: an unresolved zero would let the hardware
-        // concurrency, not n, bound the workers and clones.
+        // Zero is resolved here rather than in the pool so ChunkedComparisons'
+        // item cap applies to it too. That cap sizes the pool and its clone
+        // free list; it does not change how many workers run, because a unit
+        // is at least one row, so there are at most n units, and
+        // detail::launch_workers starts at most one worker per unit.
         const std::size_t workers =
             num_threads_ > 0
                 ? num_threads_

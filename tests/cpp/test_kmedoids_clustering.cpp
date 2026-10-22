@@ -1710,7 +1710,7 @@ TEST(KMedoidsDeterminismTest, IsIdenticalAcrossThreadCountsAndChunkSizes) {
 // depends on how many workers ran. It does not pin the cap: launch_workers
 // alone keeps this call bounded, so removing the k-medoids cap would not fail
 // it.
-TEST(KMedoidsThreadCapTest, CapsAnAbsurdThreadCount) {
+TEST(KMedoidsThreadCapTest, AnAbsurdThreadCountGivesTheSingleThreadedAnswer) {
     const DenseStorage storage = MakeTwoTriplesStorage();
 
     KMedoidsOptions single;
