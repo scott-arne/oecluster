@@ -124,14 +124,14 @@ inline void validate_size_and_chunk(size_t n, size_t chunk_size,
 }
 
 // A huge explicit request can cost what it asks for, so it is capped at the
-// item count before the pool sees it: ChunkedComparisons reserves one
-// free-list slot per pool thread, and a pass over pairs, such as
-// SphereExclusion's graph build, can have more chunks than items, where
-// detail::launch_workers would start up to one worker per chunk. A pass over
-// n items gains nothing from the cap, since launch_workers already starts at
-// most one worker per chunk. Zero passes through and keeps meaning hardware
-// concurrency; n >= 1 here, so the minimum never manufactures a zero from a
-// nonzero request.
+// item count before the pool sees it. ChunkedComparisons reserves one
+// free-list slot per pool thread, whatever the pass, and a pass over pairs,
+// such as SphereExclusion's graph build, can have more chunks than items,
+// where detail::launch_workers would start up to one worker per chunk. For a
+// pass over n items the cap does not change how many workers start, since
+// launch_workers already starts at most one per chunk. Zero passes through and
+// keeps meaning hardware concurrency; n >= 1 here, so the minimum never
+// manufactures a zero from a nonzero request.
 inline size_t capped_threads(size_t num_threads, size_t n) {
     return std::min(num_threads, n);
 }

@@ -246,6 +246,8 @@ class TestVersionPins:
         generated shadow module by %pythoncode. A mismatch with the package
         version means the extension was built from an older source, for
         example after a version bump without rebuilding oecluster_python.
+        It sees version skew only: a native change made without a version
+        bump leaves all three equal.
         """
         from oecluster import oecluster as native
         compiled = (f"{native.OECLUSTER_VERSION_MAJOR}."
