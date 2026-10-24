@@ -268,9 +268,9 @@ ThresholdNeighborGraph BuildThresholdNeighborGraph(
 
         ThreadPool pool(options.num_threads);
         // Clamped to the pair count, as KMedoidsSwapKernel.h and
-        // ChunkedComparisons clamp theirs: ThreadPool's ceiling division wraps
-        // to zero chunks for a chunk size near SIZE_MAX and would skip every
-        // pair. A chunk at least as wide as the range is one chunk either way.
+        // ChunkedComparisons clamp theirs. A chunk at least as wide as the
+        // range is one chunk either way, so the clamp does not change the
+        // schedule.
         const size_t chunk_size = std::min(
             options.chunk_size == 0 ? size_t{4096} : options.chunk_size,
             storage.NumPairs());

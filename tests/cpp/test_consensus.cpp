@@ -241,10 +241,10 @@ TEST(CoassociationTest, AMemberOfTwoLargeClustersStillSpreadsOverThePool) {
 }
 
 TEST(CoassociationTest, ExtremeThreadAndChunkCountsStillDoTheWork) {
-    // Both of these are accepted by the contract and both overflow a chunk
-    // count if they reach the arithmetic unclamped: 4 * workers wraps to
-    // zero, and ThreadPool's (range + chunk_size - 1) wraps to fewer chunks
-    // than the range needs, which drops a whole pass in silence.
+    // Both of these are accepted by the contract. The thread count overflows
+    // a chunk count if it reaches the arithmetic unclamped: 4 * workers wraps
+    // to zero. The chunk size pins that a chunk near SIZE_MAX still covers
+    // the whole range.
     const Ensemble ensemble;
     DenseStorage plain(4);
     DenseStorage extreme(4);

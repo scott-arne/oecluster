@@ -240,9 +240,7 @@ ConsensusMatrixSummary coassociation_distances(
 
     std::atomic<size_t> unobserved{0};
     // More workers than rows do nothing; capping before the arithmetic keeps
-    // 4 * workers from wrapping for any count the size_t interface admits,
-    // and the final min keeps a chunk near SIZE_MAX from wrapping
-    // ThreadPool's own (range + chunk_size - 1) chunk count.
+    // 4 * workers from wrapping for any count the size_t interface admits.
     const size_t finalize_workers =
         std::max<size_t>(1, std::min(pool.NumThreads(), num_items));
     // chunk_size is the ceiling, not the chunk: ThreadPool starts at most one
@@ -398,9 +396,7 @@ ConsensusStrength consensus_strength(const StorageBackend& matrix,
     std::vector<double> sums(num_items, 0.0);
     ThreadPool pool(options.num_threads);
     // More workers than rows do nothing; capping before the arithmetic keeps
-    // 4 * workers from wrapping for any count the size_t interface admits,
-    // and the final min keeps a chunk near SIZE_MAX from wrapping
-    // ThreadPool's own (range + chunk_size - 1) chunk count.
+    // 4 * workers from wrapping for any count the size_t interface admits.
     const size_t workers =
         std::max<size_t>(1, std::min(pool.NumThreads(), num_items));
     // chunk_size is the ceiling, not the chunk: ThreadPool starts at most one

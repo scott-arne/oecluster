@@ -24,13 +24,11 @@ namespace OECluster::detail {
 /**
  * @brief Clamp a chunk size to the item count.
  *
- * ThreadPool derives its chunk count as ``(range + chunk_size - 1) /
- * chunk_size``, which wraps to zero for a chunk size near SIZE_MAX and then
- * runs no chunk at all: every scan in the swap kernel would return its
- * default-initialized output and the call would report a zero-cost single
- * cluster as converged. Clamping to the item count is observationally free --
- * a chunk at least as wide as the range is one chunk either way -- and keeps
- * both the kernel's own ceiling arithmetic and the pool's below the overflow.
+ * The swap kernel sizes its per-chunk staging as ``(n + chunk - 1) / chunk``,
+ * which wraps to zero for a chunk size near SIZE_MAX, leaving no slot for the
+ * one chunk the pool runs. Clamping to the item count is observationally
+ * free -- a chunk at least as wide as the range is one chunk either way --
+ * and keeps that arithmetic below the overflow.
  * Validation guarantees ``chunk_size >= 1``, and every call site has
  * ``n >= n_clusters >= 1``, so the result is never zero.
  *

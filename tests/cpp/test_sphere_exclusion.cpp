@@ -313,8 +313,8 @@ TEST(SphereExclusionTest, NeighborsWithNearestKeepsButinasCentersOnly) {
     EXPECT_EQ(nearest.Centers(), std::vector<size_t>({3, 0}));
 }
 
-// ThreadPool's ceiling division wraps to zero chunks for a chunk size near
-// SIZE_MAX; the graph builder clamps to its pair count so no pair is skipped.
+// A chunk size near SIZE_MAX must still score every pair; the graph builder
+// clamps it to its pair count.
 TEST(SphereExclusionTest, NeighborsIgnoresAHugeChunkSize) {
     const DenseStorage storage = MakeStorage(5, Positions({0, 1, 3, 7, 8}));
     const Clusters expected{{4, 3}, {1, 0}, {2}};

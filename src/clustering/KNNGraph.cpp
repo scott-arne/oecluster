@@ -45,8 +45,8 @@ size_t checked_graph_size(size_t num_items, size_t k) {
 }
 
 // chunk_size counts pairwise distances, as in the threshold graph, and a row
-// reads n - 1 of them. The cap at n keeps a near-SIZE_MAX chunk_size from
-// overflowing ParallelFor's ceiling arithmetic.
+// reads n - 1 of them. A unit of more than n rows would still be one unit, so
+// the cap at n does not change the schedule.
 size_t rows_per_unit(size_t n, size_t chunk_size) {
     return std::min(n, std::max<size_t>(1, chunk_size / (n - 1)));
 }

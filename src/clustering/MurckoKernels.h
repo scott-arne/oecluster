@@ -76,10 +76,11 @@ std::vector<std::optional<std::string>> extract_all(size_t count,
     if (count == 0u) {
         return raw;
     }
-    // ParallelFor early-returns on a zero chunk size, and an over-large value
-    // overflows its chunk-count arithmetic into zero chunks. Either way no work
-    // runs and every slot stays empty, so the failure scan then blames index 0
-    // -- a confidently wrong answer rather than a crash.
+    // ParallelFor early-returns on a zero chunk size: no work would run and
+    // every slot would stay empty, so the failure scan would then blame index
+    // 0 -- a confidently wrong answer rather than a crash. A chunk wider than
+    // count is one chunk either way, so the cap at count does not change the
+    // schedule.
     const size_t safe_chunk = std::min(chunk == 0u ? count : chunk, count);
     ThreadPool pool(num_threads);
     pool.ParallelFor(0u, count, safe_chunk, [&](size_t begin, size_t end) {

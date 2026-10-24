@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <atomic>
 #include <cmath>
+#include <limits>
 #include <memory>
 #include "oecluster/PDist.h"
 #include "oecluster/Error.h"
@@ -261,4 +262,20 @@ TEST(PDistTest, AnAbsurdThreadCountBuildsAtMostOneClonePerChunk) {
     EXPECT_NO_THROW(pdist(comparison, storage, opts));
     EXPECT_LE(comparison.Clones(), 3u);
     EXPECT_DOUBLE_EQ(storage.Get(0, 3), 0.75);
+}
+
+TEST(PDistTest, AChunkSizeNearSizeMaxFillsTheMatrix) {
+    CloneCountingComparison comparison(4);
+    DenseStorage storage(4);
+    PDistOptions opts;
+    opts.num_threads = 8;
+    opts.chunk_size = std::numeric_limits<size_t>::max();
+    pdist(comparison, storage, opts);
+    for (size_t i = 0; i < 4; ++i) {
+        for (size_t j = i + 1; j < 4; ++j) {
+            EXPECT_DOUBLE_EQ(storage.Get(i, j), static_cast<double>(j - i) / 4.0)
+                << "pair (" << i << ", " << j << ")";
+        }
+    }
+    EXPECT_EQ(comparison.Clones(), 1u);
 }

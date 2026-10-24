@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include <atomic>
+#include <limits>
 #include <mutex>
 #include <set>
 #include <stdexcept>
@@ -199,4 +200,24 @@ TEST(ThreadPoolTest, TwoThreadsRunOffTheCallingThread) {
         seen.insert(std::this_thread::get_id());
     });
     EXPECT_EQ(seen.count(caller), 0u);
+}
+
+TEST(ThreadPoolTest, AChunkSizeNearSizeMaxCoversTheRange) {
+    for (const size_t threads : {size_t{1}, size_t{4}}) {
+        SCOPED_TRACE(testing::Message() << "threads = " << threads);
+        ThreadPool pool(threads);
+        std::mutex mutex;
+        std::vector<int> hits(6, 0);
+        size_t chunks = 0;
+        pool.ParallelFor(0, 6, std::numeric_limits<size_t>::max(),
+                         [&](size_t begin, size_t end) {
+            std::lock_guard<std::mutex> lock(mutex);
+            ++chunks;
+            for (size_t i = begin; i < end; ++i) {
+                hits[i] += 1;
+            }
+        });
+        EXPECT_EQ(chunks, 1u);
+        EXPECT_EQ(hits, std::vector<int>(6, 1));
+    }
 }

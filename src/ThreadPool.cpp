@@ -50,7 +50,9 @@ void ThreadPool::ParallelFor(size_t begin, size_t end, size_t chunk_size,
     }
 
     const size_t range = end - begin;
-    const size_t total_chunks = (range + chunk_size - 1) / chunk_size;
+    // Overflow-safe ceiling: (range + chunk_size - 1) / chunk_size wraps for
+    // a chunk_size near SIZE_MAX and would report zero chunks.
+    const size_t total_chunks = range / chunk_size + (range % chunk_size != 0 ? 1 : 0);
 
     std::atomic<size_t> next_chunk{0};
     std::exception_ptr captured_exception;
@@ -68,7 +70,9 @@ void ThreadPool::ParallelFor(size_t begin, size_t end, size_t chunk_size,
             }
 
             size_t chunk_begin = begin + chunk_idx * chunk_size;
-            size_t chunk_end = std::min(chunk_begin + chunk_size, end);
+            // end - chunk_begin is positive here, and taking the smaller of it
+            // and chunk_size avoids chunk_begin + chunk_size wrapping.
+            size_t chunk_end = chunk_begin + std::min(chunk_size, end - chunk_begin);
 
             try {
                 body(chunk_begin, chunk_end);
@@ -87,7 +91,7 @@ void ThreadPool::ParallelFor(size_t begin, size_t end, size_t chunk_size,
         // of its own. A caller that holds a lock a worker would need while it
         // waits -- the GIL, for a binding that keeps it -- would deadlock if a
         // worker had to take that lock, as a progress callback that calls into
-        // Python does; on the calling thread, taking it again is re-entrant.
+        // Python does; on the calling thread, re-taking the GIL is re-entrant.
         // The worker loop is unchanged, so chunk order, cancellation and the
         // captured exception behave as before.
         worker();

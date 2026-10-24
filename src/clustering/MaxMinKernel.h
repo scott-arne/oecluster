@@ -315,8 +315,6 @@ inline std::vector<double> medoid_row_sums(Runner& distances) {
     const size_t n = distances.Size();
     std::vector<double> sums(n, 0.0);
 
-    // The runner caps the chunk at n, so a chunk size near SIZE_MAX cannot
-    // wrap ParallelFor's ceiling arithmetic to zero.
     distances.Run(n, [&](const auto& local, size_t begin, size_t end) {
         for (size_t candidate = begin; candidate < end; ++candidate) {
             double sum = 0.0;

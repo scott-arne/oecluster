@@ -761,9 +761,8 @@ void ExpectIdenticalAcrossSchedules(const DenseStorage& storage, size_t k) {
 
     // SIZE_MAX is a legal chunk size -- validation only rejects zero -- and it
     // is the value that overflows an unguarded (n + chunk_size - 1) ceiling to
-    // zero chunks. A scan that runs no chunk at all returns its
-    // default-initialized output: a single cluster at cost 0, reported as
-    // converged. This row is what fails if effective_chunk_size() is dropped.
+    // zero chunks, which the swap kernel's per-chunk staging would use. This
+    // row is the one that exercises effective_chunk_size().
     for (const size_t threads : {size_t{1}, size_t{2}, size_t{4}, size_t{8}}) {
         for (const size_t chunk : {size_t{1}, size_t{7}, size_t{4096},
                                    std::numeric_limits<size_t>::max()}) {

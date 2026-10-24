@@ -46,8 +46,8 @@ public:
         if (range == 0) {
             return;
         }
-        // Capped at the range so a near-SIZE_MAX chunk_size cannot overflow
-        // ParallelFor's ceiling arithmetic.
+        // Capped at the range, so that a chunk at least as wide as the range
+        // is recognised below as the single chunk it is.
         const size_t chunk = std::min(chunk_size_, range);
         if (chunk == range) {
             // One chunk: a pool of more than one thread would start a thread

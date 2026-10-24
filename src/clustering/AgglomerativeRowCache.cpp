@@ -172,8 +172,8 @@ void copy_input(const StorageBackend& storage, std::vector<double>& work,
                 const SlotIndex& index) {
     const size_t n = storage.NumSamples();
     const double* data = storage.Data();
-    // Capped at the row count so a near-SIZE_MAX chunk_size cannot overflow
-    // ParallelFor's ceiling arithmetic and silently skip the copy.
+    // Capped at the row count; a chunk at least as wide as the range is one
+    // chunk either way, so the cap does not change the schedule.
     const size_t chunk = std::min(options.chunk_size, n);
     pool.ParallelFor(0, n, chunk, [&](size_t begin, size_t end) {
         for (size_t i = begin; i < end; ++i) {

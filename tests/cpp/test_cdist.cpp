@@ -5,6 +5,7 @@
 
 #include <gtest/gtest.h>
 #include <atomic>
+#include <limits>
 #include <memory>
 #include <string>
 #include "oecluster/oecluster.h"
@@ -261,4 +262,21 @@ TEST_F(CDistTest, AnAbsurdThreadCountBuildsAtMostOneClonePerChunk) {
     EXPECT_NO_THROW(cdist(comparison, 2, out.data(), opts));
     EXPECT_LE(comparison.Clones(), 2u);
     EXPECT_DOUBLE_EQ(out[1], 0.75);  // pair (0, 3)
+}
+
+TEST_F(CDistTest, AChunkSizeNearSizeMaxFillsTheBlock) {
+    CloneCountingCDistComparison comparison;
+    std::vector<double> out(2 * 2, -1.0);
+    CDistOptions opts;
+    opts.num_threads = 8;
+    opts.chunk_size = std::numeric_limits<size_t>::max();
+    cdist(comparison, 2, out.data(), opts);
+    // Rows are items 0 and 1, columns items 2 and 3.
+    for (size_t i = 0; i < 2; ++i) {
+        for (size_t j = 2; j < 4; ++j) {
+            EXPECT_DOUBLE_EQ(out[i * 2 + (j - 2)], static_cast<double>(j - i) / 4.0)
+                << "pair (" << i << ", " << j << ")";
+        }
+    }
+    EXPECT_EQ(comparison.Clones(), 1u);
 }
