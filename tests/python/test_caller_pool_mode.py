@@ -65,7 +65,7 @@ def test_a_module_never_imported_gives_no_value(monkeypatch):
 
 
 @pytest.mark.parametrize("mode", [8, 10, 2**32 - 1],
-                         ids=["unbounded-cache", "mutexed-cache", "top-of-range"])
+                         ids=["unbounded-cache", "thread-local-cache", "top-of-range"])
 def test_a_plain_int_in_range_is_read_as_is(monkeypatch, mode):
     monkeypatch.setitem(sys.modules, _KEY, _returning(mode))
     assert native._caller_pool_mode() == mode

@@ -1761,8 +1761,8 @@ static std::optional<unsigned int> _oecluster_caller_pool_mode() {
 %feature("docstring") oecluster_caller_pool_mode
 "For tests only. Returns the memory-pool mode oecluster reads from
 openeye.oechem.OEGetMemPoolMode(), 0 when that read fails or gives anything but
-an int within unsigned int's range, or None when openeye.oechem was never
-imported.";
+a plain int (not a bool or other int subclass) within unsigned int's range, or
+None when openeye.oechem was never imported.";
 %inline %{
 // For tests only: the reader's answer, as a Python int or None.
 PyObject* oecluster_caller_pool_mode() {
