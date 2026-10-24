@@ -19,8 +19,6 @@
 #include <utility>
 #include <vector>
 
-#include <oesystem.h>
-
 #include "oecluster/Error.h"
 #include "oecluster/PoolMode.h"
 #include "oecluster/ThreadPool.h"

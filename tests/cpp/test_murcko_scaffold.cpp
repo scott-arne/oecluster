@@ -579,8 +579,9 @@ TEST(MurckoThreadClampTest, ClampsByItemCountAndConcurrencyCeiling) {
 TEST(MurckoMemPoolGateTest, ForcesSerialExtractionWhenThePoolIsUnsafe) {
     // The line murcko_scaffolds actually executes, as a pure function. An
     // unsafe mode collapses every thread request to 1, whatever the caller
-    // asked for and however many molecules there are. This is the branch whose
-    // end-to-end form cannot be written in this binary.
+    // asked for and however many molecules there are. murcko_scaffolds reaches
+    // this branch in-process under an unsafe CallerPoolModeScope; what this
+    // binary cannot observe is that the extraction then ran serially.
     const unsigned int unsafe = OESystem::OEMemPoolMode::SingleThreaded |
                                 OESystem::OEMemPoolMode::UnboundedCache;
     EXPECT_EQ(dispatch_thread_count(unsafe, 0u, 1000u), 1u);
