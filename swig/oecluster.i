@@ -14,6 +14,7 @@
 #include "oecluster/DescriptorStatistics.h"
 #include "oecluster/StorageBackend.h"
 #include "oecluster/ThreadPool.h"
+#include "oecluster/PoolMode.h"
 #include "oecluster/PDist.h"
 #include "oecluster/CDist.h"
 #include "oecluster/DistanceMatrix.h"
@@ -1878,6 +1879,10 @@ OECLUSTER_GIL_EXCEPTION(OECluster::leiden, leiden)
 %ignore OECluster::PairwiseComparison::Clone;
 %ignore OECluster::PairwiseComparison::TryPDist;
 %ignore OECluster::PairwiseComparison::TryCDist;
+
+// Internal capability read by the worker gate (oecluster/PoolMode.h), not
+// Python API.
+%ignore RunsOpenEyeCode;
 
 // Ignore private constructors for comparison clones
 %ignore OECluster::FingerprintComparison::FingerprintComparison(std::shared_ptr<const Impl>);

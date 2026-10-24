@@ -280,10 +280,12 @@ std::vector<std::string> scaffolds_for(const std::vector<OEChem::OEMolBase*>& mo
 
     // The hazard in calling the toolkit concurrently is not this function's
     // data -- each worker builds its own molecule copies -- but the toolkit's
-    // shared molecule memory pool. A caller who selected SingleThreaded gets
-    // serial extraction rather than a data race.
+    // shared molecule memory pool. A caller whose mode is not thread-safe gets
+    // serial extraction. effective_pool_mode() is the caller's mode even when
+    // this library carries its own OpenEye copy, as the statically linked
+    // Python extension does, because the bindings record it for the call.
     const size_t num_threads = detail::dispatch_thread_count(
-        OESystem::OEGetMemPoolMode(), options.num_threads, inputs.size());
+        effective_pool_mode(), options.num_threads, inputs.size());
     const size_t chunk = std::min(MURCKO_CHUNK, inputs.size());
     const ScaffoldType type = options.scaffold;
 

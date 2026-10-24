@@ -74,12 +74,31 @@ public:
     virtual GateFacts Facts() const { return GateFacts(); }
 
     /**
+     * @brief Whether ``Compare`` runs OpenEye code.
+     *
+     * safe_worker_count() (``oecluster/PoolMode.h``) reads this to decide
+     * whether an unsafe OpenEye memory-pool mode must keep this comparison's
+     * scoring on one thread. The default is ``true``, so a comparison that
+     * says nothing is treated as unsafe. It describes scoring only: building
+     * a comparison can run OpenEye code even when scoring does not.
+     *
+     * :returns: ``true`` unless the subclass knows ``Compare`` runs no OpenEye code.
+     */
+    virtual bool RunsOpenEyeCode() const { return true; }
+
+    /**
      * @brief Optionally compute all pairwise values in bulk.
      *
      * Implementations that own a more efficient batch kernel can override this
      * method. Returning ``false`` asks ``pdist`` to fall back to scoring the
      * pairs one at a time through the unordered seam below, which is
      * ``Compare(min(i, j), max(i, j))`` unless the comparison overrides it.
+     *
+     * An override must use at most ``options.num_threads`` workers (0
+     * meaning hardware concurrency) and must call ``options.progress``, if
+     * set, only from the calling thread. pdist and cdist pass a count already
+     * capped by safe_worker_count(), and the Python bindings may hold the GIL
+     * while the hook runs.
      *
      * :param storage: Storage backend to write results into.
      * :param options: Pairwise computation options.
@@ -97,6 +116,12 @@ public:
      * Implementations that own a more efficient batch kernel can override this
      * method. Returning ``false`` asks the generic engine to fall back to
      * per-pair ``Compare()`` calls.
+     *
+     * An override must use at most ``options.num_threads`` workers (0
+     * meaning hardware concurrency) and must call ``options.progress``, if
+     * set, only from the calling thread. pdist and cdist pass a count already
+     * capped by safe_worker_count(), and the Python bindings may hold the GIL
+     * while the hook runs.
      *
      * :param n_a: Number of items in the first set.
      * :param output: Row-major output array of length ``n_a * (Size() - n_a)``.

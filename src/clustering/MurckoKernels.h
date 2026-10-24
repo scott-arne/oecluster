@@ -22,6 +22,7 @@
 #include <oesystem.h>
 
 #include "oecluster/Error.h"
+#include "oecluster/PoolMode.h"
 #include "oecluster/ThreadPool.h"
 #include "oecluster/clustering/MurckoScaffold.h"
 
@@ -133,18 +134,6 @@ inline std::vector<std::string> finish_extraction(
 }
 
 /**
- * @brief Whether a memory-pool mode permits driving the toolkit from threads.
- *
- * A pure function over the mode word rather than an inline expression, so the
- * gate is testable against every bit combination without mutating the
- * process-global setting.
- */
-inline bool pool_is_thread_safe(unsigned int mode) {
-    return (mode & (OESystem::OEMemPoolMode::ThreadLocal |
-                    OESystem::OEMemPoolMode::Mutexed)) != 0u;
-}
-
-/**
  * @brief Clamp a requested worker count to what the work and machine support.
  *
  * ``num_threads`` is an unbounded size_t on a public options struct, so an
@@ -179,13 +168,13 @@ inline size_t effective_thread_count(size_t requested, size_t n) {
  * Mutating the process-global mode is not an option: OESetMemPoolMode is fatal
  * on a second call, so a test that changed it could never restore it.
  *
- * :param mode: The value OEGetMemPoolMode() reported.
+ * :param mode: The mode the call runs under, as effective_pool_mode() reports it.
  * :param requested: The caller's MurckoOptions::num_threads.
  * :param n: Number of molecules.
  * :returns: 1 when the pool is not thread-safe, otherwise the clamped count.
  */
 inline size_t dispatch_thread_count(unsigned int mode, size_t requested, size_t n) {
-    if (!pool_is_thread_safe(mode)) {
+    if (!OECluster::pool_is_thread_safe(mode)) {
         return 1u;
     }
     return effective_thread_count(requested, n);

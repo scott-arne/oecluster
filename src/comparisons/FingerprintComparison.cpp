@@ -457,4 +457,8 @@ GateFacts FingerprintComparison::Facts() const {
     return facts;
 }
 
+bool FingerprintComparison::RunsOpenEyeCode() const {
+    return false;
+}
+
 }  // namespace OECluster

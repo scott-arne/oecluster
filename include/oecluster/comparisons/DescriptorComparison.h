@@ -95,6 +95,8 @@ public:
     size_t Size() const override;
     std::string ComparisonName() const override;
     GateFacts Facts() const override;
+    /// Scoring compares precomputed numbers; it runs no OpenEye code.
+    bool RunsOpenEyeCode() const override;
 
     /// Surviving column names, in ascending schema order regardless of the
     /// order they were requested in. Values supplied through ``variances`` or

@@ -31,6 +31,7 @@ class DistanceMatrix;
 #include "oecluster/CondensedIndex.h"
 #include "oecluster/StorageBackend.h"
 #include "oecluster/ThreadPool.h"
+#include "oecluster/PoolMode.h"
 #include "oecluster/PDist.h"
 #include "oecluster/CDist.h"
 #include "oecluster/DistanceMatrix.h"

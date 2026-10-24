@@ -17,6 +17,7 @@ set(_OECLUSTER_SWIG_DEPENDS
     ${CMAKE_SOURCE_DIR}/include/oecluster/PairwiseComparison.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/StorageBackend.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/ThreadPool.h
+    ${CMAKE_SOURCE_DIR}/include/oecluster/PoolMode.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/PDist.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/CDist.h
     ${CMAKE_SOURCE_DIR}/include/oecluster/DistanceMatrix.h

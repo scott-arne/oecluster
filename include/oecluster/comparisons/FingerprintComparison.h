@@ -78,6 +78,8 @@ public:
     size_t Size() const override;
     std::string ComparisonName() const override;
     GateFacts Facts() const override;
+    /// Scoring compares precomputed bits; it runs no OpenEye code.
+    bool RunsOpenEyeCode() const override;
 
 private:
     struct Impl;

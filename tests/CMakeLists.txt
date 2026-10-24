@@ -12,6 +12,7 @@ add_executable(oecluster_tests
     cpp/test_main.cpp
     cpp/test_storage.cpp
     cpp/test_thread_pool.cpp
+    cpp/test_pool_mode.cpp
     cpp/test_pdist.cpp
     cpp/test_cdist.cpp
     cpp/test_butina_clustering.cpp

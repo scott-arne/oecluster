@@ -137,6 +137,7 @@ find_package(OpenEye REQUIRED)
 set(OECLUSTER_SOURCES
     src/StorageBackend.cpp
     src/ThreadPool.cpp
+    src/PoolMode.cpp
     src/CompareUnordered.cpp
     src/PDist.cpp
     src/CDist.cpp

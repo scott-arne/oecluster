@@ -79,6 +79,7 @@ TEST(UmbrellaHeaderTest, ReachesTheCoreHeaders) {
     EXPECT_NE(definition_size<OECluster::PairwiseComparison>(), 0u);
     EXPECT_NE(definition_size<OECluster::DenseStorage>(), 0u);
     EXPECT_NE(definition_size<OECluster::ThreadPool>(), 0u);
+    EXPECT_NE(definition_size<OECluster::CallerPoolModeScope>(), 0u);
     EXPECT_NE(definition_size<OECluster::PDistOptions>(), 0u);
     EXPECT_NE(definition_size<OECluster::CDistOptions>(), 0u);
     EXPECT_NE(definition_size<OECluster::DistanceMatrix>(), 0u);

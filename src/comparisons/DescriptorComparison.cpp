@@ -603,6 +603,10 @@ GateFacts DescriptorComparison::Facts() const {
     return facts;
 }
 
+bool DescriptorComparison::RunsOpenEyeCode() const {
+    return false;
+}
+
 const std::vector<std::string>& DescriptorComparison::Columns() const {
     return pimpl_->matrix.names;
 }

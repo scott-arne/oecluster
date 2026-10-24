@@ -30,7 +30,7 @@ using OECluster::detail::effective_thread_count;
 using OECluster::detail::extract_all;
 using OECluster::detail::finish_extraction;
 using OECluster::detail::first_failure;
-using OECluster::detail::pool_is_thread_safe;
+using OECluster::pool_is_thread_safe;
 using OECluster::detail::scaffold_of;
 
 /// Extract a scaffold from a SMILES string, reporting a failure as a string
@@ -574,36 +574,6 @@ TEST(MurckoThreadClampTest, ClampsByItemCountAndConcurrencyCeiling) {
     EXPECT_EQ(effective_thread_count(1000000u, 1000000u), ceiling);
     // An empty item count must not produce the auto-detect sentinel.
     EXPECT_EQ(effective_thread_count(4u, 0u), 1u);
-}
-
-TEST(MurckoMemPoolGateTest, RecognizesOnlyTheThreadSafeModes) {
-    // Every single bit OEMemPoolMode defines as of 2026.1.0. The members are
-    // namespace-scoped const unsigned int rather than enumerators, so a vendor
-    // addition compiles silently and simply goes unlisted -- this table is a
-    // record of what was checked, not a compile-time guard.
-    EXPECT_TRUE(pool_is_thread_safe(OESystem::OEMemPoolMode::Mutexed));
-    EXPECT_TRUE(pool_is_thread_safe(OESystem::OEMemPoolMode::ThreadLocal));
-    EXPECT_TRUE(pool_is_thread_safe(OESystem::OEMemPoolMode::Default));
-
-    // SingleThreaded is 0, so it is the absence of a safe bit rather than a
-    // flag: asserting it is unsafe is asserting the predicate's default.
-    EXPECT_FALSE(pool_is_thread_safe(OESystem::OEMemPoolMode::SingleThreaded));
-    // The cache and allocator-strategy bits say nothing about thread safety on
-    // their own. Spinlocked is treated as unsafe deliberately: the SDK header
-    // describes it as "Spinlock - for Java threading", which names an intended
-    // consumer rather than a guarantee for this caller, and the cost of being
-    // wrong in this direction is lost parallelism rather than corruption.
-    EXPECT_FALSE(pool_is_thread_safe(OESystem::OEMemPoolMode::BoundedCache));
-    EXPECT_FALSE(pool_is_thread_safe(OESystem::OEMemPoolMode::UnboundedCache));
-    EXPECT_FALSE(pool_is_thread_safe(OESystem::OEMemPoolMode::System));
-    EXPECT_FALSE(pool_is_thread_safe(OESystem::OEMemPoolMode::Spinlocked));
-
-    // A safe bit stays safe when a cache bit joins it, which is the only
-    // combination Default itself relies on.
-    EXPECT_TRUE(pool_is_thread_safe(OESystem::OEMemPoolMode::Mutexed |
-                                    OESystem::OEMemPoolMode::BoundedCache));
-    EXPECT_FALSE(pool_is_thread_safe(OESystem::OEMemPoolMode::System |
-                                     OESystem::OEMemPoolMode::UnboundedCache));
 }
 
 TEST(MurckoMemPoolGateTest, ForcesSerialExtractionWhenThePoolIsUnsafe) {
