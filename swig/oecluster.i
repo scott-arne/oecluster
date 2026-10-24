@@ -47,6 +47,7 @@
 #include "oefp/oefp.h"
 
 #include <cstdio>
+#include <limits>
 #include <optional>
 #include <oechem.h>
 #include <oebio.h>
@@ -1705,7 +1706,8 @@ static std::function<void(size_t, size_t)> _oecluster_make_progress(PyObject* ca
 // than imported: importing oecluster does not import openeye.oechem, and an
 // application that never loaded it cannot have set a mode through it, so the
 // native mode stands. A failed read answers 0, an unsafe mode: a call wrongly
-// kept serial is slow, while one wrongly run in parallel crashes. Only a
+// kept serial is slow, while one wrongly run in parallel crashes. A result
+// that is not a plain int within unsigned int's range also answers 0. Only a
 // cleanly missing module answers "no value".
 static std::optional<unsigned int> _oecluster_caller_pool_mode() {
     PyObject* modules = PyImport_GetModuleDict();  // borrowed
@@ -1734,13 +1736,40 @@ static std::optional<unsigned int> _oecluster_caller_pool_mode() {
         PyErr_Clear();
         return 0u;
     }
+    // Exact, because bool is an int subclass and True would read as 1, which
+    // is Mutexed and thread-safe.
+    if (!PyLong_CheckExact(value)) {
+        Py_DECREF(value);
+        return 0u;
+    }
     const unsigned long mode = PyLong_AsUnsignedLong(value);
     Py_DECREF(value);
     if (PyErr_Occurred()) {
         PyErr_Clear();
         return 0u;
     }
+    // unsigned long is wider than unsigned int on LP64, where the cast below
+    // would turn 2**32 + 1 into 1.
+    if (mode > std::numeric_limits<unsigned int>::max()) {
+        return 0u;
+    }
     return static_cast<unsigned int>(mode);
+}
+%}
+
+%feature("docstring") oecluster_caller_pool_mode
+"For tests only. Returns the memory-pool mode oecluster reads from
+openeye.oechem.OEGetMemPoolMode(), 0 when that read fails or gives anything but
+an int within unsigned int's range, or None when openeye.oechem was never
+imported.";
+%inline %{
+// For tests only: the reader's answer, as a Python int or None.
+PyObject* oecluster_caller_pool_mode() {
+    const std::optional<unsigned int> mode = _oecluster_caller_pool_mode();
+    if (!mode) {
+        Py_RETURN_NONE;
+    }
+    return PyLong_FromUnsignedLong(*mode);
 }
 %}
 
