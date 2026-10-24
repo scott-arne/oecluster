@@ -1778,30 +1778,53 @@ PyObject* oecluster_caller_pool_mode() {
 // GIL release for the long-running entry points (overrides the general
 // handler above)
 //
-// Every override releases the GIL around $action and restores it on each exit
-// path. Most of them then share one catch ladder, differing only in the name
-// in the fallback message; spelling that out by hand for each one invited the
-// ladders to drift apart, and one of them already had. `NAME` is SWIG
-// preprocessor stringification, which is what keeps each message naming its
-// own function. The entry points that can plausibly exhaust memory use
-// OECLUSTER_GIL_MEMORY_EXCEPTION instead, which adds a pair of catch clauses.
+// Every override releases the GIL around $action, unless the memory-pool mode
+// is unsafe (below), and restores it on each exit path. Most of them then
+// share one catch ladder, differing only in the name in the fallback message;
+// spelling that out by hand for each one invited the ladders to drift apart,
+// and one of them already had. `NAME` is SWIG preprocessor stringification,
+// which is what keeps each message naming its own function. The entry points
+// that can plausibly exhaust memory use OECLUSTER_GIL_MEMORY_EXCEPTION
+// instead, which adds a pair of catch clauses.
+//
+// Under a resolved memory-pool mode that is not thread-safe, the call keeps
+// the GIL. OpenEye then requires single-threaded use, and holding the GIL
+// serialises the call against every other Python thread. Another thread runs
+// only while a progress callback runs Python code, and the call's OpenEye
+// work, then all on this thread, waits for it. The GIL cannot hold back an
+// OpenEye call another thread is running, because OpenEye's wrappers release
+// the GIL around their work (measured on 2026-10-24); OpenEye's own rule under
+// these modes forbids such a call. The scope records the caller's mode for
+// the native worker gate, and tells it that a progress callback can run only
+// on this thread. The inner braces keep the initialized locals out of the
+// scope that SWIG's earlier `goto fail` jumps cross. The scope is destroyed on
+// every exit, including SWIG_exception's jump to `fail`.
 // ============================================================================
 %define OECLUSTER_GIL_EXCEPTION(QUALIFIED, NAME)
 %exception QUALIFIED {
-    Py_BEGIN_ALLOW_THREADS
-    try {
-        $action
-    } catch (const OECluster::OEClusterError& e) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, e.what());
-    } catch (const std::exception& e) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, e.what());
-    } catch (...) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, "Unknown C++ exception in " `NAME`);
+    {
+        const std::optional<unsigned int> _oecluster_python_mode =
+            _oecluster_caller_pool_mode();
+        const bool _oecluster_keep_gil = !OECluster::pool_is_thread_safe(
+            OECluster::resolve_pool_mode(_oecluster_python_mode));
+        OECluster::CallerPoolModeScope _oecluster_pool_scope(
+            _oecluster_python_mode, _oecluster_keep_gil);
+        PyThreadState* _oecluster_saved =
+            _oecluster_keep_gil ? nullptr : PyEval_SaveThread();
+        try {
+            $action
+        } catch (const OECluster::OEClusterError& e) {
+            if (_oecluster_saved) PyEval_RestoreThread(_oecluster_saved);
+            SWIG_exception(SWIG_RuntimeError, e.what());
+        } catch (const std::exception& e) {
+            if (_oecluster_saved) PyEval_RestoreThread(_oecluster_saved);
+            SWIG_exception(SWIG_RuntimeError, e.what());
+        } catch (...) {
+            if (_oecluster_saved) PyEval_RestoreThread(_oecluster_saved);
+            SWIG_exception(SWIG_RuntimeError, "Unknown C++ exception in " `NAME`);
+        }
+        if (_oecluster_saved) PyEval_RestoreThread(_oecluster_saved);
     }
-    Py_END_ALLOW_THREADS
 }
 %enddef
 
@@ -1811,26 +1834,35 @@ PyObject* oecluster_caller_pool_mode() {
 // machine from a refused input.
 %define OECLUSTER_GIL_MEMORY_EXCEPTION(QUALIFIED, NAME)
 %exception QUALIFIED {
-    Py_BEGIN_ALLOW_THREADS
-    try {
-        $action
-    } catch (const OECluster::OEClusterError& e) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, e.what());
-    } catch (const std::bad_alloc&) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_MemoryError, `NAME` ": out of memory");
-    } catch (const std::length_error& e) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_MemoryError, e.what());
-    } catch (const std::exception& e) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, e.what());
-    } catch (...) {
-        Py_BLOCK_THREADS
-        SWIG_exception(SWIG_RuntimeError, "Unknown C++ exception in " `NAME`);
+    {
+        const std::optional<unsigned int> _oecluster_python_mode =
+            _oecluster_caller_pool_mode();
+        const bool _oecluster_keep_gil = !OECluster::pool_is_thread_safe(
+            OECluster::resolve_pool_mode(_oecluster_python_mode));
+        OECluster::CallerPoolModeScope _oecluster_pool_scope(
+            _oecluster_python_mode, _oecluster_keep_gil);
+        PyThreadState* _oecluster_saved =
+            _oecluster_keep_gil ? nullptr : PyEval_SaveThread();
+        try {
+            $action
+        } catch (const OECluster::OEClusterError& e) {
+            if (_oecluster_saved) PyEval_RestoreThread(_oecluster_saved);
+            SWIG_exception(SWIG_RuntimeError, e.what());
+        } catch (const std::bad_alloc&) {
+            if (_oecluster_saved) PyEval_RestoreThread(_oecluster_saved);
+            SWIG_exception(SWIG_MemoryError, `NAME` ": out of memory");
+        } catch (const std::length_error& e) {
+            if (_oecluster_saved) PyEval_RestoreThread(_oecluster_saved);
+            SWIG_exception(SWIG_MemoryError, e.what());
+        } catch (const std::exception& e) {
+            if (_oecluster_saved) PyEval_RestoreThread(_oecluster_saved);
+            SWIG_exception(SWIG_RuntimeError, e.what());
+        } catch (...) {
+            if (_oecluster_saved) PyEval_RestoreThread(_oecluster_saved);
+            SWIG_exception(SWIG_RuntimeError, "Unknown C++ exception in " `NAME`);
+        }
+        if (_oecluster_saved) PyEval_RestoreThread(_oecluster_saved);
     }
-    Py_END_ALLOW_THREADS
 }
 %enddef
 

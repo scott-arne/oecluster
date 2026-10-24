@@ -13,7 +13,9 @@ fails a function whose text it cannot follow: a release or re-acquire out of
 turn, a second call, a preprocessor conditional, a release that does not begin a
 statement, or a branch, label or block end between that release and the call. A
 GIL change or jump the text does not spell out, such as a helper function that
-re-acquires the GIL internally, is invisible to that scan.
+re-acquires the GIL internally, is invisible to that scan. The one condition it
+accepts on a release is the macros' memory-pool gate, which keeps the GIL when
+the caller's mode is not thread-safe; test_pool_mode.py checks that branch.
 
 The second times calls into the imported extension while a second thread tries
 to run, which is the check for such a hidden re-acquire on the calls it covers.
@@ -63,6 +65,12 @@ _LABEL = re.compile(r"(?:^|[;{}])[ \t]*(\w+)[ \t]*:(?!:)", re.MULTILINE)
 _CONDITIONAL_LINE = re.compile(r"^[ \t]*#[ \t]*(?:if|ifdef|ifndef|elif|else|endif)\b",
                                re.MULTILINE)
 _QUALIFIED_CALL = re.compile(r"\bOECluster::\w+\(")
+# The GIL macros' own condition on the release (swig/oecluster.i): a declaration
+# that begins a statement and skips the release only under an unsafe
+# memory-pool mode. Text before a release that ends this way is the gate, not a
+# condition the scan cannot follow.
+_POOL_MODE_GATE = re.compile(r"(?:^|[;{}])\s*PyThreadState\s*\*\s*_oecluster_saved\s*=\s*"
+                             r"_oecluster_keep_gil\s*\?\s*nullptr\s*:\s*\Z")
 # Under build/, this repository builds into build/ itself (the default CMake
 # preset) and build/{wheel_tag} (pyproject's build-dir).
 _SHADOW_MODULE_PATTERNS = ("swig/_oecluster.py", "*/swig/_oecluster.py")
@@ -145,7 +153,8 @@ def _release_problem(function, body, name):
     # release sits in, which would also run the destructor of a scoped release.
     release = last.start()
     preceding = code[:release].rstrip()
-    if preceding and preceding[-1] not in ";{}":
+    if (preceding and preceding[-1] not in ";{}"
+            and not _POOL_MODE_GATE.search(preceding)):
         return (f"{function}'s {last.group(0)} on line {line(release)} does not "
                 "begin a statement, so a condition may skip it")
     branch = _BRANCH.search(code, release, call)
@@ -178,7 +187,8 @@ def _unreleased(names, wrapper_text):
     _ACQUIRING re-acquires it, and a release while released or a re-acquire
     while held fails the function as malformed. The call must be reached
     released. So that the text order is the order that runs, the release the
-    replay ended on must begin a statement, and between it and the call there
+    replay ended on must begin a statement, or end the macros' memory-pool
+    gate (_POOL_MODE_GATE), and between it and the call there
     may be no if, else, for, while, do, switch, case, default or goto, no
     label, and no brace closing the block the release sits in.
 
@@ -252,7 +262,8 @@ def _bound_wrapper(build_root, module_file):
 
 
 def test_every_registered_wrapper_releases_the_gil():
-    """Every function that runs a registered call releases the GIL.
+    """Every function that runs a registered call releases the GIL, unless
+    the caller's memory-pool mode is not thread-safe.
 
     Scans the wrapper source in the build tree whose shadow module the import
     uses, assuming that wrapper is the one the imported extension was compiled
@@ -329,6 +340,23 @@ def test_a_registered_call_inside_its_release_is_accepted():
     assert _unreleased(["demo"], _synthetic_wrapper(body)) == []
 
 
+def test_a_release_skipped_only_under_an_unsafe_pool_is_accepted():
+    """The shape the GIL macros generate: the release is skipped, and the GIL
+    kept, only when the caller's memory-pool mode is not thread-safe."""
+    body = ("  {\n"
+            "    PyThreadState* _oecluster_saved =\n"
+            "      _oecluster_keep_gil ? nullptr : PyEval_SaveThread();\n"
+            "    try {\n"
+            "      result = OECluster::demo(arg1);\n"
+            "    } catch (...) {\n"
+            "      if (_oecluster_saved) PyEval_RestoreThread(_oecluster_saved);\n"
+            '      SWIG_exception(SWIG_RuntimeError, "Unknown C++ exception in " "demo");\n'
+            "    }\n"
+            "    if (_oecluster_saved) PyEval_RestoreThread(_oecluster_saved);\n"
+            "  }\n")
+    assert _unreleased(["demo"], _synthetic_wrapper(body)) == []
+
+
 def test_a_registration_with_no_wrapper_function_is_refused():
     """A registration naming a function SWIG never wrapped, as the removed
     ``cdist`` one did, has no function to check, and is reported rather than
@@ -394,6 +422,10 @@ def test_a_registration_with_no_wrapper_function_is_refused():
       "  result = OECluster::demo(arg1);\n"
       "  Py_END_ALLOW_THREADS\n"),
      "does not begin a statement"),
+    (("  PyThreadState* saved = ready ? nullptr : PyEval_SaveThread();\n"
+      "  result = OECluster::demo(arg1);\n"
+      "  if (saved) PyEval_RestoreThread(saved);\n"),
+     "does not begin a statement"),
     (("  goto released;\n"
       "  Py_BEGIN_ALLOW_THREADS\n"
       "released:\n"
@@ -403,7 +435,8 @@ def test_a_registration_with_no_wrapper_function_is_refused():
 ], ids=["marker-after-the-call", "marker-only-under-if-0", "call-after-the-end",
         "no-call", "blocked-before-the-call", "gilstate-ensure-before-the-call",
         "double-release", "branch-after-the-release", "release-in-a-closed-block",
-        "release-under-a-braceless-if", "label-after-the-release"])
+        "release-under-a-braceless-if", "release-under-another-condition",
+        "label-after-the-release"])
 def test_a_registered_call_outside_its_release_is_refused(body, reason):
     problems = _unreleased(["demo"], _synthetic_wrapper(body))
     assert len(problems) == 1, problems

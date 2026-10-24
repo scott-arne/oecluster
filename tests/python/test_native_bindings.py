@@ -1000,8 +1000,8 @@ def test_memory_exception_macro_raises_memory_error():
     assert text.count(define) == 1
     start = text.index(define)
     body = text[start:text.index("%enddef", start)]
-    assert "Py_BEGIN_ALLOW_THREADS" in body
-    assert "Py_END_ALLOW_THREADS" in body
+    assert "PyEval_SaveThread()" in body
+    assert "PyEval_RestoreThread(_oecluster_saved)" in body
     generic = body.index("catch (const std::exception& e)")
     for clause in ("catch (const std::bad_alloc&)",
                    "catch (const std::length_error& e)"):
@@ -1009,7 +1009,7 @@ def test_memory_exception_macro_raises_memory_error():
         position = body.index(clause)
         assert position < generic, f"{clause} is unreachable after std::exception"
         handler = body[position:body.index("}", position)]
-        assert "Py_BLOCK_THREADS" in handler
+        assert "PyEval_RestoreThread(_oecluster_saved)" in handler
         assert "SWIG_MemoryError" in handler
 
     for name in ("cluster_report", "isim", "isim_report", "butina_cluster",
