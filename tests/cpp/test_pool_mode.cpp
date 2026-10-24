@@ -60,17 +60,17 @@ public:
 };
 
 template <typename T, typename = void>
-struct heap_allocatable : std::false_type {};
+struct plain_new_compiles : std::false_type {};
 template <typename T>
-struct heap_allocatable<T, std::void_t<decltype(new T(std::optional<unsigned int>{}))>>
+struct plain_new_compiles<T, std::void_t<decltype(new T(std::optional<unsigned int>{}))>>
     : std::true_type {};
 
 }  // namespace
 
 static_assert(!std::is_copy_constructible_v<CallerPoolModeScope>);
 static_assert(!std::is_move_constructible_v<CallerPoolModeScope>);
-static_assert(!heap_allocatable<CallerPoolModeScope>::value,
-              "CallerPoolModeScope must not be heap-allocatable");
+static_assert(!plain_new_compiles<CallerPoolModeScope>::value,
+              "CallerPoolModeScope must reject a plain new-expression (new, std::make_unique)");
 
 TEST(PoolModeTest, TheSuiteRunsUnderAThreadSafeNativePool) {
     // Every safe-mode expectation below assumes the native default.

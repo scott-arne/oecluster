@@ -67,8 +67,9 @@ bool callbacks_on_calling_thread();
 /**
  * @brief The worker count a comparison may use under the current mode.
  *
- * :param comparison: The comparison whose ``Compare``, ``TryPDist`` or
- *     ``TryCDist`` the workers will run.
+ * :param comparison: The comparison whose ``Compare``, protected
+ *     ``CompareUnordered`` seam, ``TryPDist`` or ``TryCDist`` the workers
+ *     will run.
  * :param requested: The caller's request; 0 means hardware concurrency.
  * :returns: 1 when the comparison runs OpenEye code and effective_pool_mode()
  *     is not thread-safe, otherwise ``requested`` unchanged.
