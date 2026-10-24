@@ -8,6 +8,7 @@
 #ifndef OECLUSTER_DESCRIPTORBUILD_H
 #define OECLUSTER_DESCRIPTORBUILD_H
 
+#include <oefp/descriptor_batch.h>
 #include <oefp/descriptor_calculator.h>
 #include <oefp/descriptor_schema.h>
 #include <oefp/descriptor_source.h>
@@ -123,6 +124,26 @@ std::string to_lower(const std::string& value);
  */
 std::vector<const OEChem::OEMolBase*> checked_inputs(
     const std::vector<OEChem::OEMolBase*>& mols, const char* caller);
+
+namespace detail {
+
+/**
+ * @brief Compute descriptor rows, serially when the memory-pool mode is unsafe.
+ *
+ * oefp's DescriptorCalculator::CalculateBatch always runs a ParallelFor at
+ * hardware concurrency, and its workers normalize molecules through OEChem.
+ * Under a memory-pool mode that is not thread-safe (oecluster/PoolMode.h) this
+ * does what CalculateBatch does on the calling thread instead.
+ *
+ * :param calculator: The calculator to run.
+ * :param inputs: Molecules, none null (checked_inputs guarantees it).
+ * :returns: One row per molecule, in input order.
+ */
+OEFP::DescriptorBatch calculate_descriptor_batch(
+    const OEFP::DescriptorCalculator& calculator,
+    const std::vector<const OEChem::OEMolBase*>& inputs);
+
+}  // namespace detail
 
 }  // namespace OECluster
 

@@ -13,6 +13,7 @@
 #include <string>
 #include <oechem.h>
 #include "oecluster/Error.h"
+#include "oecluster/PoolMode.h"
 
 namespace OECluster {
 
@@ -37,6 +38,24 @@ std::vector<const OEChem::OEMolBase*> checked_inputs(
     }
     return inputs;
 }
+
+namespace detail {
+
+OEFP::DescriptorBatch calculate_descriptor_batch(
+    const OEFP::DescriptorCalculator& calculator,
+    const std::vector<const OEChem::OEMolBase*>& inputs) {
+    if (pool_is_thread_safe(effective_pool_mode())) {
+        return calculator.CalculateBatch(inputs);
+    }
+    // CalculateBatch's own steps (oefp descriptor_calculator.cpp), on this thread.
+    OEFP::DescriptorBatch batch = OEFP::DescriptorBatch::Empty(calculator.SchemaPtr());
+    for (const OEChem::OEMolBase* mol : inputs) {
+        batch.Append(calculator.Compute(*mol));
+    }
+    return batch;
+}
+
+}  // namespace detail
 
 namespace {
 

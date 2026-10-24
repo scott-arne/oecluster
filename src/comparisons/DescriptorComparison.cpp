@@ -349,7 +349,7 @@ DescriptorComparison::DescriptorComparison(const std::vector<OEChem::OEMolBase*>
         numeric_selection(schema, opts, impl->dropped_columns, impl->dropped_reasons);
 
     try {
-        OEFP::DescriptorBatch batch = calculator->CalculateBatch(inputs);
+        OEFP::DescriptorBatch batch = detail::calculate_descriptor_batch(*calculator, inputs);
         // The matrix is materialized over the selection as requested and
         // complete_case is enforced against it here, before any column is
         // dropped below. A column whose gaps are present-and-NaN rather than
@@ -650,7 +650,7 @@ std::vector<size_t> descriptor_excluded_indices(const std::vector<OEChem::OEMolB
 
     OEFP::DescriptorNumericMatrix matrix;
     try {
-        matrix = calculator->CalculateBatch(inputs).ToNumericMatrix(
+        matrix = detail::calculate_descriptor_batch(*calculator, inputs).ToNumericMatrix(
             OEFP::DescriptorSelection::Indices(selection));
     } catch (const std::exception& exc) {
         throw ComparisonError("Failed to compute descriptors for complete-case filtering: " +

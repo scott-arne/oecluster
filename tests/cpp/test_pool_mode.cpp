@@ -20,6 +20,8 @@
 #include "oecluster/comparisons/DescriptorComparison.h"
 #include "oecluster/comparisons/FingerprintComparison.h"
 
+#include "../../src/DescriptorBuild.h"
+
 using OECluster::callbacks_on_calling_thread;
 using OECluster::CallerPoolModeScope;
 using OECluster::effective_pool_mode;
@@ -217,4 +219,27 @@ TEST(PoolModeTest, FingerprintAndDescriptorScoringRunNoOpenEyeCode) {
     options.metric = "euclidean";
     const OECluster::DescriptorComparison descriptor(mols, options);
     EXPECT_FALSE(descriptor.RunsOpenEyeCode());
+}
+
+TEST(PoolModeTest, DescriptorRowsAreTheSameUnderAnUnsafePool) {
+    std::vector<OEChem::OEGraphMol> owned(4);
+    const char* smiles[] = {"c1ccccc1", "Cc1ccccc1", "CCO", "c1ccncc1"};
+    std::vector<const OEChem::OEMolBase*> inputs;
+    for (size_t i = 0; i < owned.size(); ++i) {
+        OEChem::OESmilesToMol(owned[i], smiles[i]);
+        inputs.push_back(&static_cast<const OEChem::OEMolBase&>(owned[i]));
+    }
+    const auto calculator = OECluster::make_descriptor_calculator({"openeye"});
+    const auto selection = OEFP::DescriptorSelection::Names({"MolecularWeight"});
+    const OEFP::DescriptorNumericMatrix parallel =
+        calculator->CalculateBatch(inputs).ToNumericMatrix(selection);
+
+    CallerPoolModeScope scope(UNSAFE);
+    const OEFP::DescriptorNumericMatrix serial =
+        OECluster::detail::calculate_descriptor_batch(*calculator, inputs)
+            .ToNumericMatrix(selection);
+
+    EXPECT_EQ(serial.rows, inputs.size());
+    EXPECT_EQ(serial.values, parallel.values);
+    EXPECT_EQ(serial.validity, parallel.validity);
 }

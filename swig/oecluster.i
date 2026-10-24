@@ -47,6 +47,7 @@
 #include "oefp/oefp.h"
 
 #include <cstdio>
+#include <optional>
 #include <oechem.h>
 #include <oebio.h>
 #include <oespruce.h>
@@ -1698,6 +1699,51 @@ static std::function<void(size_t, size_t)> _oecluster_make_progress(PyObject* ca
     }
 }
 
+%{
+// The memory-pool mode the application set through OpenEye's Python layer,
+// read while the wrapper still holds the GIL. Looked up in sys.modules rather
+// than imported: importing oecluster does not import openeye.oechem, and an
+// application that never loaded it cannot have set a mode through it, so the
+// native mode stands. A failed read answers 0, an unsafe mode: a call wrongly
+// kept serial is slow, while one wrongly run in parallel crashes. Only a
+// cleanly missing module answers "no value".
+static std::optional<unsigned int> _oecluster_caller_pool_mode() {
+    PyObject* modules = PyImport_GetModuleDict();  // borrowed
+    if (modules == nullptr) {
+        PyErr_Clear();
+        return 0u;
+    }
+    PyObject* key = PyUnicode_FromString("openeye.oechem");
+    if (key == nullptr) {
+        PyErr_Clear();
+        return 0u;
+    }
+    // PyDict_GetItemWithError tells a missing key (no error set) from a
+    // failed lookup (error set); only the first means "never loaded".
+    PyObject* oechem = PyDict_GetItemWithError(modules, key);  // borrowed
+    Py_DECREF(key);
+    if (oechem == nullptr) {
+        if (PyErr_Occurred()) {
+            PyErr_Clear();
+            return 0u;
+        }
+        return std::nullopt;
+    }
+    PyObject* value = PyObject_CallMethod(oechem, "OEGetMemPoolMode", nullptr);
+    if (value == nullptr) {
+        PyErr_Clear();
+        return 0u;
+    }
+    const unsigned long mode = PyLong_AsUnsignedLong(value);
+    Py_DECREF(value);
+    if (PyErr_Occurred()) {
+        PyErr_Clear();
+        return 0u;
+    }
+    return static_cast<unsigned int>(mode);
+}
+%}
+
 // ============================================================================
 // GIL release for the long-running entry points (overrides the general
 // handler above)
@@ -1849,6 +1895,33 @@ OECLUSTER_GIL_EXCEPTION(OECluster::consensus_strength, consensus_strength)
 // leiden builds the same graph, weighs it on worker threads and runs a
 // serial optimizer that can take seconds at scale.
 OECLUSTER_GIL_EXCEPTION(OECluster::leiden, leiden)
+
+// For the descriptor entry points, which compute descriptors through oefp
+// threads and run under the general ladder with the GIL held: the scope lets
+// calculate_descriptor_batch see the caller's mode in a statically linked
+// build. Not added to the general %exception, which would put a sys.modules
+// read in front of every wrapped call.
+%define OECLUSTER_POOL_SCOPED_EXCEPTION(QUALIFIED)
+%exception QUALIFIED {
+    {
+        OECluster::CallerPoolModeScope _oecluster_pool_scope(
+            _oecluster_caller_pool_mode());
+        try {
+            $action
+        } catch (const OECluster::OEClusterError& e) {
+            SWIG_exception(SWIG_RuntimeError, e.what());
+        } catch (const std::exception& e) {
+            SWIG_exception(SWIG_RuntimeError, e.what());
+        } catch (...) {
+            SWIG_exception(SWIG_RuntimeError, "Unknown C++ exception");
+        }
+    }
+}
+%enddef
+
+OECLUSTER_POOL_SCOPED_EXCEPTION(OECluster::DescriptorComparison::DescriptorComparison)
+OECLUSTER_POOL_SCOPED_EXCEPTION(OECluster::descriptor_statistics)
+OECLUSTER_POOL_SCOPED_EXCEPTION(OECluster::descriptor_excluded_indices)
 
 // ============================================================================
 // Ignore problematic members before %include

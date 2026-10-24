@@ -81,7 +81,7 @@ DescriptorStatisticsResult descriptor_statistics(const std::vector<OEChem::OEMol
 
     const OEFP::DescriptorBatch batch = [&]() {
         try {
-            return calculator->CalculateBatch(inputs);
+            return detail::calculate_descriptor_batch(*calculator, inputs);
         } catch (const std::exception& exc) {
             throw ComparisonError("Failed to compute descriptors: " + std::string(exc.what()));
         }
