@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
+#include <atomic>
 #include <cmath>
+#include <memory>
 #include "oecluster/PDist.h"
 #include "oecluster/Error.h"
 #include "oecluster/StorageBackend.h"
@@ -221,4 +223,42 @@ TEST_F(PDistCutoffOrientationTest, SimilarityIntoDenseStorageStillWorks) {
             EXPECT_NEAR(storage.Get(i, j), comparison.Compare(i, j), 1e-12);
         }
     }
+}
+
+/// MockComparison whose clones share one Clone() counter.
+class CloneCountingComparison : public MockComparison {
+public:
+    explicit CloneCountingComparison(size_t n)
+        : MockComparison(n), clones_(std::make_shared<std::atomic<size_t>>(0)) {}
+
+    std::unique_ptr<PairwiseComparison> Clone() const override {
+        clones_->fetch_add(1);
+        return std::make_unique<CloneCountingComparison>(*this);
+    }
+
+    size_t Clones() const { return clones_->load(); }
+
+private:
+    std::shared_ptr<std::atomic<size_t>> clones_;
+};
+
+TEST(PDistTest, AOneChunkProblemBuildsOneClone) {
+    CloneCountingComparison comparison(4);  // 6 pairs, one chunk of 256
+    DenseStorage storage(4);
+    PDistOptions opts;
+    opts.num_threads = 8;
+    pdist(comparison, storage, opts);
+    EXPECT_EQ(comparison.Clones(), 1u);
+    EXPECT_DOUBLE_EQ(storage.Get(0, 3), 0.75);
+}
+
+TEST(PDistTest, AnAbsurdThreadCountBuildsAtMostOneClonePerChunk) {
+    CloneCountingComparison comparison(4);
+    DenseStorage storage(4);
+    PDistOptions opts;
+    opts.num_threads = size_t{1} << 61;
+    opts.chunk_size = 2;  // 6 pairs, 3 chunks
+    EXPECT_NO_THROW(pdist(comparison, storage, opts));
+    EXPECT_LE(comparison.Clones(), 3u);
+    EXPECT_DOUBLE_EQ(storage.Get(0, 3), 0.75);
 }

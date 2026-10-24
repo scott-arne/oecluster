@@ -4,6 +4,9 @@
  */
 
 #include <gtest/gtest.h>
+#include <atomic>
+#include <memory>
+#include <string>
 #include "oecluster/oecluster.h"
 #include "oecluster/comparisons/FingerprintComparison.h"
 #include <oechem.h>
@@ -211,4 +214,51 @@ TEST_F(CDistTest, SimilarityWithoutCutoffStillWorks) {
             EXPECT_NEAR(output[i * n_b + j], comparison.Compare(i, n_a + j), 1e-12);
         }
     }
+}
+
+/// Distances |i - j| / n over four items, whose clones share one Clone()
+/// counter.
+class CloneCountingCDistComparison : public PairwiseComparison {
+public:
+    CloneCountingCDistComparison() : clones_(std::make_shared<std::atomic<size_t>>(0)) {}
+
+    double Compare(size_t i, size_t j) override {
+        return static_cast<double>(i > j ? i - j : j - i) / static_cast<double>(Size());
+    }
+
+    std::unique_ptr<PairwiseComparison> Clone() const override {
+        clones_->fetch_add(1);
+        return std::make_unique<CloneCountingCDistComparison>(*this);
+    }
+
+    size_t Size() const override { return 4; }
+    std::string ComparisonName() const override { return "clone-counting"; }
+
+    size_t Clones() const { return clones_->load(); }
+
+private:
+    std::shared_ptr<std::atomic<size_t>> clones_;
+};
+
+// TEST_F because CDistTest names the fixture above, and a suite cannot mix
+// TEST and TEST_F; the fixture's molecules are unused here.
+TEST_F(CDistTest, AOneChunkProblemBuildsOneClone) {
+    CloneCountingCDistComparison comparison;  // 2x2 = 4 pairs, one chunk of 256
+    std::vector<double> out(2 * 2, -1.0);
+    CDistOptions opts;
+    opts.num_threads = 8;
+    cdist(comparison, 2, out.data(), opts);
+    EXPECT_EQ(comparison.Clones(), 1u);
+    EXPECT_DOUBLE_EQ(out[1], 0.75);  // pair (0, 3)
+}
+
+TEST_F(CDistTest, AnAbsurdThreadCountBuildsAtMostOneClonePerChunk) {
+    CloneCountingCDistComparison comparison;
+    std::vector<double> out(2 * 2, -1.0);
+    CDistOptions opts;
+    opts.num_threads = size_t{1} << 61;
+    opts.chunk_size = 2;  // 4 pairs, 2 chunks
+    EXPECT_NO_THROW(cdist(comparison, 2, out.data(), opts));
+    EXPECT_LE(comparison.Clones(), 2u);
+    EXPECT_DOUBLE_EQ(out[1], 0.75);  // pair (0, 3)
 }

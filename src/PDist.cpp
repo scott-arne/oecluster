@@ -5,6 +5,7 @@
 
 #include "oecluster/PDist.h"
 
+#include <algorithm>
 #include <atomic>
 #include <mutex>
 #include <vector>
@@ -13,6 +14,7 @@
 #include "oecluster/CondensedIndex.h"
 #include "oecluster/Error.h"
 #include "oecluster/PairwiseComparison.h"
+#include "oecluster/PoolMode.h"
 #include "oecluster/StorageBackend.h"
 #include "oecluster/ThreadPool.h"
 
@@ -57,23 +59,41 @@ void pdist(PairwiseComparison& comparison, StorageBackend& storage,
         return;
     }
 
-    if (comparison.TryPDist(storage, options)) {
+    // The bulk hook sees the same capped count as the generic loop below, so
+    // an override that runs OpenEye code is serialised too.
+    PDistOptions effective = options;
+    effective.num_threads = safe_worker_count(comparison, options.num_threads);
+
+    if (comparison.TryPDist(storage, effective)) {
         storage.Finalize();
         return;
     }
 
-    ThreadPool pool(options.num_threads);
-    const size_t num_threads = pool.NumThreads();
+    // A progress callback is called from whichever worker finished a chunk.
+    // When the caller can service callbacks only on its own thread -- the
+    // bindings hold the GIL under an unsafe memory-pool mode -- one worker,
+    // which ThreadPool runs on the calling thread, keeps every call there.
+    const size_t requested = options.progress && callbacks_on_calling_thread()
+                                 ? 1
+                                 : effective.num_threads;
+    ThreadPool pool(requested);
     const size_t chunk_size = options.chunk_size > 0 ? options.chunk_size : 256;
+    const size_t total_chunks =
+        total_pairs / chunk_size + (total_pairs % chunk_size != 0 ? 1 : 0);
 
-    // Create one clone per thread
+    // One clone per participant. A one-thread pool runs every chunk on the
+    // calling thread. Otherwise detail::launch_workers starts exactly
+    // min(NumThreads(), total_chunks) workers, each a fresh thread that takes
+    // one ordinal below, so every index stays in range.
+    const size_t participants =
+        pool.NumThreads() == 1 ? 1 : std::min(pool.NumThreads(), total_chunks);
     std::vector<std::unique_ptr<PairwiseComparison>> clones;
-    clones.reserve(num_threads);
-    for (size_t t = 0; t < num_threads; ++t) {
+    clones.reserve(participants);
+    for (size_t t = 0; t < participants; ++t) {
         clones.push_back(comparison.Clone());
     }
 
-    // Atomic counter for thread-local index assignment
+    // Atomic counter for worker ordinal assignment
     std::atomic<size_t> thread_ordinal{0};
 
     // Progress tracking
@@ -82,9 +102,13 @@ void pdist(PairwiseComparison& comparison, StorageBackend& storage,
 
     pool.ParallelFor(0, total_pairs, chunk_size,
         [&](size_t chunk_begin, size_t chunk_end) {
-            // Assign each thread a unique ordinal on first entry
-            thread_local size_t my_ordinal = thread_ordinal.fetch_add(1, std::memory_order_relaxed);
-            auto& local_comparison = clones[my_ordinal];
+            PairwiseComparison* local_comparison = clones.front().get();
+            if (participants > 1) {
+                // Each worker takes a unique ordinal on its first chunk.
+                thread_local size_t my_ordinal =
+                    thread_ordinal.fetch_add(1, std::memory_order_relaxed);
+                local_comparison = clones[my_ordinal].get();
+            }
 
             size_t i, j;
             for (size_t k = chunk_begin; k < chunk_end; ++k) {

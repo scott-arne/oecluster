@@ -32,8 +32,9 @@ public:
      * Chunks of size chunk_size are claimed by threads via atomic counter,
      * and at most one worker per chunk is started, so a call with fewer
      * chunks than NumThreads() starts only as many threads as it has chunks.
-     * Exceptions from any worker are captured and re-thrown after all
-     * workers complete.
+     * A pool with exactly one thread runs every chunk on the calling thread,
+     * in order, and starts no worker. Exceptions from any worker are
+     * captured and re-thrown after all workers complete.
      *
      * If a worker thread cannot be spawned, the workers already started are
      * joined and the std::system_error is propagated. A body exception or a

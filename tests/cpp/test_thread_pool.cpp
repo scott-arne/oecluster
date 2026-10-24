@@ -1,5 +1,8 @@
 #include <gtest/gtest.h>
 #include <atomic>
+#include <mutex>
+#include <set>
+#include <stdexcept>
 #include <system_error>
 #include <thread>
 #include <vector>
@@ -156,4 +159,44 @@ TEST(ThreadPoolTest, ParallelForWithFewerChunksThanThreadsCoversTheRange) {
     for (size_t i = 0; i < hits.size(); ++i) {
         EXPECT_EQ(hits[i], 1) << "item " << i;
     }
+}
+
+TEST(ThreadPoolTest, OneThreadRunsEveryChunkOnTheCallingThreadInOrder) {
+    ThreadPool pool(1);
+    const std::thread::id caller = std::this_thread::get_id();
+    std::vector<size_t> begins;
+    std::set<std::thread::id> seen;
+    pool.ParallelFor(0, 10, 3, [&](size_t begin, size_t) {
+        begins.push_back(begin);
+        seen.insert(std::this_thread::get_id());
+    });
+    EXPECT_EQ(seen, std::set<std::thread::id>{caller});
+    EXPECT_EQ(begins, (std::vector<size_t>{0, 3, 6, 9}));
+}
+
+TEST(ThreadPoolTest, OneThreadPropagatesABodyException) {
+    ThreadPool pool(1);
+    EXPECT_THROW(pool.ParallelFor(0, 4, 1, [](size_t, size_t) {
+        throw std::runtime_error("boom");
+    }), std::runtime_error);
+}
+
+TEST(ThreadPoolTest, OneThreadDoesNoWorkAfterCancel) {
+    ThreadPool pool(1);
+    pool.Cancel();
+    size_t calls = 0;
+    pool.ParallelFor(0, 4, 1, [&](size_t, size_t) { ++calls; });
+    EXPECT_EQ(calls, 0u);
+}
+
+TEST(ThreadPoolTest, TwoThreadsRunOffTheCallingThread) {
+    ThreadPool pool(2);
+    const std::thread::id caller = std::this_thread::get_id();
+    std::mutex mutex;
+    std::set<std::thread::id> seen;
+    pool.ParallelFor(0, 8, 1, [&](size_t, size_t) {
+        std::lock_guard<std::mutex> lock(mutex);
+        seen.insert(std::this_thread::get_id());
+    });
+    EXPECT_EQ(seen.count(caller), 0u);
 }

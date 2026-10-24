@@ -15,6 +15,7 @@
 
 #include "DiversityValidation.h"
 #include "oecluster/PairwiseComparison.h"
+#include "oecluster/PoolMode.h"
 #include "oecluster/ThreadPool.h"
 
 namespace OECluster::detail {
@@ -23,13 +24,16 @@ namespace OECluster::detail {
 // A thread_local ordinal (the pdist pattern) is safe only for a single
 // ParallelFor call; these entry points make one per row or candidate, so
 // clones circulate through a free list instead and their number is bounded by
-// the concurrency actually reached.
+// the concurrency actually reached. The pool is sized through
+// safe_worker_count, so an unsafe OpenEye memory-pool mode keeps an
+// OpenEye-running comparison on one thread; a one-thread pool runs on the
+// calling thread.
 class ChunkedComparisons {
 public:
     ChunkedComparisons(const PairwiseComparison& prototype, size_t n,
                        size_t num_threads, size_t chunk_size)
         : prototype_(prototype),
-          pool_(capped_threads(num_threads, n)),
+          pool_(capped_threads(safe_worker_count(prototype, num_threads), n)),
           chunk_size_(chunk_size) {
         // At most one lease is live per pool thread, so returning a clone
         // never allocates in normal operation.
@@ -46,8 +50,9 @@ public:
         // ParallelFor's ceiling arithmetic.
         const size_t chunk = std::min(chunk_size_, range);
         if (chunk == range) {
-            // One chunk: ParallelFor would start a thread to run it, once per
-            // row or candidate, where running it here starts none.
+            // One chunk: a pool of more than one thread would start a thread
+            // to run it, once per row or candidate, where running it here
+            // starts none.
             Lease lease(*this);
             body(*lease.clone, 0, range);
             return;

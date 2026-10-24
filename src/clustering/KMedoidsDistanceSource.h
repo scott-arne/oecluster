@@ -196,8 +196,9 @@ private:
  *
  * Clones come from ChunkedComparisons' free list rather than one per pass.
  * That is the whole reason the seam is a runner: a streamed run makes
- * ``k + iterations`` passes, ParallelFor spawns fresh threads for each, so a
- * per-pass ordinal scheme would mint a new set of clones every pass. A lease
+ * ``k + iterations`` passes, ParallelFor on a pool of more than one thread
+ * spawns fresh threads for each, so a per-pass ordinal scheme would mint a new
+ * set of clones every pass. A lease
  * bounds them by the pool size instead, and a lease has to be scoped to the
  * work that uses it.
  *

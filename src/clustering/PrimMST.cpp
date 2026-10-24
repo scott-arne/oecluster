@@ -19,6 +19,7 @@
 #include "DistanceAccess.h"
 #include "StepTeam.h"
 #include "ThresholdGraph.h"
+#include "oecluster/PoolMode.h"
 
 namespace OECluster::detail {
 
@@ -196,7 +197,8 @@ std::vector<HDBSCANMSTEdge> prim_mst(PairwiseComparison& comparison,
                                      const PrimOptions& options) {
     const size_t n = comparison.Size();
     const size_t participants = prim_participants(
-        options.num_threads, n, std::thread::hardware_concurrency());
+        safe_worker_count(comparison, options.num_threads), n,
+        std::thread::hardware_concurrency());
     // Built here, serially, before the team starts: Clone() is const, but
     // nothing promises that a const call is safe to make concurrently.
     std::vector<std::unique_ptr<PairwiseComparison>> clones;
