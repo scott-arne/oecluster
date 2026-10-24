@@ -84,11 +84,11 @@ void ThreadPool::ParallelFor(size_t begin, size_t end, size_t chunk_size,
 
     if (pimpl_->num_threads_ == 1) {
         // A one-thread pool runs on the calling thread rather than on a worker
-        // of its own. A caller that holds the GIL while it waits -- the Python
-        // bindings do under an unsafe OpenEye memory-pool mode -- would
-        // deadlock if a worker had to take the GIL, as a progress callback
-        // does; on the calling thread, taking it again is re-entrant. The
-        // worker loop is unchanged, so chunk order, cancellation and the
+        // of its own. A caller that holds a lock a worker would need while it
+        // waits -- the GIL, for a binding that keeps it -- would deadlock if a
+        // worker had to take that lock, as a progress callback that calls into
+        // Python does; on the calling thread, taking it again is re-entrant.
+        // The worker loop is unchanged, so chunk order, cancellation and the
         // captured exception behave as before.
         worker();
     } else {

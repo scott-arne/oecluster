@@ -198,9 +198,8 @@ private:
  * That is the whole reason the seam is a runner: a streamed run makes
  * ``k + iterations`` passes, ParallelFor on a pool of more than one thread
  * spawns fresh threads for each, so a per-pass ordinal scheme would mint a new
- * set of clones every pass. A lease
- * bounds them by the pool size instead, and a lease has to be scoped to the
- * work that uses it.
+ * set of clones every pass. A lease bounds them by the pool size instead, and
+ * a lease has to be scoped to the work that uses it.
  *
  * The partition matches the matrix runner's exactly for every chunk size
  * validation admits. Both hand ParallelFor the chunk size clamped to the

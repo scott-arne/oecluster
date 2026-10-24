@@ -50,9 +50,10 @@ void cdist(PairwiseComparison& comparison, size_t n_a, double* output,
     }
 
     // A progress callback is called from whichever worker finished a chunk.
-    // When the caller can service callbacks only on its own thread -- the
-    // bindings hold the GIL under an unsafe memory-pool mode -- one worker,
-    // which ThreadPool runs on the calling thread, keeps every call there.
+    // When the caller can service callbacks only on its own thread
+    // (callbacks_on_calling_thread(), which a CallerPoolModeScope sets), one
+    // worker, which ThreadPool runs on the calling thread, keeps every call
+    // there.
     const size_t requested = options.progress && callbacks_on_calling_thread()
                                  ? 1
                                  : effective.num_threads;

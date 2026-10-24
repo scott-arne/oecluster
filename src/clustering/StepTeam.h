@@ -68,10 +68,10 @@ inline size_t work_unit(size_t range, size_t participants,
  *
  * ThreadPool::ParallelFor on a pool of more than one thread starts fresh
  * threads on every call, about 139 us per call for 14 threads, which a loop of
- * one call per item cannot afford. This
- * team starts participants - 1 threads once; Run() releases them for one step
- * and the calling thread takes part as participant 0. Idle threads spin, then
- * yield, then sleep, so a long run of serial steps does not burn a core each.
+ * one call per item cannot afford. This team starts participants - 1 threads
+ * once; Run() releases them for one step and the calling thread takes part as
+ * participant 0. Idle threads spin, then yield, then sleep, so a long run of
+ * serial steps does not burn a core each.
  */
 class StepTeam {
 public:
