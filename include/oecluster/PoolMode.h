@@ -67,7 +67,8 @@ bool callbacks_on_calling_thread();
 /**
  * @brief The worker count a comparison may use under the current mode.
  *
- * :param comparison: The comparison whose ``Compare`` the workers will call.
+ * :param comparison: The comparison whose ``Compare``, ``TryPDist`` or
+ *     ``TryCDist`` the workers will run.
  * :param requested: The caller's request; 0 means hardware concurrency.
  * :returns: 1 when the comparison runs OpenEye code and effective_pool_mode()
  *     is not thread-safe, otherwise ``requested`` unchanged.
@@ -83,6 +84,13 @@ size_t safe_worker_count(const PairwiseComparison& comparison, size_t requested)
  * destructor restores what the constructor replaced. Copy and move are
  * deleted, because a copy's destructor would restore the outer state while
  * the original scope is still live.
+ *
+ * Create it on the stack of the thread whose call it describes, so that it
+ * is destroyed on that thread in reverse order of creation. Its ``operator
+ * new`` and ``operator new[]`` are deleted, which rejects ``new`` and
+ * ``std::make_unique``. A route that bypasses a class ``operator new`` --
+ * ``::new``, ``std::make_shared``, or a heap-allocated object that holds a
+ * scope, such as a ``std::optional`` -- still compiles, and is just as wrong.
  */
 class CallerPoolModeScope {
 public:
@@ -100,6 +108,11 @@ public:
     CallerPoolModeScope& operator=(const CallerPoolModeScope&) = delete;
     CallerPoolModeScope(CallerPoolModeScope&&) = delete;
     CallerPoolModeScope& operator=(CallerPoolModeScope&&) = delete;
+
+    // A scope must be destroyed on the thread that created it, in reverse
+    // order of creation, which heap allocation cannot promise.
+    static void* operator new(std::size_t) = delete;
+    static void* operator new[](std::size_t) = delete;
 
 private:
     std::optional<unsigned int> previous_mode_;

@@ -9,6 +9,7 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <vector>
 
 #include <oechem.h>
@@ -58,7 +59,18 @@ public:
     std::string ComparisonName() const override { return "silent"; }
 };
 
+template <typename T, typename = void>
+struct heap_allocatable : std::false_type {};
+template <typename T>
+struct heap_allocatable<T, std::void_t<decltype(new T(std::optional<unsigned int>{}))>>
+    : std::true_type {};
+
 }  // namespace
+
+static_assert(!std::is_copy_constructible_v<CallerPoolModeScope>);
+static_assert(!std::is_move_constructible_v<CallerPoolModeScope>);
+static_assert(!heap_allocatable<CallerPoolModeScope>::value,
+              "CallerPoolModeScope must not be heap-allocatable");
 
 TEST(PoolModeTest, TheSuiteRunsUnderAThreadSafeNativePool) {
     // Every safe-mode expectation below assumes the native default.

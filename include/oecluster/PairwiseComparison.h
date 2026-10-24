@@ -74,7 +74,7 @@ public:
     virtual GateFacts Facts() const { return GateFacts(); }
 
     /**
-     * @brief Whether ``Compare`` runs OpenEye code.
+     * @brief Whether ``Compare``, ``TryPDist`` or ``TryCDist`` runs OpenEye code.
      *
      * safe_worker_count() (``oecluster/PoolMode.h``) reads this to decide
      * whether an unsafe OpenEye memory-pool mode must keep this comparison's
@@ -82,7 +82,8 @@ public:
      * says nothing is treated as unsafe. It describes scoring only: building
      * a comparison can run OpenEye code even when scoring does not.
      *
-     * :returns: ``true`` unless the subclass knows ``Compare`` runs no OpenEye code.
+     * :returns: ``true`` unless the subclass knows that none of ``Compare``,
+     *     ``TryPDist`` and ``TryCDist`` runs OpenEye code.
      */
     virtual bool RunsOpenEyeCode() const { return true; }
 
