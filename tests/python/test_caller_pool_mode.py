@@ -8,7 +8,7 @@ thread-safe. The read must fail closed: anything but a plain int within
 kept serial is slow while one wrongly run in parallel crashes. A bool would
 otherwise read as 1 (Mutexed) and a value past 2**32 would truncate.
 
-``oecluster_caller_pool_mode`` exposes the reader for these tests. Each
+``_caller_pool_mode`` exposes the reader for these tests. Each
 test swaps the ``sys.modules`` entry through ``monkeypatch``, which restores
 the real module afterwards. A call that returns normally also shows that the
 reader left no Python error set, since the wrapper would otherwise raise.
@@ -36,7 +36,7 @@ class _Int(int):
 
 def _returning(value):
     module = types.ModuleType(_KEY)
-    module.OEGetMemPoolMode = lambda: value
+    module.OEGetMemPoolMode = lambda: value  # pyright: ignore[reportAttributeAccessIssue]
     return module
 
 
@@ -46,7 +46,7 @@ def _raising():
     def get():
         raise RuntimeError("OEGetMemPoolMode failed")
 
-    module.OEGetMemPoolMode = get
+    module.OEGetMemPoolMode = get  # pyright: ignore[reportAttributeAccessIssue]
     return module
 
 
@@ -56,19 +56,19 @@ def _without_getter():
 
 def test_the_real_module_s_mode_is_read():
     oechem = pytest.importorskip(_KEY)
-    assert native.oecluster_caller_pool_mode() == oechem.OEGetMemPoolMode()
+    assert native._caller_pool_mode() == oechem.OEGetMemPoolMode()
 
 
 def test_a_module_never_imported_gives_no_value(monkeypatch):
     monkeypatch.delitem(sys.modules, _KEY, raising=False)
-    assert native.oecluster_caller_pool_mode() is None
+    assert native._caller_pool_mode() is None
 
 
 @pytest.mark.parametrize("mode", [8, 10, 2**32 - 1],
                          ids=["unbounded-cache", "mutexed-cache", "top-of-range"])
 def test_a_plain_int_in_range_is_read_as_is(monkeypatch, mode):
     monkeypatch.setitem(sys.modules, _KEY, _returning(mode))
-    assert native.oecluster_caller_pool_mode() == mode
+    assert native._caller_pool_mode() == mode
 
 
 @pytest.mark.parametrize("make_module", [
@@ -91,4 +91,4 @@ def test_a_plain_int_in_range_is_read_as_is(monkeypatch, mode):
         "no-getter"])
 def test_a_failed_or_malformed_read_answers_the_unsafe_mode_0(monkeypatch, make_module):
     monkeypatch.setitem(sys.modules, _KEY, make_module())
-    assert native.oecluster_caller_pool_mode() == 0
+    assert native._caller_pool_mode() == 0

@@ -1757,6 +1757,7 @@ static std::optional<unsigned int> _oecluster_caller_pool_mode() {
 }
 %}
 
+%rename(_caller_pool_mode) oecluster_caller_pool_mode;
 %feature("docstring") oecluster_caller_pool_mode
 "For tests only. Returns the memory-pool mode oecluster reads from
 openeye.oechem.OEGetMemPoolMode(), 0 when that read fails or gives anything but
