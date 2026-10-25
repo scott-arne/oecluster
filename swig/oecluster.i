@@ -605,7 +605,8 @@ static PyObject* _oecluster_loaded_runtimes() {
 // that RuntimeError or whatever stopped it being built, for the caller to
 // propagate. The message carries no index: cdist renames only a marked
 // TypeError, so an index would reach the caller as one into
-// items_a + items_b.
+// items_a + items_b. _require_oemol_items in python/oecluster/_comparisons.py
+// keeps a copy of the molecule form of this message; change both together.
 static void _oecluster_unreadable_runtime_error(const char* noun, PyObject* item) {
     PyObject* name = _oecluster_item_type_name(item);
     if (!name) {

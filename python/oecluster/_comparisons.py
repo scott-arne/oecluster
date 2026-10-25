@@ -1132,32 +1132,42 @@ def _expand_conformers_requested(kwargs):
     return bool(expand)
 
 
-def _molecule_item_error(index, item, tail):
+def _item_type_name(item):
     """
-    Build the ``TypeError`` a native molecule list conversion raises for a
-    refused item, marked as a conversion's own.
+    Name a refused item's type as the native refusals do.
 
-    As in ``_oecluster_list_item_error`` in swig/oecluster.i, the type name is
+    As in ``_oecluster_item_type_name`` in swig/oecluster.i, the name is
     ``<unnamed type>`` when reading ``__name__`` raises an ``Exception`` or
     gives something other than a string. Any other ``BaseException``, such as
     ``KeyboardInterrupt`` or ``SystemExit``, propagates unchanged. A ``str``
     subclass contributes its contents rather than its own ``__str__`` or
     ``__format__``.
 
+    :param item: The refused item.
+    :returns: The type name, as a plain ``str``.
+    """
+    name: object = None
+    try:
+        name = type(item).__name__
+    except Exception:  # noqa: BLE001, S110 - a failing name still owes the refusal
+        pass
+    if not isinstance(name, str):
+        return "<unnamed type>"
+    return str.__str__(name)
+
+
+def _molecule_item_error(index, item, tail):
+    """
+    Build the ``TypeError`` a native molecule list conversion raises for a
+    refused item, marked as a conversion's own.
+
     :param index: The item's position in the list.
     :param item: The refused item.
     :param tail: Why it was refused, such as ``", not an OEMol"``.
     :returns: The marked ``TypeError``, for the caller to raise.
     """
-    name: object = None
-    try:
-        name = type(item).__name__
-    except Exception:  # noqa: BLE001, S110 - a failing name still owes the index
-        pass
-    if not isinstance(name, str):
-        name = "<unnamed type>"
     error = TypeError(
-        f"molecule list item {index} is a {str.__str__(name)}{tail}")
+        f"molecule list item {index} is a {_item_type_name(item)}{tail}")
     setattr(error, _ITEM_INDEX_ATTRIBUTE, index)
     return error
 
@@ -1186,8 +1196,9 @@ def _require_oemol_items(items):
     for index, item in enumerate(items):
         if not isinstance(item, oechem.OEMol):
             raise _molecule_item_error(index, item, ", not an OEMol")
-        # Any exception from reading ``this`` propagates, as the native
-        # conversion propagates it.
+        # Any exception but AttributeError from reading ``this`` propagates,
+        # as the native conversion propagates it; an AttributeError means the
+        # item wraps nothing, which the check answers as 2.
         verdict = _oecluster._swig_cast_verdict(
             item, "_p_OEChem__OEMCMolBase")
         if verdict == 1:
@@ -1202,7 +1213,7 @@ def _require_oemol_items(items):
             if isinstance(name, str) and name.startswith("swig_runtime_data"))
         ) or "none"
         raise RuntimeError(
-            f"molecule list item is a {type(item).__name__} whose SWIG type "
+            f"molecule list item is a {_item_type_name(item)} whose SWIG type "
             f"is in no SWIG runtime oecluster can read (loaded: {loaded})")
 
 
