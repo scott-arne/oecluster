@@ -168,7 +168,9 @@ public:
      *
      * Creates or opens a file at path and maps it into memory.
      * If the file exists and has the correct size, it is reused.
-     * Otherwise, a new file is created and zero-filled.
+     * Otherwise, a new file is created and zero-filled. With fewer than two
+     * items there are no pairs: the file is sized to 0 bytes, nothing is
+     * mapped, and Data() returns nullptr.
      *
      * :param path: File path for the memory-mapped file.
      * :param n: Number of items.
