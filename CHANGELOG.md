@@ -2,6 +2,70 @@
 
 This file starts at 5.0.0; earlier releases are not recorded here.
 
+## [5.27.0] - 2026-10-25
+
+### Added
+
+- The public header `oecluster/PoolMode.h`, which decides how many workers
+  work that runs OpenEye code may use under the memory-pool mode a call runs
+  under, and a Concurrency section in the Python API docs. The thread counts,
+  timings and per-worker memory figures in the docs now say they assume a
+  thread-safe pool mode.
+
+### Changed
+
+- **Calling any wrapped accessor, method or destructor with `None` as `self`
+  raises `TypeError` ("invalid null reference").** SWIG accepts `None` as a
+  null pointer, and getters and methods then read through it. Setters and
+  `delete_*` used to return silently and now raise too, which reverses what
+  5.26.1 documented for the `progress` setter: `PDistOptions.progress.fset(None,
+  callback)` now raises.
+- A `ThreadPool` with one thread runs its work on the calling thread and
+  starts no worker. C++ callers see this.
+- `PairwiseComparison` gains the virtual `RunsOpenEyeCode()`, which changes
+  its C++ ABI. A `TryPDist` or `TryCDist` override must now honour
+  `options.num_threads` and call `progress` only on the calling thread.
+
+### Fixed
+
+- **Under an OpenEye memory-pool mode without the Mutexed or ThreadLocal bit,
+  parallel `pdist`, `cdist`, the comparison clustering paths, descriptor
+  calculation and Murcko extraction ran OpenEye code on several threads and
+  could crash.** On every build they now run that work on the calling thread.
+  Under such a mode a call keeps the GIL while its native work runs, except
+  while a progress callback runs Python code, so two oecluster calls never run
+  native work at once. That does not stop native code, OpenEye calls included,
+  that another thread is already running. The Windows wheel and statically
+  linked builds previously ignored a mode set through `openeye.oechem`,
+  Murcko extraction included.
+- `pdist` and `cdist` build at most one comparison clone per worker that
+  runs, not one per requested thread, and an absurd `num_threads` no longer
+  throws `length_error`.
+- `pdist` and `cdist` refuse a negative `num_threads` with
+  `ValueError: num_threads must be non-negative`, and a non-integer one (a
+  float, a numeric string, `None`) with `TypeError`. The value goes through
+  `operator.index`, as in `k_medoids`; a float used to be truncated. Both
+  checks run before any native call.
+- `pdist` converts its items before it reads any label, so an item that only
+  claims to be a molecule is refused by oecluster. `pdist` and `cdist` with
+  RMSD conformer expansion verify each item with the conversion's own check
+  before the expansion reads it, and refuse such an item with oecluster's
+  `TypeError` rather than reaching OEChem's own binding.
+- `SuperposeComparison` accepts an empty list.
+- `ThreadPool::ParallelFor` computed its chunk count and chunk end in
+  arithmetic that overflowed for a `chunk_size` near `SIZE_MAX`, so a `pdist`
+  or `cdist` with such a chunk size returned success having computed nothing.
+  It now covers the range.
+- With fewer than two items there are no pairs. `MMapStorage` used to empty
+  an existing file and fail with `Failed to mmap file ...: Invalid argument`,
+  on POSIX and Win32 alike, so `pdist(..., output=path)` failed. It now sizes
+  the file to 0 bytes, maps nothing, and returns the matrix.
+  `consensus(..., output=path)` still refuses fewer than two items before it
+  opens the path.
+- `SymmetricDistanceMatrix.squareform()` of a matrix with no items returns an
+  empty `(0, 0)` array. It returned a 1x1 array, because SciPy reads an empty
+  condensed array as one sample. `pdist([])` reached this too.
+
 ## [5.26.1] - 2026-10-21
 
 ### Added
