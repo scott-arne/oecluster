@@ -45,7 +45,7 @@ struct MurckoOptions {
      * A positive value is clamped to the molecule count and to a multiple of
      * the hardware concurrency, so an over-large request is bounded rather
      * than refused. Extraction runs serially regardless of this value when the
-     * process memory-pool mode is not thread-safe; see ``murcko_scaffolds``.
+     * effective memory-pool mode (``effective_pool_mode()``) is not thread-safe; see ``murcko_scaffolds``.
      */
     size_t num_threads = 0;
 };
@@ -101,8 +101,8 @@ private:
  *
  * Input molecules are never modified: each is copied before extraction.
  *
- * Extraction is parallelized across molecules only when the process
- * memory-pool mode reports a thread-safe setting; otherwise the call runs
+ * Extraction is parallelized across molecules only when the effective
+ * memory-pool mode (``effective_pool_mode()``) is thread-safe; otherwise the call runs
  * serially and returns the same answer.
  *
  * :param mols: Molecules to process; must not contain null pointers.

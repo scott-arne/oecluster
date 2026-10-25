@@ -27,16 +27,19 @@ Parallel work that runs OpenEye code needs a thread-safe OpenEye
 memory-pool mode, one with the Mutexed or ThreadLocal bit, such as the
 default. That work is comparison scoring for every comparison except
 fingerprint and descriptor, descriptor calculation when a descriptor
-comparison or descriptor statistics are built, and Murcko extraction. When the
+comparison or descriptor statistics are built or `descriptor_excluded_indices`
+is called, and Murcko extraction. When the
 application sets a mode without either bit through `oechem.OESetMemPoolMode`,
 oecluster runs that work single-threaded on the calling thread, and a call
-that normally releases the GIL keeps it for its duration, except while a
-progress callback runs Python code. Other Python threads then run no Python
-code during the call, and two oecluster calls never run their native work at
+that normally releases the GIL keeps it while its native work runs, except
+while a progress callback runs Python code. Other Python threads then run no
+Python code meanwhile, and two oecluster calls never run their native work at
 the same time. This does not stop native code that another thread is already
 running without the GIL, an OpenEye call included: an application that sets
 such a mode must keep its own OpenEye work off other threads meanwhile, as
-OpenEye requires under these modes anyway. oecluster reads the mode from
+OpenEye requires under these modes anyway.
+
+oecluster reads the mode from
 `openeye.oechem` when the application has imported it; a read that fails, or a
 value that is not a plain int, is treated as unsafe. If `openeye.oechem` was
 never imported, the mode reported by oecluster's own OpenEye copy stands. This

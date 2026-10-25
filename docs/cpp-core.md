@@ -51,12 +51,13 @@ its mode has the Mutexed or ThreadLocal bit (`pool_is_thread_safe()` in
 `oecluster/PoolMode.h`). The worker sites therefore cap at one worker when the
 comparison's `PairwiseComparison::RunsOpenEyeCode()` is true and
 `effective_pool_mode()` is not thread-safe (`safe_worker_count()`). A
-one-thread `ThreadPool` runs on the calling thread. Descriptor calculation runs
-serially under such a mode, and `pdist` and `cdist` also cap at one worker when
-a progress callback is set and `callbacks_on_calling_thread()` is true.
+one-thread `ThreadPool` runs on the calling thread. Descriptor calculation and
+Murcko extraction run serially under such a mode. When `pdist` or `cdist` scores
+pair by pair, it also caps at one worker when a progress callback is set and
+`callbacks_on_calling_thread()` is true.
 
-`effective_pool_mode()` is `OESystem::OEGetMemPoolMode()` unless a
-`CallerPoolModeScope` is live on the calling thread. An embedder whose OpenEye
+`effective_pool_mode()` is `OESystem::OEGetMemPoolMode()` unless a live
+`CallerPoolModeScope` on the calling thread recorded a mode. An embedder whose OpenEye
 copy differs from oecluster's, as the Python extension is when it links OpenEye
 statically, records the application's mode with
 `CallerPoolModeScope(std::optional<unsigned int> mode, bool callbacks_on_calling_thread = false)`
