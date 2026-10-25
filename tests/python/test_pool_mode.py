@@ -273,12 +273,12 @@ def _peak_workers(mode, case, deadline=600):
     errors = []
 
     def forward_out():
-        for line in process.stdout:
+        for line in process.stdout:  # pyright: ignore[reportOptionalIterable]
             lines.put(line.strip())
         lines.put(None)
 
     def drain_err():
-        errors.append(process.stderr.read())
+        errors.append(process.stderr.read())  # pyright: ignore[reportOptionalMemberAccess]
 
     out_reader = threading.Thread(target=forward_out, daemon=True)
     err_reader = threading.Thread(target=drain_err, daemon=True)
@@ -306,8 +306,8 @@ def _peak_workers(mode, case, deadline=600):
             for _ in range(50):
                 baseline = max(baseline, _COUNT_THREADS(process.pid))
                 time.sleep(0.001)
-            process.stdin.write("go\n")
-            process.stdin.flush()
+            process.stdin.write("go\n")  # pyright: ignore[reportOptionalMemberAccess]
+            process.stdin.flush()  # pyright: ignore[reportOptionalMemberAccess]
             peak = baseline
             done = False
             while not done and failure is None:

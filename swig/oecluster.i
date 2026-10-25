@@ -1885,7 +1885,8 @@ OECLUSTER_GIL_EXCEPTION(OECluster::select_representatives, select_representative
 // storage overload under compute_pair_rank_indices), so it can plausibly
 // exhaust memory or exceed a container's max_size(). The handler covers both
 // overloads; the comparison overload runs clones on worker threads with no
-// Python object in reach, so the GIL stays released.
+// Python object in reach, so the GIL is released unless the resolved pool mode
+// is unsafe.
 OECLUSTER_GIL_MEMORY_EXCEPTION(OECluster::cluster_report, cluster_report)
 
 OECLUSTER_GIL_MEMORY_EXCEPTION(OECluster::dbscan_cluster, dbscan_cluster)
@@ -1910,20 +1911,22 @@ OECLUSTER_GIL_EXCEPTION(OECluster::k_medoids_cluster, k_medoids_cluster)
 
 // Extraction spawns ThreadPool workers that touch only OEChem data, and
 // nothing it builds touches a Python object before the GIL is reacquired, so
-// the GIL is released for both entry points.
+// both entry points release the GIL unless the resolved pool mode is unsafe,
+// when extraction is serial too.
 OECLUSTER_GIL_EXCEPTION(OECluster::murcko_scaffolds, murcko_scaffolds)
 OECLUSTER_GIL_EXCEPTION(OECluster::murcko_cluster, murcko_cluster)
 
-// The AMI path is the library's one second-scale computation, so it must not
-// hold the GIL. The override is chosen at wrap time and cannot see the option
-// value, so it wraps every overload of the name rather than branching.
+// The AMI path is the library's one second-scale computation, so it releases
+// the GIL unless the resolved pool mode is unsafe. The override is chosen at
+// wrap time and cannot see the option value, so it wraps every overload of the
+// name rather than branching.
 OECLUSTER_GIL_EXCEPTION(OECluster::partition_agreement, partition_agreement)
 OECLUSTER_GIL_EXCEPTION(OECluster::scaffold_agreement, scaffold_agreement)
 
 // activity_landscape and modelability sweep every pair, of a precomputed
 // matrix or of a comparison whose clones run on worker threads; sar_coherence
-// is linear. None of them has a Python object in reach, so the GIL stays
-// released across every overload.
+// is linear. None of them has a Python object in reach, so every overload
+// releases the GIL unless the resolved pool mode is unsafe.
 OECLUSTER_GIL_EXCEPTION(OECluster::sar_coherence, sar_coherence)
 OECLUSTER_GIL_EXCEPTION(OECluster::activity_landscape, activity_landscape)
 OECLUSTER_GIL_EXCEPTION(OECluster::modelability, modelability)

@@ -16,9 +16,13 @@
  * What this guarantees for direct C++ callers is serial work within one call.
  * It does not serialise two calls made at once from different threads:
  * OpenEye requires single-threaded use under these modes, so a C++ application
- * that sets one must serialise its own calls into oecluster and OpenEye. The
- * Python bindings get that serialisation from the GIL, which they keep for the
- * whole call under an unsafe mode.
+ * that sets one must serialise its own calls into oecluster and OpenEye. Under
+ * an unsafe mode the Python bindings keep the GIL for the call, except while a
+ * progress callback runs Python code, so two calls made through them never run
+ * their native work at once. That does not cover native code another thread
+ * is already running without the GIL, an OpenEye call included: a Python
+ * application that sets such a mode must still keep its OpenEye work off
+ * other threads meanwhile.
  */
 
 #ifndef OECLUSTER_POOLMODE_H
