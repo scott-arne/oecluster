@@ -1766,7 +1766,7 @@ static std::optional<unsigned int> _oecluster_caller_pool_mode() {
     }
     // unsigned long is wider than unsigned int on LP64, where the cast below
     // would turn 2**32 + 1 into 1.
-    if (mode > std::numeric_limits<unsigned int>::max()) {
+    if (mode > (std::numeric_limits<unsigned int>::max)()) {
         return 0u;
     }
     return static_cast<unsigned int>(mode);

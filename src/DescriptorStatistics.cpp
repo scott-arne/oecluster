@@ -52,8 +52,8 @@ DescriptorStatisticsResult descriptor_statistics(const std::vector<OEChem::OEMol
     // Which kinds it would then cover is worth recording, because the two
     // differ. A string-valued column is handled here as written: OEFP counts
     // String as scalar, so the batch builds and this filter drops it. A
-    // vector, matrix or fingerprint column is NOT -- CalculateBatch builds a
-    // batch over the whole merged schema and rejects any non-scalar column
+    // vector, matrix or fingerprint column is NOT -- the batch is built over
+    // the whole merged schema and rejects any non-scalar column
     // before this filter can matter, so such a source would need the
     // calculator narrowed to the numeric columns first.
     DescriptorStatisticsResult result;

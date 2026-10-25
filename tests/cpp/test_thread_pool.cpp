@@ -182,6 +182,19 @@ TEST(ThreadPoolTest, OneThreadPropagatesABodyException) {
     }), std::runtime_error);
 }
 
+TEST(ThreadPoolTest, OneThreadIsCancelledAfterABodyException) {
+    // ThreadPool.h promises that a body exception cancels the pool; the inline
+    // one-thread path must keep that promise as the worker path does.
+    ThreadPool pool(1);
+    size_t calls = 0;
+    EXPECT_THROW(pool.ParallelFor(0, 4, 1, [&](size_t, size_t) {
+        ++calls;
+        throw std::runtime_error("boom");
+    }), std::runtime_error);
+    EXPECT_EQ(calls, 1u);
+    EXPECT_TRUE(pool.IsCancelled());
+}
+
 TEST(ThreadPoolTest, OneThreadDoesNoWorkAfterCancel) {
     ThreadPool pool(1);
     pool.Cancel();

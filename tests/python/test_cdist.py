@@ -406,5 +406,5 @@ def test_cdist_accepts_a_numpy_integer_num_threads():
 
     mols = _two_mols()
     expected = oecluster.cdist(mols, mols, "fingerprint", num_threads=2)
-    got = oecluster.cdist(mols, mols, "fingerprint", num_threads=np.int64(2))
+    got = oecluster.cdist(mols, mols, "fingerprint", num_threads=np.int64(2))  # pyright: ignore[reportArgumentType]
     np.testing.assert_array_equal(got.matrix, expected.matrix)

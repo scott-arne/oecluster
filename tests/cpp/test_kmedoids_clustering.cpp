@@ -1604,8 +1604,8 @@ TEST(KMedoidsSwapKernelTest, VerificationPassConsidersAnOddIndexedEntrantInEvery
     // so with one worker the chunks run in ascending order and a pass that wrote
     // every chunk's local winner to the same slot would report the LAST chunk's
     // winner rather than the best one. Chunk sizes 1 and 2 put the winner in
-    // chunk 3 of 5 and chunk 1 of 3 respectively -- never in chunk zero, and
-    // never in the final chunk. KERNEL_CHUNK is a single chunk and says nothing
+    // chunk 3 of 5 and chunk 1 of 3 respectively (0-based) -- never in chunk
+    // zero, and never in the final chunk. KERNEL_CHUNK is a single chunk and says nothing
     // about staging.
     //
     // Candidate stride: chunk size 1 holds one candidate per chunk, so a loop

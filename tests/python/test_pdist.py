@@ -1204,7 +1204,7 @@ def test_pdist_accepts_a_numpy_integer_num_threads():
 
     mols = _benzene_toluene()
     expected = oecluster.pdist(mols, "fingerprint", num_threads=2)
-    got = oecluster.pdist(mols, "fingerprint", num_threads=np.int64(2))
+    got = oecluster.pdist(mols, "fingerprint", num_threads=np.int64(2))  # pyright: ignore[reportArgumentType]
     np.testing.assert_array_equal(got.condensed, expected.condensed)
 
 
