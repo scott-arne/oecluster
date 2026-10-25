@@ -123,7 +123,8 @@ struct MCSOptions {
  * single ``MCSComparison`` across threads of the caller's own and calling
  * ``Compare`` on it directly bypasses ``Clone()`` and is unsupported, exactly
  * as it is for the other comparisons. The price is about 10.4 KB per molecule
- * per clone, so memory grows as ``num_threads x n``.
+ * per clone, so memory grows as workers x n: ``num_threads`` workers, or one
+ * under a memory-pool mode that is not thread-safe (oecluster/PoolMode.h).
  *
  * There is no metric guarantee. No triangle-inequality violation appeared in
  * 74,400 ordered triples, but the inclusion-exclusion bound that would prove

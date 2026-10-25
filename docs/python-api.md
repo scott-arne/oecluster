@@ -303,9 +303,9 @@ below. What the comparison forms compare and hold
 | single linkage, matrix | none | a few numbers per item, where 5.19.0 held about 12 GB at 20,000 items |
 
 The comparison forms also hold one clone of the comparison per worker thread
-(one clone in total under an unsafe pool mode), whose size depends on its
-family: a fingerprint clone is small, an MCS clone holds about 10.4 KB per
-molecule.
+(one at a time for a comparison that runs OpenEye code, under an unsafe pool
+mode), whose size depends on its family: a fingerprint clone is small, an MCS
+clone holds about 10.4 KB per molecule.
 
 **Threads.** For a matrix, or a comparison under a thread-safe memory-pool
 mode (see [Concurrency](#concurrency)), `num_threads=0` uses every core for
@@ -2824,10 +2824,11 @@ The first argument decides how distances are read:
   go in as keywords.
 
 The lazy paths compare only the pairs the selection needs -- O(N·k) for k
-picks -- and never build the O(N^2) matrix, so they are the route for a library
-too large to hold one. Each worker thread holds one clone of the comparison;
-for a comparison that copies its items, such as `mcs`, that is O(N) memory per
-worker (one worker under an unsafe pool mode; see [Concurrency](#concurrency)).
+picks -- and never build the O(N^2) matrix, so they are the route for a
+library too large to hold one. Each worker thread holds one clone of the
+comparison; for a comparison that copies its items, such as `mcs`, that is
+O(N) memory per worker (one worker for a comparison that runs OpenEye code
+under an unsafe pool mode; see [Concurrency](#concurrency)).
 
 A lazy comparison is refused before any pair is scored when its declared
 facts rule ranking out: a similarity orientation, a nonzero self-distance,
@@ -3130,12 +3131,12 @@ same = oecluster.jarvis_patrick(mols, k=6, kmin=3, comparison="fingerprint")
 ```
 
 **Inputs.** A `SymmetricDistanceMatrix` (dense, memory-mapped or sparse), a
-prebuilt comparison, or a sequence of items with `comparison=` and
-comparison options, as for `sphere_exclusion`. Lazy paths evaluate every
-ordered pair, N(N-1) comparisons, and keep only the O(N*k) graph, plus one
-comparison clone per running worker during the build (one worker under an
-unsafe pool mode; see [Concurrency](#concurrency)). A comparison that copies
-its items, such as `mcs`, costs O(N) per clone.
+prebuilt comparison, or a sequence of items with `comparison=` and comparison
+options, as for `sphere_exclusion`. Lazy paths evaluate every ordered pair,
+N(N-1) comparisons, and keep only the O(N*k) graph, plus one comparison clone
+per running worker during the build (one worker for a comparison that runs
+OpenEye code under an unsafe pool mode; see [Concurrency](#concurrency)). A
+comparison that copies its items, such as `mcs`, costs O(N) per clone.
 
 **Rows.** Each row lists `k` items other than its own, ordered by ascending
 (distance, position); equal distances go to the lower position. The result
