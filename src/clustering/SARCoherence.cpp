@@ -183,18 +183,12 @@ public:
     // distance between samples a and b. Callers guarantee n >= 2.
     template <typename Body>
     void Run(std::size_t n, Body&& body) const {
-        // Capped at the row count before the pool is built, though the cap
-        // changes nothing observable today. num_threads is a size_t on a
-        // public options struct, but the next statement bounds threads by n
-        // whatever the pool reports, so the chunk size comes out the same with
-        // or without the cap, and detail::launch_workers starts at most one
-        // worker per chunk, of which there are at most n. That bound on
-        // threads is also what makes 8 * threads below safe to form: the
-        // product is at most 8n. A num_threads of 0 passes through the cap by
-        // design, because it means "use the hardware concurrency"; a run that
-        // is a single chunk still starts one worker. Because n >= 2, no value
-        // other than that deliberate 0 can reach zero here.
-        ThreadPool pool(std::min<std::size_t>(num_threads_, n));
+        // The request goes to the pool unchanged. The next statement bounds
+        // threads by n whatever the pool reports, which fixes the chunk size
+        // and is what makes 8 * threads below safe to form (at most 8n), and
+        // detail::launch_workers starts at most one worker per chunk. A
+        // num_threads of 0 means "use the hardware concurrency".
+        ThreadPool pool(num_threads_);
         const std::size_t threads =
             std::max<std::size_t>(1, std::min<std::size_t>(pool.NumThreads(), n));
         const std::size_t chunk_size =

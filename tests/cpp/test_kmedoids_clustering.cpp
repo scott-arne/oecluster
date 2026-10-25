@@ -1699,16 +1699,12 @@ TEST(KMedoidsDeterminismTest, IsIdenticalAcrossThreadCountsAndChunkSizes) {
 }
 
 // num_threads is a size_t on a public options struct, so "more threads than
-// the machine could ever run" is a value a caller can simply pass. Two things
-// bound the workers it yields: k_medoids_cluster in KMedoids.cpp caps
-// num_threads at the item count before it builds its distance runner, and
+// the machine could ever run" is a value a caller can simply pass. This row
+// pins that an absurd count gives the single-threaded answer, because
 // detail::launch_workers starts at most one worker per chunk whatever pool
 // size it is given. With six items and the default chunk_size every pass is
-// one chunk, so each pass here runs on one worker. This row pins the answer,
-// which must equal the single-threaded one because nothing in the algorithm
-// depends on how many workers ran. It does not pin the cap: launch_workers
-// alone keeps this call bounded, so removing the k-medoids cap would not fail
-// it.
+// one chunk, so each pass runs on one worker, and nothing in the algorithm
+// depends on how many workers ran.
 TEST(KMedoidsThreadCapTest, AnAbsurdThreadCountGivesTheSingleThreadedAnswer) {
     const DenseStorage storage = MakeTwoTriplesStorage();
 

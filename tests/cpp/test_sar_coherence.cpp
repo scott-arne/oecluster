@@ -1178,14 +1178,11 @@ TEST(ActivityLandscapeTest, IsInvariantUnderTheThreadCount) {
 }
 
 // num_threads is a size_t, so "more threads than the machine could ever run"
-// is a value a caller can pass, and the answer must still be the
-// single-threaded one. MatrixSweep caps the count at the row count before it
-// builds its pool, but this row cannot tell whether it did: the sweep bounds
-// its thread count by the row count whatever the pool reports, so the chunk
-// size is the same either way, and detail::launch_workers starts at most one
-// worker per chunk. Removing the cap would not fail it. That bound on the
-// thread count is also what makes the chunk-size division safe: it divides by
-// a count no larger than the row count, not by num_threads.
+// is a value a caller can pass. This row pins that an absurd count gives the
+// single-threaded answer, because detail::launch_workers starts at most one
+// worker per chunk. The sweep bounds its own thread count by the row count
+// whatever the pool reports, so the chunk-size division is by a count no
+// larger than the row count, not by num_threads.
 TEST(ActivityLandscapeTest, AnAbsurdThreadCountGivesTheSingleThreadedAnswer) {
     OECluster::DenseStorage storage(4);
     FillStorage(storage, {0.1, 0.2, 0.3, 0.15, 0.25, 0.35});
@@ -1660,9 +1657,9 @@ TEST(ModelabilityTest, IsInvariantUnderTheThreadCount) {
     }
 }
 
-// The same sweep as `activity_landscape`, tested the same way: an absurd
-// num_threads must not change the answer. As there, this row cannot tell
-// whether the cap applied, and removing it would not fail it.
+// The same sweep as `activity_landscape`, tested the same way: this row pins
+// that an absurd count gives the single-threaded answer, because
+// detail::launch_workers starts at most one worker per chunk.
 TEST(ModelabilityTest, AnAbsurdThreadCountGivesTheSingleThreadedAnswer) {
     OECluster::DenseStorage storage(4);
     FillStorage(storage, {0.1, 0.8, 0.9, 0.7, 0.6, 0.2});

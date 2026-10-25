@@ -603,14 +603,11 @@ def test_an_absurd_num_threads_gives_the_single_threaded_answer():
 
     The Python layer only rejects values above size_t, so 2^61 is well inside
     what it accepts and reaches the native code intact: this exercises the
-    native handling rather than the representation check. Two things bound
-    the workers there. k_medoids_cluster in KMedoids.cpp caps num_threads at
-    the item count before it builds its distance runner, and
+    native handling rather than the representation check. The test pins that
+    an absurd count gives the single-threaded answer, because
     detail::launch_workers starts at most one worker per chunk whatever pool
     size it is given. With six items and the default chunk_size every pass is
-    one chunk, so each pass here runs on one worker. The test pins the answer,
-    not the cap: launch_workers alone keeps this call bounded, so removing the
-    k-medoids cap would not fail it.
+    one chunk, so each pass runs on one worker.
     """
     import oecluster
 

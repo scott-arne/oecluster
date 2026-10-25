@@ -210,9 +210,9 @@ KMedoidsResult identity_partition(size_t n) {
 }
 
 // Reads the worker count from the runner rather than from options.num_threads,
-// so the cap applied in k_medoids_cluster cannot be bypassed by the
-// initializers underneath: the runner is built with the capped count and is
-// the only thing here that starts a thread.
+// so the count the runner was built with cannot be bypassed by the
+// initializers underneath: the runner is the only thing here that starts a
+// thread.
 template <typename Runner>
 std::vector<size_t> initialize_medoids(Runner& distances,
                                        const KMedoidsOptions& options) {
@@ -373,24 +373,10 @@ KMedoidsResult k_medoids_cluster(const StorageBackend& storage,
 
     const size_t n = storage.NumSamples();
 
-    // Capped at the item count once here and then passed to every helper
-    // below, so no path from this entry point can hand ThreadPool the raw
-    // field. num_threads is a size_t on a public options struct, so an
-    // oversized request is attempted rather than refused. The pool itself now
-    // absorbs the two ways that used to go badly: detail::launch_workers
-    // starts at most one worker per chunk, and detail::launch_threads joins
-    // every thread it managed to start before rethrowing a spawn failure. So
-    // the cap changes nothing observable today: every pass runs over n items
-    // in chunks of at least one, so launch_workers starts the same number of
-    // workers, at most n, with or without it; ThreadPool only stores the
-    // count it is given; and nothing on this path reads NumThreads(). It is
-    // kept as a guard: a pass that sized per-worker state from NumThreads(),
-    // as PDist.cpp sizes its clones, would see at most n for any nonzero
-    // request. A num_threads of 0 means "use the hardware concurrency" and
-    // has to keep meaning that; validation guarantees n >= n_clusters >= 1,
-    // so the minimum passes that 0 through untouched and can never
-    // manufacture one from a nonzero request.
-    const size_t num_threads = std::min(options.num_threads, n);
+    // Passed through uncapped: detail::launch_workers starts at most one
+    // worker per chunk, and no pass here sizes state from NumThreads(). A
+    // num_threads of 0 keeps meaning "use the hardware concurrency".
+    const size_t num_threads = options.num_threads;
 
     if (options.n_clusters == n) {
         // Every item is already a medoid, so the candidate set is empty and
@@ -399,7 +385,7 @@ KMedoidsResult k_medoids_cluster(const StorageBackend& storage,
         return identity_partition(n);
     }
 
-    // Built once with the capped worker count, so every pass below is
+    // Built once with the requested worker count, so every pass below is
     // partitioned and scheduled the same way whichever kernel asks for it.
     detail::MatrixDistanceRunner distances(storage.Data(), n, num_threads,
                                            options.chunk_size);
@@ -465,11 +451,9 @@ KMedoidsResult k_medoids_cluster(PairwiseComparison& comparison,
             "instead");
     }
 
-    // Capped exactly as the storage overload caps it; see the comment there.
-    // The runner's ChunkedComparisons applies the same cap to its own pool,
-    // so this one changes nothing observable either.
+    // The runner's ChunkedComparisons caps its own pool at the item count.
     detail::StreamingDistanceRunner distances(comparison, KMEDOIDS_NAME,
-                                              std::min(options.num_threads, n),
+                                              options.num_threads,
                                               options.chunk_size);
     return cluster_with(distances, options, budget - unavoidable);
 }
