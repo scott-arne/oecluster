@@ -1,6 +1,7 @@
 """SWIG accepts None as a null ``self``. Every wrapped accessor, method and
-destructor refuses it with TypeError rather than reading through a null
-pointer. Run in a child process, since the failure this guards against is a
+destructor refuses it with TypeError: getters and methods would otherwise
+read through a null pointer, and setters and destructors would return
+silently. Run in a child process, since the failure this guards against is a
 crash."""
 
 import subprocess

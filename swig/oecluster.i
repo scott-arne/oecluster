@@ -3,10 +3,11 @@
 // SWIG interface file for oecluster Python bindings
 %module _oecluster
 
-// SWIG_ConvertPtr accepts None as a null pointer, and the generated accessors,
-// methods and destructors use self (arg1) unchecked. This check runs after the
-// arguments convert and before the action, in every wrapper with a self, and
-// refuses a null one with TypeError. It matches by the parameter name self,
+// SWIG_ConvertPtr accepts None as a null pointer. The generated getters and
+// methods then read through self (arg1) unchecked, while setters skip a null
+// self silently and destructors delete it as a no-op. This check runs after
+// the arguments convert and before the action, in every wrapper with a self,
+// and refuses a null one with TypeError, so all three behave alike. It matches by the parameter name self,
 // so no wrapped C++ parameter or member may be named self.
 %typemap(check, noblock=1) SWIGTYPE *self {
   if (!$1) {
