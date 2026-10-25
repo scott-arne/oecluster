@@ -21,7 +21,8 @@ A call that releases the GIL, as most long computations do, lets other
 Python threads keep running. Such a call reads its inputs without a lock: do
 not mutate anything passed to a running call from another thread. That covers
 a matrix's storage, an `oefp.OEFPBatch` and a `DoubleVector`. Building a
-comparison and computing descriptor statistics keep the GIL.
+comparison, computing descriptor statistics and `descriptor_excluded_indices`
+keep the GIL.
 
 Parallel work that runs OpenEye code needs a thread-safe OpenEye
 memory-pool mode, one with the Mutexed or ThreadLocal bit, such as the
@@ -39,12 +40,12 @@ running without the GIL, an OpenEye call included: an application that sets
 such a mode must keep its own OpenEye work off other threads meanwhile, as
 OpenEye requires under these modes anyway.
 
-oecluster reads the mode from
-`openeye.oechem` when the application has imported it; a read that fails, or a
-value that is not a plain int, is treated as unsafe. If `openeye.oechem` was
-never imported, the mode reported by oecluster's own OpenEye copy stands. This
-holds whether the extension links OpenEye as shared libraries (the macOS and
-Linux wheels) or statically (the Windows wheel).
+oecluster reads the mode from `openeye.oechem` when the application has
+imported it; a read that fails, or a value that is not a plain int, is treated
+as unsafe. If `openeye.oechem` was never imported, the mode reported by
+oecluster's own OpenEye copy stands. This holds whether the extension links
+OpenEye as shared libraries (the macOS and Linux wheels) or statically (the
+Windows wheel).
 
 ## Distance Matrices
 

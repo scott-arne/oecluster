@@ -57,9 +57,9 @@ pair by pair, it also caps at one worker when a progress callback is set and
 `callbacks_on_calling_thread()` is true.
 
 `effective_pool_mode()` is `OESystem::OEGetMemPoolMode()` unless a live
-`CallerPoolModeScope` on the calling thread recorded a mode. An embedder whose OpenEye
-copy differs from oecluster's, as the Python extension is when it links OpenEye
-statically, records the application's mode with
+`CallerPoolModeScope` on the calling thread recorded a mode. An embedder whose
+OpenEye copy differs from oecluster's, as the Python extension is when it
+links OpenEye statically, records the application's mode with
 `CallerPoolModeScope(std::optional<unsigned int> mode, bool callbacks_on_calling_thread = false)`
 for the duration of a call. `resolve_pool_mode()` gives the mode a call would
 run under for a mode its caller reports. A scope is stack-only and must be

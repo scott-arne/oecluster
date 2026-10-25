@@ -45,7 +45,8 @@ struct MurckoOptions {
      * A positive value is clamped to the molecule count and to a multiple of
      * the hardware concurrency, so an over-large request is bounded rather
      * than refused. Extraction runs serially regardless of this value when the
-     * effective memory-pool mode (``effective_pool_mode()``) is not thread-safe; see ``murcko_scaffolds``.
+     * effective memory-pool mode (``effective_pool_mode()``) is not
+     * thread-safe; see ``murcko_scaffolds``.
      */
     size_t num_threads = 0;
 };
