@@ -15,6 +15,34 @@ from the SWIG bindings and that the package exports -- `FingerprintOptions`,
 `ButinaOptions` and `DenseStorage` among them -- are described on the generated
 SWIG class page, [](api/swig-classes). This page is the narrative guide.
 
+## Concurrency
+
+A call that releases the GIL, as most long computations do, lets other
+Python threads keep running. Such a call reads its inputs without a lock: do
+not mutate anything passed to a running call from another thread. That covers
+a matrix's storage, an `oefp.OEFPBatch` and a `DoubleVector`. Building a
+comparison and computing descriptor statistics keep the GIL.
+
+Parallel work that runs OpenEye code needs a thread-safe OpenEye
+memory-pool mode, one with the Mutexed or ThreadLocal bit, such as the
+default. That work is comparison scoring for every comparison except
+fingerprint and descriptor, descriptor calculation when a descriptor
+comparison or descriptor statistics are built, and Murcko extraction. When the
+application sets a mode without either bit through `oechem.OESetMemPoolMode`,
+oecluster runs that work single-threaded on the calling thread, and a call
+that normally releases the GIL keeps it for its duration, except while a
+progress callback runs Python code. Other Python threads then run no Python
+code during the call, and two oecluster calls never run their native work at
+the same time. This does not stop native code that another thread is already
+running without the GIL, an OpenEye call included: an application that sets
+such a mode must keep its own OpenEye work off other threads meanwhile, as
+OpenEye requires under these modes anyway. oecluster reads the mode from
+`openeye.oechem` when the application has imported it; a read that fails, or a
+value that is not a plain int, is treated as unsafe. If `openeye.oechem` was
+never imported, the mode reported by oecluster's own OpenEye copy stands. This
+holds whether the extension links OpenEye as shared libraries (the macOS and
+Linux wheels) or statically (the Windows wheel).
+
 ## Distance Matrices
 
 `pdist()` computes the symmetric within-set pairwise distance matrix. The first
@@ -1528,9 +1556,9 @@ and subset-scored integrity are inherited. For a batch the result is a new
 hardware concurrency); the sparse and fingerprint gathers are single passes.
 A dense subset of `m` items allocates `4 m (m - 1)` bytes, so a large
 fraction of a huge memory-mapped matrix needs that much RAM for the subset.
-Like every entry point that releases the GIL, `take` reads its inputs
-without a lock: do not mutate the matrix's storage or the batch from
-another thread while a call runs.
+As with every call that releases the GIL, do not mutate the matrix's storage
+or the batch from another thread while `take` runs; see
+[Concurrency](#concurrency).
 
 ### Resampling
 

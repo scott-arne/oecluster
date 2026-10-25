@@ -44,6 +44,34 @@ for (size_t i = 0; i < mols.size(); ++i) {
 read, because a `SparseStorage` applies its own cutoff. `CDist.h`
 provides the matching cross-distance engine for the rectangular NxM case.
 
+### Memory-pool mode
+
+OpenEye's molecule memory pool is safe to drive from several threads only when
+its mode has the Mutexed or ThreadLocal bit (`pool_is_thread_safe()` in
+`oecluster/PoolMode.h`). The worker sites therefore cap at one worker when the
+comparison's `PairwiseComparison::RunsOpenEyeCode()` is true and
+`effective_pool_mode()` is not thread-safe (`safe_worker_count()`). A
+one-thread `ThreadPool` runs on the calling thread. Descriptor calculation runs
+serially under such a mode, and `pdist` and `cdist` also cap at one worker when
+a progress callback is set and `callbacks_on_calling_thread()` is true.
+
+`effective_pool_mode()` is `OESystem::OEGetMemPoolMode()` unless a
+`CallerPoolModeScope` is live on the calling thread. An embedder whose OpenEye
+copy differs from oecluster's, as the Python extension is when it links OpenEye
+statically, records the application's mode with
+`CallerPoolModeScope(std::optional<unsigned int> mode, bool callbacks_on_calling_thread = false)`
+for the duration of a call. `resolve_pool_mode()` gives the mode a call would
+run under for a mode its caller reports. A scope is stack-only and must be
+destroyed on the thread that created it.
+
+For direct C++ callers the guarantee covers parallelism within one call. It
+does not serialise two calls made at once from different threads, so an
+application that sets an unsafe mode must serialise its own calls into
+oecluster and OpenEye.
+
+A `TryPDist` or `TryCDist` override must honour `options.num_threads` and call
+`progress` only on the calling thread.
+
 ## Pairwise Comparisons
 
 `PairwiseComparison` is the abstract interface implemented by every comparison
