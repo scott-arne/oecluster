@@ -1184,6 +1184,12 @@ def _require_oemol_items(items):
     check, without the copy the conversion makes of each molecule. Where
     nothing is expanded, the native conversion refuses the item itself.
 
+    The check verifies the object one read of ``this`` gives. An item whose
+    ``this`` changes from read to read can still show OEChem's own methods a
+    different object afterwards; the native conversion, which pins the
+    reference it verified, is what keeps such an item out of oecluster's
+    native code.
+
     :param items: The items given to the RMSD comparison.
     :raises TypeError: For the first item that is not an ``OEMol``, whose
         ``this`` is not an ``OEMol``'s, or that wraps no molecule, as an
