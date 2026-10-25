@@ -13,6 +13,7 @@ step (conformer expansion, complete-case filtering) without ``pdist`` and
 import contextlib
 import math
 import re
+import sys
 import warnings
 from collections.abc import Callable
 from typing import Any
@@ -1163,31 +1164,46 @@ def _molecule_item_error(index, item, tail):
 
 def _require_oemol_items(items):
     """
-    Refuse a non-``OEMol`` item, or an ``OEMol`` with no ``this``, in the
-    words of the strict ``OEMol`` list conversion.
+    Refuse an item the strict ``OEMol`` list conversion would refuse, in its
+    words, before anything is read from it.
 
-    Conformer expansion calls ``NumConfs`` and ``GetTitle`` on each item, so
-    an item that is not a molecule would otherwise fail there, with an error
-    naming a method rather than the item. Where nothing is expanded, the
-    native conversion refuses the item itself.
+    Conformer expansion calls ``NumConfs`` and ``GetTitle`` on each item
+    before the comparison is built, so an item that only claims to be a
+    molecule would otherwise reach OEChem's own binding, with an error naming
+    a method rather than the item. The check is the conversion's own cast
+    check, without the copy the conversion makes of each molecule. Where
+    nothing is expanded, the native conversion refuses the item itself.
 
     :param items: The items given to the RMSD comparison.
-    :raises TypeError: For the first item that is not an ``OEMol``, or is one
-        with no ``this`` attribute, as an ``OEMol`` made by ``__new__``
-        without ``__init__`` has none. A ``this`` holding a null pointer is
-        not detected here.
+    :raises TypeError: For the first item that is not an ``OEMol``, whose
+        ``this`` is not an ``OEMol``'s, or that wraps no molecule, as an
+        ``OEMol`` made by ``__new__`` without ``__init__`` does.
+    :raises RuntimeError: For an item whose SWIG type is in no SWIG runtime
+        oecluster can read.
     """
     from openeye import oechem
 
     for index, item in enumerate(items):
         if not isinstance(item, oechem.OEMol):
             raise _molecule_item_error(index, item, ", not an OEMol")
-        # An OEMol made by ``__new__`` without ``__init__`` has no ``this``,
-        # and its NumConfs raises OEChem's own TypeError naming the method.
-        # Any exception but AttributeError from the read propagates, as the
-        # native conversion propagates it.
-        if getattr(item, "this", None) is None:
+        # Any exception from reading ``this`` propagates, as the native
+        # conversion propagates it.
+        verdict = _oecluster._swig_cast_verdict(
+            item, "_p_OEChem__OEMCMolBase")
+        if verdict == 1:
+            continue
+        if verdict == 0:
+            raise _molecule_item_error(index, item, ", not an OEMol")
+        if verdict == 2:
             raise _molecule_item_error(index, item, " that wraps no molecule")
+        # 3: mirrors the native refusal, which carries no item index.
+        loaded = ", ".join(sorted(
+            name for name in sys.modules
+            if isinstance(name, str) and name.startswith("swig_runtime_data"))
+        ) or "none"
+        raise RuntimeError(
+            f"molecule list item is a {type(item).__name__} whose SWIG type "
+            f"is in no SWIG runtime oecluster can read (loaded: {loaded})")
 
 
 def _normalize_rmsd(items, kwargs):

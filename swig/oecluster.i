@@ -961,12 +961,15 @@ static PyObject* _oecluster_wrap_as_oe_grid(OESystem::OEScalarGrid* grid) {
 
 %rename(_swig_cast_verdict) oecluster_swig_cast_verdict;
 %feature("docstring") oecluster_swig_cast_verdict
-"For tests only. Returns the code oecluster's cross-runtime type check gives obj
-against the descriptor named target_name: 1 converts, 0 does not, 2 wraps
-nothing, 3 is in no readable SWIG runtime.";
+"Returns the code oecluster's cross-runtime type check gives obj against the
+descriptor named target_name: 1 converts, 0 does not, 2 wraps nothing, 3 is in
+no readable SWIG runtime. Made for tests; the RMSD conformer normalizer also
+uses it, to verify items before it reads them.";
 %inline %{
-// For tests only: the helper's verdict for obj against the descriptor named
-// target_name, with the converted pointer and the held reference discarded.
+// The helper's verdict for obj against the descriptor named target_name, with
+// the converted pointer and the held reference discarded. Made for tests; the
+// RMSD conformer normalizer also calls it, to verify items before it reads
+// them.
 PyObject* oecluster_swig_cast_verdict(PyObject* obj, const char* target_name) {
     swig_type_info* target = SWIG_MangledTypeQuery(target_name);
     if (!target) {

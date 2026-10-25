@@ -528,6 +528,31 @@ def test_pdist_converts_before_it_reads_a_label(donor):
         "not an OEMolBase")}
 
 
+_EXPAND_RMSD = r'''
+    donor = sys.argv[1]
+    borrowed = 5 if donor == "int" else oechem.OEDesignUnit().this
+    items = [parsed(oechem.OEMol, "c1ccccc1"), BorrowingMol(borrowed)]
+    report("pdist", lambda: oecluster.pdist(
+        items, "rmsd", expand_conformers=True))
+    report("cdist", lambda: oecluster.cdist(
+        items, items, "rmsd", expand_conformers=True))
+'''
+
+
+@pytest.mark.parametrize("donor", ["OEDesignUnit", "int"])
+def test_conformer_expansion_verifies_an_item_before_it_reads_it(donor):
+    """The expansion reads NumConfs and titles before the comparison is
+    built, so it must verify each item with the conversion's own check
+    rather than reach OEChem's binding with one that only claims to be a
+    molecule."""
+    outcomes = _run_child(_EXPAND_RMSD, donor)
+    assert outcomes == {
+        "pdist": ("raised TypeError: molecule list item 1 is a "
+                  "BorrowingMol, not an OEMol"),
+        "cdist": ("raised TypeError: items_a item 1 is a "
+                  "BorrowingMol, not an OEMol")}
+
+
 _PRODUCED = r'''
     call, path = sys.argv[1:3]
     calls = {
