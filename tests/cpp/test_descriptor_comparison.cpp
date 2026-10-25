@@ -49,10 +49,11 @@ std::string refusal_message(Callable&& call) {
 /// construction still reaches an independent refusal, and for some cases it
 /// reaches none -- with the inverse_covariance-under-euclidean rule deleted the
 /// constructor stores the override, resolves a euclidean metric that ignores it,
-/// and falls silent too, so the two messages still agree. Neither test detects
-/// the reverse: a duplicate rule added to the constructor below its validate
-/// call is unreachable for every case listed here, because the validator refuses
-/// each of them first.
+/// and falls silent too, so the two messages still agree.
+///
+/// A constructor rule that merely repeats a validator rule can never run, because
+/// the validator refuses first, so no test can observe it. The rules only the
+/// constructor enforces are pinned by constructor_only_mistakes() below.
 std::vector<std::pair<std::string, DescriptorOptions>> molecule_independent_mistakes() {
     std::vector<std::pair<std::string, DescriptorOptions>> cases;
 
@@ -140,9 +141,66 @@ std::vector<std::pair<std::string, DescriptorOptions>> molecule_independent_mist
     return cases;
 }
 
+/// An input the validator accepts but only the constructor refuses, with the
+/// molecules to construct over and the constructor's exact message.
+struct ConstructorOnlyMistake {
+    std::string label;
+    DescriptorOptions options;
+    std::vector<std::string> smiles;
+    std::string message;
+};
+
+/// Every rule that only the constructor enforces. A constructor rule that merely
+/// repeats a validator rule is not tabled: the validator refuses first, so no
+/// test can observe the repeat.
+std::vector<ConstructorOnlyMistake> constructor_only_mistakes() {
+    const std::vector<std::string> drug_like{"c1ccccc1", "c1ccc(O)cc1", "CC(=O)Oc1ccccc1C(=O)O"};
+    std::vector<ConstructorOnlyMistake> cases;
+
+    DescriptorOptions unknown_column;
+    unknown_column.columns = {"NoSuchColumn"};
+    cases.push_back({"unknown column without an override", unknown_column, drug_like,
+                     "Unknown descriptor column: NoSuchColumn"});
+
+    DescriptorOptions unknown_source;
+    unknown_source.sources = {"nosuchsource"};
+    cases.push_back({"unknown source without an override", unknown_source, drug_like,
+                     "Unknown descriptor source: nosuchsource. Supported sources are "
+                     "'openeye', 'mordred', 'rdkit'"});
+
+    DescriptorOptions unknown_group;
+    unknown_group.groups = {"nosuchgroup"};
+    cases.push_back({"unknown group without an override", unknown_group, drug_like,
+                     "Unknown or empty descriptor group: nosuchgroup"});
+
+    cases.push_back({"fitted metric over one molecule", DescriptorOptions(), {"c1ccccc1"},
+                     "metric='standardized_euclidean' fits variances from the input and needs at least two "
+                     "molecules, got 1; pass variances= from descriptor_statistics, or use an unfitted "
+                     "metric such as 'euclidean'"});
+
+    // Water carries a present-and-NaN FractionCsp3, which complete_case refuses.
+    DescriptorOptions complete_case;
+    complete_case.missing = "complete_case";
+    cases.push_back({"complete_case over a molecule with a non-finite value", complete_case,
+                     {"O", "c1ccccc1", "c1ccc(O)cc1", "CCCCCCCC", "CC(=O)Oc1ccccc1C(=O)O",
+                      "CCN(CC)CCOC(=O)c1ccccc1"},
+                     "missing='complete_case' but molecule 0 has an absent or non-finite value for descriptor "
+                     "'FractionCsp3'; call descriptor_excluded_indices first and pass only the "
+                     "retained molecules"});
+
+    // Identical molecules have no spread, so the only selected column is dropped.
+    DescriptorOptions single_column;
+    single_column.columns = {"MolecularWeight"};
+    cases.push_back({"every selected column dropped", single_column, {"CCO", "CCO"},
+                     "Every selected descriptor column was dropped over these molecules (zero-variance); there "
+                     "is no distance to compute"});
+
+    return cases;
+}
+
 }  // namespace
 
-class DescriptorComparisonTest : public ::testing::Test {
+class DescriptorComparisonTest: public ::testing::Test {
 protected:
     void SetUp() override {
         const char* smiles[] = {"c1ccccc1", "c1ccc(O)cc1", "CCCCCCCC",
@@ -720,16 +778,31 @@ TEST(DescriptorOptionValidationTest, TheAllDroppedRefusalNamesWhyTheSelectionEmp
 TEST_F(DescriptorComparisonTest, TheConstructorRepeatsEveryValidatorMessageVerbatim) {
     // The extraction must not have changed what a caller is told, only when:
     // for every tabled refusal the constructor path reports the validator's own
-    // wording. It does not also keep the constructor from growing a second copy
-    // of a rule -- a duplicate below the validate call is unreachable for every
-    // case in the table, and the suite passed with one inserted. The caption on
-    // molecule_independent_mistakes() has the rest.
+    // wording. A constructor rule that only repeats a validator rule can never
+    // run, because the validator refuses first, so this cannot observe one.
+    // constructor_only_mistakes() pins the rules only the constructor enforces.
     for (const auto& entry : molecule_independent_mistakes()) {
         const std::string from_validator =
             refusal_message([&] { validate_descriptor_options(entry.second); });
         const std::string from_constructor =
             refusal_message([&] { DescriptorComparison(mols_, entry.second); });
         EXPECT_EQ(from_constructor, from_validator) << entry.first;
+    }
+}
+
+TEST(DescriptorOptionValidationTest, OnlyTheConstructorRefusesEachConstructorOnlyMistake) {
+    for (const auto& entry : constructor_only_mistakes()) {
+        SCOPED_TRACE(entry.label);
+        EXPECT_NO_THROW(validate_descriptor_options(entry.options));
+
+        std::vector<OEChem::OEGraphMol> graph_mols(entry.smiles.size());
+        std::vector<OEChem::OEMolBase*> mols;
+        for (size_t i = 0; i < entry.smiles.size(); ++i) {
+            ASSERT_TRUE(OEChem::OESmilesToMol(graph_mols[i], entry.smiles[i]));
+            mols.push_back(&static_cast<OEChem::OEMolBase&>(graph_mols[i]));
+        }
+        EXPECT_EQ(refusal_message([&] { DescriptorComparison(mols, entry.options); }),
+                  entry.message);
     }
 }
 

@@ -1432,6 +1432,35 @@ TEST(KMedoidsSwapKernelTest, ScoresEveryNonMedoidCandidate) {
     EXPECT_EQ(wide.slot_of[candidate.entering_item], 20u);
 }
 
+TEST(KMedoidsSwapKernelTest, FindsAWinnerInAMiddleChunk) {
+    // Item 3 is the only winner: entering it costs 7 against 10 for item 4.
+    // With one worker the chunks run in ascending order, and chunk sizes 1
+    // and 2 put item 3 in chunk 3 of 5 and chunk 1 of 3 -- never the first
+    // chunk, whose only candidates are medoids, and never the last, whose
+    // winner is item 4. A reduction that kept the first or the last chunk's
+    // winner fails here. The single-chunk run is the reference.
+    const DenseStorage storage = MakeOddIndexMedianStorage();
+    const KernelState state = MakeKernelState(storage, {0, 1});
+
+    detail::MatrixDistanceRunner whole = Rows(storage, 1, KERNEL_CHUNK);
+    const detail::SwapCandidate reference = detail::best_predicted_swap(
+        whole, state.medoids, state.assignments, state.slot_of);
+    ASSERT_TRUE(reference.valid);
+    EXPECT_EQ(reference.entering_item, 3u);
+
+    for (const size_t chunk : {size_t{1}, size_t{2}}) {
+        SCOPED_TRACE(testing::Message() << "chunk_size = " << chunk);
+        detail::MatrixDistanceRunner distances = Rows(storage, 1, chunk);
+        const detail::SwapCandidate candidate = detail::best_predicted_swap(
+            distances, state.medoids, state.assignments, state.slot_of);
+        ASSERT_TRUE(candidate.valid);
+        EXPECT_EQ(candidate.entering_item, reference.entering_item);
+        EXPECT_EQ(candidate.leaving_item, reference.leaving_item);
+        EXPECT_EQ(candidate.leaving_slot, reference.leaving_slot);
+        EXPECT_EQ(candidate.score, reference.score);
+    }
+}
+
 TEST(KMedoidsSwapKernelTest, ResolvesTiedDeltasToTheSmallestEnteringThenLeavingItem) {
     {
         // Two symmetric triples: shifting either medoid one step inward saves
