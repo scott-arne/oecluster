@@ -1206,3 +1206,34 @@ def test_pdist_accepts_a_numpy_integer_num_threads():
     expected = oecluster.pdist(mols, "fingerprint", num_threads=2)
     got = oecluster.pdist(mols, "fingerprint", num_threads=np.int64(2))
     np.testing.assert_array_equal(got.condensed, expected.condensed)
+
+
+@pytest.mark.parametrize("stale", [False, True], ids=["new", "existing"])
+@pytest.mark.parametrize("comparison, count", [
+    ("fingerprint", 0), ("fingerprint", 1), ("superpose", 0)])
+def test_pdist_output_with_no_pairs_writes_an_empty_file(tmp_path, comparison,
+                                                         count, stale):
+    """Fewer than two items own no pair, so the file is sized to 0 bytes.
+
+    A zero-length mapping is an error on POSIX and Win32, and MMapStorage
+    used to truncate the file before failing to map it: the caller got an
+    exception and lost whatever the file held.
+    """
+    import oecluster
+
+    path = tmp_path / "matrix.bin"
+    if stale:
+        path.write_bytes(b"stale bytes")
+    items = _benzene_toluene()[:count]
+
+    matrix = oecluster.pdist(items, comparison, output=str(path))
+
+    assert isinstance(matrix.storage, oecluster.MMapStorage)
+    assert matrix.num_samples == count
+    assert matrix.num_pairs == 0
+    # The zero-copy view over a storage with no pairs wraps a null address.
+    assert matrix.condensed.size == 0
+    if count == 1:
+        assert matrix.storage.Get(0, 0) == 0.0
+        np.testing.assert_array_equal(matrix.squareform(), [[0.0]])
+    assert path.stat().st_size == 0

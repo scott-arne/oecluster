@@ -331,6 +331,11 @@ MMapStorage::MMapStorage(const std::string& path, size_t n)
         }
     }
 
+    // A zero-length mapping fails on POSIX and Win32; no pairs need no memory.
+    if (file_size_ == 0) {
+        return;
+    }
+
     const DWORD size_high =
         static_cast<DWORD>((static_cast<uint64_t>(file_size_) >> 32) & 0xFFFFFFFFu);
     const DWORD size_low =
@@ -414,6 +419,11 @@ MMapStorage::MMapStorage(const std::string& path, size_t n)
             throw std::runtime_error("MMapStorage: Failed to resize file " + path +
                                      ": " + std::strerror(errno));
         }
+    }
+
+    // A zero-length mapping fails on POSIX and Win32; no pairs need no memory.
+    if (file_size_ == 0) {
+        return;
     }
 
     // Memory map the file

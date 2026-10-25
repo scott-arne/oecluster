@@ -735,6 +735,20 @@ def test_a_reused_output_path_does_not_accumulate(tmp_path):
     del second
 
 
+@pytest.mark.parametrize("num_items", [0, 1])
+def test_an_output_below_two_items_is_refused_before_the_file_is_opened(
+        tmp_path, num_items):
+    # pdist(output=) leaves a 0-byte file for fewer than two items, but
+    # consensus refuses that count before MMapStorage opens the path, so an
+    # existing file keeps its bytes.
+    path = tmp_path / "consensus.bin"
+    path.write_bytes(b"stale")
+    member = (np.arange(num_items), np.zeros(num_items, dtype=int))
+    with pytest.raises(ValueError, match="at least 2"):
+        oecluster.consensus([member], num_items=num_items, output=str(path))
+    assert path.read_bytes() == b"stale"
+
+
 @pytest.mark.parametrize("num_threads", [0, 1, 2])
 def test_the_result_does_not_depend_on_the_thread_count(num_threads):
     blobs = oecluster.butina(_blobs20(), threshold=0.2)

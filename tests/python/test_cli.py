@@ -2752,3 +2752,21 @@ def test_a_refusal_reads_whole_at_every_path_length(tmp_path):
         if "different files" not in result.output:
             split.append(extra)
     assert split == []
+
+
+def test_a_zero_byte_bin_from_a_one_item_pdist_reads_back_as_one_item(
+        tmp_path):
+    # pdist(output=) over one item leaves a 0-byte file. Zero values fit both
+    # zero items and one, and the loader settles on one, so a sidecar that
+    # says one is what lets the file load.
+    from openeye import oechem
+
+    mol = oechem.OEGraphMol()
+    oechem.OESmilesToMol(mol, "c1ccccc1")
+    raw = str(tmp_path / "one.bin")
+    oecluster.pdist([mol], "fingerprint", output=raw)
+    assert os.path.getsize(raw) == 0
+    _write_sidecar(raw, 1)
+    loaded = _cli_input.load(raw, warn=lambda message: None)
+    assert loaded.num_samples == 1
+    assert list(loaded.labels) == ["m0"]

@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <cstddef>
 #include <filesystem>
+#include <fstream>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -194,6 +195,58 @@ TEST(MMapStorageTest, SetOutOfRangeThrows) {
         EXPECT_THROW(storage.Set(1, 1, 1.0), std::invalid_argument);
     }
     std::filesystem::remove(path);
+}
+
+// Fewer than two samples own no pair, so the file is sized to 0 bytes, and a
+// zero-length mapping is an error on POSIX and Win32 alike. The constructor
+// used to truncate the file and only then fail to map it, so the caller lost
+// both the matrix and whatever the file held before.
+TEST(MMapStorageTest, NoPairsCreatesAnEmptyFile) {
+    for (const size_t n : {size_t{0}, size_t{1}}) {
+        SCOPED_TRACE("n = " + std::to_string(n));
+        const auto path =
+            std::filesystem::temp_directory_path() / "test_mmap_no_pairs.bin";
+        std::filesystem::remove(path);
+        {
+            MMapStorage storage(path.string(), n);
+            EXPECT_EQ(storage.NumSamples(), n);
+            EXPECT_EQ(storage.NumPairs(), 0u);
+            EXPECT_EQ(storage.Data(), nullptr);
+            // Every pair index is refused, and the in-range diagonal is
+            // answered without the mapping, so nothing reads the null pointer.
+            EXPECT_THROW(storage.Get(0, 1), std::out_of_range);
+            EXPECT_THROW(storage.Set(0, 1, 1.0), std::out_of_range);
+            if (n == 1) {
+                EXPECT_DOUBLE_EQ(storage.Get(0, 0), 0.0);
+                EXPECT_THROW(storage.Set(0, 0, 1.0), std::invalid_argument);
+            }
+        }
+        EXPECT_TRUE(std::filesystem::exists(path));
+        EXPECT_EQ(std::filesystem::file_size(path), 0u);
+        // On Windows a file with an open handle cannot be deleted, so this
+        // also shows the destructor released it.
+        EXPECT_TRUE(std::filesystem::remove(path));
+    }
+}
+
+TEST(MMapStorageTest, NoPairsEmptiesAnExistingFile) {
+    for (const size_t n : {size_t{0}, size_t{1}}) {
+        SCOPED_TRACE("n = " + std::to_string(n));
+        const auto path = std::filesystem::temp_directory_path() /
+                          "test_mmap_no_pairs_existing.bin";
+        {
+            std::ofstream stale(path, std::ios::binary | std::ios::trunc);
+            stale << "stale";
+        }
+        ASSERT_EQ(std::filesystem::file_size(path), 5u);
+        {
+            MMapStorage storage(path.string(), n);
+            EXPECT_EQ(storage.NumSamples(), n);
+            EXPECT_EQ(storage.NumPairs(), 0u);
+        }
+        EXPECT_EQ(std::filesystem::file_size(path), 0u);
+        EXPECT_TRUE(std::filesystem::remove(path));
+    }
 }
 
 TEST(SparseStorageTest, StoresOnlyBelowCutoff) {
