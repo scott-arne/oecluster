@@ -114,7 +114,7 @@ def test_superpose_still_takes_both_list_types():
 
 
 def test_superpose_accepts_an_empty_list():
-    """Every other comparison accepts an empty list, and Superpose follows."""
+    """Superpose accepts an empty list, as Fingerprint and an unfitted Descriptor do."""
     assert native.SuperposeComparison([]).Size() == 0
     assert native.SuperposeComparison([], native.SuperposeOptions()).Size() == 0
 

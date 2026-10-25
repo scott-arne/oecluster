@@ -1188,3 +1188,21 @@ def test_pdist_refuses_a_negative_num_threads():
 
     with pytest.raises(ValueError, match="num_threads must be non-negative"):
         oecluster.pdist(_benzene_toluene(), "fingerprint", num_threads=-1)
+
+
+@pytest.mark.parametrize("value", [2.5, "8", None], ids=["float", "str", "none"])
+def test_pdist_refuses_a_non_integer_num_threads(value):
+    """A float, a string or None is refused rather than truncated."""
+    import oecluster
+
+    with pytest.raises(TypeError):
+        oecluster.pdist(_benzene_toluene(), "fingerprint", num_threads=value)
+
+
+def test_pdist_accepts_a_numpy_integer_num_threads():
+    import oecluster
+
+    mols = _benzene_toluene()
+    expected = oecluster.pdist(mols, "fingerprint", num_threads=2)
+    got = oecluster.pdist(mols, "fingerprint", num_threads=np.int64(2))
+    np.testing.assert_array_equal(got.condensed, expected.condensed)

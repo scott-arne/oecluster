@@ -2325,16 +2325,19 @@ def pdist(items,
     :returns: SymmetricDistanceMatrix with computed distances/similarities.
     :raises TypeError: If unknown kwargs are passed, if any comparison option
         in ``kwargs`` accompanies a prebuilt comparison, or if ``items`` has
-        no length alongside one.
-    :raises ValueError: If cutoff > 0 with no ``output`` and either
+        no length alongside one, or if ``num_threads`` is not an integer (a
+        float, a string or None is refused, not truncated).
+    :raises ValueError: If ``num_threads`` is negative, or cutoff > 0 with no
+        ``output`` and either
         similarity=True on a named comparison or a prebuilt comparison that
         reports similarities, if normalizing the inputs leaves no items, or if
         ``items`` and a prebuilt comparison describe different numbers of
         items.
     """
-    # Mirrors butina: a negative value would otherwise reach a size_t option
-    # field and raise OverflowError from the binding. Zero means "choose".
-    num_threads = int(num_threads)
+    # A negative value would otherwise reach a size_t option field and raise
+    # OverflowError from the binding. Zero means "choose". ``operator.index``,
+    # as in k_medoids, refuses a float or a string rather than truncating it.
+    num_threads = operator.index(num_threads)
     if num_threads < 0:
         raise ValueError("num_threads must be non-negative")
 
@@ -2515,8 +2518,10 @@ def cdist(items_a, items_b, comparison, *,
     :raises TypeError: If a prebuilt comparison object is passed, or unknown
         kwargs, or if an item is not one the comparison accepts. That message
         names the set and the item's index within it, as in ``items_b item 2
-        is a int, not an OEMolBase``.
-    :raises ValueError: If either input is empty, or cutoff > 0 with similarity=True.
+        is a int, not an OEMolBase``. Also raised if ``num_threads`` is not an
+        integer (a float, a string or None is refused, not truncated).
+    :raises ValueError: If either input is empty, if ``num_threads`` is
+        negative, or cutoff > 0 with similarity=True.
     """
     if not isinstance(comparison, str):
         raise TypeError(
@@ -2524,9 +2529,10 @@ def cdist(items_a, items_b, comparison, *,
             "prebuilt comparison objects are not supported because cdist must "
             "construct the combined A+B comparison itself")
 
-    # Mirrors butina: a negative value would otherwise reach a size_t option
-    # field and raise OverflowError from the binding. Zero means "choose".
-    num_threads = int(num_threads)
+    # A negative value would otherwise reach a size_t option field and raise
+    # OverflowError from the binding. Zero means "choose". ``operator.index``,
+    # as in k_medoids, refuses a float or a string rather than truncating it.
+    num_threads = operator.index(num_threads)
     if num_threads < 0:
         raise ValueError("num_threads must be non-negative")
 

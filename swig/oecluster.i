@@ -1337,8 +1337,8 @@ catch (const std::bad_alloc&) {
 // that starts with a design unit on the design-unit constructor, leaving
 // every other list to this one. Two lists reach the
 // design-unit constructor without element 0 being known to be a design unit:
-// an empty list, refused with the same "SuperposeComparison: empty structure
-// list" either constructor gives; and one whose first element's isinstance
+// an empty list, which builds an empty comparison (Size() == 0) on that
+// constructor, as it would on either; and one whose first element's isinstance
 // check raises, which the design-unit typecheck leaves in play, so the
 // design-unit conversion is the one that repeats the check. Fingerprint and
 // Descriptor have no competing overload for the order to matter to.

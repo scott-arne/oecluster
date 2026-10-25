@@ -208,16 +208,18 @@ TEST_F(SuperposeComparisonDUTest, IntegrationWithPDist) {
     EXPECT_TRUE(std::isfinite(d));
 }
 
-// -- Error cases --
+// -- Empty lists --
 
 TEST_F(SuperposeComparisonDUTest, EmptyStructureListIsAccepted) {
     std::vector<std::shared_ptr<OEBio::OEDesignUnit>> empty_dus;
     EXPECT_EQ(SuperposeComparison(empty_dus).Size(), 0u);
 
-    // The molecule overload carries its own copy of the check.
+    // The molecule overload had its own copy of the removed check.
     std::vector<OEChem::OEMolBase*> empty_mols;
     EXPECT_EQ(SuperposeComparison(empty_mols).Size(), 0u);
 }
+
+// -- Error cases --
 
 // Compile-time tripwire for the hand-written method list below. An exhaustive
 // switch with no default case makes the compiler diagnose a SuperposeMethod

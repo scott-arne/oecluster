@@ -383,3 +383,33 @@ def test_cdist_refuses_a_negative_num_threads():
         mols.append(mol)
     with pytest.raises(ValueError, match="num_threads must be non-negative"):
         oecluster.cdist(mols, mols, "fingerprint", num_threads=-1)
+
+
+def _two_mols():
+    from openeye import oechem
+
+    mols = []
+    for smi in ("c1ccccc1", "Cc1ccccc1"):
+        mol = oechem.OEGraphMol()
+        oechem.OESmilesToMol(mol, smi)
+        mols.append(mol)
+    return mols
+
+
+@pytest.mark.parametrize("value", [2.5, "8", None], ids=["float", "str", "none"])
+def test_cdist_refuses_a_non_integer_num_threads(value):
+    """A float, a string or None is refused rather than truncated."""
+    import oecluster
+
+    mols = _two_mols()
+    with pytest.raises(TypeError):
+        oecluster.cdist(mols, mols, "fingerprint", num_threads=value)
+
+
+def test_cdist_accepts_a_numpy_integer_num_threads():
+    import oecluster
+
+    mols = _two_mols()
+    expected = oecluster.cdist(mols, mols, "fingerprint", num_threads=2)
+    got = oecluster.cdist(mols, mols, "fingerprint", num_threads=np.int64(2))
+    np.testing.assert_array_equal(got.matrix, expected.matrix)
