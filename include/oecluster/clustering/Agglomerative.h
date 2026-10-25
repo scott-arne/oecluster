@@ -36,7 +36,10 @@ struct AgglomerativeOptions {
     double distance_threshold = -1.0;             ///< Stop merging above this distance; negative means use n_clusters instead.
     AgglomerativeLinkageMethod linkage = AgglomerativeLinkageMethod::Average;  ///< Linkage update method.
     bool compute_full_tree = true;                ///< Build full dendrogram even when stopping early.
-    size_t num_threads = 0;                       ///< Worker threads; 0 gives every core to the passes over the input and at most 8 to the step loop.
+    /// Worker threads; 0 asks for every core for the passes over the input and
+    /// at most 8 for the step loop. A comparison that runs OpenEye code gets one
+    /// worker under a memory-pool mode that is not thread-safe (oecluster/PoolMode.h).
+    size_t num_threads = 0;
     size_t chunk_size = 4096;                     ///< Rows per chunk of the initial passes over the distances; clamped to the row count.
 };
 

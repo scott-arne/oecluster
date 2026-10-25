@@ -74,9 +74,10 @@ Worker counts, timings and per-worker memory given elsewhere in this guide
 assume a thread-safe mode. Under an unsafe one, a comparison whose
 `RunsOpenEyeCode()` is true gets one worker, whatever `num_threads` asks for,
 at every site that scores comparisons (`pdist`, `cdist`, `ChunkedComparisons`
-and `prim_mst`). The generic pairwise paths then build one `Clone()`; a
-`TryPDist` or `TryCDist` override receives the capped count and owns its own
-clone policy. No timing under an unsafe mode is published.
+and `prim_mst`). The generic pairwise paths then build one `Clone()`, and the
+other sites hold one at a time; a `TryPDist` or `TryCDist` override receives
+the capped count and owns its own clone policy. No timing under an unsafe
+mode is published.
 
 A `TryPDist` or `TryCDist` override must honour `options.num_threads` and call
 `progress` only on the calling thread.
