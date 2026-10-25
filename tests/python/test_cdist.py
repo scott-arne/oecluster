@@ -370,21 +370,6 @@ def test_cdist_mcs_accepts_mixed_sets_in_either_order():
     assert reverse == pytest.approx(1.0 / 7.0, abs=1e-6)
 
 
-def test_cdist_refuses_a_negative_num_threads():
-    """A negative count is a ValueError, as in butina, not the binding's
-    OverflowError from a size_t field."""
-    import oecluster
-    from openeye import oechem
-
-    mols = []
-    for smi in ("c1ccccc1", "Cc1ccccc1"):
-        mol = oechem.OEGraphMol()
-        oechem.OESmilesToMol(mol, smi)
-        mols.append(mol)
-    with pytest.raises(ValueError, match="num_threads must be non-negative"):
-        oecluster.cdist(mols, mols, "fingerprint", num_threads=-1)
-
-
 def _two_mols():
     from openeye import oechem
 
@@ -394,6 +379,16 @@ def _two_mols():
         oechem.OESmilesToMol(mol, smi)
         mols.append(mol)
     return mols
+
+
+def test_cdist_refuses_a_negative_num_threads():
+    """A negative count is a ValueError, as in butina, not the binding's
+    OverflowError from a size_t field."""
+    import oecluster
+
+    mols = _two_mols()
+    with pytest.raises(ValueError, match="num_threads must be non-negative"):
+        oecluster.cdist(mols, mols, "fingerprint", num_threads=-1)
 
 
 @pytest.mark.parametrize("value", [2.5, "8", None], ids=["float", "str", "none"])

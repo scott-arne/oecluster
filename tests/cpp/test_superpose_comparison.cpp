@@ -219,7 +219,7 @@ TEST_F(SuperposeComparisonDUTest, EmptyStructureListIsAccepted) {
     EXPECT_EQ(SuperposeComparison(empty_mols).Size(), 0u);
 }
 
-// -- Error cases --
+// -- Facts --
 
 // Compile-time tripwire for the hand-written method list below. An exhaustive
 // switch with no default case makes the compiler diagnose a SuperposeMethod
