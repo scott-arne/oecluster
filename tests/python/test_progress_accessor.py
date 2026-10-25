@@ -62,13 +62,13 @@ def test_progress_holds_one_reference_to_the_callable(options_type):
 
 
 @pytest.mark.parametrize("options_type", OPTIONS)
-def test_setting_progress_on_a_null_self_returns_silently(options_type):
-    """SWIG accepts None as a null self, and the setter's ``if (arg1)`` guard
-    makes a silent return the only defined result, so the test pins exactly
-    that. Without the guard the setter assigns through a null pointer: it can
-    crash, or raise TypeError where the compiler drops SWIG_ConvertPtr's None
-    branch, so surviving the call is not enough. Run in a child process,
-    since the failure can be a crash."""
+def test_setting_progress_on_a_null_self_is_refused(options_type):
+    """SWIG accepts None as a null self, and the null-self check typemap in
+    swig/oecluster.i refuses it with TypeError before any assignment. The
+    message is pinned as well: without the check the setter assigns through a
+    null pointer, which can crash or, where the compiler drops
+    SWIG_ConvertPtr's None branch, raise a TypeError of its own. Run in a
+    child process, since the failure can be a crash."""
     script = (
         "from oecluster import oecluster as n\n"
         f"setter = n.{options_type.__name__}.progress.fset\n"
@@ -83,7 +83,8 @@ def test_setting_progress_on_a_null_self_returns_silently(options_type):
                             check=False)
     report = (result.returncode, result.stdout, result.stderr[-2000:])
     assert result.returncode == 0, report
-    assert result.stdout.strip() == "returned", report
+    assert result.stdout.startswith("raised TypeError"), report
+    assert "invalid null reference" in result.stdout, report
 
 
 def test_a_cdist_progress_callable_is_called():

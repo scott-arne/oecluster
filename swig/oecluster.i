@@ -3,6 +3,17 @@
 // SWIG interface file for oecluster Python bindings
 %module _oecluster
 
+// SWIG_ConvertPtr accepts None as a null pointer, and the generated accessors,
+// methods and destructors use self (arg1) unchecked. This check runs after the
+// arguments convert and before the action, in every wrapper with a self, and
+// refuses a null one with TypeError. It matches by the parameter name self,
+// so no wrapped C++ parameter or member may be named self.
+%typemap(check, noblock=1) SWIGTYPE *self {
+  if (!$1) {
+    SWIG_exception_fail(SWIG_NullReferenceError, "in method '" "$symname" "', invalid null reference of type '" "$1_type" "'");
+  }
+}
+
 // ============================================================================
 // C++ header includes for wrapped API
 // ============================================================================
@@ -2259,15 +2270,11 @@ namespace std {
     $1 = &temp;
 }
 
-// A memberin typemap replaces SWIG's whole assignment, including its
-// ``if (arg1)``, and SWIG_ConvertPtr accepts None as a null self, so the
-// check is restored here.
+// The null-self check typemap near %module refuses a None self before this runs.
 %typemap(memberin) std::function<void(size_t, size_t)> progress {
-    if ($self) {
-        try {
-            $1 = *$input;
-        } OECLUSTER_TYPEMAP_ALLOCATION_CATCH("setting a progress callback")
-    }
+    try {
+        $1 = *$input;
+    } OECLUSTER_TYPEMAP_ALLOCATION_CATCH("setting a progress callback")
 }
 
 %typemap(out) const std::function<void(size_t, size_t)>& progress {
