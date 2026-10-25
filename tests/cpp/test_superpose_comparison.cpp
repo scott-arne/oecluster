@@ -210,9 +210,13 @@ TEST_F(SuperposeComparisonDUTest, IntegrationWithPDist) {
 
 // -- Error cases --
 
-TEST_F(SuperposeComparisonDUTest, EmptyStructureListThrows) {
+TEST_F(SuperposeComparisonDUTest, EmptyStructureListIsAccepted) {
     std::vector<std::shared_ptr<OEBio::OEDesignUnit>> empty_dus;
-    EXPECT_THROW({ SuperposeComparison m(empty_dus); }, ComparisonError);
+    EXPECT_EQ(SuperposeComparison(empty_dus).Size(), 0u);
+
+    // The molecule overload carries its own copy of the check.
+    std::vector<OEChem::OEMolBase*> empty_mols;
+    EXPECT_EQ(SuperposeComparison(empty_mols).Size(), 0u);
 }
 
 // Compile-time tripwire for the hand-written method list below. An exhaustive

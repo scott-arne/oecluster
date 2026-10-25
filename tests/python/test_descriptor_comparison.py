@@ -1083,6 +1083,17 @@ def test_pdist_still_returns_a_zero_sample_matrix_for_an_empty_input():
     assert len(dist.condensed) == 0
 
 
+@pytest.mark.parametrize("comparison, kwargs", [
+    ("superpose", {}),
+    ("descriptor", {"metric": "euclidean"}),
+], ids=["superpose", "descriptor"])
+def test_pdist_returns_a_zero_sample_matrix_for_an_empty_input_to_each_comparison(
+        comparison, kwargs):
+    dist = oecluster.pdist([], comparison, **kwargs)
+    assert dist.num_samples == 0
+    assert len(dist.condensed) == 0
+
+
 def test_an_empty_descriptor_input_is_not_blamed_on_the_filtering():
     """The same standing-aside, on the comparison that does normalize.
 

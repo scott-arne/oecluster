@@ -1179,3 +1179,12 @@ def test_default_fingerprint_path_is_unchanged_by_the_5_0_0_rewrite():
         metric="tanimoto", numbits=2048, radius=2, similarity=False)
     np.testing.assert_array_equal(dist.condensed, reference.condensed)
     assert dist.metric_capabilities == {'zero_self': True, 'triangle': True}
+
+
+def test_pdist_refuses_a_negative_num_threads():
+    """A negative count is a ValueError, as in butina, not the binding's
+    OverflowError from a size_t field."""
+    import oecluster
+
+    with pytest.raises(ValueError, match="num_threads must be non-negative"):
+        oecluster.pdist(_benzene_toluene(), "fingerprint", num_threads=-1)

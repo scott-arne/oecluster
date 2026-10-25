@@ -508,6 +508,26 @@ def test_an_item_whose_this_is_a_plain_object_is_refused(comparison):
     _assert_refused_by_position(comparison, "int")
 
 
+_PDIST_LABELS = r'''
+    donor = sys.argv[1]
+    borrowed = 5 if donor == "int" else oechem.OEDesignUnit().this
+    items = [parsed(oechem.OEGraphMol, "c1ccccc1"), BorrowingGraphMol(borrowed)]
+    report("pdist", lambda: oecluster.pdist(items, "fingerprint"))
+'''
+
+
+@pytest.mark.parametrize("donor", ["OEDesignUnit", "int"])
+def test_pdist_converts_before_it_reads_a_label(donor):
+    """pdist builds the comparison, whose conversion verifies each item,
+    before it reads any title: an item that only claims to be a molecule is
+    refused by oecluster's conversion rather than reaching OEChem's own
+    binding first."""
+    outcomes = _run_child(_PDIST_LABELS, donor)
+    assert outcomes == {"pdist": (
+        "raised TypeError: molecule list item 1 is a BorrowingGraphMol, "
+        "not an OEMolBase")}
+
+
 _PRODUCED = r'''
     call, path = sys.argv[1:3]
     calls = {

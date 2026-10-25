@@ -113,15 +113,10 @@ def test_superpose_still_takes_both_list_types():
             items, native.SuperposeOptions()).Size() == 2
 
 
-def test_superpose_keeps_its_empty_list_message():
-    """An empty list is accepted by both typechecks, so it reaches the
-    design-unit constructor, which is examined first, and is refused as
-    before."""
-    for call in (lambda: native.SuperposeComparison([]),
-                 lambda: native.SuperposeComparison([], native.SuperposeOptions())):
-        with pytest.raises(RuntimeError,
-                           match=r"^SuperposeComparison: empty structure list$"):
-            call()
+def test_superpose_accepts_an_empty_list():
+    """Every other comparison accepts an empty list, and Superpose follows."""
+    assert native.SuperposeComparison([]).Size() == 0
+    assert native.SuperposeComparison([], native.SuperposeOptions()).Size() == 0
 
 
 @pytest.mark.parametrize("route", _ROUTES)

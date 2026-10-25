@@ -2332,6 +2332,12 @@ def pdist(items,
         ``items`` and a prebuilt comparison describe different numbers of
         items.
     """
+    # Mirrors butina: a negative value would otherwise reach a size_t option
+    # field and raise OverflowError from the binding. Zero means "choose".
+    num_threads = int(num_threads)
+    if num_threads < 0:
+        raise ValueError("num_threads must be non-negative")
+
     if isinstance(comparison, str):
         # Before normalization: filtering can empty the list, and the refusal
         # below would then answer for an argument no input could rescue.
@@ -2372,9 +2378,12 @@ def pdist(items,
             raise ValueError(
                 "pdist requires a non-empty input set, but normalizing the "
                 f"inputs for the {comparison!r} comparison left 0 items")
-        labels = _comparisons.extract_labels(items)
         comparison_obj, comparison_name, params = _comparisons.build_comparison(
             items, comparison, similarity, kwargs, symmetric=True)
+        # After the build: its conversion verifies each item, while reading a
+        # title calls OEChem's own binding on an item that may only claim to
+        # be a molecule.
+        labels = _comparisons.extract_labels(items)
         if excluded:
             params['excluded_items'] = excluded
     else:
@@ -2514,6 +2523,12 @@ def cdist(items_a, items_b, comparison, *,
             "cdist requires a string comparison name (e.g. 'fingerprint'); "
             "prebuilt comparison objects are not supported because cdist must "
             "construct the combined A+B comparison itself")
+
+    # Mirrors butina: a negative value would otherwise reach a size_t option
+    # field and raise OverflowError from the binding. Zero means "choose".
+    num_threads = int(num_threads)
+    if num_threads < 0:
+        raise ValueError("num_threads must be non-negative")
 
     # Above the two guards below, not merely above normalization as in
     # ``pdist``: both of them can describe the wrong problem. The cutoff

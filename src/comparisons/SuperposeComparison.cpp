@@ -174,10 +174,6 @@ SuperposeComparison::SuperposeComparison(
     const std::vector<std::shared_ptr<OEBio::OEDesignUnit>>& dus,
     const Options& opts)
     : opts_(opts) {
-    if (dus.empty()) {
-        throw ComparisonError("SuperposeComparison: empty structure list");
-    }
-
     auto shared = std::make_shared<SharedData>();
     shared->use_dus = true;
     shared->dus = dus;
@@ -192,10 +188,6 @@ SuperposeComparison::SuperposeComparison(
     const std::vector<OEChem::OEMolBase*>& mols,
     const Options& opts)
     : opts_(opts) {
-    if (mols.empty()) {
-        throw ComparisonError("SuperposeComparison: empty structure list");
-    }
-
     auto shared = std::make_shared<SharedData>();
     shared->use_dus = false;
     shared->mols.reserve(mols.size());
