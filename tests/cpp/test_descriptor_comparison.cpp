@@ -151,10 +151,13 @@ struct ConstructorOnlyMistake {
     std::string message;
 };
 
-/// The rules that only the constructor enforces, apart from the null molecule
-/// pointer, which a SMILES table cannot express and has its own test. A constructor rule that merely
-/// repeats a validator rule is not tabled: the validator refuses first, so no
-/// test can observe the repeat.
+/// Every refusal oecluster's own code makes only in the constructor, plus the two
+/// oefp preconditions that surface through it (the source name collision and the
+/// covariance row count); any other oefp exception would arrive through the generic
+/// "Failed to build descriptor comparison" wrapper. The null molecule pointer, which
+/// a SMILES table cannot express, has its own test. A constructor rule that merely
+/// repeats a validator rule is not tabled: the validator refuses first, so no test
+/// can observe the repeat.
 std::vector<ConstructorOnlyMistake> constructor_only_mistakes() {
     const std::vector<std::string> drug_like{"c1ccccc1", "c1ccc(O)cc1", "CC(=O)Oc1ccccc1C(=O)O"};
     std::vector<ConstructorOnlyMistake> cases;
@@ -199,17 +202,20 @@ std::vector<ConstructorOnlyMistake> constructor_only_mistakes() {
 
     DescriptorOptions duplicate_sources;
     duplicate_sources.sources = {"openeye", "openeye"};
-    cases.push_back({"duplicate sources", duplicate_sources, drug_like, "Failed to build descriptor calculator: Descriptor name collision: "
+    cases.push_back({"duplicate sources", duplicate_sources, drug_like,
+                     "Failed to build descriptor calculator: Descriptor name collision: "
                      "'XLogP' from source 'OpenEye' collides with an earlier source; tag them with "
                      "a shared canonical_id or narrow one out."});
 
-    // Sodium has no value in most mordred columns, leaving too few complete rows.
+    // Under missing='propagate', mordred leaves too few rows complete across the
+    // surviving columns for a covariance fit.
     DescriptorOptions sparse_mahalanobis;
     sparse_mahalanobis.metric = "mahalanobis";
     sparse_mahalanobis.missing = "propagate";
     sparse_mahalanobis.sources = {"mordred"};
     cases.push_back({"mahalanobis fit with too few complete rows", sparse_mahalanobis,
-                     {"[Na+]", "O", "C", "CC"}, "Failed to build descriptor comparison: Covariance requires at least two rows "
+                     {"[Na+]", "O", "C", "CC"},
+                     "Failed to build descriptor comparison: Covariance requires at least two rows "
                      "with every selected column present."});
 
     return cases;
