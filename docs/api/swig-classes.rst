@@ -52,7 +52,9 @@ the SWIG-generated ones come from the C++ documentation, and a few are set in
 
       ::
 
-         Worker threads; 0 gives every core to the passes over the input and at most 8 to the step loop.
+         Worker threads; 0 asks for every core for the passes over the input and
+         at most 8 for the step loop. A comparison that runs OpenEye code gets one
+         worker under a memory-pool mode that is not thread-safe (oecluster/PoolMode.h).
 
 .. py:class:: BitBirchOptions()
 
