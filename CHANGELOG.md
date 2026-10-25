@@ -46,9 +46,10 @@ This file starts at 5.0.0; earlier releases are not recorded here.
 - `pdist` and `cdist` refuse a negative `num_threads` with
   `ValueError: num_threads must be non-negative`, and a non-integer one (a
   float, a numeric string, `None`) with `TypeError`. The value goes through
-  `operator.index`, as in `k_medoids`. Both checks run before any native call;
-  the binding used to refuse such a value only after the storage, and any
-  `output` file, had been created.
+  `operator.index`, as in `k_medoids`. Both checks run before any native call.
+  The binding used to refuse such a value only after `pdist` had created its
+  storage, and created or resized any `output` file, or after `cdist` had
+  built its comparison.
 - `pdist` converts its items before it reads any label, so an item that only
   claims to be a molecule is refused by oecluster. `pdist` and `cdist` with
   RMSD conformer expansion verify each item with the conversion's own check
