@@ -3953,9 +3953,9 @@ sets and `mcs` for focused series.
 Under a thread-safe pool mode, memory grows as `num_threads x n x 10.4 KB`,
 because each worker holds private copies of the molecules rather than sharing
 one set. That is the one cost here that grows with thread count instead of
-shrinking. Under an unsafe pool mode `mcs` runs one worker, so the
-single-threaded time above and one clone's copy apply
-(see [Concurrency](#concurrency)).
+shrinking. Under an unsafe pool mode `mcs` runs one worker with one clone's
+copy (see [Concurrency](#concurrency)); no timing for that mode was measured,
+so the table above does not cover it.
 
 Every measured number in this section is recorded in
 [MCS Comparison Measurements](mcs-measurements.md), together with what was

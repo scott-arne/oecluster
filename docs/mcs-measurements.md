@@ -286,7 +286,10 @@ nor the twenty targets were.
 ## Per-clone molecule copies
 
 **Claim.** "Memory grows as `num_threads x n x 10.4 KB`", and the cost table's
-"peak memory added by per-clone molecule copies, ~79 MB".
+"peak memory added by per-clone molecule copies, ~79 MB". Since 5.27.0 both
+hold under a thread-safe OpenEye memory-pool mode only: under an unsafe mode
+`mcs` runs one worker with one clone, so the copies cost `n x 10.4 KB` (see
+[Concurrency](python-api.md#concurrency)).
 
 **Cited in.** `MCSComparison.h` class documentation and `docs/python-api.md`.
 
