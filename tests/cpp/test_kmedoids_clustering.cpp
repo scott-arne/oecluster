@@ -1705,7 +1705,7 @@ TEST(KMedoidsDeterminismTest, IsIdenticalAcrossThreadCountsAndChunkSizes) {
 // size it is given. With six items and the default chunk_size every pass is
 // one chunk, so each pass runs on one worker, and nothing in the algorithm
 // depends on how many workers ran.
-TEST(KMedoidsThreadCapTest, AnAbsurdThreadCountGivesTheSingleThreadedAnswer) {
+TEST(KMedoidsThreadCountTest, AnAbsurdThreadCountGivesTheSingleThreadedAnswer) {
     const DenseStorage storage = MakeTwoTriplesStorage();
 
     KMedoidsOptions single;

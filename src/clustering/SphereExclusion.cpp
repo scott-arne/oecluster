@@ -334,9 +334,9 @@ SphereExclusionResult sphere_exclusion(const StorageBackend& storage,
         }
         ThresholdGraphOptions graph_options;
         graph_options.threshold = options.distance_threshold;
-        // Capped at the item count, as ChunkedComparisons and k-medoids cap
-        // theirs: the graph builder parallelizes over pairs, so a huge request
-        // could otherwise launch pair-count-scale workers.
+        // Capped at the item count, as ChunkedComparisons caps its own: the
+        // graph builder parallelizes over pairs, so a huge request could
+        // otherwise launch pair-count-scale workers.
         graph_options.num_threads =
             detail::capped_threads(options.num_threads, n);
         graph_options.chunk_size = options.chunk_size;

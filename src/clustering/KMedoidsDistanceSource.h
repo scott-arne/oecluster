@@ -82,7 +82,10 @@ public:
      * :param data: Condensed distance array from ``StorageBackend::Data()``.
      * :param n: Number of items.
      * :param num_threads: Worker threads; 0 auto-detects hardware concurrency.
-     *     Already capped by the caller, so no pass underneath can raise it.
+     *     Passed through unchanged by the caller, so no pass may size
+     *     per-worker state from it: an absurd count reaches the pool, and
+     *     only detail::launch_workers' one-worker-per-chunk bound keeps it
+     *     harmless.
      * :param chunk_size: Caller-requested chunk size; at least one.
      */
     MatrixDistanceRunner(const double* data, size_t n, size_t num_threads,
@@ -214,7 +217,8 @@ public:
      * :param comparison: Prototype to clone from; must outlive this runner.
      * :param caller: Entry point name for error messages.
      * :param num_threads: Worker threads; 0 auto-detects hardware concurrency.
-     *     Already capped by the caller, so no pass underneath can raise it.
+     *     The caller passes it unchanged; ChunkedComparisons bounds its own
+     *     pool at the item count.
      * :param chunk_size: Caller-requested chunk size; validation guarantees at
      *     least one, and a zero is raised to one rather than honoured. Zero is
      *     not a schedule: ParallelFor declines a zero chunk and runs nothing,

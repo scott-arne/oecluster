@@ -1658,8 +1658,11 @@ TEST(ModelabilityTest, IsInvariantUnderTheThreadCount) {
 }
 
 // The same sweep as `activity_landscape`, tested the same way: this row pins
-// that an absurd count gives the single-threaded answer, because
-// detail::launch_workers starts at most one worker per chunk.
+// that an absurd count gives the single-threaded answer. Here min_rows is 1,
+// so there are four chunks and the absurd run does start four workers while
+// the reference runs inline; the answers match because the per-row results do
+// not depend on the schedule, and detail::launch_workers' one-worker-per-chunk
+// bound only stops it trying to start 2^61 threads.
 TEST(ModelabilityTest, AnAbsurdThreadCountGivesTheSingleThreadedAnswer) {
     OECluster::DenseStorage storage(4);
     FillStorage(storage, {0.1, 0.8, 0.9, 0.7, 0.6, 0.2});
