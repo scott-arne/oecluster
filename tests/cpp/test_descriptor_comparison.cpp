@@ -53,7 +53,8 @@ std::string refusal_message(Callable&& call) {
 ///
 /// A constructor rule that merely repeats a validator rule can never run, because
 /// the validator refuses first, so no test can observe it. The rules only the
-/// constructor enforces are pinned by constructor_only_mistakes() below.
+/// constructor enforces are pinned by constructor_only_mistakes(), plus the
+/// null-pointer test beside it.
 std::vector<std::pair<std::string, DescriptorOptions>> molecule_independent_mistakes() {
     std::vector<std::pair<std::string, DescriptorOptions>> cases;
 
@@ -150,7 +151,8 @@ struct ConstructorOnlyMistake {
     std::string message;
 };
 
-/// Every rule that only the constructor enforces. A constructor rule that merely
+/// The rules that only the constructor enforces, apart from the null molecule
+/// pointer, which a SMILES table cannot express and has its own test. A constructor rule that merely
 /// repeats a validator rule is not tabled: the validator refuses first, so no
 /// test can observe the repeat.
 std::vector<ConstructorOnlyMistake> constructor_only_mistakes() {
@@ -195,12 +197,27 @@ std::vector<ConstructorOnlyMistake> constructor_only_mistakes() {
                      "Every selected descriptor column was dropped over these molecules (zero-variance); there "
                      "is no distance to compute"});
 
+    DescriptorOptions duplicate_sources;
+    duplicate_sources.sources = {"openeye", "openeye"};
+    cases.push_back({"duplicate sources", duplicate_sources, drug_like, "Failed to build descriptor calculator: Descriptor name collision: "
+                     "'XLogP' from source 'OpenEye' collides with an earlier source; tag them with "
+                     "a shared canonical_id or narrow one out."});
+
+    // Sodium has no value in most mordred columns, leaving too few complete rows.
+    DescriptorOptions sparse_mahalanobis;
+    sparse_mahalanobis.metric = "mahalanobis";
+    sparse_mahalanobis.missing = "propagate";
+    sparse_mahalanobis.sources = {"mordred"};
+    cases.push_back({"mahalanobis fit with too few complete rows", sparse_mahalanobis,
+                     {"[Na+]", "O", "C", "CC"}, "Failed to build descriptor comparison: Covariance requires at least two rows "
+                     "with every selected column present."});
+
     return cases;
 }
 
 }  // namespace
 
-class DescriptorComparisonTest: public ::testing::Test {
+class DescriptorComparisonTest : public ::testing::Test {
 protected:
     void SetUp() override {
         const char* smiles[] = {"c1ccccc1", "c1ccc(O)cc1", "CCCCCCCC",
@@ -780,7 +797,8 @@ TEST_F(DescriptorComparisonTest, TheConstructorRepeatsEveryValidatorMessageVerba
     // for every tabled refusal the constructor path reports the validator's own
     // wording. A constructor rule that only repeats a validator rule can never
     // run, because the validator refuses first, so this cannot observe one.
-    // constructor_only_mistakes() pins the rules only the constructor enforces.
+    // constructor_only_mistakes(), plus the null-pointer test beside it, pins
+    // every rule that only the constructor enforces.
     for (const auto& entry : molecule_independent_mistakes()) {
         const std::string from_validator =
             refusal_message([&] { validate_descriptor_options(entry.second); });
@@ -804,6 +822,21 @@ TEST(DescriptorOptionValidationTest, OnlyTheConstructorRefusesEachConstructorOnl
         EXPECT_EQ(refusal_message([&] { DescriptorComparison(mols, entry.options); }),
                   entry.message);
     }
+}
+
+TEST(DescriptorOptionValidationTest, OnlyTheConstructorRefusesANullMoleculePointer) {
+    // A SMILES table cannot hold a null pointer, so this rule has its own test.
+    DescriptorOptions options;
+    EXPECT_NO_THROW(validate_descriptor_options(options));
+
+    OEChem::OEGraphMol first;
+    OEChem::OEGraphMol third;
+    ASSERT_TRUE(OEChem::OESmilesToMol(first, "c1ccccc1"));
+    ASSERT_TRUE(OEChem::OESmilesToMol(third, "CCO"));
+    std::vector<OEChem::OEMolBase*> mols{&static_cast<OEChem::OEMolBase&>(first), nullptr,
+                                         &static_cast<OEChem::OEMolBase&>(third)};
+    EXPECT_EQ(refusal_message([&] { DescriptorComparison(mols, options); }),
+              "DescriptorComparison received null molecule pointer at index 1");
 }
 
 TEST(DescriptorComparisonMinimumInputTest, AFittedMetricNeedsTwoMolecules) {

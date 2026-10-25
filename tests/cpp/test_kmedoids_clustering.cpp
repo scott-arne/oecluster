@@ -1435,10 +1435,10 @@ TEST(KMedoidsSwapKernelTest, ScoresEveryNonMedoidCandidate) {
 TEST(KMedoidsSwapKernelTest, FindsAWinnerInAMiddleChunk) {
     // Item 3 is the only winner: entering it costs 7 against 10 for item 4.
     // With one worker the chunks run in ascending order, and chunk sizes 1
-    // and 2 put item 3 in chunk 3 of 5 and chunk 1 of 3 -- never the first
-    // chunk, whose only candidates are medoids, and never the last, whose
-    // winner is item 4. A reduction that kept the first or the last chunk's
-    // winner fails here. The single-chunk run is the reference.
+    // and 2 put item 3 in the fourth of five chunks and the second of three --
+    // never the first chunk, whose only candidates are medoids, and never the
+    // last, whose winner is item 4. A reduction that kept the first or the
+    // last chunk's winner fails here. The single-chunk run is the reference.
     const DenseStorage storage = MakeOddIndexMedianStorage();
     const KernelState state = MakeKernelState(storage, {0, 1});
 
