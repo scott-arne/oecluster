@@ -65,10 +65,12 @@ _LABEL = re.compile(r"(?:^|[;{}])[ \t]*(\w+)[ \t]*:(?!:)", re.MULTILINE)
 _CONDITIONAL_LINE = re.compile(r"^[ \t]*#[ \t]*(?:if|ifdef|ifndef|elif|else|endif)\b",
                                re.MULTILINE)
 _QUALIFIED_CALL = re.compile(r"\bOECluster::\w+\(")
-# The GIL macros' own condition on the release (swig/oecluster.i): a declaration
-# that begins a statement and skips the release only under an unsafe
-# memory-pool mode. Text before a release that ends this way is the gate, not a
-# condition the scan cannot follow.
+# The GIL macros' own condition on the release, OECLUSTER_POOL_GATE_BEGIN in
+# swig/oecluster.i, as SWIG expands it into the wrapper: a declaration that
+# begins a statement and skips the release only under an unsafe memory-pool
+# mode. Text before a release that ends this way is the gate, not a condition
+# the scan cannot follow. The /*@SWIG...@*/ markers SWIG puts around a nested
+# expansion are comments, which the scan blanks.
 _POOL_MODE_GATE = re.compile(r"(?:^|[;{}])\s*PyThreadState\s*\*\s*_oecluster_saved\s*=\s*"
                              r"_oecluster_keep_gil\s*\?\s*nullptr\s*:\s*\Z")
 # Under build/, this repository builds into build/ itself (the default CMake
@@ -341,18 +343,25 @@ def test_a_registered_call_inside_its_release_is_accepted():
 
 
 def test_a_release_skipped_only_under_an_unsafe_pool_is_accepted():
-    """The shape the GIL macros generate: the release is skipped, and the GIL
-    kept, only when the caller's memory-pool mode is not thread-safe."""
+    """The shape the GIL macros generate, SWIG's expansion markers included:
+    the release is skipped, and the GIL kept, only when the caller's
+    memory-pool mode is not thread-safe."""
+    begin = "/*@SWIG:swig/oecluster.i,1,OECLUSTER_POOL_GATE_BEGIN@*/"
+    restore = "/*@SWIG:swig/oecluster.i,2,OECLUSTER_POOL_GATE_RESTORE@*/"
     body = ("  {\n"
+            f"    {begin}const bool _oecluster_keep_gil = unsafe_mode();\n"
             "    PyThreadState* _oecluster_saved =\n"
             "      _oecluster_keep_gil ? nullptr : PyEval_SaveThread();\n"
+            "    /*@SWIG@*/\n"
             "    try {\n"
             "      result = OECluster::demo(arg1);\n"
             "    } catch (...) {\n"
-            "      if (_oecluster_saved) PyEval_RestoreThread(_oecluster_saved);\n"
+            f"      {restore}if (_oecluster_saved) PyEval_RestoreThread(_oecluster_saved);\n"
+            "      /*@SWIG@*/\n"
             '      SWIG_exception(SWIG_RuntimeError, "Unknown C++ exception in " "demo");\n'
             "    }\n"
-            "    if (_oecluster_saved) PyEval_RestoreThread(_oecluster_saved);\n"
+            f"    {restore}if (_oecluster_saved) PyEval_RestoreThread(_oecluster_saved);\n"
+            "    /*@SWIG@*/\n"
             "  }\n")
     assert _unreleased(["demo"], _synthetic_wrapper(body)) == []
 

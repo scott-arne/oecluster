@@ -1000,8 +1000,7 @@ def test_memory_exception_macro_raises_memory_error():
     assert text.count(define) == 1
     start = text.index(define)
     body = text[start:text.index("%enddef", start)]
-    assert "PyEval_SaveThread()" in body
-    assert "PyEval_RestoreThread(_oecluster_saved)" in body
+    assert "OECLUSTER_POOL_GATE_BEGIN" in body
     generic = body.index("catch (const std::exception& e)")
     for clause in ("catch (const std::bad_alloc&)",
                    "catch (const std::length_error& e)"):
@@ -1009,14 +1008,79 @@ def test_memory_exception_macro_raises_memory_error():
         position = body.index(clause)
         assert position < generic, f"{clause} is unreachable after std::exception"
         handler = body[position:body.index("}", position)]
-        assert "PyEval_RestoreThread(_oecluster_saved)" in handler
+        assert "OECLUSTER_POOL_GATE_RESTORE" in handler
         assert "SWIG_MemoryError" in handler
+        assert handler.index("OECLUSTER_POOL_GATE_RESTORE") < handler.index("SWIG_exception")
 
     for name in ("cluster_report", "isim", "isim_report", "butina_cluster",
                  "dbscan_cluster", "sphere_exclusion", "hdbscan_cluster",
                  "agglomerative_cluster"):
         assert f"OECLUSTER_GIL_MEMORY_EXCEPTION(OECluster::{name}, {name})" in text
         assert f"OECLUSTER_GIL_EXCEPTION(OECluster::{name}, {name})" not in text
+
+
+# Every call that can change whether the running thread holds the GIL, as
+# tests/python/test_gil_release.py counts them.
+_GIL_CHANGE = re.compile(r"\b(?:Py_BEGIN_ALLOW_THREADS|Py_END_ALLOW_THREADS|Py_BLOCK_THREADS|"
+                         r"Py_UNBLOCK_THREADS|PyEval_\w+|PyGILState_\w+|"
+                         r"SWIG_PYTHON_THREAD_\w+)\b")
+
+
+def test_both_gil_macros_open_the_one_pool_gate():
+    """The pool-mode gate is defined once, and both GIL macros open it.
+
+    OECLUSTER_POOL_GATE_BEGIN skips the release, keeping the GIL, exactly when
+    the caller's resolved memory-pool mode is not thread-safe, and
+    OECLUSTER_POOL_GATE_RESTORE re-acquires through the guarded line. A copy of
+    the gate inside one GIL macro could drift from the other's, so neither
+    macro may change the GIL except through these two, and each must restore
+    before every SWIG_exception and once after its try.
+
+    Asserted against the interface file for the reasons given in
+    test_the_new_entry_points_release_the_gil. test_gil_release.py scans the
+    wrapper SWIG expanded from it, and test_pool_mode.py and
+    test_caller_pool_mode.py run both branches.
+    """
+    interface = pathlib.Path(__file__).resolve().parents[2] / "swig" / "oecluster.i"
+    text = _SWIG_COMMENT.sub("", interface.read_text(encoding="utf-8"))
+
+    def body_of(define):
+        assert text.count(define) == 1, define
+        start = text.index(define) + len(define)
+        return text[start:text.index("%enddef", start)]
+
+    def squeezed(code):
+        return "".join(code.split())
+
+    assert squeezed(body_of("%define OECLUSTER_POOL_GATE_BEGIN\n")) == squeezed("""
+        const std::optional<unsigned int> _oecluster_python_mode =
+            _oecluster_caller_pool_mode();
+        const bool _oecluster_keep_gil = !OECluster::pool_is_thread_safe(
+            OECluster::resolve_pool_mode(_oecluster_python_mode));
+        OECluster::CallerPoolModeScope _oecluster_pool_scope(
+            _oecluster_python_mode, _oecluster_keep_gil);
+        PyThreadState* _oecluster_saved =
+            _oecluster_keep_gil ? nullptr : PyEval_SaveThread();
+    """)
+    assert squeezed(body_of("%define OECLUSTER_POOL_GATE_RESTORE\n")) == squeezed(
+        "if (_oecluster_saved) PyEval_RestoreThread(_oecluster_saved);")
+
+    for name in ("OECLUSTER_GIL_EXCEPTION", "OECLUSTER_GIL_MEMORY_EXCEPTION"):
+        body = body_of(f"%define {name}(QUALIFIED, NAME)")
+        change = _GIL_CHANGE.search(body)
+        assert change is None, f"{name} calls {change.group(0) if change else ''} itself"
+        assert body.count("OECLUSTER_POOL_GATE_BEGIN") == 1, name
+        assert body.index("OECLUSTER_POOL_GATE_BEGIN") < body.index("try {"), name
+        clauses = [match.start() for match in re.finditer(r"\bcatch\s*\(", body)]
+        assert clauses, name
+        for position in clauses:
+            handler = body[position:body.index("}", position)]
+            assert "OECLUSTER_POOL_GATE_RESTORE" in handler, (name, handler)
+            assert (handler.index("OECLUSTER_POOL_GATE_RESTORE")
+                    < handler.index("SWIG_exception")), (name, handler)
+        epilogue = body[body.index("}", clauses[-1]) + 1:]
+        assert epilogue.count("OECLUSTER_POOL_GATE_RESTORE") == 1, name
+        assert body.count("OECLUSTER_POOL_GATE_RESTORE") == len(clauses) + 1, name
 
 
 def test_by_value_returns_convert_inside_an_exception_handler():
