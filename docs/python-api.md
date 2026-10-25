@@ -302,16 +302,17 @@ below. What the comparison forms compare and hold
 | single linkage, comparison | exactly P | a few numbers per item |
 | single linkage, matrix | none | a few numbers per item, where 5.19.0 held about 12 GB at 20,000 items |
 
-The comparison forms also hold one clone of the comparison per worker
-thread (one clone in total under an unsafe pool mode), whose size depends on its family: a fingerprint clone is small, an
-MCS clone holds about 10.4 KB per molecule.
+The comparison forms also hold one clone of the comparison per worker thread
+(one clone in total under an unsafe pool mode), whose size depends on its
+family: a fingerprint clone is small, an MCS clone holds about 10.4 KB per
+molecule.
 
 **Threads.** For a matrix, or a comparison under a thread-safe memory-pool
 mode (see [Concurrency](#concurrency)), `num_threads=0` uses every core for
-the core-distance pass and at most 8 threads for the spanning tree. That pass re-reads every remaining
-item at every step, so it is bound by memory traffic, and every step waits
-for its slowest thread: on a busy machine a smaller explicit `num_threads`
-can be faster.
+the core-distance pass and at most 8 threads for the spanning tree. That pass
+re-reads every remaining item at every step, so it is bound by memory traffic,
+and every step waits for its slowest thread: on a busy machine a smaller
+explicit `num_threads` can be faster.
 
 **Exactness.** The result equals the matrix form's over a matrix filled
 through the same `Compare`, for every `num_threads` and `chunk_size`,

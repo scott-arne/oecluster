@@ -381,14 +381,16 @@ with one `Clone()` per concurrently running chunk. Each options struct
 gains `chunk_size`, default 4096 pairwise distances per unit. The
 comparison overloads refuse a zero `chunk_size`; the storage overloads
 ignore the field, and Python validates it on every path. A unit is whole
-rows; `activity_landscape` never makes one smaller than 64 rows, the floor
-its storage path already applies. Memory is O(N + K) plus O(N + C) per
-worker, for K clusters, where C is one comparison clone's size: O(N) for an
+rows; `activity_landscape` never makes one smaller than 64 rows, the floor its
+storage path already applies. Memory is O(N + K) plus O(N + C) per worker, for
+K clusters, where C is one comparison clone's size: O(N) for an
 `MCSComparison`, which deep-copies its molecules, and O(1) for clones that
-share their data. Workers are the requested `num_threads`, or the hardware concurrency
-when it is 0, capped at N, and at one for a comparison that runs OpenEye code
-under an unsafe memory-pool mode (see Memory-pool mode). No term grows with the pair count. A `cluster_report` fill block
-holds at most 2^20 distances, or one row if a row is longer.
+share their data. Workers are the requested `num_threads`, or the hardware
+concurrency when it is 0, capped at N, and at one for a comparison that runs
+OpenEye code under an unsafe memory-pool mode (see
+[Memory-pool mode](#memory-pool-mode)). No term grows with the pair count. A
+`cluster_report` fill block holds at most 2^20 distances, or one row if a row
+is longer.
 
 The comparison contract is the one `maxmin_select` and `knn_graph` already
 document: the engines read each pair through the unordered
