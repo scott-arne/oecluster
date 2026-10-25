@@ -70,6 +70,12 @@ does not serialise two calls made at once from different threads, so an
 application that sets an unsafe mode must serialise its own calls into
 oecluster and OpenEye.
 
+Worker counts, timings and per-worker memory given elsewhere in this guide
+assume a thread-safe mode. Under an unsafe one, a comparison whose
+`RunsOpenEyeCode()` is true is scored by one worker with one `Clone()`,
+whatever `num_threads` asks for, at every site that scores comparisons
+(`pdist`, `cdist`, `ChunkedComparisons` and `prim_mst`).
+
 A `TryPDist` or `TryCDist` override must honour `options.num_threads` and call
 `progress` only on the calling thread.
 
@@ -379,8 +385,9 @@ rows; `activity_landscape` never makes one smaller than 64 rows, the floor
 its storage path already applies. Memory is O(N + K) plus O(N + C) per
 worker, for K clusters, where C is one comparison clone's size: O(N) for an
 `MCSComparison`, which deep-copies its molecules, and O(1) for clones that
-share their data. Workers are `num_threads`, or the hardware concurrency
-when it is 0, capped at N. No term grows with the pair count. A `cluster_report` fill block
+share their data. Workers are the requested `num_threads`, or the hardware concurrency
+when it is 0, capped at N, and at one for a comparison that runs OpenEye code
+under an unsafe memory-pool mode (see Memory-pool mode). No term grows with the pair count. A `cluster_report` fill block
 holds at most 2^20 distances, or one row if a row is longer.
 
 The comparison contract is the one `maxmin_select` and `knn_graph` already

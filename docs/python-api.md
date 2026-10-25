@@ -47,6 +47,12 @@ oecluster's own OpenEye copy stands. This holds whether the extension links
 OpenEye as shared libraries (the macOS and Linux wheels) or statically (the
 Windows wheel).
 
+Thread counts, timings and per-worker memory given elsewhere in these docs
+assume a thread-safe mode. Under an unsafe mode, a comparison that runs
+OpenEye code is scored by one worker on the calling thread, with one clone,
+whatever `num_threads` asks for. Matrix inputs, and the fingerprint and
+descriptor comparisons, keep the requested count.
+
 ## Distance Matrices
 
 `pdist()` computes the symmetric within-set pairwise distance matrix. The first
@@ -297,11 +303,12 @@ below. What the comparison forms compare and hold
 | single linkage, matrix | none | a few numbers per item, where 5.19.0 held about 12 GB at 20,000 items |
 
 The comparison forms also hold one clone of the comparison per worker
-thread, whose size depends on its family: a fingerprint clone is small, an
+thread (one clone in total under an unsafe pool mode), whose size depends on its family: a fingerprint clone is small, an
 MCS clone holds about 10.4 KB per molecule.
 
-**Threads.** `num_threads=0` uses every core for the core-distance pass and
-at most 8 threads for the spanning tree. That pass re-reads every remaining
+**Threads.** For a matrix, or a comparison under a thread-safe memory-pool
+mode (see [Concurrency](#concurrency)), `num_threads=0` uses every core for
+the core-distance pass and at most 8 threads for the spanning tree. That pass re-reads every remaining
 item at every step, so it is bound by memory traffic, and every step waits
 for its slowest thread: on a busy machine a smaller explicit `num_threads`
 can be faster.
@@ -2819,7 +2826,7 @@ The lazy paths compare only the pairs the selection needs -- O(N·k) for k
 picks -- and never build the O(N^2) matrix, so they are the route for a library
 too large to hold one. Each worker thread holds one clone of the comparison;
 for a comparison that copies its items, such as `mcs`, that is O(N) memory per
-worker.
+worker (one worker under an unsafe pool mode; see [Concurrency](#concurrency)).
 
 A lazy comparison is refused before any pair is scored when its declared
 facts rule ranking out: a similarity orientation, a nonzero self-distance,
@@ -3005,8 +3012,9 @@ n = 10,000) and time as `n^3`.
 | `vendi_score`, order 2 | n(n-1)/2 | O(n) | O(n^2) |
 | `logdet_diversity` | n(n-1)/2 | O(n^2) | O(n^3) |
 
-The comparison paths also hold one comparison clone per worker thread. A
-comparison that copies its items (`mcs`) costs O(n) per clone.
+The comparison paths also hold one comparison clone per worker thread (see
+[Concurrency](#concurrency) for the unsafe-mode cap). A comparison that copies
+its items (`mcs`) costs O(n) per clone.
 
 The table's figures are for the native scoring pass. On the
 `SymmetricDistanceMatrix` path, the Python wrapper first validates the stored
@@ -3124,7 +3132,8 @@ same = oecluster.jarvis_patrick(mols, k=6, kmin=3, comparison="fingerprint")
 prebuilt comparison, or a sequence of items with `comparison=` and
 comparison options, as for `sphere_exclusion`. Lazy paths evaluate every
 ordered pair, N(N-1) comparisons, and keep only the O(N*k) graph, plus one
-comparison clone per running worker during the build. A comparison that copies
+comparison clone per running worker during the build (one worker under an
+unsafe pool mode; see [Concurrency](#concurrency)). A comparison that copies
 its items, such as `mcs`, costs O(N) per clone.
 
 **Rows.** Each row lists `k` items other than its own, ordered by ascending
@@ -3929,7 +3938,7 @@ do not gate on metric facts and accept it either way.
 | search time | ~400 s |
 | search construction, 0.287 ms each | ~287 s |
 | total, single-threaded | ~11.5 min |
-| total, 8 threads | ~90 s |
+| total, 8 threads (thread-safe pool mode) | ~90 s |
 | peak memory added by per-clone molecule copies | ~79 MB |
 
 Two caveats travel with those numbers. The per-search figures come from small
@@ -3939,9 +3948,12 @@ times the 0.691 ms mean the microbenchmark measured. And the 8-thread row
 assumes linear scaling, which was never measured. Use `fingerprint` for large
 sets and `mcs` for focused series.
 
-Memory grows as `num_threads x n x 10.4 KB`, because each worker holds private
-copies of the molecules rather than sharing one set. That is the one cost here
-that grows with thread count instead of shrinking.
+Under a thread-safe pool mode, memory grows as `num_threads x n x 10.4 KB`,
+because each worker holds private copies of the molecules rather than sharing
+one set. That is the one cost here that grows with thread count instead of
+shrinking. Under an unsafe pool mode `mcs` runs one worker, so the
+single-threaded time above and one clone's copy apply
+(see [Concurrency](#concurrency)).
 
 Every measured number in this section is recorded in
 [MCS Comparison Measurements](mcs-measurements.md), together with what was
