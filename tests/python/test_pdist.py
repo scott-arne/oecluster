@@ -1233,7 +1233,28 @@ def test_pdist_output_with_no_pairs_writes_an_empty_file(tmp_path, comparison,
     assert matrix.num_pairs == 0
     # The zero-copy view over a storage with no pairs wraps a null address.
     assert matrix.condensed.size == 0
+    assert matrix.squareform().shape == (count, count)
     if count == 1:
         assert matrix.storage.Get(0, 0) == 0.0
         np.testing.assert_array_equal(matrix.squareform(), [[0.0]])
     assert path.stat().st_size == 0
+
+
+def test_squareform_of_an_empty_matrix_is_empty():
+    """SciPy reads an empty condensed array as one sample, so squareform
+    must not hand it a zero-item matrix: that would invent an item."""
+    import oecluster
+
+    square = oecluster.pdist([], "fingerprint").squareform()
+    assert square.shape == (0, 0)
+    assert square.dtype == np.float64
+
+
+def test_an_empty_matrix_round_trips_through_a_file(tmp_path):
+    import oecluster
+
+    path = tmp_path / "empty.npz"
+    oecluster.pdist([], "fingerprint").to_file(str(path))
+    loaded = oecluster.SymmetricDistanceMatrix.from_file(str(path))
+    assert loaded.num_samples == 0
+    assert loaded.squareform().shape == (0, 0)

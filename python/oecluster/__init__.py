@@ -1132,6 +1132,10 @@ class SymmetricDistanceMatrix(DistanceMatrix):
                 "Install it with: pip install scipy"
             ) from e
 
+        # SciPy reads an empty condensed array as one sample, which would
+        # invent an item for a matrix that has none.
+        if self.num_samples == 0:
+            return np.zeros((0, 0), dtype=np.float64)
         return squareform(self.condensed)
 
     def to_file(self, path):
