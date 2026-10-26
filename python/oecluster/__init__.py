@@ -958,6 +958,28 @@ class DistanceMatrix(abc.ABC):
         raise NotImplementedError
 
 
+# A loaded stamp the data contradicts is corrected only towards caution, and
+# only from these two. ``subset_scored`` answers a different question and is
+# left alone, as pdist and cdist leave it. A clean scan never raises a stamp:
+# a sparse matrix with a positive finite cutoff drops ``+inf``, so a scan
+# that finds nothing cannot prove the matrix complete.
+_LOAD_CORRECTABLE_INTEGRITY = ("complete", "unknown")
+
+
+def _correct_loaded_integrity(matrix, has_nonfinite):
+    """
+    Correct a loaded ``data_integrity`` stamp that the loaded values contradict.
+
+    :param matrix: The distance matrix ``from_file`` just built.
+    :param has_nonfinite: Zero-argument callable answering whether the loaded
+        values hold a NaN or an infinity; called only when the stamp could
+        change, so a stamp that cannot change costs no scan.
+    """
+    if (matrix._facts['data_integrity'] in _LOAD_CORRECTABLE_INTEGRITY
+            and has_nonfinite()):
+        matrix._facts['data_integrity'] = "nan_present"
+
+
 class SymmetricDistanceMatrix(DistanceMatrix):
     """
     A symmetric (within-set) distance matrix produced by :func:`pdist`.
@@ -1194,6 +1216,10 @@ class SymmetricDistanceMatrix(DistanceMatrix):
         """
         Load a symmetric distance matrix from a .npz file.
 
+        A ``data_integrity`` stamp of ``complete`` or ``unknown`` that the
+        loaded values contradict -- any NaN or infinity -- reads back as
+        ``nan_present``. No stamp is raised, and ``subset_scored`` is kept.
+
         :param path: Input file path.
         :returns: SymmetricDistanceMatrix instance.
         :raises ValueError: If the file is a cross-distance matrix or malformed.
@@ -1260,7 +1286,11 @@ class SymmetricDistanceMatrix(DistanceMatrix):
             storage = DenseStorage(num_samples)
             _fill_dense_storage(storage, condensed)
 
-        return cls(storage, comparison_name, labels, params, facts)
+        matrix = cls(storage, comparison_name, labels, params, facts)
+        # The storage is float64 whichever way it was rebuilt, and
+        # _has_nonfinite reads sparse entries as the algorithms see them.
+        _correct_loaded_integrity(matrix, lambda: _gate._has_nonfinite(matrix))
+        return matrix
 
     @classmethod
     def from_condensed(cls, values, *, labels=None,
@@ -1740,6 +1770,10 @@ class CrossDistanceMatrix(DistanceMatrix):
         """
         Load a cross-distance matrix from a .npz file.
 
+        A ``data_integrity`` stamp of ``complete`` or ``unknown`` that the
+        loaded values contradict -- any NaN or infinity -- reads back as
+        ``nan_present``. No stamp is raised, and ``subset_scored`` is kept.
+
         :param path: Input file path.
         :returns: CrossDistanceMatrix instance.
         :raises ValueError: If the file is not a cross-distance matrix or is malformed.
@@ -1776,8 +1810,16 @@ class CrossDistanceMatrix(DistanceMatrix):
             facts = json.loads(str(data['facts_json']))
         except (KeyError, json.JSONDecodeError):
             facts = None
-        return cls(matrix, str(data['comparison_name']), labels_a, labels_b,
-                   params, facts)
+        loaded = cls(matrix, str(data['comparison_name']), labels_a, labels_b,
+                     params, facts)
+        # The array is stored as it was saved, whatever its dtype. Only a real
+        # numeric one is scanned: isfinite raises on a string array, and a
+        # timedelta64 NaT is not finite though it is no distance, so any other
+        # dtype keeps its stamp and loads as it always has.
+        _correct_loaded_integrity(
+            loaded,
+            lambda: matrix.dtype.kind in "fiu" and not np.isfinite(matrix).all())
+        return loaded
 
     def __array__(self):
         """Support numpy array interface."""

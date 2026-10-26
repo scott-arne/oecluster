@@ -42,7 +42,9 @@ def default_facts():
 
     Every value is the "unknown" form, and no unknown fact refuses on its own.
     This is what a distance matrix written before 5.0.0 loads as: the file
-    recorded no capability claim, so the gate must not invent one. The one
+    recorded no capability claim, so the gate must not invent one. Loading
+    then corrects ``data_integrity`` to ``nan_present`` if the values hold a
+    NaN or an infinity, the one fact the data can settle. The one
     thing these facts cannot buy is a pass on non-finite data, which the gate
     measures off the stored distances rather than reads off the stamp.
 
@@ -192,7 +194,8 @@ def require_metric(distance_matrix, caller, *, allow_nonmetric=False):
 
     # The stamp describes the data as computed. The caller can still write
     # through ``.condensed``, or through ``storage.Set`` -- plus ``Finalize``
-    # on sparse storage -- and ``from_file`` trusts a file's stamp outright, so
+    # on sparse storage -- and ``from_file`` corrects only a ``complete`` or
+    # ``unknown`` stamp, keeping ``subset_scored`` over a NaN, so
     # the one tier-1 fact that is cheap to re-measure is re-measured, and a
     # stamp that disagrees with the data loses. Testing the stamp first
     # short-circuits only a matrix already stamped ``nan_present``; every other

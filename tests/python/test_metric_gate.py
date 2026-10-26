@@ -418,22 +418,17 @@ def test_the_nan_refusal_names_only_a_remedy_the_caller_can_take():
         oecluster.pdist(mols, "fingerprint", missing="complete_case")
 
 
-def test_a_nan_bearing_file_is_refused_though_its_stamp_says_complete(tmp_path):
-    """The file route needs no deliberate mutation of the loaded matrix.
-
-    ``from_file`` trusts ``facts_json`` outright and never checks it against
-    the ``condensed`` array it just loaded, so an untrusted or stale file
-    arrives with NaN data under a ``complete`` stamp. Deliberately left as a
-    known residual: ``loaded.data_integrity`` still reports ``complete``. The
-    gate is what stops it clustering.
-    """
+def test_a_nan_bearing_file_stamped_complete_loads_as_nan_present(tmp_path):
+    """A file whose ``complete`` stamp its own data contradicts is corrected on
+    load: ``from_file`` scans the values once and reports ``nan_present``. The
+    gate still refuses the matrix, now on the stamp as well as the data."""
     path = tmp_path / "tampered.npz"
     dist = oecluster.pdist(_mols(), "fingerprint")
     dist.condensed[0] = float('nan')
     dist.to_file(str(path))
 
     loaded = oecluster.load_distance_matrix(str(path))
-    assert loaded.data_integrity == "complete"
+    assert loaded.data_integrity == "nan_present"
     assert np.isnan(loaded.condensed[0])
     with pytest.raises(ValueError, match="non-finite entries"):
         oecluster.butina(loaded, threshold=0.4)
@@ -956,8 +951,10 @@ def test_all_unknown_facts_with_clean_data_still_cluster(tmp_path):
     assert len(oecluster.butina(loaded, 0.5).labels) == 3
 
 
-def test_an_all_unknown_matrix_with_nonfinite_data_is_still_refused(tmp_path):
-    """The complement: "unknown" buys no pass on data that is measurably bad."""
+def test_a_legacy_file_with_nonfinite_data_loads_as_nan_present(tmp_path):
+    """A pre-5.0.0 file records no facts, so every fact starts ``unknown``; a
+    NaN in its values corrects ``data_integrity`` to ``nan_present`` on load,
+    and the gate still refuses it."""
     path = tmp_path / "legacy_nan.npz"
     np.savez_compressed(
         str(path),
@@ -968,9 +965,134 @@ def test_an_all_unknown_matrix_with_nonfinite_data_is_still_refused(tmp_path):
         num_samples=np.array(3),
     )
     loaded = oecluster.load_distance_matrix(str(path))
-    assert loaded.data_integrity == "unknown"
+    assert loaded.data_integrity == "nan_present"
     with pytest.raises(ValueError, match="non-finite entries"):
         oecluster.butina(loaded, 0.5, allow_nonmetric=True)
+
+
+def _rewrite_archive(path, **changes):
+    """Rewrite a saved ``.npz`` with some keys replaced or (value None) removed."""
+    with np.load(str(path), allow_pickle=False) as data:
+        arrays = {key: data[key] for key in data.files}
+    for key, value in changes.items():
+        if value is None:
+            arrays.pop(key, None)
+        else:
+            arrays[key] = value
+    np.savez_compressed(str(path), **arrays)
+
+
+def _restamp(path, integrity):
+    """Set ``data_integrity`` in a saved archive's ``facts_json``."""
+    with np.load(str(path), allow_pickle=False) as data:
+        facts = json.loads(str(data['facts_json']))
+    facts['data_integrity'] = integrity
+    _rewrite_archive(path, facts_json=np.array(json.dumps(facts)))
+
+
+def _dense_file(tmp_path, values):
+    """Save a three-item dense matrix with the given condensed values."""
+    path = tmp_path / "dense.npz"
+    dist = oecluster.pdist(_mols()[:3], "fingerprint")
+    dist.condensed[:] = values
+    dist.to_file(str(path))
+    return path
+
+
+def _sparse_file(tmp_path, value):
+    """Save a sparse three-item matrix whose one stored entry is ``value``."""
+    path = tmp_path / "sparse.npz"
+    # A positive cutoff with no output is what selects sparse storage.
+    dist = oecluster.pdist(_mols()[:3], "fingerprint", cutoff=0.9)
+    dist.to_file(str(path))
+    _rewrite_archive(
+        path, sparse_i=np.array([0]), sparse_j=np.array([1]),
+        sparse_v=np.array([value], dtype=np.float64))
+    return path
+
+
+def _cross_file(tmp_path, matrix):
+    """Save a cross matrix with the given values."""
+    path = tmp_path / "cross.npz"
+    mols = _mols()
+    cross = oecluster.cdist(mols[:2], mols[2:4], "fingerprint")
+    cross.to_file(str(path))
+    _rewrite_archive(path, matrix=matrix)
+    return path
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")],
+                         ids=["nan", "inf", "-inf"])
+def test_a_complete_stamp_over_a_nonfinite_value_loads_as_nan_present(
+        tmp_path, bad):
+    dense = _dense_file(tmp_path, [0.2, bad, 0.4])
+    _restamp(dense, "complete")
+    assert oecluster.load_distance_matrix(str(dense)).data_integrity == "nan_present"
+
+    cross = _cross_file(tmp_path, np.array([[0.1, bad], [0.3, 0.4]]))
+    _restamp(cross, "complete")
+    assert oecluster.load_distance_matrix(str(cross)).data_integrity == "nan_present"
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("-inf")], ids=["nan", "-inf"])
+def test_a_sparse_complete_stamp_over_a_stored_nonfinite_loads_as_nan_present(
+        tmp_path, bad):
+    # +inf cannot be stored under a finite cutoff, so NaN and -inf are the
+    # non-finite values a sparse file can hold.
+    sparse = _sparse_file(tmp_path, bad)
+    _restamp(sparse, "complete")
+    assert oecluster.load_distance_matrix(str(sparse)).data_integrity == "nan_present"
+
+
+def test_a_truthful_complete_file_round_trips_unchanged(tmp_path):
+    dense = _dense_file(tmp_path, [0.2, 0.3, 0.4])
+    _restamp(dense, "complete")
+    assert oecluster.load_distance_matrix(str(dense)).data_integrity == "complete"
+
+
+def test_a_subset_scored_stamp_is_kept_over_a_nan(tmp_path):
+    """``subset_scored`` answers a different question, as in pdist and cdist,
+    so a NaN does not overwrite it; the gate still finds the NaN."""
+    dense = _dense_file(tmp_path, [0.2, float("nan"), 0.4])
+    _restamp(dense, "subset_scored")
+    assert oecluster.load_distance_matrix(str(dense)).data_integrity == "subset_scored"
+
+
+def test_a_nan_present_stamp_is_never_raised_on_clean_data(tmp_path):
+    dense = _dense_file(tmp_path, [0.2, 0.3, 0.4])
+    _restamp(dense, "nan_present")
+    assert oecluster.load_distance_matrix(str(dense)).data_integrity == "nan_present"
+
+
+@pytest.mark.parametrize("values, expected", [
+    ([0.2, float("nan"), 0.4], "nan_present"),
+    ([0.2, 0.3, 0.4], "unknown"),
+], ids=["nonfinite", "clean"])
+def test_an_unknown_stamp_follows_the_data(tmp_path, values, expected):
+    dense = _dense_file(tmp_path, values)
+    _restamp(dense, "unknown")
+    assert oecluster.load_distance_matrix(str(dense)).data_integrity == expected
+
+
+def test_a_file_without_facts_and_clean_data_loads_as_unknown(tmp_path):
+    dense = _dense_file(tmp_path, [0.2, 0.3, 0.4])
+    _rewrite_archive(dense, facts_json=None)
+    assert oecluster.load_distance_matrix(str(dense)).data_integrity == "unknown"
+
+
+@pytest.mark.parametrize("matrix", [
+    np.array([["a", "b"], ["c", "d"]]),
+    np.array([[1, "NaT"], [2, 3]], dtype="timedelta64[s]"),
+], ids=["unicode", "timedelta-nat"])
+def test_a_cross_file_of_a_non_real_dtype_keeps_its_stamp(tmp_path, matrix):
+    """Such archives load today, because the cross loader checks only the
+    keys and the shape, so the scan must not refuse them or rewrite their
+    stamp: numpy.isfinite raises on a string array, and a timedelta64 NaT is
+    not finite."""
+    cross = _cross_file(tmp_path, matrix)
+    _restamp(cross, "complete")
+    loaded = oecluster.load_distance_matrix(str(cross))
+    assert loaded.data_integrity == "complete"
 
 
 def test_require_metric_refuses_subset_scored_but_allows_the_override():

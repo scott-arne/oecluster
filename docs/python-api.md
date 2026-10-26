@@ -3399,11 +3399,15 @@ that do not read the numbers still run either way, among them the shape and
 length arithmetic, the label count, the masked-array refusal and the
 complex-dtype refusal.
 
-Distance matrices written before 5.0.0 record no facts at all and load with
-`is_distance`, `zero_self`, `triangle` and `data_integrity` every one
-`'unknown'`. An unknown fact never refuses on its own, so those files cluster
-as they always did -- except for the non-finite scan, which reads the numbers
-rather than the stamp and so applies to them too.
+Distance matrices written before 5.0.0 record no facts at all. They load with
+`is_distance`, `zero_self` and `triangle` all `'unknown'`, and with
+`data_integrity` `'unknown'` too, unless the values hold a NaN or an infinity,
+when it reads `'nan_present'`. Any loaded file gets that correction: a
+`complete` or `unknown` stamp the values contradict reads back as
+`nan_present`, while `subset_scored` is kept. An unknown fact never refuses on
+its own, so legacy files cluster as they always did, except for the
+non-finite scan, which reads the numbers rather than the stamp and so applies
+to them too.
 
 ## Comparison Methods
 
