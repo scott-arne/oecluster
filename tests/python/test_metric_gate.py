@@ -1236,10 +1236,10 @@ def test_require_metric_refuses_subset_scored_but_allows_the_override():
 def test_butina_coercion_error_before_gate():
     """Caller argument coercion errors come before the gate's advisory refusal.
 
-    Discriminator: passing a list to int() raises TypeError, while the gate
-    raises ValueError. If the gate ran first, the caller would see ValueError
-    with the "allow_nonmetric=True" advisory -- a remedy that cannot rescue
-    the invalid type.
+    Discriminator: passing a list to operator.index() raises TypeError, while
+    the gate raises ValueError. If the gate ran first, the caller would see
+    ValueError with the "allow_nonmetric=True" advisory -- a remedy that
+    cannot rescue the invalid type.
     """
     dist = oecluster.pdist(_mols(), "fingerprint", metric="dice")
     assert dist.metric_capabilities['triangle'] is False
@@ -1362,6 +1362,68 @@ def test_negative_chunk_size_before_gate(call):
     dist = _nonmetric()
     with pytest.raises(ValueError, match="chunk_size must be non-negative"):
         call(dist, chunk_size=-1)
+
+
+class _IndexOnly:
+    """An integer through operator.index, and an error through int()."""
+
+    def __index__(self):
+        return 1
+
+    def __int__(self):
+        raise AssertionError("int() reached a value meant for operator.index")
+
+
+_CLUSTERING_CALLS = [
+    lambda dm, **kw: oecluster.butina(dm, 0.5, **kw),
+    lambda dm, **kw: oecluster.dbscan(dm, 0.5, **kw),
+    lambda dm, **kw: oecluster.hdbscan(dm, min_cluster_size=2, **kw),
+    lambda dm, **kw: oecluster.agglomerative(dm, **kw),
+]
+
+
+@pytest.mark.parametrize("call", _CLUSTERING_CALLS)
+@pytest.mark.parametrize("name", ["num_threads", "chunk_size"])
+@pytest.mark.parametrize("value", [2.5, "8", None], ids=["float", "str", "none"])
+def test_a_non_integer_thread_or_chunk_count_is_refused_before_gate(
+        call, name, value):
+    """operator.index refuses what int() used to truncate or parse, and it
+    still runs ahead of the gate's advisory, which _nonmetric() would raise."""
+    with pytest.raises(TypeError):
+        call(_nonmetric(), **{name: value})
+
+
+@pytest.mark.parametrize("call", _CLUSTERING_CALLS)
+@pytest.mark.parametrize("name", ["num_threads", "chunk_size"])
+def test_a_numpy_integer_or_index_only_count_is_accepted(call, name):
+    dist = _nonmetric()
+    expected = call(dist, allow_nonmetric=True, **{name: 2}).labels
+    got = call(dist, allow_nonmetric=True, **{name: np.int64(2)}).labels
+    assert list(got) == list(expected)
+    call(dist, allow_nonmetric=True, **{name: _IndexOnly()})
+
+
+@pytest.mark.parametrize("value", [2.5, "8", None], ids=["float", "str", "none"])
+def test_cluster_report_refuses_a_non_integer_num_threads_before_gate(value):
+    # No allow_nonmetric here: the TypeError must come ahead of the gate's
+    # refusal of this non-metric matrix.
+    dist = _nonmetric()
+    result = oecluster.butina(dist, 0.5, allow_nonmetric=True)
+    with pytest.raises(TypeError):
+        oecluster.cluster_report(result, dist, num_threads=value)
+
+
+def test_cluster_report_accepts_a_numpy_integer_or_index_only_num_threads():
+    dist = _nonmetric()
+    result = oecluster.butina(dist, 0.5, allow_nonmetric=True)
+
+    def report(num_threads):
+        return oecluster.cluster_report(result, dist, num_threads=num_threads,
+                                        allow_nonmetric=True)
+
+    # repr, not field equality: a report can hold NaN, which never equals itself.
+    assert repr(report(np.int64(2))) == repr(report(2))
+    report(_IndexOnly())
 
 
 def test_negative_n_clusters_before_gate_with_a_threshold():

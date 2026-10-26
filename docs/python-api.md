@@ -1278,9 +1278,9 @@ must be non-NaN and non-negative (`ValueError`); `treat_noise_as_singletons`,
 `compute_centroid_indices` and `compute_per_cluster_records`, checked in that
 order, must each be `bool` or `numpy.bool_` (`TypeError` -- truthiness is
 refused because a string such as `"no"` would silently switch the O(N K)
-stage on); `num_threads` must be non-negative after `int()` conversion
-(`ValueError`); and `result` and `fingerprints` must cover the same number of
-samples (`ValueError` naming both counts).
+stage on); `num_threads` must be an integer (`TypeError` for a float, string
+or `None`) and non-negative (`ValueError`); and `result` and `fingerprints`
+must cover the same number of samples (`ValueError` naming both counts).
 
 Those Python checks are a convenience layer in front of the native ones,
 which run as a backstop: `metric` other than `"tanimoto"`, a non-empty batch
@@ -2754,18 +2754,19 @@ where `[5, 3, 1, 0]` gives it the last, and neither is an error, so pass a
 sequence when the pairing matters. The same silence in the activity position
 costs more than a pairing: `sar_coherence([0, 0, 1, 1], [10., 20., 30., 40.])`
 reports an `eta_squared` of 0.8, and the same call with those four values as a
-`set`, which iterates `40.0, 10.0, 20.0, 30.0`, reports 0.0. All four numeric
-options behave alike here, each being coerced before it is range-checked:
-`None` or a list raises `TypeError` from that coercion for any of
-`distance_threshold`, `activity_threshold`, `rmodi_delta` and `num_threads`,
-while a string the coercion cannot parse raises `ValueError` from the same
-call.
+`set`, which iterates `40.0, 10.0, 20.0, 30.0`, reports 0.0. The numeric
+options are each coerced before they are range-checked. The three thresholds,
+`distance_threshold`, `activity_threshold` and `rmodi_delta`, go through
+`float()`: `None` or a list raises `TypeError` from that coercion, while a
+string it cannot parse raises `ValueError` from the same call. `num_threads`
+goes through `operator.index`, which raises `TypeError` for any non-integer --
+a float, a string, `None` or a list alike.
 
 Each of the three raises `ValueError` for whatever its own signature lets
 Python see for itself: a length mismatch, an empty labeling, an empty activity,
 an out-of-range label, an unknown `noise=` spelling, a non-finite or negative
-threshold, a `num_threads` of -1 or below (`-0.5` truncates to 0 and is
-accepted, selecting the hardware concurrency rather than raising), and every
+threshold, a `num_threads` of -1 or below (a non-integer such as `-0.5` is a
+`TypeError`), and every
 refusal above from the matrix check. The two overloads of `sar_coherence()`
 agree on all of the conditions they share, which is worth saying because they
 reach the native layer by different routes: an empty activity and a label too
@@ -2785,14 +2786,14 @@ negative number is, so nothing catches it until the sweep reads it.
 
 The fourth type is `OverflowError`, and it derives from `ArithmeticError`, so
 an `except ValueError` does not catch it. Only `num_threads` reaches it, in
-both functions that take one, by two routes: `float("inf")` fails in `int()`
-with "cannot convert float infinity to integer", and a finite value past the
-native `size_t` -- `1e300`, or `10**30`, though not `2**64 - 1` -- fails where
-the bindings assign it to the options struct. The three `float()` options
+both functions that take one, and only as an integer past the native
+`size_t` -- `10**30`, though not `2**64 - 1` -- which fails where the bindings
+assign it to the options struct. `float("inf")` does not reach it: like every
+float, it is a `TypeError` from `operator.index`. The three `float()` options
 cannot reach it at all, each being finiteness-guarded before use, so
 `distance_threshold=float("inf")` is
 `ValueError: distance_threshold must be finite`; and a `nan` is a `ValueError`
-for all four.
+for the three `float()` options and a `TypeError` for `num_threads`.
 
 ## Diversity Selection
 

@@ -2934,7 +2934,8 @@ def butina(items=_MISSING, threshold=_MISSING, *, distance_matrix=_MISSING,
         ``distance_matrix`` are given, or ``threshold`` is missing; the
         arguments fit none of the three forms, or ``comparison`` or a keyword
         this function does not take accompanies a matrix or a prebuilt
-        comparison; ``allow_nonmetric`` is not a bool or ``numpy.bool_``; or
+        comparison; ``num_threads`` or ``chunk_size`` is not an integer;
+        ``allow_nonmetric`` is not a bool or ``numpy.bool_``; or
         ``max_graph_bytes`` accompanies a matrix, or is a bool or not an
         integer.
     :raises ValueError: If threshold or a size argument is negative;
@@ -2958,8 +2959,9 @@ def butina(items=_MISSING, threshold=_MISSING, *, distance_matrix=_MISSING,
 
     # Coerce caller arguments before the gate so that an invalid type is reported
     # ahead of an advisory refusal that names a remedy which cannot rescue it.
-    num_threads_int = int(num_threads)
-    chunk_size_int = int(chunk_size)
+    # operator.index refuses a float, str or None, which int() would truncate or parse.
+    num_threads_int = operator.index(num_threads)
+    chunk_size_int = operator.index(chunk_size)
 
     # Both reach size_t option fields, where a negative value raises
     # OverflowError below the gate. Zero stays legal: it means "choose for me".
@@ -3364,7 +3366,8 @@ def dbscan(items=_MISSING, eps=_MISSING, *, distance_matrix=_MISSING,
         ``distance_matrix`` are given, or ``eps`` is missing; the arguments
         fit none of the three forms, or ``comparison`` or a keyword this
         function does not take accompanies a matrix or a prebuilt
-        comparison; ``allow_nonmetric`` is not a bool or ``numpy.bool_``; or
+        comparison; ``num_threads`` or ``chunk_size`` is not an integer;
+        ``allow_nonmetric`` is not a bool or ``numpy.bool_``; or
         ``max_graph_bytes`` accompanies a matrix, or is a bool or not an
         integer.
     :raises ValueError: If eps, min_samples, or a size argument is invalid;
@@ -3390,8 +3393,9 @@ def dbscan(items=_MISSING, eps=_MISSING, *, distance_matrix=_MISSING,
 
     # Coerce caller arguments before the gate so that an invalid type is reported
     # ahead of an advisory refusal that names a remedy which cannot rescue it.
-    num_threads_int = int(num_threads)
-    chunk_size_int = int(chunk_size)
+    # operator.index refuses a float, str or None, which int() would truncate or parse.
+    num_threads_int = operator.index(num_threads)
+    chunk_size_int = operator.index(chunk_size)
 
     # Both reach size_t option fields, where a negative value raises
     # OverflowError below the gate. Zero stays legal: it means "choose for me".
@@ -3484,8 +3488,9 @@ def hdbscan(items=_MISSING, *, distance_matrix=_MISSING, min_cluster_size=5,
     :raises TypeError: If both or neither of ``items`` and
         ``distance_matrix`` are given; the arguments fit none of the three
         forms, or ``comparison`` or a keyword this function does not take
-        accompanies a matrix or a prebuilt comparison; or
-        ``allow_nonmetric`` is not a bool or ``numpy.bool_``.
+        accompanies a matrix or a prebuilt comparison; ``num_threads`` or
+        ``chunk_size`` is not an integer; or ``allow_nonmetric`` is not a bool
+        or ``numpy.bool_``.
     :raises ValueError: If options are invalid, ``alpha`` included when it is
         NaN; ``min_samples`` exceeds the item count; the matrix uses sparse
         storage, holds a NaN or infinite distance, or is not a metric, or the
@@ -3523,8 +3528,9 @@ def hdbscan(items=_MISSING, *, distance_matrix=_MISSING, min_cluster_size=5,
 
     # Coerce caller arguments before the gate so that an invalid type is reported
     # ahead of an advisory refusal that names a remedy which cannot rescue it.
-    num_threads_int = int(num_threads)
-    chunk_size_int = int(chunk_size)
+    # operator.index refuses a float, str or None, which int() would truncate or parse.
+    num_threads_int = operator.index(num_threads)
+    chunk_size_int = operator.index(chunk_size)
 
     # Both reach size_t option fields, where a negative value raises
     # OverflowError below the gate. Zero stays legal: it means "choose for me".
@@ -3654,8 +3660,9 @@ def agglomerative(items=_MISSING, *, distance_matrix=_MISSING, n_clusters=2,
     :raises TypeError: If both or neither of ``items`` and
         ``distance_matrix`` are given; the arguments fit none of the three
         forms, or ``comparison`` or a keyword this function does not take
-        accompanies a matrix or a prebuilt comparison; or
-        ``allow_nonmetric`` is not a bool or ``numpy.bool_``.
+        accompanies a matrix or a prebuilt comparison; ``num_threads`` or
+        ``chunk_size`` is not an integer; or ``allow_nonmetric`` is not a bool
+        or ``numpy.bool_``.
     :raises ValueError: If options are invalid; a comparison form asks for a
         linkage other than single; ``n_clusters`` exceeds the item count
         without a ``distance_threshold``; the matrix uses sparse storage,
@@ -3692,8 +3699,9 @@ def agglomerative(items=_MISSING, *, distance_matrix=_MISSING, n_clusters=2,
     # Coerce caller arguments before the gate so that an invalid type is reported
     # ahead of an advisory refusal that names a remedy which cannot rescue it.
     n_clusters_int = int(n_clusters)
-    num_threads_int = int(num_threads)
-    chunk_size_int = int(chunk_size)
+    # operator.index refuses a float, str or None, which int() would truncate or parse.
+    num_threads_int = operator.index(num_threads)
+    chunk_size_int = operator.index(chunk_size)
 
     # All three reach size_t option fields, where a negative value raises
     # OverflowError below the gate. n_clusters needs its own check because the
@@ -4278,7 +4286,8 @@ def bitbirch(fingerprints, *, threshold=0.65, branching_factor=50,
         inputs.
     :param num_threads: Thread count for parallel-safe phases.
     :returns: BitBirchResult with labels, clusters, centroids, and cluster sizes.
-    :raises TypeError: If fingerprints is not an `oefp.OEFPBatch`.
+    :raises TypeError: If fingerprints is not an `oefp.OEFPBatch`, or
+        ``num_threads`` is not an integer.
     :raises ValueError: If an option is invalid.
     """
     _require_oefp_batch(fingerprints, "bitbirch")
@@ -4296,7 +4305,7 @@ def bitbirch(fingerprints, *, threshold=0.65, branching_factor=50,
     options.tolerance = float(tolerance)
     options.singly = _flag(singly, "singly")
     options.mode = _bitbirch_mode(mode)
-    options.num_threads = int(num_threads)
+    options.num_threads = operator.index(num_threads)
 
     result = _bitbirch_cluster(fingerprints, options)
     return BitBirchResult(
@@ -4342,7 +4351,7 @@ def bitbirch_recluster(fingerprints, *, initial_threshold=0.65,
     options.second_tolerance = float(second_tolerance)
     options.branching_factor = int(branching_factor)
     options.mode = _bitbirch_mode(mode)
-    options.num_threads = int(num_threads)
+    options.num_threads = operator.index(num_threads)
 
     result = _bitbirch_recluster(fingerprints, options)
     return BitBirchResult(
@@ -4408,14 +4417,14 @@ def bitbirch_refine(fingerprints, *, threshold=0.65, branching_factor=50,
     fit_options.tolerance = float(tolerance)
     fit_options.singly = _flag(singly, "singly")
     fit_options.mode = _bitbirch_mode(mode)
-    fit_options.num_threads = int(num_threads)
+    fit_options.num_threads = operator.index(num_threads)
 
     options = BitBirchRefinementOptions()
     options.fit_options = fit_options
     options.redistribute_largest_cluster = _flag(
         redistribute_largest_cluster, "redistribute_largest_cluster")
     options.reassign_top_clusters = int(reassign_top_clusters)
-    options.num_threads = int(num_threads)
+    options.num_threads = operator.index(num_threads)
 
     result = _bitbirch_refine(fingerprints, options)
     return BitBirchResult(
@@ -5239,9 +5248,10 @@ def cluster_report(result, items=_MISSING, *, distance_matrix=_MISSING,
         ``items`` and ``distance_matrix`` are given; ``distance_matrix`` is not
         a SymmetricDistanceMatrix; ``items`` fits none of the three forms;
         ``comparison`` or a keyword this function does not take accompanies a
-        matrix or a prebuilt comparison; or treat_noise_as_singletons,
-        compute_pair_rank_indices, compute_per_cluster_records or
-        allow_nonmetric is not a bool or ``numpy.bool_``.
+        matrix or a prebuilt comparison; ``num_threads`` is not an integer;
+        or treat_noise_as_singletons, compute_pair_rank_indices,
+        compute_per_cluster_records or allow_nonmetric is not a bool or
+        ``numpy.bool_``.
     :raises ValueError: If a preset/method/threshold is invalid, ``chunk_size``
         is not an integer of at least 1, the result and the distances cover
         different numbers of samples, the matrix uses sparse storage, or the
@@ -5312,7 +5322,7 @@ def cluster_report(result, items=_MISSING, *, distance_matrix=_MISSING,
             f"({treat_noise_as_singletons!r})."
         )
 
-    num_threads_int = int(num_threads)
+    num_threads_int = operator.index(num_threads)
 
     # num_threads reaches a size_t option field, where a negative value raises
     # OverflowError below the gate. Zero stays legal: it means "choose for me".
@@ -5468,8 +5478,8 @@ def isim_report(result, fingerprints, *, metric="tanimoto", preset="default",
     :param num_threads: Worker threads; 0 means hardware concurrency, capped at
         the cluster count.
     :returns: An :class:`ISimReport`.
-    :raises TypeError: For a non-ClusteringResult, a non-OEFPBatch, or a
-        non-bool flag.
+    :raises TypeError: For a non-ClusteringResult, a non-OEFPBatch, a
+        non-bool flag, or a ``num_threads`` that is not an integer.
     :raises ValueError: For an unsupported metric or preset, a NaN or negative
         threshold, a negative ``num_threads``, or a result and batch of
         different sizes.
@@ -5502,7 +5512,7 @@ def isim_report(result, fingerprints, *, metric="tanimoto", preset="default",
                 f"{name} must be True or False, "
                 f"not {type(value).__name__} ({value!r}).")
 
-    num_threads_int = int(num_threads)
+    num_threads_int = operator.index(num_threads)
     if num_threads_int < 0:
         raise ValueError("num_threads must be non-negative")
 
@@ -6145,14 +6155,13 @@ def activity_landscape(items=_MISSING, activity=_MISSING, *,
     :param rmodi_delta: Half-width of the RMODI activity band, in standard
         deviations. 0.625 is the published value.
     :param num_threads: 0 selects the hardware concurrency. The result does not
-        depend on this value, bit for bit. Truncated toward zero, so 1.9 selects
-        one thread and -0.5 truncates to 0 and therefore selects the hardware
-        concurrency, like every other value that truncates there.
-        ``OverflowError`` has two sources, with different causes and different
-        moments: an infinite value has no integer to truncate to and fails
-        inside ``int()``, before the non-negative check runs at all, while a
-        finite but oversized value coerces cleanly there and fails later, in the
-        binding layer's ``size_t`` assignment.
+        depend on this value, bit for bit. Must be an integer -- an int, a bool
+        or a numpy integer, read through ``operator.index`` -- so a float
+        (infinity and NaN included), a str or None is a ``TypeError`` rather
+        than being truncated or parsed: -0.5 is refused, not read as 0. An
+        integer too large for a ``size_t``, such as ``10**30``, passes the
+        non-negative check and raises ``OverflowError`` in the binding layer's
+        ``size_t`` assignment.
     :param chunk_size: Pairwise distances per work unit on the comparison
         paths, at least 1; validated on every path. A unit is never smaller
         than 64 rows, so a small value does not fragment the sweep. The result
@@ -6164,16 +6173,14 @@ def activity_landscape(items=_MISSING, activity=_MISSING, *,
         ``distance_matrix`` is not a SymmetricDistanceMatrix; ``items`` fits
         none of the three forms, or ``comparison`` or a keyword this function
         does not take accompanies a matrix or a prebuilt comparison;
-        ``activity`` is not a sequence of floats, or ``num_threads`` is a value
-        ``int()`` cannot accept at all, such as None or a complex. That
-        coercion runs before the non-negative check below.
+        ``activity`` is not a sequence of floats, or ``num_threads`` is not an
+        integer, such as a float, a str or None. That coercion runs before the
+        non-negative check below.
     :raises ValueError: If the matrix uses sparse storage, the activity is
         empty, the activity holds a number too large to convert to a double,
         the activity and the matrix cover different numbers of samples,
         any of the three thresholds is non-finite or negative,
-        ``num_threads`` is a str ``int()`` cannot parse or a NaN, which the
-        same coercion refuses,
-        ``num_threads`` truncates toward zero to a negative integer,
+        ``num_threads`` is a negative integer,
         ``chunk_size`` is not an integer of at least 1,
         or the gate refuses the matrix --
         similarity-valued, a non-zero self-distance, a non-finite entry, or
@@ -6191,8 +6198,8 @@ def activity_landscape(items=_MISSING, activity=_MISSING, *,
         SWIG maps every native
         exception to ``RuntimeError``. A negative distance reaches C++ because
         the gate measures finiteness, not sign.
-    :raises OverflowError: If ``num_threads`` is an infinity or coerces to an
-        integer too large for a ``size_t``.
+    :raises OverflowError: If ``num_threads`` is an integer too large for a
+        ``size_t``.
 
     Example::
 
@@ -6251,7 +6258,7 @@ def activity_landscape(items=_MISSING, activity=_MISSING, *,
         checked.append(coerced)
     distance_value, activity_value, rmodi_value = checked
 
-    num_threads_int = int(num_threads)
+    num_threads_int = operator.index(num_threads)
     # num_threads reaches a size_t option field, where a negative value raises
     # OverflowError below the gate. Zero stays legal: it means "choose for me".
     if num_threads_int < 0:
@@ -6319,11 +6326,10 @@ def modelability(items=_MISSING, activity_classes=_MISSING, *,
         missing annotation rather than a category, and its sample is dropped.
     :param num_threads: 0 selects the hardware concurrency. Nearest-neighbour
         ties resolve to the lowest scored index, so the result does not depend
-        on this value. Truncated toward zero on :func:`activity_landscape`'s
-        terms: 1.9 selects one thread, -0.5 truncates to 0 and therefore
-        selects the hardware concurrency, and ``OverflowError`` arrives from
-        the same two places -- an infinite value out of ``int()``, a finite but
-        oversized one out of the binding layer's ``size_t`` assignment.
+        on this value. Coerced on :func:`activity_landscape`'s terms: a
+        non-integer, -0.5 and infinity included, is a ``TypeError``, and an
+        integer too large for a ``size_t`` raises ``OverflowError`` from the
+        binding layer's ``size_t`` assignment.
     :param chunk_size: Pairwise distances per work unit on the comparison
         paths, at least 1; validated on every path. The result does not
         depend on it.
@@ -6332,21 +6338,17 @@ def modelability(items=_MISSING, activity_classes=_MISSING, *,
     :raises TypeError: On :func:`activity_landscape`'s argument-routing
         conditions, reading ``activity_classes`` for ``activity``;
         ``activity_classes`` is not a sequence of strings, or ``num_threads``
-        is a value ``int()`` cannot accept at all, on
-        :func:`activity_landscape`'s terms.
+        is not an integer, on :func:`activity_landscape`'s terms.
     :raises ValueError: On the same conditions as :func:`activity_landscape`,
         reading ``activity_classes`` for ``activity``, less the three threshold
         refusals and the oversized-value refusal: this function has no
-        thresholds, and a class string has no magnitude to overflow. Every
-        ``num_threads`` condition carries over unchanged, including the ones
-        the coercion raises: a str ``int()`` cannot parse and a NaN as the
-        ValueError this clause describes, an infinite value as the
-        ``OverflowError`` the parameter above sets out.
+        thresholds, and a class string has no magnitude to overflow. The
+        negative ``num_threads`` refusal carries over unchanged.
     :raises RuntimeError: If a stored or compared distance is negative, or a
         comparison returns a non-finite distance for a pair the sweep reads,
         on the same terms as :func:`activity_landscape`.
-    :raises OverflowError: If ``num_threads`` is an infinity or coerces to an
-        integer too large for a ``size_t``.
+    :raises OverflowError: If ``num_threads`` is an integer too large for a
+        ``size_t``.
 
     Example::
 
@@ -6382,7 +6384,7 @@ def modelability(items=_MISSING, activity_classes=_MISSING, *,
             f"activity_classes has {len(classes)} entries but the matrix "
             f"covers {items.num_samples} samples")
 
-    num_threads_int = int(num_threads)
+    num_threads_int = operator.index(num_threads)
     if num_threads_int < 0:
         raise ValueError("num_threads must be non-negative")
 

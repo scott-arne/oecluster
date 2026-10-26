@@ -488,6 +488,42 @@ def test_bitbirch_refine_reassign_threads_match_serial_on_duplicate_blocks():
     assert threaded.cluster_sizes == serial.cluster_sizes
 
 
+class _IndexOnly:
+    """An integer through operator.index, and an error through int()."""
+
+    def __index__(self):
+        return 1
+
+    def __int__(self):
+        raise AssertionError("int() reached a value meant for operator.index")
+
+
+_BITBIRCH_CALLS = [
+    lambda batch, **kw: oecluster.bitbirch(batch, **kw),
+    lambda batch, **kw: oecluster.bitbirch_recluster(
+        batch, initial_threshold=0.5, second_threshold=0.5, **kw),
+    lambda batch, **kw: oecluster.bitbirch_refine(batch, **kw),
+]
+
+
+@pytest.mark.parametrize("call", _BITBIRCH_CALLS)
+@pytest.mark.parametrize("value", [2.5, "8", None], ids=["float", "str", "none"])
+def test_bitbirch_refuses_a_non_integer_num_threads(call, value):
+    batch = _batch_from_bits(_random_bits(30, 64, seed=5))
+    with pytest.raises(TypeError):
+        call(batch, num_threads=value)
+
+
+@pytest.mark.parametrize("call", _BITBIRCH_CALLS)
+def test_bitbirch_accepts_a_numpy_integer_or_index_only_num_threads(call):
+    """_IndexOnly reaches every coercion, so bitbirch_refine's second one,
+    which a refused value never reaches, cannot keep int() unnoticed."""
+    batch = _batch_from_bits(_random_bits(30, 64, seed=5))
+    expected = call(batch, num_threads=2).labels
+    assert list(call(batch, num_threads=np.int64(2)).labels) == list(expected)
+    call(batch, num_threads=_IndexOnly())
+
+
 def _duplicate_prototype_bits(seed, *, prototypes=4, copies=3, cols=24, density=0.2):
     # Repeated prototypes give reassign equal centroids to select, and a tie
     # resolves to the lower centroid index, so the later of two equal centroids

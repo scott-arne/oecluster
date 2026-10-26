@@ -1376,6 +1376,39 @@ def test_the_matrix_metrics_agree_across_thread_counts():
             oecluster.modelability(dm, ["A", "B"] * 30, num_threads=4).modi)
 
 
+class _IndexOnly:
+    """An integer through operator.index, and an error through int()."""
+
+    def __index__(self):
+        return 1
+
+    def __int__(self):
+        raise AssertionError("int() reached a value meant for operator.index")
+
+
+_SAR_CALLS = [
+    lambda **kw: oecluster.activity_landscape(
+        _line_dm(_SALI_COORDS), _SALI_ACTIVITY, **kw),
+    lambda **kw: oecluster.modelability(
+        _line_dm(_MODI_COORDS), _MODI_CLASSES, **kw),
+]
+
+
+@pytest.mark.parametrize("call", _SAR_CALLS)
+@pytest.mark.parametrize("value", [2.5, "8", None, float("inf"), float("nan")],
+                         ids=["float", "str", "none", "inf", "nan"])
+def test_a_non_integer_num_threads_is_a_type_error(call, value):
+    """inf used to be OverflowError and NaN ValueError, both from int()."""
+    with pytest.raises(TypeError):
+        call(num_threads=value)
+
+
+@pytest.mark.parametrize("call", _SAR_CALLS)
+def test_a_numpy_integer_or_index_only_num_threads_is_accepted(call):
+    assert call(num_threads=np.int64(2)).to_table() == call(num_threads=2).to_table()
+    call(num_threads=_IndexOnly())
+
+
 def test_the_matrix_metrics_are_safe_under_concurrent_calls():
     """Four Python threads in one process, scoring the same matrix.
 

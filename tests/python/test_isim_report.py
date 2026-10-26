@@ -355,6 +355,32 @@ def test_positive_num_threads_is_forwarded_without_changing_results(num_threads)
                           _full_report(labels, rows, 70, num_threads=num_threads))
 
 
+class _IndexOnly:
+    """An integer through operator.index, and an error through int()."""
+
+    def __index__(self):
+        return 1
+
+    def __int__(self):
+        raise AssertionError("int() reached a value meant for operator.index")
+
+
+@pytest.mark.parametrize("value", [2.5, "8", None], ids=["float", "str", "none"])
+def test_a_non_integer_num_threads_is_refused(value):
+    labels = _mixed_labels()
+    rows = _random_rows(40, 70, 11)
+    with pytest.raises(TypeError):
+        _full_report(labels, rows, 70, num_threads=value)
+
+
+def test_a_numpy_integer_or_index_only_num_threads_is_accepted():
+    labels = _mixed_labels()
+    rows = _random_rows(40, 70, 11)
+    _assert_reports_match(_full_report(labels, rows, 70, num_threads=2),
+                          _full_report(labels, rows, 70, num_threads=np.int64(2)))
+    _full_report(labels, rows, 70, num_threads=_IndexOnly())
+
+
 def test_noise_coverage_is_nan_without_noise():
     report = _full_report([0, 0, 1, 1], [[1], [1, 2], [5], [5, 6]], 16)
     assert len(report.noise_coverage_at) == len(report.coverage_thresholds) == 3
