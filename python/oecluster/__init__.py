@@ -2959,7 +2959,7 @@ def butina(items=_MISSING, threshold=_MISSING, *, distance_matrix=_MISSING,
 
     # Coerce caller arguments before the gate so that an invalid type is reported
     # ahead of an advisory refusal that names a remedy which cannot rescue it.
-    # operator.index refuses a float, str or None, which int() would truncate or parse.
+    # operator.index refuses None and a float or str, which int() would truncate or parse.
     num_threads_int = operator.index(num_threads)
     chunk_size_int = operator.index(chunk_size)
 
@@ -3393,7 +3393,7 @@ def dbscan(items=_MISSING, eps=_MISSING, *, distance_matrix=_MISSING,
 
     # Coerce caller arguments before the gate so that an invalid type is reported
     # ahead of an advisory refusal that names a remedy which cannot rescue it.
-    # operator.index refuses a float, str or None, which int() would truncate or parse.
+    # operator.index refuses None and a float or str, which int() would truncate or parse.
     num_threads_int = operator.index(num_threads)
     chunk_size_int = operator.index(chunk_size)
 
@@ -3528,7 +3528,7 @@ def hdbscan(items=_MISSING, *, distance_matrix=_MISSING, min_cluster_size=5,
 
     # Coerce caller arguments before the gate so that an invalid type is reported
     # ahead of an advisory refusal that names a remedy which cannot rescue it.
-    # operator.index refuses a float, str or None, which int() would truncate or parse.
+    # operator.index refuses None and a float or str, which int() would truncate or parse.
     num_threads_int = operator.index(num_threads)
     chunk_size_int = operator.index(chunk_size)
 
@@ -3699,7 +3699,7 @@ def agglomerative(items=_MISSING, *, distance_matrix=_MISSING, n_clusters=2,
     # Coerce caller arguments before the gate so that an invalid type is reported
     # ahead of an advisory refusal that names a remedy which cannot rescue it.
     n_clusters_int = int(n_clusters)
-    # operator.index refuses a float, str or None, which int() would truncate or parse.
+    # operator.index refuses None and a float or str, which int() would truncate or parse.
     num_threads_int = operator.index(num_threads)
     chunk_size_int = operator.index(chunk_size)
 
