@@ -1172,6 +1172,59 @@ def test_a_nonfinite_value_in_the_last_chunk_corrects_a_loaded_stamp(
         assert max(sizes) <= 2
 
 
+_NAN = float("nan")
+_INF = float("inf")
+
+
+@pytest.mark.parametrize("cutoff, merged, unmerged, expected", [
+    (0.9, [], [], False),
+    (0.9, [(0, 1, 0.1), (0, 2, 0.2), (1, 2, 0.3)], [], False),
+    (0.9, [(0, 1, _NAN), (0, 2, 0.2), (1, 2, 0.3)], [], True),
+    (0.9, [(0, 1, 0.1), (0, 2, _NAN), (1, 2, 0.3)], [], True),
+    (0.9, [(0, 1, 0.1), (0, 2, 0.2), (1, 2, _NAN)], [], True),
+    (0.9, [(0, 1, 0.1), (0, 2, -_INF)], [], True),
+    # Set drops a value above the cutoff, so +inf survives only an infinite one.
+    (0.9, [(0, 1, 0.1), (0, 2, _INF)], [], False),
+    (_INF, [(0, 1, 0.1), (0, 2, _INF)], [], True),
+    # The raw list keeps a superseded NaN, as ThresholdGraph does.
+    (0.9, [(0, 1, _NAN), (0, 1, 0.3)], [], True),
+    # A Set after the last Finalize is invisible to Entries and so to both.
+    (0.9, [(0, 1, 0.1)], [(0, 2, _NAN)], False),
+], ids=["empty", "all-finite", "nan-first", "nan-middle", "nan-last", "-inf",
+        "+inf-dropped", "+inf-kept", "superseded-nan", "unmerged-nan"])
+def test_the_native_sparse_scan_matches_a_python_scan_of_the_entries(
+        cutoff, merged, unmerged, expected):
+    storage = oecluster.SparseStorage(3, cutoff)
+    for i, j, value in merged:
+        storage.Set(i, j, value)
+    storage.Finalize()
+    for i, j, value in unmerged:
+        storage.Set(i, j, value)
+    python_scan = any(not math.isfinite(value)
+                      for _, _, value in storage._entries())
+    assert python_scan is expected
+    assert storage._has_nonfinite() is expected
+
+
+def test_the_sparse_scan_builds_no_python_entry_list(monkeypatch, tmp_path):
+    """``_entries()`` builds a Python tuple per stored entry, several times
+    the native size, so neither the load-time correction nor the gate may
+    call it."""
+    sparse = _sparse_file(tmp_path, _NAN)
+    _restamp(sparse, "complete")
+    built = oecluster.pdist(_mols()[:3], "fingerprint", cutoff=0.9)
+    built.storage.Set(0, 1, _NAN)
+    built.storage.Finalize()
+
+    def refuse(self):
+        raise AssertionError("the sparse scan materialised _entries()")
+
+    monkeypatch.setattr(oecluster.SparseStorage, "_entries", refuse)
+    loaded = oecluster.load_distance_matrix(str(sparse))
+    assert loaded.data_integrity == "nan_present"
+    assert _gate._has_nonfinite(built) is True
+
+
 def test_require_metric_refuses_subset_scored_but_allows_the_override():
     dist = oecluster.pdist(_mols(), "fingerprint")
     dist._facts['data_integrity'] = "subset_scored"

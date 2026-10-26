@@ -17,8 +17,6 @@ and proven probe violations -- is a soundness warning that
 ``allow_nonmetric=True`` overrides.
 """
 
-import math
-
 import numpy as np
 
 from . import oecluster as _oecluster
@@ -123,7 +121,8 @@ def _has_nonfinite(distance_matrix):
     :returns: True if any distance the algorithms would read is NaN or
         infinite.
     """
-    # Sparse storage is scanned entry by entry, not through ``.condensed``:
+    # Sparse storage is scanned entry by entry, natively over ``Entries()`` so
+    # no Python list is built, and not through ``.condensed``:
     # for a sparse matrix ``.condensed`` is a densified copy cached on first
     # access, so it answers for a snapshot the algorithms never read, while
     # costing a Python loop over every pair and seeding a cache that then
@@ -136,8 +135,7 @@ def _has_nonfinite(distance_matrix):
     # folds them in, they are invisible to ``Entries``, to ``Get`` and to the
     # algorithms, so refusing on them would be over-refusal.
     if isinstance(distance_matrix.storage, _oecluster.SparseStorage):
-        return any(not math.isfinite(value)
-                   for _, _, value in distance_matrix.storage._entries())
+        return distance_matrix.storage._has_nonfinite()
 
     # ``isfinite`` rather than ``isnan``: infinities break the algorithms the
     # same way, the native stamp already escalates on any non-finite value, and

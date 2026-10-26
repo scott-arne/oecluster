@@ -58,6 +58,7 @@
 #include "oefp/batch.h"
 #include "oefp/oefp.h"
 
+#include <cmath>
 #include <cstdio>
 #include <limits>
 #include <optional>
@@ -2191,6 +2192,16 @@ public:
                 (Py_ssize_t)row, (Py_ssize_t)col, val));
         }
         return list;
+    }
+
+    /** Return whether any entry _entries() would list holds a non-finite value. */
+    bool _has_nonfinite() const {
+        for (const auto& entry : $self->Entries()) {
+            if (!std::isfinite(std::get<2>(entry))) {
+                return true;
+            }
+        }
+        return false;
     }
 }
 
