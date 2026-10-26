@@ -369,6 +369,24 @@ TEST(ConsensusComponentsTest, RefusesABadMatrixOrThreshold) {
                  std::invalid_argument);
 }
 
+TEST(ConsensusComponentsTest, FewerThanTwoItemsIsReportedOnEveryBackend) {
+    // The item count is the reason to report: a 0- or 1-item matrix offers no
+    // pairs, whichever backend holds it.
+    for (const size_t n : {size_t{0}, size_t{1}}) {
+        SCOPED_TRACE(testing::Message() << "n = " << n);
+        DenseStorage dense(n);
+        SparseStorage sparse(n, 0.5);
+        TempMMap mmap("consensus_components_few_" + std::to_string(n) + ".bin", n);
+        ExpectRefusal([&] { consensus_components(dense, 0.5); }, "at least 2 items");
+        ExpectRefusal([&] { consensus_components(sparse, 0.5); }, "at least 2 items");
+        ExpectRefusal([&] { consensus_components(mmap.Storage(), 0.5); },
+                      "at least 2 items");
+    }
+    // With two or more items a sparse matrix is still refused for its storage.
+    SparseStorage two(2, 0.5);
+    ExpectRefusal([&] { consensus_components(two, 0.5); }, "contiguous storage");
+}
+
 TEST(ConsensusStrengthTest, MeansMatchTheHandComputedEnsemble) {
     const Ensemble ensemble;
     DenseStorage matrix(4);
@@ -435,4 +453,21 @@ TEST(ConsensusStrengthTest, RefusesAMismatchedLabelCount) {
     EXPECT_THROW(
         consensus_strength(matrix, std::vector<int>{0, 0, 0, 0}, zero_chunk),
         std::invalid_argument);
+}
+
+TEST(ConsensusStrengthTest, FewerThanTwoItemsIsReportedOnEveryBackend) {
+    for (const size_t n : {size_t{0}, size_t{1}}) {
+        SCOPED_TRACE(testing::Message() << "n = " << n);
+        const std::vector<int> labels(n, 0);
+        DenseStorage dense(n);
+        SparseStorage sparse(n, 0.5);
+        TempMMap mmap("consensus_strength_few_" + std::to_string(n) + ".bin", n);
+        ExpectRefusal([&] { consensus_strength(dense, labels); }, "at least 2 items");
+        ExpectRefusal([&] { consensus_strength(sparse, labels); }, "at least 2 items");
+        ExpectRefusal([&] { consensus_strength(mmap.Storage(), labels); },
+                      "at least 2 items");
+    }
+    SparseStorage two(2, 0.5);
+    ExpectRefusal([&] { consensus_strength(two, std::vector<int>{0, 0}); },
+                  "contiguous storage");
 }

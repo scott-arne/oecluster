@@ -103,8 +103,9 @@ std::vector<int> consensus_components(
  * :returns: `item_consensus` of length N and one `cluster_consensus` per
  *     distinct non-negative label in ascending order; NaN where a cluster
  *     has one member and for an item that is noise.
- * :raises std::invalid_argument: For a matrix without contiguous data, a
- *     label count that disagrees with the matrix, or a zero chunk size.
+ * :raises std::invalid_argument: For a matrix with fewer than two items or
+ *     without contiguous data, a label count that disagrees with the matrix,
+ *     or a zero chunk size.
  */
 ConsensusStrength consensus_strength(
     const StorageBackend& matrix,

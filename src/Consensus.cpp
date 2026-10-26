@@ -287,12 +287,14 @@ std::vector<int> consensus_components(const StorageBackend& matrix,
                                       double threshold,
                                       const ConsensusOptions& options) {
     (void)options;
-    const double* data = contiguous_data(matrix, "consensus_components");
     const size_t num_items = matrix.NumSamples();
+    // Ahead of contiguous_data: with fewer than two items there are no pairs,
+    // so a null Data() on any backend says nothing about sparse storage.
     if (num_items < 2) {
         throw std::invalid_argument(
             "consensus_components requires at least 2 items");
     }
+    const double* data = contiguous_data(matrix, "consensus_components");
     if (!std::isfinite(threshold) || threshold < 0.0 || threshold > 1.0) {
         throw std::invalid_argument(
             "consensus_components: threshold must be a finite fraction in "
@@ -355,8 +357,13 @@ std::vector<int> consensus_components(const StorageBackend& matrix,
 ConsensusStrength consensus_strength(const StorageBackend& matrix,
                                      const std::vector<int>& labels,
                                      const ConsensusOptions& options) {
-    const double* data = contiguous_data(matrix, "consensus_strength");
     const size_t num_items = matrix.NumSamples();
+    // Ahead of contiguous_data, for the reason consensus_components gives.
+    if (num_items < 2) {
+        throw std::invalid_argument(
+            "consensus_strength requires at least 2 items");
+    }
+    const double* data = contiguous_data(matrix, "consensus_strength");
     if (labels.size() != num_items) {
         throw std::invalid_argument(
             "consensus_strength: " + std::to_string(labels.size())
