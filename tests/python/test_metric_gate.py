@@ -1183,7 +1183,7 @@ _INF = float("inf")
     (0.9, [(0, 1, 0.1), (0, 2, _NAN), (1, 2, 0.3)], [], True),
     (0.9, [(0, 1, 0.1), (0, 2, 0.2), (1, 2, _NAN)], [], True),
     (0.9, [(0, 1, 0.1), (0, 2, -_INF)], [], True),
-    # Set drops a value above the cutoff, so +inf survives only an infinite one.
+    # Set drops a value above the cutoff, so +inf survives only a cutoff it does not exceed.
     (0.9, [(0, 1, 0.1), (0, 2, _INF)], [], False),
     (_INF, [(0, 1, 0.1), (0, 2, _INF)], [], True),
     # The raw list keeps a superseded NaN, as ThresholdGraph does.
