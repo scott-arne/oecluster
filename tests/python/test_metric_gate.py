@@ -392,7 +392,7 @@ def test_the_nan_refusal_names_only_a_remedy_the_caller_can_take():
     """``missing`` is a descriptor-only keyword.
 
     Every route the scan above exists for -- ``.condensed``, ``storage.Set``,
-    a trusted file -- can deliver a NaN into any comparison's matrix, and
+    a loaded file -- can deliver a NaN into any comparison's matrix, and
     offering ``missing='complete_case'`` to the ones that never took the
     keyword costs a second refusal. Removing the offending items needs no
     option, so that is the remedy both branches keep.
@@ -1055,7 +1055,10 @@ def test_a_subset_scored_stamp_is_kept_over_a_nan(tmp_path):
     so a NaN does not overwrite it; the gate still finds the NaN."""
     dense = _dense_file(tmp_path, [0.2, float("nan"), 0.4])
     _restamp(dense, "subset_scored")
-    assert oecluster.load_distance_matrix(str(dense)).data_integrity == "subset_scored"
+    loaded = oecluster.load_distance_matrix(str(dense))
+    assert loaded.data_integrity == "subset_scored"
+    with pytest.raises(ValueError, match="non-finite entries"):
+        oecluster.butina(loaded, 0.4, allow_nonmetric=True)
 
 
 def test_a_nan_present_stamp_is_never_raised_on_clean_data(tmp_path):

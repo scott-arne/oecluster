@@ -3404,7 +3404,9 @@ Distance matrices written before 5.0.0 record no facts at all. They load with
 `data_integrity` `'unknown'` too, unless the values hold a NaN or an infinity,
 when it reads `'nan_present'`. Any loaded file gets that correction: a
 `complete` or `unknown` stamp the values contradict reads back as
-`nan_present`, while `subset_scored` is kept. An unknown fact never refuses on
+`nan_present`, while `subset_scored` is kept. The exception is a cross matrix
+whose values are not real numbers (strings, complex numbers, timedeltas and so
+on), which keeps its stamp whatever it holds. An unknown fact never refuses on
 its own, so legacy files cluster as they always did, except for the
 non-finite scan, which reads the numbers rather than the stamp and so applies
 to them too.

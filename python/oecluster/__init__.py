@@ -1773,6 +1773,8 @@ class CrossDistanceMatrix(DistanceMatrix):
         A ``data_integrity`` stamp of ``complete`` or ``unknown`` that the
         loaded values contradict -- any NaN or infinity -- reads back as
         ``nan_present``. No stamp is raised, and ``subset_scored`` is kept.
+        Only a matrix of real numbers is scanned: a matrix of any other dtype
+        (string, complex, timedelta and so on) keeps its stamp.
 
         :param path: Input file path.
         :returns: CrossDistanceMatrix instance.
