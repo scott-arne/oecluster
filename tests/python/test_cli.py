@@ -2770,3 +2770,36 @@ def test_a_zero_byte_bin_from_a_one_item_pdist_reads_back_as_one_item(
     loaded = _cli_input.load(raw, warn=lambda message: None)
     assert loaded.num_samples == 1
     assert list(loaded.labels) == ["m0"]
+
+
+def _zero_byte_bin(tmp_path):
+    raw = str(tmp_path / "empty.bin")
+    open(raw, "wb").close()
+    return raw
+
+
+def test_a_zero_byte_bin_whose_sidecar_says_zero_reads_back_as_zero_items(
+        tmp_path):
+    # pdist([], output=) writes this payload. Zero values fit both zero items
+    # and one, and a sidecar saying exactly the integer 0 settles it.
+    raw = _zero_byte_bin(tmp_path)
+    _write_sidecar(raw, 0)
+    loaded = _cli_input.load(raw, warn=lambda message: None)
+    assert loaded.num_samples == 0
+
+
+def test_a_zero_byte_bin_whose_sidecar_says_true_still_reads_as_one_item(
+        tmp_path):
+    # Today's quirk, kept: 1 == True, so n_rows: true matches one item.
+    raw = _zero_byte_bin(tmp_path)
+    _write_sidecar(raw, True)
+    loaded = _cli_input.load(raw, warn=lambda message: None)
+    assert loaded.num_samples == 1
+
+
+def test_a_zero_byte_bin_whose_sidecar_says_false_is_still_refused(tmp_path):
+    # Only an int 0 is new; False == 0 must not slip through it.
+    raw = _zero_byte_bin(tmp_path)
+    _write_sidecar(raw, False)
+    with pytest.raises(_cli_input.InputError, match="describe 1 items"):
+        _cli_input.load(raw, warn=lambda message: None)

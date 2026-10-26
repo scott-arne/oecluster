@@ -397,6 +397,14 @@ def load(path, *, warn=None):
     labels = _label_list(sidecar.get("row_labels"), _sidecar_path(path))
     values = _values(path, suffix)
     items = _items_from_pairs(values.size)
+    # Zero values fit both zero items and one. _items_from_pairs answers one,
+    # which is right for a single-item pdist; a sidecar saying exactly the
+    # integer 0 settles it the other way. False == 0, so the type is tested
+    # rather than the value. from_condensed reads an empty 1-D array as one
+    # item and a 0x0 square as none, so the square is what goes forward.
+    if values.size == 0 and type(rows) is int and rows == 0:
+        items = 0
+        values = np.empty((0, 0), dtype=np.float64)
     if items is None:
         raise InputError(
             f"{values.size} values is not a condensed symmetric matrix")
