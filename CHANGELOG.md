@@ -2,6 +2,73 @@
 
 This file starts at 5.0.0; earlier releases are not recorded here.
 
+## [5.28.0] - 2026-10-26
+
+### Changed
+
+- **`butina`, `dbscan`, `hdbscan`, `agglomerative`, `bitbirch`,
+  `bitbirch_recluster`, `bitbirch_refine`, `cluster_report`, `isim_report`,
+  `activity_landscape` and `modelability` raise `TypeError` for a
+  `num_threads` that is a float, a string or `None`.** They now coerce it with
+  `operator.index`, as `k_medoids`, `pdist` and `cdist` already did, where
+  they used `int()`. The first four coerce `chunk_size` the same way, as
+  `k_medoids` does. A float used to be truncated, so `num_threads=2.5` was
+  read as 2 and `num_threads=-0.5` as 0, which chooses the thread count
+  automatically; an infinity raised `OverflowError` and a NaN `ValueError`. A
+  string holding an integer, such as `"8"`, used to be parsed, and any other
+  string raised `ValueError`. `None` already raised `TypeError`. Python bools
+  and numpy integers are still accepted. A `numpy.bool_` now raises
+  `TypeError` too, as it already did for the `num_threads` of `pdist`,
+  `cdist` and `k_medoids`.
+- When the metric gate scans a distance matrix for NaN and infinite
+  distances, which it does unless the matrix is stamped `nan_present` or an
+  earlier check has refused it, the scan no longer allocates memory in
+  proportion to the matrix. On dense and memory-mapped storage it tests
+  1,048,576 values at a time, where it used to allocate a one-byte flag for
+  every distance at once. On sparse storage it walks the stored entries in
+  C++ and stops at the first non-finite one, where it used to build a Python
+  list holding an `(i, j, value)` tuple for every stored entry. `pdist` uses
+  the same scan when it checks a `nan_present` stamp against a dense or
+  memory-mapped result, and so does the load-time correction under Fixed: in
+  chunks for a dense or cross matrix, entry by entry for a sparse one.
+
+### Fixed
+
+- `SymmetricDistanceMatrix.from_file` and `CrossDistanceMatrix.from_file`,
+  which `load_distance_matrix` calls, used to report a file's
+  `data_integrity` stamp as saved, so a matrix holding a NaN could load as
+  `complete`. A `complete` or `unknown` stamp now reads back as `nan_present`
+  when the loaded matrix holds a NaN or an infinity. A `subset_scored` stamp
+  is kept even then, and a scan that finds nothing changes no stamp, so
+  `nan_present` over finite values stays `nan_present`. A cross matrix stored
+  with a dtype other than integer or floating point is not scanned and keeps
+  its stamp. The metric gate measured the values, not only the stamp, before
+  this release too, so a call that runs it already refused such a matrix.
+- `consensus_components` and `consensus_strength`, called from C++ or
+  through the raw bindings in `oecluster.oecluster`, refuse a matrix of fewer
+  than two items with "requires at least 2 items" whatever its storage. On a
+  dense, memory-mapped or sparse matrix of 0 or 1 items they used to raise
+  the refusal written for sparse storage, "requires contiguous storage; a
+  SparseStorage matrix holds only the pairs below its cutoff", and
+  `consensus_strength` had no item-count check at all. `consensus()` refuses
+  fewer than two items itself and is unchanged.
+- The `oecluster` CLI reads a `.npy` or `.bin` input that holds no values as
+  a matrix of 0 items when its sidecar records `n_rows` as the integer 0. It
+  used to refuse that input with "0 values describe 1 items, but the sidecar
+  says 0". With a sidecar recording 1, such an input still reads as 1 item.
+- `SparseStorage` refuses a sample count for which `n * (n - 1)` does not fit
+  in `size_t`, which on a 64-bit platform is any count above 4294967296, with
+  `std::overflow_error`; through the bindings that arrives as `RuntimeError`.
+  Its pair count used to wrap silently, and its condensed index could:
+  `SparseStorage(SIZE_MAX, 0.5).NumPairs()` returned 1. This supersedes
+  5.25.0's note that `SparseStorage` was not covered.
+- The `MMapStorage` constructor's documentation now says what it does with an
+  existing file: a file of the matrix's size is reused as it is, a smaller
+  one is extended and the whole mapping zero-filled, and a larger one is
+  truncated to that size and keeps its leading bytes. It used to say that a
+  file of any other size was replaced by a new zero-filled one. The behaviour
+  is unchanged.
+
 ## [5.27.0] - 2026-10-25
 
 ### Added
