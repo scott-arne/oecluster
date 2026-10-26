@@ -17,9 +17,10 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   automatically; an infinity raised `OverflowError` and a NaN `ValueError`. A
   string holding an integer, such as `"8"`, used to be parsed, and any other
   string raised `ValueError`. `None` already raised `TypeError`. Python bools
-  and numpy integers are still accepted. A `numpy.bool_` now raises
-  `TypeError` too, as it already did for the `num_threads` of `pdist`,
-  `cdist` and `k_medoids`.
+  and numpy integers are still accepted. On NumPy 2.3 and later a
+  `numpy.bool_` now raises `TypeError` too, as it already did for the
+  `num_threads` of `pdist`, `cdist` and `k_medoids`; earlier NumPy reads it
+  as 0 or 1 with a `DeprecationWarning`.
 - When the metric gate scans a distance matrix for NaN and infinite
   distances, which it does unless the matrix is stamped `nan_present` or an
   earlier check has refused it, the scan no longer allocates memory in
@@ -62,12 +63,8 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   Its pair count used to wrap silently, and its condensed index could:
   `SparseStorage(SIZE_MAX, 0.5).NumPairs()` returned 1. This supersedes
   5.25.0's note that `SparseStorage` was not covered.
-- The `MMapStorage` constructor's documentation now says what it does with an
-  existing file: a file of the matrix's size is reused as it is, a smaller
-  one is extended and the whole mapping zero-filled, and a larger one is
-  truncated to that size and keeps its leading bytes. It used to say that a
-  file of any other size was replaced by a new zero-filled one. The behaviour
-  is unchanged.
+- Documentation only: the `MMapStorage` constructor's comment now says how
+  an existing file is reused, extended and zero-filled, or truncated.
 
 ## [5.27.0] - 2026-10-25
 
