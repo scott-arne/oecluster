@@ -1098,6 +1098,80 @@ def test_a_cross_file_of_a_non_real_dtype_keeps_its_stamp(tmp_path, matrix):
     assert loaded.data_integrity == "complete"
 
 
+# With a chunk of 4, ten elements scan as [0..3], [4..7] and the partial [8, 9].
+@pytest.mark.parametrize("position", [1, 3, 4, 9],
+                         ids=["first-chunk", "chunk-end", "chunk-start",
+                              "last-partial-chunk"])
+def test_all_finite_finds_a_nonfinite_value_in_any_chunk(monkeypatch, position):
+    monkeypatch.setattr(_gate, "_FINITE_SCAN_CHUNK", 4)
+    values = np.linspace(0.1, 0.9, 10)
+    values[position] = float("nan")
+    assert _gate._all_finite(values) is False
+
+
+def test_all_finite_accepts_a_clean_multi_chunk_array_and_an_empty_one(
+        monkeypatch):
+    monkeypatch.setattr(_gate, "_FINITE_SCAN_CHUNK", 4)
+    assert _gate._all_finite(np.linspace(0.1, 0.9, 10)) is True
+    assert _gate._all_finite(np.empty(0)) is True
+
+
+def test_all_finite_scans_a_fortran_ordered_matrix(monkeypatch):
+    monkeypatch.setattr(_gate, "_FINITE_SCAN_CHUNK", 4)
+    matrix = np.asfortranarray(np.linspace(0.1, 0.9, 15).reshape(3, 5))
+    assert matrix.flags.f_contiguous and not matrix.flags.c_contiguous
+    assert _gate._all_finite(matrix) is True
+    matrix[2, 4] = float("nan")
+    assert _gate._all_finite(matrix) is False
+
+
+def _record_isfinite_sizes(monkeypatch):
+    """Wrap ``np.isfinite`` for the rest of the test, recording each input's
+    element count in the returned list."""
+    sizes = []
+    real_isfinite = np.isfinite
+
+    def recording_isfinite(values, *args, **kwargs):
+        sizes.append(np.size(values))
+        return real_isfinite(values, *args, **kwargs)
+
+    monkeypatch.setattr(_gate.np, "isfinite", recording_isfinite)
+    return sizes
+
+
+@pytest.mark.parametrize("shape", [(50,), (2, 25)], ids=["1-D", "long-rows"])
+def test_all_finite_never_tests_more_than_one_chunk_at_once(monkeypatch, shape):
+    """An eager ``np.isfinite(values).all()`` allocates a mask as large as the
+    array, so every call must see at most one chunk; the two-row case also
+    catches a scan that chunks by rows. Together the calls must still cover
+    every element."""
+    monkeypatch.setattr(_gate, "_FINITE_SCAN_CHUNK", 4)
+    values = np.linspace(0.1, 0.9, 50).reshape(shape)
+    sizes = _record_isfinite_sizes(monkeypatch)
+    assert _gate._all_finite(values) is True
+    assert max(sizes) <= 4
+    assert sum(sizes) == values.size
+
+
+def test_a_nonfinite_value_in_the_last_chunk_corrects_a_loaded_stamp(
+        monkeypatch, tmp_path):
+    """Both loaders scan in bounded chunks, and a NaN in the final chunk alone
+    still turns a ``complete`` stamp into ``nan_present``."""
+    monkeypatch.setattr(_gate, "_FINITE_SCAN_CHUNK", 2)
+    dense = _dense_file(tmp_path, [0.2, 0.3, float("nan")])
+    _restamp(dense, "complete")
+    cross = _cross_file(tmp_path, np.array([[0.1, 0.2], [0.3, float("nan")]]))
+    _restamp(cross, "complete")
+
+    sizes = _record_isfinite_sizes(monkeypatch)
+    for path in (dense, cross):
+        sizes.clear()
+        loaded = oecluster.load_distance_matrix(str(path))
+        assert loaded.data_integrity == "nan_present"
+        assert sizes
+        assert max(sizes) <= 2
+
+
 def test_require_metric_refuses_subset_scored_but_allows_the_override():
     dist = oecluster.pdist(_mols(), "fingerprint")
     dist._facts['data_integrity'] = "subset_scored"

@@ -1820,7 +1820,7 @@ class CrossDistanceMatrix(DistanceMatrix):
         # dtype keeps its stamp and loads as it always has.
         _correct_loaded_integrity(
             loaded,
-            lambda: matrix.dtype.kind in "fiu" and not np.isfinite(matrix).all())
+            lambda: matrix.dtype.kind in "fiu" and not _gate._all_finite(matrix))
         return loaded
 
     def __array__(self):

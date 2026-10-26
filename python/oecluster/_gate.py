@@ -85,6 +85,33 @@ def facts_from_comparison(comparison_obj):
     return facts
 
 
+# Elements per ``np.isfinite`` call in :func:`_all_finite`. A module constant
+# so a test can shrink it.
+_FINITE_SCAN_CHUNK = 1 << 20
+
+
+def _all_finite(values):
+    """
+    Report whether every element of a real numeric array is finite.
+
+    The scan runs in chunks of ``_FINITE_SCAN_CHUNK`` elements, so its scratch
+    mask stays bounded however large the array is. A single
+    ``np.isfinite(values).all()`` first allocates one byte per element, which
+    can exhaust memory when loading or gating a matrix that itself fits.
+
+    :param values: Numpy array of a real numeric dtype, of any shape.
+    :returns: True if no element is NaN or infinite; True for an empty array.
+    """
+    # ``order="K"`` makes this a view rather than a copy for C- or
+    # F-contiguous input, which is what ``np.load`` returns and what dense
+    # ``.condensed`` is. Chunking the flat view rather than by rows keeps the
+    # bound for a matrix with one very long row.
+    flat = values.ravel(order="K")
+    chunk = _FINITE_SCAN_CHUNK
+    return all(np.isfinite(flat[start:start + chunk]).all()
+               for start in range(0, flat.size, chunk))
+
+
 def _has_nonfinite(distance_matrix):
     """
     Measure whether a matrix currently holds a non-finite distance.
@@ -115,7 +142,7 @@ def _has_nonfinite(distance_matrix):
     # ``isfinite`` rather than ``isnan``: infinities break the algorithms the
     # same way, the native stamp already escalates on any non-finite value, and
     # the refusal below says "non-finite entries".
-    return not np.isfinite(distance_matrix.condensed).all()
+    return not _all_finite(distance_matrix.condensed)
 
 
 def check_allow_nonmetric(allow_nonmetric):
