@@ -1228,3 +1228,12 @@ def test_the_consensus_strength_members_are_read_only(native):
     # member read off a temporary stays valid.
     assert list(strength.item_consensus) == [1.0, 1.0, 1.0, 1.0]
     assert list(strength.cluster_consensus) == [1.0, 1.0]
+
+
+def test_sparse_storage_refuses_a_count_too_large_for_condensed_arithmetic(native):
+    """SparseStorage allocates nothing per pair, so its constructor is the one
+    place that bounds n; the bindings map the overflow_error to RuntimeError."""
+    with pytest.raises(RuntimeError,
+                       match="too large for condensed index arithmetic"):
+        native.SparseStorage(2**32 + 1, 0.5)
+    assert native.SparseStorage(2**32, 0.5).NumPairs() == 9223372034707292160

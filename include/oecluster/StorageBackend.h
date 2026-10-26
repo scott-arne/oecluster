@@ -166,9 +166,10 @@ public:
     /**
      * @brief Construct a memory-mapped storage backend.
      *
-     * Creates or opens a file at path and maps it into memory.
-     * If the file exists and has the correct size, it is reused.
-     * Otherwise, a new file is created and zero-filled. With fewer than two
+     * Creates or opens a file at path and maps it into memory. A file of the
+     * matrix's size is reused as it is. A smaller or missing file is extended
+     * to that size and the whole mapping is zero-filled. A larger file is
+     * truncated to that size and keeps its leading bytes. With fewer than two
      * items there are no pairs: the file is sized to 0 bytes, nothing is
      * mapped, and Data() returns nullptr.
      *
@@ -244,6 +245,9 @@ public:
      *
      * :param n: Number of items in the dataset.
      * :param cutoff: Maximum distance value to store (inclusive).
+     * :raises std::overflow_error: If n * (n - 1) exceeds what size_t can
+     *     represent: the condensed index arithmetic forms that product. The
+     *     message names n.
      */
     SparseStorage(size_t n, double cutoff);
     ~SparseStorage() override = default;

@@ -389,6 +389,15 @@ constexpr size_t SMALLEST_WRAPPING_BYTES_N = 2147483649ULL;
 /// offset the resize calls take: 9223372043074251000 bytes.
 constexpr size_t SMALLEST_UNMAPPABLE_N = 1518500251ULL;
 
+/// Largest n whose n * (n - 1) fits in size_t: 4294967296 * 4294967295 is
+/// 18446744069414584320. Every condensed formula forms a product no larger
+/// than that before dividing.
+constexpr size_t LARGEST_CONDENSED_PRODUCT_N = 4294967296ULL;
+
+/// Smallest n whose n * (n - 1) does not fit: the product would be
+/// 18446744078004518912.
+constexpr size_t SMALLEST_WRAPPING_PRODUCT_N = 4294967297ULL;
+
 }  // namespace
 
 // The arithmetic. Nothing below this point until the wiring tests constructs
@@ -460,6 +469,42 @@ TEST(CheckedPairCountTest, NamesTheBackendItWasGiven) {
               "size_t can hold");
 }
 
+TEST(CondensedProductTest, AcceptsCountsWhoseProductFits) {
+    for (const size_t n : {size_t{0}, size_t{1}, size_t{2}, LARGEST_CONDENSED_PRODUCT_N}) {
+        EXPECT_EQ(overflow_message([n] { check_condensed_product(n, "SparseStorage"); }),
+                  "<threw nothing>")
+            << "n = " << n;
+    }
+}
+
+TEST(CondensedProductTest, RefusesTheSmallestSampleCountWhoseProductWraps) {
+    EXPECT_EQ(overflow_message([] {
+                  check_condensed_product(SMALLEST_WRAPPING_PRODUCT_N, "SparseStorage");
+              }),
+              "SparseStorage: sample count 4294967297 is too large for condensed "
+              "index arithmetic in size_t");
+}
+
+TEST(CondensedProductTest, RefusesTheLargestSampleCountThereIs) {
+    EXPECT_EQ(overflow_message([] {
+                  check_condensed_product(std::numeric_limits<size_t>::max(),
+                                          "SparseStorage");
+              }),
+              "SparseStorage: sample count 18446744073709551615 is too large for "
+              "condensed index arithmetic in size_t");
+}
+
+TEST(CondensedProductTest, TheBoundaryIsWhereTheProductStopsFitting) {
+    if (sizeof(size_t) != 8) {
+        GTEST_SKIP() << "the boundary constants are for a 64-bit size_t";
+    }
+    const size_t fits = LARGEST_CONDENSED_PRODUCT_N;
+    EXPECT_EQ(fits * (fits - 1), 18446744069414584320ULL);
+    // One more and the product wraps: dividing it back by n no longer gives n - 1.
+    const size_t wraps = SMALLEST_WRAPPING_PRODUCT_N;
+    EXPECT_NE((wraps * (wraps - 1)) / wraps, wraps - 1);
+}
+
 // The wiring. Each case below constructs a backend, so each uses a sample
 // count that stays cheap even if the guard it is testing is removed.
 
@@ -506,4 +551,31 @@ TEST(StorageOverflowTest, MMapRefusesAByteCountPastTheFileOffsetLimit) {
     EXPECT_NE(message.find(" byte file size limit"), std::string::npos)
         << "message was: " << message;
     EXPECT_FALSE(std::filesystem::exists(path));
+}
+
+TEST(StorageOverflowTest, SparseRefusesASampleCountWhoseProductWraps) {
+    // SparseStorage allocates nothing per pair, so these counts stay cheap even
+    // with the guard removed.
+    EXPECT_EQ(overflow_message([] { SparseStorage storage(SMALLEST_WRAPPING_PRODUCT_N, 0.5); }),
+              "SparseStorage: sample count 4294967297 is too large for condensed "
+              "index arithmetic in size_t");
+    EXPECT_EQ(overflow_message([] {
+                  SparseStorage storage(std::numeric_limits<size_t>::max(), 0.5);
+              }),
+              "SparseStorage: sample count 18446744073709551615 is too large for "
+              "condensed index arithmetic in size_t");
+}
+
+TEST(StorageOverflowTest, SparseAtTheLargestCountCountsAndIndexesEveryPair) {
+    SparseStorage storage(LARGEST_CONDENSED_PRODUCT_N, 0.5);
+    EXPECT_EQ(storage.NumSamples(), LARGEST_CONDENSED_PRODUCT_N);
+    // 2^31 * (2^32 - 1).
+    EXPECT_EQ(storage.NumPairs(), 9223372034707292160ULL);
+    const size_t last = LARGEST_CONDENSED_PRODUCT_N - 1;
+    storage.Set(0, 1, 0.125);
+    storage.Set(last - 1, last, 0.25);
+    storage.Finalize();
+    // The first and last condensed offsets, 0 and NumPairs() - 1, must not collide.
+    EXPECT_EQ(storage.Get(0, 1), 0.125);
+    EXPECT_EQ(storage.Get(last - 1, last), 0.25);
 }

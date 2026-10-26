@@ -43,6 +43,24 @@ namespace OECluster {
  */
 size_t checked_pair_count(size_t n, const char* backend);
 
+/**
+ * @brief Refuse a sample count too large for the condensed index arithmetic.
+ *
+ * The condensed formulas multiply before they divide, and each forms a product
+ * no larger than n * (n - 1): the pair count n * (n - 1) / 2, the condensed
+ * index n * i - i * (i + 1) / 2 + j - i - 1, condensed_to_pair's range check
+ * and row search, and pdist's pair total. checked_pair_count bounds only the
+ * quotient. That is enough for the contiguous backends, whose byte check
+ * refuses every n large enough for the product to wrap. SparseStorage
+ * allocates nothing per pair, so nothing else bounds its n.
+ *
+ * :param n: Number of items the backend was asked to store.
+ * :param backend: Storage class name, used in the message.
+ * :raises std::overflow_error: If n * (n - 1) exceeds what size_t can
+ *     represent.
+ */
+void check_condensed_product(size_t n, const char* backend);
+
 }  // namespace OECluster
 
 #endif  // OECLUSTER_STORAGEOVERFLOW_H

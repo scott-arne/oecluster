@@ -195,6 +195,17 @@ size_t checked_pair_count(size_t n, const char* backend) {
     return pairs;
 }
 
+// Declared in StorageOverflow.h, which is where its contract is written.
+void check_condensed_product(size_t n, const char* backend) {
+    // n * (n - 1) fits exactly when n - 1 <= SIZE_MAX / n, the division
+    // rounding down; testing the product directly would need the product.
+    if (n > 1 && n - 1 > std::numeric_limits<size_t>::max() / n) {
+        throw std::overflow_error(
+            std::string(backend) + ": sample count " + std::to_string(n) +
+            " is too large for condensed index arithmetic in size_t");
+    }
+}
+
 // DenseStorage implementation
 
 DenseStorage::DenseStorage(size_t n)
@@ -365,7 +376,7 @@ MMapStorage::MMapStorage(const std::string& path, size_t n)
     data_ = static_cast<double*>(view);
 
     // SetEndOfFile leaves new bytes undefined on some filesystems; match the
-    // POSIX branch by zeroing any extended region.
+    // POSIX branch by zeroing the whole mapping when the file was extended.
     if (needs_extend) {
         std::memset(data_, 0, file_size_);
     }
@@ -435,7 +446,9 @@ MMapStorage::MMapStorage(const std::string& path, size_t n)
                                  ": " + std::strerror(errno));
     }
 
-    // If we created a new file or extended it, zero-fill the new regions
+    // A new or extended file is zero-filled across the whole mapping, not only
+    // the bytes the resize added; a file that was already this size, or was
+    // truncated to it, keeps its bytes.
     if (static_cast<size_t>(st.st_size) < file_size_) {
         std::memset(data_, 0, file_size_);
     }
@@ -509,6 +522,9 @@ size_t MMapStorage::CondensedIndex(size_t n, size_t i, size_t j) {
 
 SparseStorage::SparseStorage(size_t n, double cutoff)
     : n_(n), cutoff_(cutoff) {
+    // No byte check bounds n here, because nothing is allocated per pair, and
+    // the condensed formulas this backend shares multiply before they divide.
+    check_condensed_product(n, "SparseStorage");
 }
 
 void SparseStorage::Set(size_t i, size_t j, double value) {
