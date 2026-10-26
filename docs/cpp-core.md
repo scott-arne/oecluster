@@ -219,14 +219,16 @@ and reads a partition back off it. Python's `consensus()` is built on these.
   numbered by each component's smallest member position. It is a single
   sequential sweep of the condensed array, so a memory-mapped matrix is read
   once, front to back, and it needs only `O(N)` beyond the matrix. It throws
-  for a matrix without contiguous data or with fewer than two items, and for
-  a threshold that is not a finite fraction in `[0, 1]`.
+  for a matrix with fewer than two items (checked first, on every storage
+  kind) or without contiguous data, and for a threshold that is not a finite
+  fraction in `[0, 1]`.
 - `consensus_strength(matrix, labels, options)` returns each item's mean
   co-association with the rest of its cluster and each cluster's mean over
   its pairs, NaN for a cluster of one and for a noise item, with one cluster
   entry per distinct non-negative label in ascending order. It throws for a
-  matrix without contiguous data, a label count that disagrees with it, and
-  a zero chunk size.
+  matrix with fewer than two items (checked first, on every storage kind) or
+  without contiguous data, a label count that disagrees with it, and a zero
+  chunk size.
 
 ## Clustering
 
