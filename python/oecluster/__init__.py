@@ -1110,20 +1110,7 @@ class SymmetricDistanceMatrix(DistanceMatrix):
         # Check if this is sparse storage
         if isinstance(self._storage, SparseStorage):
             # Sparse storage requires dense conversion
-            n = self.num_samples
-            num_pairs = self.num_pairs
-            condensed = np.zeros(num_pairs, dtype=np.float64)
-
-            # Get sparse entries
-            entries = self._storage._entries()
-            for i, j, val in entries:
-                # Convert (i,j) to condensed index
-                if i < j:
-                    idx = n * i + j - ((i + 2) * (i + 1)) // 2
-                else:
-                    idx = n * j + i - ((j + 2) * (j + 1)) // 2
-                condensed[idx] = val
-
+            condensed = _sparse_dense(self._storage)
             self._condensed_cache = condensed
             return condensed
 
@@ -1160,22 +1147,14 @@ class SymmetricDistanceMatrix(DistanceMatrix):
         n = self.num_samples
 
         if isinstance(self._storage, SparseStorage):
-            # Get sparse entries directly
-            entries = self._storage._entries()
-            if not entries:
+            rows, cols, data = _sparse_columns(self._storage)
+            if not data.size:
                 return coo_matrix((n, n), dtype=np.float64)
 
-            rows, cols, data = zip(*entries)
             return coo_matrix(
-                (
-                    np.asarray(data, dtype=np.float64),
-                    (
-                        np.asarray(rows, dtype=np.intp),
-                        np.asarray(cols, dtype=np.intp),
-                    ),
-                ),
+                (data, (rows.astype(np.intp, copy=False),
+                        cols.astype(np.intp, copy=False))),
                 shape=(n, n),
-                dtype=np.float64,
             )
 
         # Dense/MMap: convert condensed to COO
@@ -1253,11 +1232,8 @@ class SymmetricDistanceMatrix(DistanceMatrix):
             # Written verbatim, duplicates included: ThresholdGraph tests every
             # tuple Entries() returns, so a "tidied" list would cluster
             # differently from the matrix that was saved.
-            entries = self._storage._entries()
+            rows, cols, values = _sparse_columns(self._storage)
             cutoff = self._storage.Cutoff()
-            rows = np.array([e[0] for e in entries], dtype=np.int64)
-            cols = np.array([e[1] for e in entries], dtype=np.int64)
-            values = np.array([e[2] for e in entries], dtype=np.float64)
             # Checked before anything is written, not only on load. This is a
             # backstop now: ``SparseStorage.Set`` refuses an out-of-range or
             # diagonal pair outright, where it once enforced ``i != j`` with a

@@ -617,11 +617,13 @@ class _PokedSparseStorage(oecluster.SparseStorage):
     accepted it: the ``i != j`` precondition was a bare ``assert``, compiled out
     of release builds. ``Set`` refuses the diagonal now, so no supported call
     sequence produces a malformed entry list and the only way left to reach
-    ``to_file``'s guard is to hand it one.
+    ``to_file``'s guard is to hand it the entry columns it writes.
     """
 
-    def _entries(self):
-        return [(2, 2, 0.11)]
+    def _entry_columns(self):
+        return (bytearray(np.array([2], dtype=np.int64).tobytes()),
+                bytearray(np.array([2], dtype=np.int64).tobytes()),
+                bytearray(np.array([0.11], dtype=np.float64).tobytes()))
 
 
 def test_to_file_refuses_a_sparse_matrix_from_file_would_refuse(tmp_path):

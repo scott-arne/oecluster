@@ -17,6 +17,7 @@ from . import (
     SparseStorage,
     SymmetricDistanceMatrix,
     _cli_render,
+    _sparse_columns,
     load_distance_matrix,
 )
 
@@ -61,11 +62,10 @@ def _refuse_negative(matrix, path):
     :raises InputError: If any stored distance is below zero.
     """
     if isinstance(matrix.storage, SparseStorage):
-        # The entry list, not ``condensed``: that property answers the
+        # The stored entries, not ``condensed``: that property answers the
         # question by densifying a sparse matrix into n(n-1)/2 floats, and
         # the omitted pairs it invents are zeros that cannot be negative.
-        values = np.array([entry[2] for entry in matrix.storage._entries()],
-                          dtype=np.float64)
+        values = _sparse_columns(matrix.storage)[2]
     else:
         values = matrix.condensed
     # ``min`` propagates NaN and ``nan < 0`` is False, so a non-finite value

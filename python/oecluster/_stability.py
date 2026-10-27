@@ -111,11 +111,10 @@ def _data_facts(subset, source_facts):
         # densify, and inheriting never claims less than the source did.
         facts.update(_gate.probe_triangle(subset.condensed, subset.num_samples))
     if source_facts["data_integrity"] == "nan_present":
-        # The sparse scan reads the stored entries, as the metric gate does;
-        # ``condensed`` on a sparse matrix is a densified copy.
+        # The sparse scan runs natively over the stored entries, as the metric
+        # gate's does; ``condensed`` on a sparse matrix is a densified copy.
         if sparse:
-            finite = all(math.isfinite(value)
-                         for _, _, value in subset.storage._entries())
+            finite = not subset.storage._has_nonfinite()
         else:
             finite = bool(np.isfinite(subset.condensed).all())
         facts["data_integrity"] = (_integrity_after_nan_exclusion(subset)
