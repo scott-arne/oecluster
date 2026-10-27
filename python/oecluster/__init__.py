@@ -21,6 +21,8 @@ import re
 import shutil
 import sys
 import warnings
+import zipfile
+import zlib
 from importlib import metadata
 from pathlib import Path
 from typing import Any, ClassVar, NamedTuple
@@ -833,19 +835,17 @@ def _archive_count(data, key, subject):
     :returns: The count.
     :raises ValueError: If the key cannot be read, or holds anything but a
         0-d integer array with a value of at least 0.
-    :raises MemoryError: If reading the count runs out of memory; that is not
-        a malformed file, so it propagates unchanged.
+
+    Any other error from the read, ``MemoryError`` and ``OSError`` included,
+    propagates unchanged.
     """
     try:
         value = data[key]
-    except MemoryError:
-        # Running out of memory says nothing about the file, and the CLI
-        # keeps the two apart the same way.
-        raise
-    except Exception as error:
-        # Any other read error -- numpy's refusal of an object array when
-        # pickling is off, or a damaged zip member's BadZipFile, zlib.error or
-        # EOFError -- means the count is unreadable, which is a malformed file.
+    except (ValueError, zipfile.BadZipFile, zlib.error, EOFError) as error:
+        # These mean the member itself is malformed: numpy's refusal of an
+        # object array when pickling is off, or a damaged zip member. Errors
+        # about the environment, such as MemoryError or OSError, say nothing
+        # about the file and propagate.
         raise ValueError(
             f"{subject}: {key} must be a non-negative integer scalar, but "
             f"it cannot be read: {error}") from error
@@ -1726,7 +1726,9 @@ class SymmetricDistanceMatrix(DistanceMatrix):
         try:
             storage = SparseStorage(num_samples, cutoff)
         except RuntimeError as error:
-            # The native size limit, re-raised as the malformed-file error
+            # The constructor allocates nothing beyond the object
+            # (src/StorageBackend.cpp), so the only RuntimeError it raises in
+            # practice is its size refusal. That limit, re-raised as the malformed-file error
             # from_file documents. The limit itself stays in the chained
             # native error rather than being restated here.
             raise ValueError(

@@ -1,5 +1,6 @@
 """Counts in archived matrices are non-negative integer scalars."""
 
+import errno
 import json
 
 import numpy as np
@@ -198,4 +199,19 @@ def test_a_memory_error_reading_a_count_is_not_a_malformed_file(
 
     monkeypatch.setattr(np.lib.npyio.NpzFile, "__getitem__", getitem)
     with pytest.raises(MemoryError, match="simulated"):
+        oecluster.SymmetricDistanceMatrix.from_file(str(path))
+
+
+def test_an_os_error_reading_a_count_is_not_a_malformed_file(
+        tmp_path, monkeypatch):
+    path = _symmetric(tmp_path)
+    original = np.lib.npyio.NpzFile.__getitem__
+
+    def getitem(self, key):
+        if key == "num_samples":
+            raise OSError(errno.EIO, "I/O error")
+        return original(self, key)
+
+    monkeypatch.setattr(np.lib.npyio.NpzFile, "__getitem__", getitem)
+    with pytest.raises(OSError, match="I/O error"):
         oecluster.SymmetricDistanceMatrix.from_file(str(path))
