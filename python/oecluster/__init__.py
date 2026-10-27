@@ -3072,7 +3072,8 @@ class ClusterRepresentative:
 def _cpp_cluster(cluster, function_name):
     cpp_cluster = _oecluster.SizeTVector()
     for member in cluster:
-        cpp_cluster.push_back(int(member))
+        # operator.index refuses None and a float or str, which int() would truncate or parse.
+        cpp_cluster.push_back(operator.index(member))
     if len(cpp_cluster) == 0:
         raise ValueError(f"{function_name}() requires a non-empty cluster")
     return cpp_cluster
@@ -3211,7 +3212,8 @@ def representative(cluster, distance_matrix, *, method="medoid", threshold=None,
     :param priority_scores: Optional per-item priority vector.
     :param scaffold_labels: Optional per-item scaffold label vector.
     :returns: Selected member index.
-    :raises TypeError: If distance_matrix is not a SymmetricDistanceMatrix.
+    :raises TypeError: If distance_matrix is not a SymmetricDistanceMatrix, or
+        a ``cluster`` member is not an integer.
     :raises ValueError: If cluster, method, threshold, or metadata is invalid.
     """
     cpp_cluster = _cpp_cluster(cluster, "representative")
@@ -3249,7 +3251,8 @@ def rank_representatives(cluster, distance_matrix, *, method="medoid",
     :param priority_scores: Optional per-item priority vector.
     :param scaffold_labels: Optional per-item scaffold label vector.
     :returns: Tuple of ClusterRepresentative objects sorted by score.
-    :raises TypeError: If distance_matrix is not a SymmetricDistanceMatrix.
+    :raises TypeError: If distance_matrix is not a SymmetricDistanceMatrix, or
+        a ``cluster`` member is not an integer.
     :raises ValueError: If cluster, method, threshold, or metadata is invalid.
     """
     cpp_cluster = _cpp_cluster(cluster, "rank_representatives")
@@ -3291,11 +3294,14 @@ def select_representatives(cluster, distance_matrix, *, k, method="medoid",
     :param priority_scores: Optional per-item priority vector.
     :param scaffold_labels: Optional per-item scaffold label vector.
     :returns: Tuple of selected ClusterRepresentative objects.
-    :raises TypeError: If distance_matrix is not a SymmetricDistanceMatrix.
+    :raises TypeError: If distance_matrix is not a SymmetricDistanceMatrix, or
+        a ``cluster`` member or ``k`` is not an integer.
     :raises ValueError: If cluster, k, method, selection, threshold, or metadata
         is invalid.
     """
-    if k < 0:
+    # operator.index refuses None and a float or str, which int() would truncate or parse.
+    k_int = operator.index(k)
+    if k_int < 0:
         raise ValueError("k must be non-negative")
 
     cpp_cluster = _cpp_cluster(cluster, "select_representatives")
@@ -3315,7 +3321,7 @@ def select_representatives(cluster, distance_matrix, *, k, method="medoid",
         _select_representatives(
             cpp_cluster,
             distance_matrix.storage,
-            int(k),
+            k_int,
             options,
         ))
 
@@ -3366,10 +3372,10 @@ def dbscan(items=_MISSING, eps=_MISSING, *, distance_matrix=_MISSING,
         ``distance_matrix`` are given, or ``eps`` is missing; the arguments
         fit none of the three forms, or ``comparison`` or a keyword this
         function does not take accompanies a matrix or a prebuilt
-        comparison; ``num_threads`` or ``chunk_size`` is not an integer;
-        ``allow_nonmetric`` is not a bool or ``numpy.bool_``; or
-        ``max_graph_bytes`` accompanies a matrix, or is a bool or not an
-        integer.
+        comparison; ``min_samples``, ``num_threads`` or ``chunk_size`` is
+        not an integer; ``allow_nonmetric`` is not a bool or
+        ``numpy.bool_``; or ``max_graph_bytes`` accompanies a matrix, or is
+        a bool or not an integer.
     :raises ValueError: If eps, min_samples, or a size argument is invalid;
         ``similarity=True``; ``max_graph_bytes`` is not positive; the matrix
         is not a metric or the comparison's declared facts refuse it; or
@@ -3388,12 +3394,13 @@ def dbscan(items=_MISSING, eps=_MISSING, *, distance_matrix=_MISSING,
             "dbscan() clusters on distances; similarity=True is not supported")
     if eps < 0.0:
         raise ValueError("DBSCAN eps must be non-negative")
-    if min_samples < 1:
+    # operator.index refuses None and a float or str, which int() would truncate or parse.
+    min_samples_int = operator.index(min_samples)
+    if min_samples_int < 1:
         raise ValueError("DBSCAN min_samples must be at least one")
 
     # Coerce caller arguments before the gate so that an invalid type is reported
     # ahead of an advisory refusal that names a remedy which cannot rescue it.
-    # operator.index refuses None and a float or str, which int() would truncate or parse.
     num_threads_int = operator.index(num_threads)
     chunk_size_int = operator.index(chunk_size)
 
@@ -3413,7 +3420,7 @@ def dbscan(items=_MISSING, eps=_MISSING, *, distance_matrix=_MISSING,
 
     options = DBSCANOptions()
     options.eps = float(eps)
-    options.min_samples = int(min_samples)
+    options.min_samples = min_samples_int
     options.num_threads = num_threads_int
     options.chunk_size = chunk_size_int
     options.max_graph_bytes = budget
@@ -3488,9 +3495,10 @@ def hdbscan(items=_MISSING, *, distance_matrix=_MISSING, min_cluster_size=5,
     :raises TypeError: If both or neither of ``items`` and
         ``distance_matrix`` are given; the arguments fit none of the three
         forms, or ``comparison`` or a keyword this function does not take
-        accompanies a matrix or a prebuilt comparison; ``num_threads`` or
-        ``chunk_size`` is not an integer; or ``allow_nonmetric`` is not a bool
-        or ``numpy.bool_``.
+        accompanies a matrix or a prebuilt comparison;
+        ``min_cluster_size``, ``num_threads`` or ``chunk_size`` is not an
+        integer; ``min_samples`` or ``max_cluster_size`` is neither None nor
+        an integer; or ``allow_nonmetric`` is not a bool or ``numpy.bool_``.
     :raises ValueError: If options are invalid, ``alpha`` included when it is
         NaN; ``min_samples`` exceeds the item count; the matrix uses sparse
         storage, holds a NaN or infinite distance, or is not a metric, or the
@@ -3502,13 +3510,18 @@ def hdbscan(items=_MISSING, *, distance_matrix=_MISSING, min_cluster_size=5,
         items, or if a distance divided by ``alpha`` is not finite. A
         matrix's non-finite distances are refused earlier, as a ValueError.
     """
-    if min_cluster_size < 2:
+    # operator.index refuses None and a float or str, which int() would truncate or parse.
+    min_cluster_size_int = operator.index(min_cluster_size)
+    if min_cluster_size_int < 2:
         raise ValueError("HDBSCAN min_cluster_size must be at least two")
-    if min_samples is not None and min_samples < 1:
+    min_samples_int = 0 if min_samples is None else operator.index(min_samples)
+    if min_samples is not None and min_samples_int < 1:
         raise ValueError("HDBSCAN min_samples must be at least one")
     if cluster_selection_epsilon < 0.0:
         raise ValueError("HDBSCAN cluster_selection_epsilon must be non-negative")
-    if max_cluster_size is not None and max_cluster_size < 1:
+    max_cluster_size_int = (0 if max_cluster_size is None
+                            else operator.index(max_cluster_size))
+    if max_cluster_size is not None and max_cluster_size_int < 1:
         raise ValueError("HDBSCAN max_cluster_size must be at least one")
     # Written as `not alpha > 0` so that NaN, which `alpha <= 0` let through,
     # is refused too.
@@ -3528,7 +3541,6 @@ def hdbscan(items=_MISSING, *, distance_matrix=_MISSING, min_cluster_size=5,
 
     # Coerce caller arguments before the gate so that an invalid type is reported
     # ahead of an advisory refusal that names a remedy which cannot rescue it.
-    # operator.index refuses None and a float or str, which int() would truncate or parse.
     num_threads_int = operator.index(num_threads)
     chunk_size_int = operator.index(chunk_size)
 
@@ -3539,8 +3551,6 @@ def hdbscan(items=_MISSING, *, distance_matrix=_MISSING, min_cluster_size=5,
     if chunk_size_int < 0:
         raise ValueError("chunk_size must be non-negative")
 
-    min_cluster_size_int = int(min_cluster_size)
-    min_samples_int = 0 if min_samples is None else int(min_samples)
     # HDBSCAN bounds the min_samples it actually uses, which is min_cluster_size
     # when the caller leaves min_samples unset, so the mirror substitutes the
     # same way the native code does.
@@ -3563,7 +3573,6 @@ def hdbscan(items=_MISSING, *, distance_matrix=_MISSING, min_cluster_size=5,
     # block below, so that every local check is answered before a comparison the
     # call will never reach is built.
     cluster_selection_epsilon_float = float(cluster_selection_epsilon)
-    max_cluster_size_int = 0 if max_cluster_size is None else int(max_cluster_size)
     alpha_float = float(alpha)
     allow_single_cluster_flag = _flag(allow_single_cluster, "allow_single_cluster")
 
@@ -3660,9 +3669,9 @@ def agglomerative(items=_MISSING, *, distance_matrix=_MISSING, n_clusters=2,
     :raises TypeError: If both or neither of ``items`` and
         ``distance_matrix`` are given; the arguments fit none of the three
         forms, or ``comparison`` or a keyword this function does not take
-        accompanies a matrix or a prebuilt comparison; ``num_threads`` or
-        ``chunk_size`` is not an integer; or ``allow_nonmetric`` is not a bool
-        or ``numpy.bool_``.
+        accompanies a matrix or a prebuilt comparison; ``n_clusters``,
+        ``num_threads`` or ``chunk_size`` is not an integer; or
+        ``allow_nonmetric`` is not a bool or ``numpy.bool_``.
     :raises ValueError: If options are invalid; a comparison form asks for a
         linkage other than single; ``n_clusters`` exceeds the item count
         without a ``distance_threshold``; the matrix uses sparse storage,
@@ -3679,8 +3688,11 @@ def agglomerative(items=_MISSING, *, distance_matrix=_MISSING, n_clusters=2,
     """
     items = _metric_input(items, distance_matrix, comparison, kwargs,
                           "agglomerative")
-    if distance_threshold is None and n_clusters < 1:
-        raise ValueError("Agglomerative n_clusters must be at least one")
+    if distance_threshold is None:
+        # operator.index refuses None and a float or str, which int() would truncate or parse.
+        n_clusters_int = operator.index(n_clusters)
+        if n_clusters_int < 1:
+            raise ValueError("Agglomerative n_clusters must be at least one")
     if distance_threshold is not None and distance_threshold < 0.0:
         raise ValueError("Agglomerative distance_threshold must be non-negative")
     if distance_threshold is not None and np.isnan(distance_threshold):
@@ -3698,8 +3710,10 @@ def agglomerative(items=_MISSING, *, distance_matrix=_MISSING, n_clusters=2,
 
     # Coerce caller arguments before the gate so that an invalid type is reported
     # ahead of an advisory refusal that names a remedy which cannot rescue it.
-    n_clusters_int = int(n_clusters)
-    # operator.index refuses None and a float or str, which int() would truncate or parse.
+    if distance_threshold is not None:
+        # Here, not above, so an invalid threshold or linkage is still
+        # reported first when n_clusters is not the parameter in use.
+        n_clusters_int = operator.index(n_clusters)
     num_threads_int = operator.index(num_threads)
     chunk_size_int = operator.index(chunk_size)
 

@@ -38,8 +38,13 @@ _REQUIRED_TYPES = {
 _EXCLUDED_FOR_ITEMS = {"comparison", "distance_matrix", "max_comparisons",
                        "max_graph_bytes", "similarity"}
 
-#: The library coerces these with a bare ``int()`` (dbscan's
-#: ``options.min_samples = int(min_samples)``), so a float would be silently truncated rather than refused.
+#: Integer options, declared rather than inferred because several default to
+#: ``None``, which has no type to infer. The command line parses each with its
+#: own check, whose message names the option and quotes the text given
+#: ("n_clusters must be an integer, got '2.5'"). The library refuses a
+#: non-integer for every one of them too, with a TypeError from
+#: ``operator.index`` or, in jarvis_patrick and leiden, a ValueError, but it
+#: never sees the text the user typed.
 _INTEGER = {
     "agglomerative.n_clusters", "hdbscan.max_cluster_size",
     "hdbscan.min_cluster_size", "hdbscan.min_samples", "jarvis_patrick.k",

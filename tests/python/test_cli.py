@@ -180,7 +180,8 @@ def test_whitespace_around_a_value_is_ignored():
     ("jarvis_patrick", "kmin=1e-324"),
 ])
 def test_an_integer_option_refuses_a_non_integral_value(algorithm, assignment):
-    # The library coerces with a bare int(), so 1.5 would silently become 1.
+    # Refused by the command line's own check, which names the option, before
+    # the library sees a value.
     with pytest.raises(ValueError, match="must be an integer"):
         _cli_registry.resolve(algorithm, [assignment], _registry())
 
