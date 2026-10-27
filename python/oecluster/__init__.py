@@ -4301,25 +4301,33 @@ def bitbirch(fingerprints, *, threshold=0.65, branching_factor=50,
     :param num_threads: Thread count for parallel-safe phases.
     :returns: BitBirchResult with labels, clusters, centroids, and cluster sizes.
     :raises TypeError: If fingerprints is not an `oefp.OEFPBatch`, or
-        ``num_threads`` is not an integer.
-    :raises ValueError: If an option is invalid.
+        ``branching_factor`` or ``num_threads`` is not an integer.
+    :raises ValueError: If an option is invalid, or ``num_threads`` is
+        negative.
     """
     _require_oefp_batch(fingerprints, "bitbirch")
     if threshold < 0.0:
         raise ValueError("BitBirch threshold must be non-negative")
-    if branching_factor < 1:
+    # operator.index refuses None and a float or str, which int() would truncate or parse.
+    branching_factor_int = operator.index(branching_factor)
+    if branching_factor_int < 1:
         raise ValueError("BitBirch branching_factor must be at least one")
     if tolerance < 0.0:
         raise ValueError("BitBirch tolerance must be non-negative")
 
     options = BitBirchOptions()
     options.threshold = float(threshold)
-    options.branching_factor = int(branching_factor)
+    options.branching_factor = branching_factor_int
     options.merge_criterion = _bitbirch_merge_criterion(merge_criterion)
     options.tolerance = float(tolerance)
     options.singly = _flag(singly, "singly")
     options.mode = _bitbirch_mode(mode)
-    options.num_threads = operator.index(num_threads)
+    num_threads_int = operator.index(num_threads)
+    # A negative value would reach the size_t option field and raise
+    # OverflowError there.
+    if num_threads_int < 0:
+        raise ValueError("num_threads must be non-negative")
+    options.num_threads = num_threads_int
 
     result = _bitbirch_cluster(fingerprints, options)
     return BitBirchResult(
@@ -4350,22 +4358,33 @@ def bitbirch_recluster(fingerprints, *, initial_threshold=0.65,
         inputs.
     :param num_threads: Thread count for parallel-safe phases.
     :returns: BitBirchResult with labels, clusters, centroids, and cluster sizes.
+    :raises TypeError: If fingerprints is not an `oefp.OEFPBatch`, or
+        ``branching_factor`` or ``num_threads`` is not an integer.
+    :raises ValueError: If an option is invalid, or ``num_threads`` is
+        negative.
     """
     _require_oefp_batch(fingerprints, "bitbirch_recluster")
     if initial_threshold < 0.0 or second_threshold < 0.0:
         raise ValueError("BitBirch reclustering thresholds must be non-negative")
     if second_tolerance < 0.0:
         raise ValueError("BitBirch reclustering tolerance must be non-negative")
-    if branching_factor < 1:
+    # operator.index refuses None and a float or str, which int() would truncate or parse.
+    branching_factor_int = operator.index(branching_factor)
+    if branching_factor_int < 1:
         raise ValueError("BitBirch branching_factor must be at least one")
 
     options = BitBirchReclusteringOptions()
     options.initial_threshold = float(initial_threshold)
     options.second_threshold = float(second_threshold)
     options.second_tolerance = float(second_tolerance)
-    options.branching_factor = int(branching_factor)
+    options.branching_factor = branching_factor_int
     options.mode = _bitbirch_mode(mode)
-    options.num_threads = operator.index(num_threads)
+    num_threads_int = operator.index(num_threads)
+    # A negative value would reach the size_t option field and raise
+    # OverflowError there.
+    if num_threads_int < 0:
+        raise ValueError("num_threads must be non-negative")
+    options.num_threads = num_threads_int
 
     result = _bitbirch_recluster(fingerprints, options)
     return BitBirchResult(
@@ -4411,34 +4430,49 @@ def bitbirch_refine(fingerprints, *, threshold=0.65, branching_factor=50,
         has already placed in another cluster, unless they were empty to
         begin with. Clusters are ordered by member count, largest first, so a
         dropped one is trailing and no label is renumbered.
+    :raises TypeError: If fingerprints is not an `oefp.OEFPBatch`, or
+        ``branching_factor``, ``reassign_top_clusters`` or ``num_threads`` is
+        not an integer.
+    :raises ValueError: If an option is invalid, or ``num_threads`` or
+        ``reassign_top_clusters`` is negative.
     """
     _require_oefp_batch(fingerprints, "bitbirch_refine")
     if threshold < 0.0:
         raise ValueError("BitBirch threshold must be non-negative")
-    if branching_factor < 1:
+    # operator.index refuses None and a float or str, which int() would truncate or parse.
+    branching_factor_int = operator.index(branching_factor)
+    if branching_factor_int < 1:
         raise ValueError("BitBirch branching_factor must be at least one")
     if tolerance < 0.0:
         raise ValueError("BitBirch tolerance must be non-negative")
-    if reassign_top_clusters == 1:
+    reassign_top_clusters_int = operator.index(reassign_top_clusters)
+    if reassign_top_clusters_int < 0:
+        raise ValueError("BitBirch reassign_top_clusters must be non-negative")
+    if reassign_top_clusters_int == 1:
         raise ValueError("BitBirch reassign_top_clusters must be zero or at least two")
     if redistribute_largest_cluster and singly:
         raise ValueError("BitBirch redistribute_largest_cluster requires singly=False")
 
     fit_options = BitBirchOptions()
     fit_options.threshold = float(threshold)
-    fit_options.branching_factor = int(branching_factor)
+    fit_options.branching_factor = branching_factor_int
     fit_options.merge_criterion = _bitbirch_merge_criterion(merge_criterion)
     fit_options.tolerance = float(tolerance)
     fit_options.singly = _flag(singly, "singly")
     fit_options.mode = _bitbirch_mode(mode)
-    fit_options.num_threads = operator.index(num_threads)
+    num_threads_int = operator.index(num_threads)
+    # A negative value would reach the size_t option fields and raise
+    # OverflowError there.
+    if num_threads_int < 0:
+        raise ValueError("num_threads must be non-negative")
+    fit_options.num_threads = num_threads_int
 
     options = BitBirchRefinementOptions()
     options.fit_options = fit_options
     options.redistribute_largest_cluster = _flag(
         redistribute_largest_cluster, "redistribute_largest_cluster")
-    options.reassign_top_clusters = int(reassign_top_clusters)
-    options.num_threads = operator.index(num_threads)
+    options.reassign_top_clusters = reassign_top_clusters_int
+    options.num_threads = num_threads_int
 
     result = _bitbirch_refine(fingerprints, options)
     return BitBirchResult(

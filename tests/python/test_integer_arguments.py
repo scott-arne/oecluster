@@ -8,6 +8,7 @@ which proves the coercion runs before any comparison or ``int()``.
 
 import numpy as np
 import oecluster
+import oefp
 import pytest
 
 
@@ -19,6 +20,27 @@ def _line_matrix():
 
 
 _DM = _line_matrix()
+
+
+def _random_bits(rows, cols, seed=13, density=0.125):
+    rng = np.random.default_rng(seed)
+    bits = (rng.random((rows, cols)) < density).astype(np.uint8)
+    empty = np.flatnonzero(bits.sum(axis=1) == 0)
+    for row in empty:
+        bits[row, row % cols] = 1
+    return bits
+
+
+def _batch_from_bits(bits):
+    arr = np.asarray(bits, dtype=np.uint8)
+    fingerprints = []
+    for row in arr:
+        on_bits = np.flatnonzero(row).astype(int).tolist()
+        fingerprints.append(oefp.OEFP.from_on_bits(arr.shape[1], on_bits))
+    return oefp.OEFPBatch.from_fingerprints(fingerprints)
+
+
+_BATCH = _batch_from_bits(_random_bits(30, 64, seed=5))
 
 
 class _IndexOnly:
@@ -76,6 +98,18 @@ _CONTRACTS = {
     "select_representatives.k": (
         lambda v: oecluster.select_representatives([0, 1, 2], _DM, k=v),
         1, 1.5, -0.5),
+    "bitbirch.branching_factor": (
+        lambda v: oecluster.bitbirch(_BATCH, branching_factor=v),
+        50, 50.5, 0.5),
+    "bitbirch_recluster.branching_factor": (
+        lambda v: oecluster.bitbirch_recluster(_BATCH, branching_factor=v),
+        50, 50.5, 0.5),
+    "bitbirch_refine.branching_factor": (
+        lambda v: oecluster.bitbirch_refine(_BATCH, branching_factor=v),
+        50, 50.5, 0.5),
+    "bitbirch_refine.reassign_top_clusters": (
+        lambda v: oecluster.bitbirch_refine(_BATCH, reassign_top_clusters=v),
+        2, 2.5, -0.5),
 }
 
 
@@ -150,3 +184,33 @@ def test_agglomerative_reports_a_bad_linkage_before_a_float_n_clusters():
     with pytest.raises(ValueError, match="Unknown agglomerative linkage"):
         oecluster.agglomerative(_DM, n_clusters=2.5, distance_threshold=3.0,
                                 linkage="bogus")
+
+
+_BITBIRCH = {
+    "bitbirch": lambda **kw: oecluster.bitbirch(_BATCH, **kw),
+    "bitbirch_recluster": lambda **kw: oecluster.bitbirch_recluster(_BATCH, **kw),
+    "bitbirch_refine": lambda **kw: oecluster.bitbirch_refine(_BATCH, **kw),
+}
+
+
+@pytest.mark.parametrize("name", sorted(_BITBIRCH))
+def test_a_negative_num_threads_is_a_value_error(name):
+    with pytest.raises(ValueError, match="num_threads must be non-negative"):
+        _BITBIRCH[name](num_threads=-1)
+
+
+@pytest.mark.parametrize("name", sorted(_BITBIRCH))
+def test_a_num_threads_past_size_t_is_still_left_to_the_binding(name):
+    with pytest.raises(OverflowError):
+        _BITBIRCH[name](num_threads=2**64)
+
+
+def test_bitbirch_refine_refuses_a_negative_reassign_top_clusters():
+    with pytest.raises(ValueError,
+                       match="reassign_top_clusters must be non-negative"):
+        oecluster.bitbirch_refine(_BATCH, reassign_top_clusters=-1)
+
+
+def test_bitbirch_still_reports_threshold_before_a_float_branching_factor():
+    with pytest.raises(ValueError, match="threshold must be non-negative"):
+        oecluster.bitbirch(_BATCH, threshold=-1.0, branching_factor=50.5)

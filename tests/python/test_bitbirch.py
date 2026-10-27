@@ -516,8 +516,9 @@ def test_bitbirch_refuses_a_non_integer_num_threads(call, value):
 
 @pytest.mark.parametrize("call", _BITBIRCH_CALLS)
 def test_bitbirch_accepts_a_numpy_integer_or_index_only_num_threads(call):
-    """_IndexOnly reaches every coercion, so bitbirch_refine's second one,
-    which a refused value never reaches, cannot keep int() unnoticed."""
+    """_IndexOnly fails through int(), so it proves each entry point reads
+    num_threads through operator.index; bitbirch_refine reads it once for
+    both of its option structs."""
     batch = _batch_from_bits(_random_bits(30, 64, seed=5))
     expected = call(batch, num_threads=2).labels
     assert list(call(batch, num_threads=np.int64(2)).labels) == list(expected)
