@@ -1481,7 +1481,7 @@ class SymmetricDistanceMatrix(DistanceMatrix):
             # is a missing self-distance, and calling it a non-zero one would
             # send the caller to recompute rather than to impute or drop.
             # Every check below can then assume finite numbers.
-            if not np.all(np.isfinite(array)):
+            if not _gate._all_finite(array):
                 raise ValueError(
                     "distance matrix contains non-finite values; remove or "
                     "impute them before clustering")
@@ -2743,7 +2743,7 @@ def cdist(items_a, items_b, comparison, *,
     # computed and keeps its stamp; an unfiltered one -- cutoff absent,
     # negative, NaN or infinite -- is faithful and the data decides.
     if (facts['data_integrity'] == "nan_present" and not filtered
-            and bool(np.isfinite(output).all())):
+            and _gate._all_finite(output)):
         facts = dict(facts, data_integrity="complete")
 
     return CrossDistanceMatrix(

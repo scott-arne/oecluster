@@ -116,7 +116,7 @@ def _data_facts(subset, source_facts):
         if sparse:
             finite = not subset.storage._has_nonfinite()
         else:
-            finite = bool(np.isfinite(subset.condensed).all())
+            finite = _gate._all_finite(subset.condensed)
         facts["data_integrity"] = (_integrity_after_nan_exclusion(subset)
                                    if finite else "nan_present")
     return facts

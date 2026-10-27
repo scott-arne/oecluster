@@ -83,31 +83,56 @@ def facts_from_comparison(comparison_obj):
     return facts
 
 
-# Elements per ``np.isfinite`` call in :func:`_all_finite`. A module constant
-# so a test can shrink it.
+# The most elements one chunk from :func:`_chunks` holds. A module constant so
+# a test can shrink it.
 _FINITE_SCAN_CHUNK = 1 << 20
+
+
+def _chunks(values):
+    """
+    Yield ``(offset, chunk)`` pairs covering an array in C order.
+
+    Each chunk is a 1-D array of at most ``_FINITE_SCAN_CHUNK`` elements, and
+    ``offset`` is the C-order flat index of its first element, so the chunks
+    concatenated equal ``values.ravel(order="C")``. A C-contiguous array is
+    sliced as a flat view. Any other layout, a Fortran-ordered matrix
+    included, is read through a buffered ``np.nditer``, so no step copies
+    more than one chunk; ``ravel`` would copy such an array whole. A chunk is
+    valid only until the next one is requested.
+
+    :param values: Numpy array of any shape and layout.
+    """
+    chunk = _FINITE_SCAN_CHUNK
+    if values.flags.c_contiguous:
+        flat = values.reshape(-1)
+        for start in range(0, flat.size, chunk):
+            yield start, flat[start:start + chunk]
+        return
+    offset = 0
+    # refs_ok so an object array reaches the caller's ufunc, which then
+    # refuses it exactly as it would refuse the whole array.
+    with np.nditer(values,
+                   flags=["external_loop", "buffered", "zerosize_ok",
+                          "refs_ok"],
+                   order="C", buffersize=chunk) as iterator:
+        for block in iterator:
+            yield offset, block
+            offset += block.size
 
 
 def _all_finite(values):
     """
     Report whether every element of a real numeric array is finite.
 
-    The scan runs in chunks of ``_FINITE_SCAN_CHUNK`` elements, so its scratch
-    mask stays bounded however large the array is. A single
-    ``np.isfinite(values).all()`` first allocates one byte per element, which
-    can exhaust memory when loading or gating a matrix that itself fits.
+    The scan runs through :func:`_chunks`, so its scratch memory stays within
+    one chunk however large the array is and whatever its layout. A single
+    ``np.isfinite(values).all()`` first allocates one byte per element.
 
     :param values: Numpy array of a real numeric dtype, of any shape.
     :returns: True if no element is NaN or infinite; True for an empty array.
+    :raises TypeError: For a dtype ``np.isfinite`` refuses.
     """
-    # ``order="K"`` makes this a view rather than a copy for C- or
-    # F-contiguous input, which is what ``np.load`` returns and what dense
-    # ``.condensed`` is. Chunking the flat view rather than by rows keeps the
-    # bound for a matrix with one very long row.
-    flat = values.ravel(order="K")
-    chunk = _FINITE_SCAN_CHUNK
-    return all(np.isfinite(flat[start:start + chunk]).all()
-               for start in range(0, flat.size, chunk))
+    return all(np.isfinite(chunk).all() for _, chunk in _chunks(values))
 
 
 def _has_nonfinite(distance_matrix):

@@ -278,6 +278,22 @@ def test_a_finite_propagate_matrix_is_stamped_complete_and_clusters():
     oecluster.butina(dist, threshold=0.5)
 
 
+def test_cdist_re_checks_a_propagate_stamp_through_all_finite(monkeypatch):
+    from oecluster import _gate
+
+    calls = []
+    real = _gate._all_finite
+
+    def spy(values):
+        calls.append(values.shape)
+        return real(values)
+
+    monkeypatch.setattr(_gate, "_all_finite", spy)
+    dist = oecluster.cdist(_mols(), _mols(), "descriptor", missing="propagate")
+    assert calls
+    assert dist.data_integrity == "complete"
+
+
 def test_a_propagate_matrix_that_really_holds_a_nan_is_still_refused():
     """The half that proves the fix did not simply disable the refusal."""
     dist = oecluster.pdist(_missingness_mols(), "descriptor",
