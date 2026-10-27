@@ -13,7 +13,7 @@ import tracemalloc
 import numpy as np
 import oecluster
 import pytest
-from oecluster import _gate, _stability
+from oecluster import SymmetricDistanceMatrix, _gate, _stability, _upper_triangle
 
 _BOUND = 256 * 1024
 _CHUNK = 1024
@@ -186,3 +186,95 @@ def test_stability_scans_a_dense_subset_through_all_finite(monkeypatch):
         dense, {"data_integrity": "nan_present", "metric_probe": "not_run"})
     assert calls
     assert facts["data_integrity"] == "complete"
+
+
+_N = 1449  # 1449 * 1449 = 2,099,601 elements, above 2,097,152
+
+
+def _metric_square(n=_N, order="C", seed=1):
+    rng = np.random.default_rng(seed)
+    positions = rng.random(n)
+    square = np.abs(positions[:, None] - positions[None, :])
+    return np.asfortranarray(square) if order == "F" else square
+
+
+def _old_checks(square, condensed):
+    """The release-C value checks, for the controls."""
+    np.all(np.isfinite(square))
+    np.allclose(square, square.T, rtol=1e-5, atol=1e-8)
+    float(np.abs(condensed).max())
+    np.any(condensed < 0.0)
+
+
+@pytest.mark.parametrize("order", ["C", "F"])
+def test_the_square_value_checks_stay_within_the_bound(order, monkeypatch):
+    monkeypatch.setattr(_gate, "_FINITE_SCAN_CHUNK", _CHUNK)
+    square = _metric_square(order=order)
+    condensed = _upper_triangle(square)
+    assert _overhead(lambda: _old_checks(square, condensed)) > _BOUND
+    assert _overhead(lambda: SymmetricDistanceMatrix._check_condensed_values(
+        square, square, condensed)) <= _BOUND
+
+
+def test_the_condensed_value_checks_stay_within_the_bound(monkeypatch):
+    monkeypatch.setattr(_gate, "_FINITE_SCAN_CHUNK", _CHUNK)
+    condensed = np.random.default_rng(2).random(2_097_152)
+
+    def old():
+        np.all(np.isfinite(condensed))
+        np.any(condensed < 0.0)
+
+    assert _overhead(old) > _BOUND
+    assert _overhead(lambda: SymmetricDistanceMatrix._check_condensed_values(
+        condensed, None, condensed)) <= _BOUND
+
+
+@pytest.mark.parametrize("order", ["C", "F"])
+def test_the_upper_triangle_is_copied_without_index_arrays(order):
+    square = _metric_square(order=order)
+    output = _N * (_N - 1) // 2 * 8
+    old = _overhead(lambda: square[np.triu_indices(_N, k=1)])
+    new = _overhead(lambda: _upper_triangle(square))
+    assert old > output + _BOUND
+    assert new <= output + _BOUND
+    np.testing.assert_array_equal(_upper_triangle(square),
+                                  square[np.triu_indices(_N, k=1)])
+
+
+def test_from_condensed_refuses_both_mirrors_of_a_one_sided_tolerance(
+        monkeypatch):
+    a, b = 1.0, 1.00001001005006
+    assert np.isclose(a, b, rtol=1e-5, atol=1e-8)
+    assert not np.isclose(b, a, rtol=1e-5, atol=1e-8)
+    upper_a = np.array([[0.0, a], [b, 0.0]])
+    for chunk in (1, 1024):
+        monkeypatch.setattr(_gate, "_FINITE_SCAN_CHUNK", chunk)
+        for square in (upper_a, upper_a.T.copy()):
+            with pytest.raises(ValueError, match="must be symmetric"):
+                SymmetricDistanceMatrix.from_condensed(square)
+
+
+@pytest.mark.parametrize("chunk", [1, 3, 1024])
+def test_from_condensed_reports_the_same_first_failure(chunk, monkeypatch):
+    monkeypatch.setattr(_gate, "_FINITE_SCAN_CHUNK", chunk)
+    asymmetric_and_negative = np.array(
+        [[0.0, -0.5, 0.2], [-0.7, 0.0, 0.3], [0.2, 0.3, 0.0]])
+    diagonal_and_negative = np.array(
+        [[1.0, -0.5, -0.5], [-0.5, 1.0, -0.5], [-0.5, -0.5, 1.0]])
+    negative_last = np.array([0.1, 0.2, 0.3, 0.4, 0.5, -0.6])
+    with pytest.raises(ValueError, match="must be symmetric"):
+        SymmetricDistanceMatrix.from_condensed(asymmetric_and_negative)
+    with pytest.raises(ValueError, match="must have a zero diagonal"):
+        SymmetricDistanceMatrix.from_condensed(diagonal_and_negative)
+    with pytest.raises(ValueError, match="contains negative values"):
+        SymmetricDistanceMatrix.from_condensed(negative_last)
+
+
+def test_from_condensed_reads_a_strided_square_as_before():
+    square = _metric_square(n=40)
+    wide = np.zeros((40, 80))
+    wide[:, ::2] = square
+    strided = wide[:, ::2]
+    expected = SymmetricDistanceMatrix.from_condensed(square.copy())
+    got = SymmetricDistanceMatrix.from_condensed(strided)
+    np.testing.assert_array_equal(got.condensed, expected.condensed)

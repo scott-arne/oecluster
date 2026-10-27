@@ -1049,6 +1049,26 @@ def _correct_loaded_integrity(matrix, has_nonfinite):
         matrix._facts['data_integrity'] = "nan_present"
 
 
+def _upper_triangle(square):
+    """
+    Copy a square matrix's strict upper triangle into a condensed array.
+
+    Row by row, in the order ``np.triu_indices(n, k=1)`` gives, without that
+    function's two index arrays of ``n(n-1)/2`` int64 values each.
+
+    :param square: Square float64 array, any layout.
+    :returns: Contiguous float64 array of ``n(n-1)/2`` values.
+    """
+    n = square.shape[0]
+    condensed = np.empty(n * (n - 1) // 2, dtype=np.float64)
+    start = 0
+    for row in range(n - 1):
+        stop = start + n - 1 - row
+        condensed[start:stop] = square[row, row + 1:]
+        start = stop
+    return condensed
+
+
 class SymmetricDistanceMatrix(DistanceMatrix):
     """
     A symmetric (within-set) distance matrix produced by :func:`pdist`.
@@ -1454,7 +1474,7 @@ class SymmetricDistanceMatrix(DistanceMatrix):
                     f"{tuple(array.shape)}")
             n = array.shape[0]
             square = array
-            condensed = np.ascontiguousarray(array[np.triu_indices(n, k=1)])
+            condensed = _upper_triangle(array)
         elif array.ndim == 1:
             length = array.shape[0]
             n = round((1.0 + np.sqrt(1.0 + 8.0 * length)) / 2.0)
@@ -1477,75 +1497,8 @@ class SymmetricDistanceMatrix(DistanceMatrix):
                     f"labels length {len(labels)} != item count {n}")
 
         if check:
-            # The whole input, so a 2-D diagonal is measured too: a NaN there
-            # is a missing self-distance, and calling it a non-zero one would
-            # send the caller to recompute rather than to impute or drop.
-            # Every check below can then assume finite numbers.
-            if not _gate._all_finite(array):
-                raise ValueError(
-                    "distance matrix contains non-finite values; remove or "
-                    "impute them before clustering")
-            if square is not None:
-                # A stated tolerance that happens to equal np.allclose's
-                # defaults, not an inherited one. A tighter rtol=1e-9 was
-                # tried and refused ordinary float32 output: the Gram-trick
-                # euclidean that torch.cdist, faiss and cuML use adds the two
-                # squared norms in sequence, so d(i, j) and d(j, i) differ in
-                # the association order alone -- measured up to 1.99e-7
-                # relative, under two float32 ulp, across 150 configurations.
-                # 1e-5 is roughly 84 of those ulp, which leaves room for a
-                # worse-conditioned pipeline than any measured here.
-                #
-                # The cost is real and accepted: a float64 producer whose
-                # halves genuinely disagree at 1e-6 passes, and the lower one
-                # is then discarded unread. The input's dtype cannot separate
-                # the two cases -- the float32 matrix above arrives as
-                # float64, having been widened by a caller for unrelated
-                # reasons -- so a dtype-dependent tolerance would only make
-                # the same data refuse or pass by accident.
-                if not np.allclose(square, square.T, rtol=1e-5, atol=1e-8):
-                    raise ValueError("a 2-D distance matrix must be symmetric")
-                # The diagonal is discarded with the rest of the lower
-                # triangle, so this check is here to catch a matrix that is
-                # not a distance matrix at all -- not to police roundoff.
-                # Exact zero did the latter, and refused the same float32
-                # Gram-trick output the tolerance above was widened to accept:
-                # self-distances of 2.8e-3 against distances of 10.8 on the
-                # set the paired test builds.
-                #
-                # 3e-2 relative to the largest distance is the geometric
-                # midpoint of the two regimes, roughly 4.6x clear of each.
-                # Measured roundoff tops out at 6.6e-3 (offset 10, d = 128;
-                # it grows with the offset, because the trick cancels the
-                # squared norms against themselves). The cheapest real
-                # confusion measured is a caller who forgot to zero a diagonal
-                # of 1.0 against distances of order 7, at 1.4e-1; a similarity
-                # matrix sits at 1.2 and an RBF kernel at 5.5.
-                #
-                # Widening costs no safety here, and that is worth stating:
-                # zeroing the diagonal already admits the same numbers at any
-                # offset, so this check was never guarding precision. It only
-                # ever refused callers who had not pre-zeroed.
-                zero_diagonal_rtol = 3e-2
-                # ``if n`` because a 0x0 square has no diagonal to reduce over
-                # and ``max`` has no identity for an empty array.
-                diagonal = (float(np.abs(np.diagonal(square)).max())
-                            if n else 0.0)
-                # ``abs`` on the scale too, because the negative-value check
-                # runs below this one: a matrix of negative distances has to
-                # be reported as negative, not as a diagonal that failed a
-                # negative tolerance. With no distance to measure against
-                # (n < 2, or every distance zero) the only defensible
-                # tolerance is zero, which is what a zero scale gives.
-                scale = float(np.abs(condensed).max()) if condensed.size else 0.0
-                if diagonal > zero_diagonal_rtol * scale:
-                    raise ValueError(
-                        f"a 2-D distance matrix must have a zero diagonal, "
-                        f"within {zero_diagonal_rtol:g} of the largest "
-                        f"distance ({scale:g}); the largest self-distance is "
-                        f"{diagonal:g}")
-            if np.any(condensed < 0.0):
-                raise ValueError("distance matrix contains negative values")
+            SymmetricDistanceMatrix._check_condensed_values(
+                array, square, condensed)
 
         # is_distance, zero_self and triangle all stay "unknown" from
         # default_facts(). A zero diagonal, where there was one to check, is
@@ -1636,6 +1589,104 @@ class SymmetricDistanceMatrix(DistanceMatrix):
                         pass
                 raise
         return cls(storage, comparison_name, labels, copied, facts)
+
+    @staticmethod
+    def _check_condensed_values(array, square, condensed):
+        """
+        Refuse distances ``from_condensed`` cannot accept, in bounded memory.
+
+        Every scan runs through :func:`_gate._chunks`, and the symmetry check
+        compares tiles of at most ``_gate._FINITE_SCAN_CHUNK`` elements, so no
+        check allocates memory in proportion to the matrix.
+
+        :param array: The caller's input, 1-D or square, as float64.
+        :param square: ``array`` when it is square, else None.
+        :param condensed: The condensed distances.
+        :raises ValueError: On a non-finite value, an asymmetric or
+            non-zero-diagonal square, or a negative distance, in that order.
+        """
+        # The whole input, so a 2-D diagonal is measured too: a NaN there
+        # is a missing self-distance, and calling it a non-zero one would
+        # send the caller to recompute rather than to impute or drop.
+        # Every check below can then assume finite numbers.
+        if not _gate._all_finite(array):
+            raise ValueError(
+                "distance matrix contains non-finite values; remove or "
+                "impute them before clustering")
+        if square is not None:
+            # A stated tolerance that happens to equal np.allclose's
+            # defaults, not an inherited one. A tighter rtol=1e-9 was
+            # tried and refused ordinary float32 output: the Gram-trick
+            # euclidean that torch.cdist, faiss and cuML use adds the two
+            # squared norms in sequence, so d(i, j) and d(j, i) differ in
+            # the association order alone -- measured up to 1.99e-7
+            # relative, under two float32 ulp, across 150 configurations.
+            # 1e-5 is roughly 84 of those ulp, which leaves room for a
+            # worse-conditioned pipeline than any measured here.
+            #
+            # The cost is real and accepted: a float64 producer whose
+            # halves genuinely disagree at 1e-6 passes, and the lower one
+            # is then discarded unread. The input's dtype cannot separate
+            # the two cases -- the float32 matrix above arrives as
+            # float64, having been widened by a caller for unrelated
+            # reasons -- so a dtype-dependent tolerance would only make
+            # the same data refuse or pass by accident.
+            side = max(1, math.isqrt(_gate._FINITE_SCAN_CHUNK))
+            n = square.shape[0]
+            # Every tile, both triangles: np.allclose scales rtol by its
+            # second argument, so element (i, j) against (j, i) and the
+            # reverse are different tests, as they were over the whole
+            # matrix.
+            symmetric = all(
+                np.allclose(square[r:r + side, c:c + side],
+                            square[c:c + side, r:r + side].T,
+                            rtol=1e-5, atol=1e-8)
+                for r in range(0, n, side) for c in range(0, n, side))
+            if not symmetric:
+                raise ValueError("a 2-D distance matrix must be symmetric")
+            # The diagonal is discarded with the rest of the lower
+            # triangle, so this check is here to catch a matrix that is
+            # not a distance matrix at all -- not to police roundoff.
+            # Exact zero did the latter, and refused the same float32
+            # Gram-trick output the tolerance above was widened to accept:
+            # self-distances of 2.8e-3 against distances of 10.8 on the
+            # set the paired test builds.
+            #
+            # 3e-2 relative to the largest distance is the geometric
+            # midpoint of the two regimes, roughly 4.6x clear of each.
+            # Measured roundoff tops out at 6.6e-3 (offset 10, d = 128;
+            # it grows with the offset, because the trick cancels the
+            # squared norms against themselves). The cheapest real
+            # confusion measured is a caller who forgot to zero a diagonal
+            # of 1.0 against distances of order 7, at 1.4e-1; a similarity
+            # matrix sits at 1.2 and an RBF kernel at 5.5.
+            #
+            # Widening costs no safety here, and that is worth stating:
+            # zeroing the diagonal already admits the same numbers at any
+            # offset, so this check was never guarding precision. It only
+            # ever refused callers who had not pre-zeroed.
+            zero_diagonal_rtol = 3e-2
+            # ``if n`` because a 0x0 square has no diagonal to reduce over
+            # and ``max`` has no identity for an empty array.
+            diagonal = (float(np.abs(np.diagonal(square)).max())
+                        if n else 0.0)
+            # ``abs`` on the scale too, because the negative-value check
+            # runs below this one: a matrix of negative distances has to
+            # be reported as negative, not as a diagonal that failed a
+            # negative tolerance. With no distance to measure against
+            # (n < 2, or every distance zero) the only defensible
+            # tolerance is zero, which is what a zero scale gives.
+            scale = max((float(np.abs(chunk).max())
+                         for _, chunk in _gate._chunks(condensed)),
+                        default=0.0)
+            if diagonal > zero_diagonal_rtol * scale:
+                raise ValueError(
+                    f"a 2-D distance matrix must have a zero diagonal, "
+                    f"within {zero_diagonal_rtol:g} of the largest "
+                    f"distance ({scale:g}); the largest self-distance is "
+                    f"{diagonal:g}")
+        if any((chunk < 0.0).any() for _, chunk in _gate._chunks(condensed)):
+            raise ValueError("distance matrix contains negative values")
 
     @staticmethod
     def _validate_sparse_entries(rows, cols, values, num_samples, cutoff,
