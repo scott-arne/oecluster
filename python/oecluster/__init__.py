@@ -820,6 +820,36 @@ def _flag(value, argument_name):
     return bool(value)
 
 
+def _archive_count(data, key, subject):
+    """
+    Read a count an archive stores, as a non-negative integer scalar.
+
+    ``to_file`` writes every count as a 0-d int64, so this refuses only what
+    an edited or foreign archive could hold.
+
+    :param data: Open ``.npz`` archive, loaded with ``allow_pickle=False``.
+    :param key: The count's key.
+    :param subject: Prefix naming the archive kind in the message.
+    :returns: The count.
+    :raises ValueError: If the key cannot be read, or holds anything but a
+        0-d integer array with a value of at least 0.
+    """
+    try:
+        value = data[key]
+    except Exception as error:
+        # Whatever the read raises -- numpy's refusal of an object array when
+        # pickling is off, or a damaged zip member's BadZipFile, zlib.error or
+        # EOFError -- the count is unreadable, which is a malformed file.
+        raise ValueError(
+            f"{subject}: {key} must be a non-negative integer scalar, but "
+            f"it cannot be read: {error}") from error
+    if value.ndim != 0 or value.dtype.kind not in "iu" or value < 0:
+        raise ValueError(
+            f"{subject}: {key} must be a non-negative integer scalar, got "
+            f"{value!r}")
+    return int(value)
+
+
 def _fill_dense_storage(storage, condensed):
     """
     Copy a condensed distance array into a dense storage buffer in one pass.
@@ -1222,7 +1252,9 @@ class SymmetricDistanceMatrix(DistanceMatrix):
 
         :param path: Input file path.
         :returns: SymmetricDistanceMatrix instance.
-        :raises ValueError: If the file is a cross-distance matrix or malformed.
+        :raises ValueError: If the file is a cross-distance matrix or malformed,
+            including a missing count or one that is not a non-negative
+            integer scalar.
         """
         data = np.load(path, allow_pickle=False)
         if 'matrix_kind' in data:
@@ -1269,9 +1301,15 @@ class SymmetricDistanceMatrix(DistanceMatrix):
         # Accept the legacy ``num_items`` key so distance matrices saved before
         # the rename to ``num_samples`` still load.
         if 'num_samples' in data:
-            num_samples = int(data['num_samples'])
+            num_samples = _archive_count(data, 'num_samples',
+                                         "Malformed symmetric matrix")
+        elif 'num_items' in data:
+            num_samples = _archive_count(data, 'num_items',
+                                         "Malformed symmetric matrix")
         else:
-            num_samples = int(data['num_items'])
+            raise ValueError(
+                "Malformed symmetric matrix: missing required key "
+                "'num_samples'")
 
         if storage_kind == "sparse":
             storage = cls._sparse_storage_from_file(data, num_samples)
@@ -1679,7 +1717,15 @@ class SymmetricDistanceMatrix(DistanceMatrix):
             rows, cols, values, num_samples, cutoff,
             "Malformed symmetric matrix")
 
-        storage = SparseStorage(num_samples, cutoff)
+        try:
+            storage = SparseStorage(num_samples, cutoff)
+        except RuntimeError as error:
+            # The native size limit, re-raised as the malformed-file error
+            # from_file documents. The limit itself stays in the chained
+            # native error rather than being restated here.
+            raise ValueError(
+                f"Malformed symmetric matrix: SparseStorage refused "
+                f"num_samples {num_samples}") from error
         for i, j, value in zip(rows, cols, values):
             storage.Set(int(i), int(j), float(value))
         storage.Finalize()
@@ -1778,7 +1824,9 @@ class CrossDistanceMatrix(DistanceMatrix):
 
         :param path: Input file path.
         :returns: CrossDistanceMatrix instance.
-        :raises ValueError: If the file is not a cross-distance matrix or is malformed.
+        :raises ValueError: If the file is not a cross-distance matrix or is
+            malformed, including a count (``n_a`` or ``n_b``) that is not a
+            non-negative integer scalar.
         """
         data = np.load(path, allow_pickle=False)
         if 'matrix_kind' not in data or str(data['matrix_kind']) != "cross":
@@ -1790,8 +1838,8 @@ class CrossDistanceMatrix(DistanceMatrix):
                 raise ValueError(
                     f"Malformed cross matrix: missing required key {required!r}")
         matrix = data['matrix']
-        n_a = int(data['n_a'])
-        n_b = int(data['n_b'])
+        n_a = _archive_count(data, 'n_a', "Malformed cross matrix")
+        n_b = _archive_count(data, 'n_b', "Malformed cross matrix")
         if matrix.shape != (n_a, n_b):
             raise ValueError(
                 f"Malformed cross matrix: matrix shape {tuple(matrix.shape)} "
