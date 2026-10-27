@@ -1595,9 +1595,9 @@ class SymmetricDistanceMatrix(DistanceMatrix):
         """
         Refuse distances ``from_condensed`` cannot accept, in bounded memory.
 
-        Every scan runs through :func:`_gate._chunks`, and the symmetry check
-        compares tiles of at most ``_gate._FINITE_SCAN_CHUNK`` elements, so no
-        check allocates memory in proportion to the matrix.
+        Every full-length scan runs through :func:`_gate._chunks`, and the
+        symmetry check compares tiles of at most ``_gate._FINITE_SCAN_CHUNK``
+        elements; only the diagonal check reads all n diagonal elements at once.
 
         :param array: The caller's input, 1-D or square, as float64.
         :param square: ``array`` when it is square, else None.
