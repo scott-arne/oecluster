@@ -222,7 +222,7 @@ private:
 };
 
 /**
- * @brief Sparse storage backend that stores only distances below a cutoff.
+ * @brief Sparse storage backend that stores only distances at or below a cutoff.
  *
  * SparseStorage filters distances during Set() operations, storing only values
  * at or below the specified cutoff threshold. It uses per-thread buffers for

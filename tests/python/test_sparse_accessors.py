@@ -159,7 +159,7 @@ def test_stability_scans_a_sparse_subset_without_the_entry_list(monkeypatch):
     assert _stability._data_facts(clean, source)["data_integrity"] == "complete"
 
 
-def test_densifying_a_sparse_matrix_allocates_only_its_output(monkeypatch):
+def test_densifying_a_sparse_matrix_allocates_only_its_output():
     n = 600
     rng = np.random.default_rng(0)
     pairs = set()

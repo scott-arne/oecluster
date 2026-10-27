@@ -140,7 +140,7 @@ use scipy-compatible condensed indexing.
   the matrix fits in RAM and most distances are accessed.
 - `MMapStorage` — full condensed matrix backed by a memory-mapped file, for
   out-of-core datasets larger than RAM. The file persists and can be reloaded.
-- `SparseStorage` — stores only entries below a cutoff, for large sparse
+- `SparseStorage` — stores only entries at or below a cutoff, for large sparse
   distance graphs. It cannot serve complete pairwise distances, so workflows
   that need every distance must use dense or memory-mapped storage.
 

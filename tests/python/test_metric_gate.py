@@ -611,7 +611,7 @@ def _write_sparse_file(path, *, num_samples=3, cutoff=0.5, rows=(0,),
 
 
 class _PokedSparseStorage(oecluster.SparseStorage):
-    """A sparse storage whose entry list holds a pair ``Set`` will not store.
+    """A sparse storage whose entry columns hold a pair ``Set`` will not store.
 
     The test below used to poke the diagonal in through ``Set`` itself, which
     accepted it: the ``i != j`` precondition was a bare ``assert``, compiled out

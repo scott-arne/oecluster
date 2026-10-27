@@ -458,11 +458,13 @@ the SWIG-generated ones come from the C++ documentation, and a few are set in
 
    ::
 
-      Sparse storage backend that stores only distances below a cutoff.
+      Sparse storage backend that stores only distances at or below a cutoff.
 
-      Stores only non-zero entries (distances below a threshold) in a sparse
-      representation. Efficient for large, sparse distance graphs where most
-      pairwise distances exceed the cutoff.
+      Every value ``Set`` writes at or below the cutoff is kept, 0.0 included, and
+      a pair written twice keeps both values. NaN, which compares above no cutoff,
+      is kept too; a value above the cutoff, such as +inf under a finite cutoff, is
+      discarded. Efficient for large, sparse distance graphs where most pairwise
+      distances exceed the cutoff.
 
    .. py:method:: Cutoff(self)
 

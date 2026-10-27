@@ -711,11 +711,13 @@ persists after computation and can be reloaded.
 """
 
 SparseStorage.__doc__ = """
-Sparse storage backend that stores only distances below a cutoff.
+Sparse storage backend that stores only distances at or below a cutoff.
 
-Stores only non-zero entries (distances below a threshold) in a sparse
-representation. Efficient for large, sparse distance graphs where most
-pairwise distances exceed the cutoff.
+Every value ``Set`` writes at or below the cutoff is kept, 0.0 included, and
+a pair written twice keeps both values. NaN, which compares above no cutoff,
+is kept too; a value above the cutoff, such as +inf under a finite cutoff, is
+discarded. Efficient for large, sparse distance graphs where most pairwise
+distances exceed the cutoff.
 """
 
 PDistOptions.__doc__ = """
@@ -1130,8 +1132,10 @@ class SymmetricDistanceMatrix(DistanceMatrix):
         """
         Get the distance matrix as a scipy sparse COO matrix.
 
-        Only available if scipy is installed. For sparse storage, only non-zero
-        entries are included. For dense storage, all entries are converted.
+        Only available if scipy is installed. For sparse storage it holds
+        every stored entry, stored 0.0 values and superseded duplicates of a
+        pair included. For dense or memory-mapped storage it holds only the
+        upper-triangle pairs whose value is not equal to 0.0.
 
         :returns: scipy.sparse.coo_matrix in square form.
         :raises ImportError: If scipy is not installed.
