@@ -215,3 +215,18 @@ def test_an_os_error_reading_a_count_is_not_a_malformed_file(
     monkeypatch.setattr(np.lib.npyio.NpzFile, "__getitem__", getitem)
     with pytest.raises(OSError, match="I/O error"):
         oecluster.SymmetricDistanceMatrix.from_file(str(path))
+
+
+def test_a_count_member_without_the_npy_magic_is_refused(tmp_path):
+    import zipfile
+
+    path = _symmetric(tmp_path)
+    with zipfile.ZipFile(str(path)) as archive:
+        members = {name: archive.read(name) for name in archive.namelist()}
+    members["num_samples.npy"] = b"3"  # numpy hands back raw bytes for this
+    with zipfile.ZipFile(str(path), "w") as archive:
+        for name, content in members.items():
+            archive.writestr(name, content)
+    with pytest.raises(ValueError,
+                       match=f"Malformed symmetric matrix: num_samples {_PREFIX}"):
+        oecluster.SymmetricDistanceMatrix.from_file(str(path))

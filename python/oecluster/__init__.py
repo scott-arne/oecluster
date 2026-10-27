@@ -849,7 +849,8 @@ def _archive_count(data, key, subject):
         raise ValueError(
             f"{subject}: {key} must be a non-negative integer scalar, but "
             f"it cannot be read: {error}") from error
-    if value.ndim != 0 or value.dtype.kind not in "iu" or value < 0:
+    if (not isinstance(value, np.ndarray) or value.ndim != 0
+            or value.dtype.kind not in "iu" or value < 0):
         raise ValueError(
             f"{subject}: {key} must be a non-negative integer scalar, got "
             f"{value!r}")
@@ -1727,10 +1728,11 @@ class SymmetricDistanceMatrix(DistanceMatrix):
             storage = SparseStorage(num_samples, cutoff)
         except RuntimeError as error:
             # The constructor allocates nothing beyond the object
-            # (src/StorageBackend.cpp), so the only RuntimeError it raises in
-            # practice is its size refusal. That limit, re-raised as the malformed-file error
-            # from_file documents. The limit itself stays in the chained
-            # native error rather than being restated here.
+            # (src/StorageBackend.cpp), so the only RuntimeError it raises
+            # in practice is its size refusal. It is re-raised as the
+            # malformed-file error from_file documents; the limit itself
+            # stays in the chained native error rather than being restated
+            # here.
             raise ValueError(
                 f"Malformed symmetric matrix: SparseStorage refused "
                 f"num_samples {num_samples}") from error
