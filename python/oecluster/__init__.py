@@ -857,6 +857,36 @@ def _archive_count(data, key, subject):
     return int(value)
 
 
+def _sparse_columns(storage):
+    """
+    Return a sparse storage's raw entries as three numpy arrays.
+
+    They hold exactly what ``SparseStorage._entries()`` lists, in the same
+    order and with superseded duplicates, without a Python object per entry.
+
+    :param storage: A :class:`SparseStorage`.
+    :returns: int64 rows, int64 columns and float64 values, writable.
+    """
+    rows, cols, values = storage._entry_columns()
+    return (np.frombuffer(rows, dtype=np.int64),
+            np.frombuffer(cols, dtype=np.int64),
+            np.frombuffer(values, dtype=np.float64))
+
+
+def _sparse_dense(storage):
+    """
+    Return a sparse storage densified to its condensed float64 array.
+
+    Pairs it does not store are 0.0, and a later entry for a pair overwrites
+    an earlier one.
+
+    :param storage: A :class:`SparseStorage`.
+    :returns: Writable float64 array of ``NumPairs()`` values.
+    :raises MemoryError: If the dense array cannot be allocated.
+    """
+    return np.frombuffer(storage._densify(), dtype=np.float64)
+
+
 def _fill_dense_storage(storage, condensed):
     """
     Copy a condensed distance array into a dense storage buffer in one pass.

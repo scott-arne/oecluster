@@ -59,7 +59,9 @@
 #include "oefp/oefp.h"
 
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <limits>
 #include <optional>
 #include <oechem.h>
@@ -2202,6 +2204,71 @@ public:
             }
         }
         return false;
+    }
+
+    /** Return the entries _entries() lists as int64 row, int64 column and float64 value bytearrays. */
+    PyObject* _entry_columns() const {
+        const auto& entries = $self->Entries();
+        const size_t count = entries.size();
+        // Checked without forming the product, which could overflow.
+        if (count > static_cast<size_t>(PY_SSIZE_T_MAX) / sizeof(int64_t)) {
+            return PyErr_NoMemory();
+        }
+        const auto bytes = static_cast<Py_ssize_t>(count * sizeof(int64_t));
+        PyObject* rows = PyByteArray_FromStringAndSize(nullptr, bytes);
+        PyObject* cols = rows ? PyByteArray_FromStringAndSize(nullptr, bytes) : nullptr;
+        PyObject* values = cols ? PyByteArray_FromStringAndSize(nullptr, bytes) : nullptr;
+        PyObject* columns = values ? PyTuple_New(3) : nullptr;
+        if (columns == nullptr) {
+            Py_XDECREF(rows);
+            Py_XDECREF(cols);
+            Py_XDECREF(values);
+            return nullptr;
+        }
+        char* row_data = PyByteArray_AsString(rows);
+        char* col_data = PyByteArray_AsString(cols);
+        char* value_data = PyByteArray_AsString(values);
+        for (size_t k = 0; k < count; ++k) {
+            const auto& [row, col, value] = entries[k];
+            const auto row64 = static_cast<int64_t>(row);
+            const auto col64 = static_cast<int64_t>(col);
+            std::memcpy(row_data + k * sizeof(int64_t), &row64, sizeof(int64_t));
+            std::memcpy(col_data + k * sizeof(int64_t), &col64, sizeof(int64_t));
+            std::memcpy(value_data + k * sizeof(double), &value, sizeof(double));
+        }
+        PyTuple_SetItem(columns, 0, rows);
+        PyTuple_SetItem(columns, 1, cols);
+        PyTuple_SetItem(columns, 2, values);
+        return columns;
+    }
+
+    /** Return NumPairs() float64 values as a bytearray: zero-filled, then each entry written in order. */
+    PyObject* _densify() const {
+        const size_t num_pairs = $self->NumPairs();
+        // SparseStorage performs no byte check of its own, and NumPairs()
+        // can approach 2^63, so the product is never formed unchecked.
+        if (num_pairs > static_cast<size_t>(PY_SSIZE_T_MAX) / sizeof(double)) {
+            return PyErr_NoMemory();
+        }
+        PyObject* dense = PyByteArray_FromStringAndSize(
+            nullptr, static_cast<Py_ssize_t>(num_pairs * sizeof(double)));
+        if (dense == nullptr) {
+            return nullptr;
+        }
+        char* data = PyByteArray_AsString(dense);
+        std::memset(data, 0, num_pairs * sizeof(double));
+        const size_t n = $self->NumSamples();
+        try {
+            // In order, so a later write to the same pair wins.
+            for (const auto& [row, col, value] : $self->Entries()) {
+                const size_t offset = OECluster::pair_to_condensed(row, col, n);
+                std::memcpy(data + offset * sizeof(double), &value, sizeof(double));
+            }
+        } catch (...) {
+            Py_DECREF(dense);
+            throw;
+        }
+        return dense;
     }
 }
 
