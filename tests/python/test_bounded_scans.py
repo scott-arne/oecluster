@@ -1,9 +1,11 @@
 """Validation scans stay within a fixed memory bound.
 
 Bounds are measured with tracemalloc, which numpy reports its array
-allocations to. Each bound test is paired with a control that runs the code
-it replaced and shows the old code exceeds the same bound; a bound the old
-code also meets would prove nothing.
+allocations to. A bound test for a path that used to allocate in proportion
+to its input is paired with a control that runs the replaced code and shows
+it exceeds the same bound; a bound the old code also met would prove nothing.
+The C- and F-order ``_all_finite`` cases have no control: they guard layouts
+the replaced scan already met.
 """
 
 import tracemalloc
@@ -88,11 +90,43 @@ def test_all_finite_is_true_for_an_empty_array():
     assert _gate._all_finite(np.empty(0)) is True
 
 
+@pytest.mark.parametrize("dtype", [object, "U3"], ids=["object", "str"])
+def test_all_finite_refuses_an_empty_array_of_a_refused_dtype(dtype):
+    """``np.isfinite`` refuses by dtype, so an empty array is no exception."""
+    array = np.empty(0, dtype=dtype)
+    with pytest.raises(TypeError):
+        np.isfinite(array).all()
+    with pytest.raises(TypeError):
+        _gate._all_finite(array)
+    assert _gate._all_finite(np.empty(0)) is True
+
+
+def test_all_finite_scans_an_f_ordered_matrix_as_its_transpose(monkeypatch):
+    """Finiteness does not depend on order, so an F-ordered matrix is handed
+    to ``_chunks`` as its C-contiguous transpose, which takes the flat path
+    rather than the slower C-order ``nditer`` walk."""
+    seen = []
+    real = _gate._chunks
+
+    def spy(values):
+        seen.append(values.flags.c_contiguous)
+        return real(values)
+
+    monkeypatch.setattr(_gate, "_chunks", spy)
+    array = _small()["f_order_2d"]
+    assert not array.flags.c_contiguous
+    assert _gate._all_finite(array) is True
+    assert seen == [True]
+
+
 @pytest.mark.parametrize("name", sorted(set(_small()) - {"empty"}))
 @pytest.mark.parametrize("position", [0, 6, 7, -1])
 def test_all_finite_finds_a_nan_wherever_it_sits(name, position, monkeypatch):
     """Positions 0, 6, 7 and the last sit at a chunk start, a chunk end, the
-    next chunk's start and the last partial chunk when the chunk is 7."""
+    next chunk's start and the last partial chunk of a C-order scan with a
+    chunk of 7. The F-ordered layouts are scanned as their C-contiguous
+    transposes, whose chunk boundaries the C-order cases cover; for them this
+    shows only that the NaN is found."""
     monkeypatch.setattr(_gate, "_FINITE_SCAN_CHUNK", 7)
     assert _gate._all_finite(_small()[name]) is True
     assert _gate._all_finite(_with_nan(name, position)) is False

@@ -132,6 +132,14 @@ def _all_finite(values):
     :returns: True if no element is NaN or infinite; True for an empty array.
     :raises TypeError: For a dtype ``np.isfinite`` refuses.
     """
+    # No chunk is yielded for an empty array, so ask isfinite itself, which
+    # refuses by dtype and allocates nothing for zero elements.
+    if values.size == 0:
+        return bool(np.isfinite(values).all())
+    # The answer does not depend on order, and the transpose is a C-contiguous
+    # view that takes the flat path instead of a far slower nditer walk.
+    if values.flags.f_contiguous and not values.flags.c_contiguous:
+        values = values.T
     return all(np.isfinite(chunk).all() for _, chunk in _chunks(values))
 
 
