@@ -833,13 +833,19 @@ def _archive_count(data, key, subject):
     :returns: The count.
     :raises ValueError: If the key cannot be read, or holds anything but a
         0-d integer array with a value of at least 0.
+    :raises MemoryError: If reading the count runs out of memory; that is not
+        a malformed file, so it propagates unchanged.
     """
     try:
         value = data[key]
+    except MemoryError:
+        # Running out of memory says nothing about the file, and the CLI
+        # keeps the two apart the same way.
+        raise
     except Exception as error:
-        # Whatever the read raises -- numpy's refusal of an object array when
+        # Any other read error -- numpy's refusal of an object array when
         # pickling is off, or a damaged zip member's BadZipFile, zlib.error or
-        # EOFError -- the count is unreadable, which is a malformed file.
+        # EOFError -- means the count is unreadable, which is a malformed file.
         raise ValueError(
             f"{subject}: {key} must be a non-negative integer scalar, but "
             f"it cannot be read: {error}") from error

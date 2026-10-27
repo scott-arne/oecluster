@@ -184,3 +184,18 @@ def test_an_oversized_sparse_count_is_a_value_error_from_the_native_refusal(
         "Malformed symmetric matrix: SparseStorage refused num_samples "
         "4294967297")
     assert isinstance(info.value.__cause__, RuntimeError)
+
+
+def test_a_memory_error_reading_a_count_is_not_a_malformed_file(
+        tmp_path, monkeypatch):
+    path = _symmetric(tmp_path)
+    original = np.lib.npyio.NpzFile.__getitem__
+
+    def getitem(self, key):
+        if key == "num_samples":
+            raise MemoryError("simulated")
+        return original(self, key)
+
+    monkeypatch.setattr(np.lib.npyio.NpzFile, "__getitem__", getitem)
+    with pytest.raises(MemoryError, match="simulated"):
+        oecluster.SymmetricDistanceMatrix.from_file(str(path))
