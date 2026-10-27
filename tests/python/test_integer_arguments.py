@@ -214,3 +214,17 @@ def test_bitbirch_refine_refuses_a_negative_reassign_top_clusters():
 def test_bitbirch_still_reports_threshold_before_a_float_branching_factor():
     with pytest.raises(ValueError, match="threshold must be non-negative"):
         oecluster.bitbirch(_BATCH, threshold=-1.0, branching_factor=50.5)
+
+
+def test_bitbirch_refine_refuses_a_non_integer_reassign_ahead_of_num_threads():
+    with pytest.raises(TypeError):
+        oecluster.bitbirch_refine(_BATCH, reassign_top_clusters=None,
+                                  num_threads=-1)
+
+
+def test_bitbirch_refine_refuses_a_negative_reassign_ahead_of_redistribute():
+    with pytest.raises(ValueError,
+                       match="reassign_top_clusters must be non-negative"):
+        oecluster.bitbirch_refine(_BATCH, reassign_top_clusters=-1,
+                                  redistribute_largest_cluster=True,
+                                  singly=True)

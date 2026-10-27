@@ -4445,6 +4445,9 @@ def bitbirch_refine(fingerprints, *, threshold=0.65, branching_factor=50,
         raise ValueError("BitBirch branching_factor must be at least one")
     if tolerance < 0.0:
         raise ValueError("BitBirch tolerance must be non-negative")
+    # Its range check is an equality, which a non-integer can pass, so coercing
+    # and checking it here refuses a non-integer or negative value ahead of the
+    # checks below.
     reassign_top_clusters_int = operator.index(reassign_top_clusters)
     if reassign_top_clusters_int < 0:
         raise ValueError("BitBirch reassign_top_clusters must be non-negative")
