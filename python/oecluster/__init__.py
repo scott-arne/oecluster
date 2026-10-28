@@ -29,8 +29,8 @@ from typing import Any, ClassVar, NamedTuple
 
 import numpy as np
 
-__version__ = "5.28.0"
-__version_info__ = (5, 28, 0)
+__version__ = "5.29.0"
+__version_info__ = (5, 29, 0)
 
 
 _OPENEYE_COMPAT_PRELOAD_PATHS: list[str] = []

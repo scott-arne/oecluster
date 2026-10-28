@@ -2,6 +2,89 @@
 
 This file starts at 5.0.0; earlier releases are not recorded here.
 
+## [5.29.0] - 2026-10-27
+
+### Changed
+
+- **`dbscan`, `hdbscan`, `agglomerative`, `bitbirch`, `bitbirch_recluster`,
+  `bitbirch_refine`, `representative`, `rank_representatives` and
+  `select_representatives` raise `TypeError` for a float or a string in
+  thirteen integer parameters.** They now coerce these with `operator.index`,
+  where they used `int()`: `dbscan`'s `min_samples`; `hdbscan`'s
+  `min_cluster_size`, `min_samples` and `max_cluster_size`;
+  `agglomerative`'s `n_clusters`; the `branching_factor` of the three bitbirch
+  functions; `bitbirch_refine`'s `reassign_top_clusters`; each member of
+  `cluster` in the three representative functions; and
+  `select_representatives`' `k`. A float such as `min_samples=2.5` used to be
+  truncated to 2. A float below the parameter's minimum, such as
+  `min_samples=0.5`, used to raise the range check's `ValueError`, except for
+  a `cluster` member, `reassign_top_clusters`, and `agglomerative`'s
+  `n_clusters` alongside a `distance_threshold`, which had no lower bound
+  checked ahead of the conversion, so `-0.5` was truncated to 0. A string
+  already raised `TypeError` from the range check, except in those same
+  three, which parsed a numeric string such as `"2"` and raised `ValueError`
+  for any other. `None`, where it is not allowed, already raised `TypeError`.
+  Python bools and numpy integers are still accepted. On NumPy 2.3 and later
+  a `numpy.bool_` now raises `TypeError`; earlier NumPy reads it as 0 or 1
+  with a `DeprecationWarning`. A call with more than one invalid argument can
+  now report a different one first when one of them is a float, a value such
+  as a `Fraction` that compares like a number but has no `__index__`, or, in
+  `bitbirch_refine`, a non-integer or negative `reassign_top_clusters`.
+- `select_parameter` passes each grid value to the algorithm unchanged, so a
+  grid of floats over one of these parameters, such as `np.linspace(2, 10, 5)`
+  for `hdbscan`'s `min_cluster_size`, now raises `TypeError` where each value
+  used to be converted with `int()`.
+- On sparse storage, `.condensed` (which densifies the matrix), `.sparse` and
+  `to_file` read the stored entries natively, where each used to build a
+  Python list holding an `(i, j, value)` tuple for every stored entry. The
+  `oecluster` CLI's negative-distance check on a sparse input no longer
+  builds that list, and neither does `take`, which `cluster_stability` calls
+  for each resample, when it re-checks a proper subset of a sparse
+  `nan_present` matrix for non-finite values.
+- Several validation scans now test 1,048,576 values at a time, where each
+  used to allocate an array with an element for every value it checked: the
+  entry checks that `to_file` and `from_file` run on a sparse matrix;
+  `from_condensed`'s non-finite and negative-value checks and its search for
+  the largest distance, which its diagonal check measures against; `cdist`'s
+  check of a `nan_present` stamp against its result; `take`'s non-finite
+  re-check of a dense subset; and the kernel range check in `vendi_score` and
+  `logdet_diversity`, which allocated two such arrays at once under
+  `kernel='complement'`. On a `SymmetricDistanceMatrix`,
+  `vendi_score(order=2)` now stays within O(n) working memory, where the
+  range check made it O(n^2). `from_condensed`'s symmetry check compares a
+  square input with its transpose in tiles of at most 1,048,576 elements,
+  where `np.allclose` allocated several n x n temporaries, and
+  `from_condensed` copies a square input's upper triangle row by row, where
+  `np.triu_indices` allocated two int64 index arrays of n(n-1)/2 elements
+  each.
+
+### Fixed
+
+- `bitbirch`, `bitbirch_recluster` and `bitbirch_refine` refuse a negative
+  `num_threads` with `ValueError`, and `bitbirch_refine` refuses a negative
+  `reassign_top_clusters` with `ValueError`, where the binding raised
+  `OverflowError` for both. A `num_threads` too large for `size_t` still
+  raises `OverflowError`.
+- `SymmetricDistanceMatrix.from_file` and `CrossDistanceMatrix.from_file`,
+  which `load_distance_matrix` calls, refuse a count (`num_samples`, the
+  legacy `num_items`, `n_a` or `n_b`) that is not a non-negative integer
+  scalar, such as a float, a bool, a string, an object array, an array
+  rather than a scalar, or a negative value, with a `ValueError` naming the
+  key. A float count such as 2.5 used to be truncated, a bool or a numeric
+  string such as `"2"` was read as an integer, and a negative symmetric count
+  could raise `OverflowError`. A symmetric archive holding neither
+  `num_samples` nor `num_items` raises `ValueError`, where it raised
+  `KeyError`. A sparse archive whose count is above 4294967296, which
+  `SparseStorage` refuses on a 64-bit platform, raises `ValueError` chained
+  from the native `RuntimeError`, which used to escape on its own.
+- Documentation only: the `SparseStorage` docstring said it stores only
+  non-zero entries below its cutoff, and `SymmetricDistanceMatrix.sparse`'s
+  docstring said sparse storage yields only non-zero entries and dense
+  storage every entry. Sparse storage keeps zeros like any other value at or
+  below its cutoff, and `.sparse` returns every stored entry, superseded
+  duplicates of a pair included; on dense or memory-mapped storage it returns
+  only the upper-triangle pairs whose value is not 0.0.
+
 ## [5.28.0] - 2026-10-26
 
 ### Changed
