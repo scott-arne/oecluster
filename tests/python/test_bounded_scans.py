@@ -316,18 +316,40 @@ def test_sparse_entry_validation_stays_within_the_bound(monkeypatch):
 def test_sparse_entry_validation_reports_the_same_first_offender(
         chunk, monkeypatch):
     monkeypatch.setattr(_gate, "_FINITE_SCAN_CHUNK", chunk)
-    rows = np.array([0, 1, 2, 3, 3], dtype=np.int64)
-    cols = np.array([1, 2, 3, 3, 4], dtype=np.int64)
-    # Entry 3 is a bad pair; entry 4 is over the cutoff. The cutoff pass runs
-    # first, so entry 4 is reported, as before.
-    values = np.array([0.1, 0.2, 0.3, 0.4, 0.95])
+    # Entries 3 and 6 are bad pairs; entries 4 and 7 are over the cutoff. The
+    # cutoff pass runs over every entry first, so entry 4 is reported ahead of
+    # the earlier bad pair. Each pass has a second offender: at chunks 1 and 3
+    # it sits in a later chunk, and at 1024 in the same chunk as the first, so
+    # neither may be the one reported.
+    rows = np.array([0, 1, 2, 3, 0, 1, 7, 2, 3], dtype=np.int64)
+    cols = np.array([1, 2, 3, 3, 2, 3, 0, 4, 5], dtype=np.int64)
+    values = np.full(9, 0.1)
+    values[4] = 0.95
+    values[7] = 0.97
     with pytest.raises(ValueError, match="sparse entry 4 has value 0.95"):
         SymmetricDistanceMatrix._validate_sparse_entries(
-            rows, cols, values, 5, 0.9, "test")
-    values[4] = 0.5
+            rows, cols, values, 6, 0.9, "test")
+    values[[4, 7]] = 0.5
     with pytest.raises(ValueError, match=r"sparse entry 3 is \(3, 3\)"):
         SymmetricDistanceMatrix._validate_sparse_entries(
-            rows, cols, values, 5, 0.9, "test")
+            rows, cols, values, 6, 0.9, "test")
+
+
+@pytest.mark.parametrize("dtype", ["<U1", "S1", "M8[s]"])
+def test_sparse_entry_validation_refuses_an_empty_non_numeric_value_array(
+        dtype):
+    """The cutoff comparison refuses by dtype, so an empty array is no
+    exception, though the chunked scan yields no chunk for it."""
+    empty_indices = np.empty(0, dtype=np.int64)
+    values = np.array([], dtype=dtype)
+    with pytest.raises(TypeError):
+        np.greater(values, 0.9)
+    with pytest.raises(TypeError):
+        SymmetricDistanceMatrix._validate_sparse_entries(
+            empty_indices, empty_indices, values, 5, 0.9, "test")
+    SymmetricDistanceMatrix._validate_sparse_entries(
+        empty_indices, empty_indices, np.array([], dtype=np.float64), 5, 0.9,
+        "test")
 
 
 def _kernel_matrix(n=2049, seed=4):

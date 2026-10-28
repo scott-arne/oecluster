@@ -1738,8 +1738,13 @@ class SymmetricDistanceMatrix(DistanceMatrix):
         # off and every genuinely over-cutoff value was then silently dropped
         # by Set -- the exact reload-a-different-matrix failure this prevents.
         #
-        # Two chunked passes in the old order, so an over-cutoff entry is
-        # still reported ahead of a bad pair anywhere in the file.
+        # Two chunked passes, the cutoff pass over every entry first, so an
+        # over-cutoff entry is reported ahead of a bad pair at any position.
+        # _chunks yields nothing for an empty array, so an empty one is
+        # compared whole: that allocates nothing, and a dtype the comparison
+        # refuses raises the TypeError a non-empty array of it would.
+        if values.size == 0:
+            np.greater(values, cutoff)
         for offset, chunk in _gate._chunks(values):
             above = np.flatnonzero(chunk > cutoff)
             if above.size:
