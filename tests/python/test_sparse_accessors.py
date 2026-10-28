@@ -247,11 +247,22 @@ def test_densifying_a_sparse_matrix_leaves_untouched_pages_unbacked():
     # of its output passes the bound above; resident memory tells them apart.
     pytest.importorskip("resource")
     n = 10_000
-    pairs = [(k * 97, k * 97 + 1) for k in range(100)]
-    offsets = [n * i + j - ((i + 2) * (i + 1)) // 2 for i, j in pairs]
-    # 64 KiB apart, so each entry lands on its own page at any page size up
-    # to 64 KiB.
-    assert min(b - a for a, b in itertools.pairwise(offsets)) * 8 >= 65_536
+    # numpy asks Linux for transparent huge pages on large arrays, so one
+    # write can make a whole 2 MiB page resident. Each entry is therefore
+    # placed in its own 2 MiB range: pairs (i, i + 1) in row order, each the
+    # first whose condensed offset is at least 2 MiB + 8 bytes past the last.
+    spacing = (2 * 2**20 + 8) // 8
+    pairs, offsets = [], []
+    for i in range(n - 1):
+        offset = n * i + (i + 1) - ((i + 2) * (i + 1)) // 2
+        if not offsets or offset - offsets[-1] >= spacing:
+            pairs.append((i, i + 1))
+            offsets.append(offset)
+            if len(pairs) == 25:
+                break
+    assert len(pairs) == 25
+    assert min(b - a for a, b in itertools.pairwise(offsets)) * 8 >= (
+        2 * 2**20 + 8)
     script = _RESIDENCY_SCRIPT.format(n=n, pairs=pairs)
     result = subprocess.run([sys.executable, "-X", "faulthandler", "-c", script],
                             capture_output=True, text=True, timeout=120,
@@ -262,8 +273,8 @@ def test_densifying_a_sparse_matrix_leaves_untouched_pages_unbacked():
     bound = 128 * 2**20
     # ru_maxrss is a high-water mark, so a delta can only understate growth;
     # the densify is measured first so the control's peak cannot hide it.
-    # 100 touched pages are at most 6.25 MiB even with 64 KiB pages, while
-    # the output is about 381 MiB.
+    # 25 entries in distinct 2 MiB ranges make at most 50 MiB resident even
+    # as huge pages, while the output is about 381 MiB.
     assert m1 - m0 <= bound, report
     # The control writes all 381 MiB. If that does not exceed the bound, this
     # platform's ru_maxrss cannot see residency, and the test must not pass.
