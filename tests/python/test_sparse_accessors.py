@@ -223,6 +223,14 @@ import oecluster
 
 
 def peak():
+    # On Linux, exec keeps the parent's high-water mark in ru_maxrss, so a
+    # child of a large pytest process reads the parent's peak. VmHWM is this
+    # process's own.
+    if sys.platform.startswith("linux"):
+        with open("/proc/self/status") as status:
+            for line in status:
+                if line.startswith("VmHWM:"):
+                    return int(line.split()[1]) * 1024
     value = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     return value if sys.platform == "darwin" else value * 1024
 
@@ -271,11 +279,11 @@ def test_densifying_a_sparse_matrix_leaves_untouched_pages_unbacked():
     assert result.returncode == 0, report
     m0, m1, m2 = (int(value) for value in result.stdout.split())
     bound = 128 * 2**20
-    # ru_maxrss is a high-water mark, so a delta can only understate growth;
+    # Each reading is a high-water mark, so a delta can only understate growth;
     # the densify is measured first so the control's peak cannot hide it.
     # 25 entries in distinct 2 MiB ranges make at most 50 MiB resident even
     # as huge pages, while the output is about 381 MiB.
     assert m1 - m0 <= bound, report
     # The control writes all 381 MiB. If that does not exceed the bound, this
-    # platform's ru_maxrss cannot see residency, and the test must not pass.
+    # platform's reading cannot see residency, and the test must not pass.
     assert m2 - m1 > bound, report
