@@ -2,7 +2,7 @@
 
 This file starts at 5.0.0; earlier releases are not recorded here.
 
-## [5.29.0] - 2026-10-27
+## [5.29.0] - 2026-10-28
 
 ### Changed
 
