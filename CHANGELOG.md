@@ -34,13 +34,13 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   grid of floats over one of these parameters, such as `np.linspace(2, 10, 5)`
   for `hdbscan`'s `min_cluster_size`, now raises `TypeError` where each value
   used to be converted with `int()`.
-- Exporting (`.sparse`) and saving (`to_file`) a sparse matrix need less
-  peak memory. They read the stored entries natively, where each used to
-  build a Python list holding an `(i, j, value)` tuple for every stored
-  entry and keep it alive alongside the arrays it returned or wrote.
-  Densifying one (`.condensed`) no longer builds that list either, and
-  neither do the `oecluster` CLI's negative-distance check on a sparse input
-  or `take`, which `cluster_stability` calls for each resample, when it
+- Densifying (`.condensed`), exporting (`.sparse`) and saving (`to_file`) a
+  sparse matrix no longer keep a Python list holding an `(i, j, value)` tuple
+  for every stored entry alive alongside their output, and their peak memory
+  grows more slowly with the number of stored entries. They now read the
+  entries natively into numpy arrays. The `oecluster` CLI's negative-distance
+  check on a sparse input no longer builds that list either, and neither does
+  `take`, which `cluster_stability` calls for each resample, when it
   re-checks a proper subset of a sparse `nan_present` matrix for non-finite
   values.
 - Several validation scans now test 1,048,576 values at a time, where each
