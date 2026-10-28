@@ -1,6 +1,9 @@
 """Native sparse accessors, and the callers that read entries through them."""
 
+import itertools
 import math
+import subprocess
+import sys
 import tracemalloc
 
 import numpy as np
@@ -209,3 +212,59 @@ def test_densifying_a_sparse_matrix_allocates_its_output_columns_and_a_chunk(
     # Control: the old loop builds a Python tuple per entry.
     assert overhead(lambda: _old_densify(storage)) > bound
     assert overhead(lambda: matrix.condensed) <= bound
+
+
+_RESIDENCY_SCRIPT = """
+import resource
+import sys
+
+import numpy as np
+import oecluster
+
+
+def peak():
+    value = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return value if sys.platform == "darwin" else value * 1024
+
+
+storage = oecluster.SparseStorage({n}, 0.9)
+for i, j in {pairs}:
+    storage.Set(i, j, 0.5)
+storage.Finalize()
+matrix = oecluster.SymmetricDistanceMatrix(storage, "test")
+m0 = peak()
+condensed = matrix.condensed
+m1 = peak()
+control = np.empty(storage.NumPairs(), dtype=np.float64)
+control.fill(0.0)
+m2 = peak()
+print(m0, m1, m2)
+"""
+
+
+def test_densifying_a_sparse_matrix_leaves_untouched_pages_unbacked():
+    # tracemalloc counts allocated bytes, so a densify that writes every page
+    # of its output passes the bound above; resident memory tells them apart.
+    pytest.importorskip("resource")
+    n = 10_000
+    pairs = [(k * 97, k * 97 + 1) for k in range(100)]
+    offsets = [n * i + j - ((i + 2) * (i + 1)) // 2 for i, j in pairs]
+    # 64 KiB apart, so each entry lands on its own page at any page size up
+    # to 64 KiB.
+    assert min(b - a for a, b in itertools.pairwise(offsets)) * 8 >= 65_536
+    script = _RESIDENCY_SCRIPT.format(n=n, pairs=pairs)
+    result = subprocess.run([sys.executable, "-X", "faulthandler", "-c", script],
+                            capture_output=True, text=True, timeout=120,
+                            check=False)
+    report = (result.returncode, result.stdout, result.stderr[-2000:])
+    assert result.returncode == 0, report
+    m0, m1, m2 = (int(value) for value in result.stdout.split())
+    bound = 128 * 2**20
+    # ru_maxrss is a high-water mark, so a delta can only understate growth;
+    # the densify is measured first so the control's peak cannot hide it.
+    # 100 touched pages are at most 6.25 MiB even with 64 KiB pages, while
+    # the output is about 381 MiB.
+    assert m1 - m0 <= bound, report
+    # The control writes all 381 MiB. If that does not exceed the bound, this
+    # platform's ru_maxrss cannot see residency, and the test must not pass.
+    assert m2 - m1 > bound, report
