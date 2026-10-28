@@ -34,13 +34,15 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   grid of floats over one of these parameters, such as `np.linspace(2, 10, 5)`
   for `hdbscan`'s `min_cluster_size`, now raises `TypeError` where each value
   used to be converted with `int()`.
-- On sparse storage, `.condensed` (which densifies the matrix), `.sparse` and
-  `to_file` read the stored entries natively, where each used to build a
-  Python list holding an `(i, j, value)` tuple for every stored entry. The
-  `oecluster` CLI's negative-distance check on a sparse input no longer
-  builds that list, and neither does `take`, which `cluster_stability` calls
-  for each resample, when it re-checks a proper subset of a sparse
-  `nan_present` matrix for non-finite values.
+- Exporting (`.sparse`) and saving (`to_file`) a sparse matrix need less
+  peak memory. They read the stored entries natively, where each used to
+  build a Python list holding an `(i, j, value)` tuple for every stored
+  entry and keep it alive alongside the arrays it returned or wrote.
+  Densifying one (`.condensed`) no longer builds that list either, and
+  neither do the `oecluster` CLI's negative-distance check on a sparse input
+  or `take`, which `cluster_stability` calls for each resample, when it
+  re-checks a proper subset of a sparse `nan_present` matrix for non-finite
+  values.
 - Several validation scans now test 1,048,576 values at a time, where each
   used to allocate an array with an element for every value it checked: the
   entry checks that `to_file` and `from_file` run on a sparse matrix;
@@ -77,13 +79,8 @@ This file starts at 5.0.0; earlier releases are not recorded here.
   `KeyError`. A sparse archive whose count is above 4294967296, which
   `SparseStorage` refuses on a 64-bit platform, raises `ValueError` chained
   from the native `RuntimeError`, which used to escape on its own.
-- Documentation only: the `SparseStorage` docstring said it stores only
-  non-zero entries below its cutoff, and `SymmetricDistanceMatrix.sparse`'s
-  docstring said sparse storage yields only non-zero entries and dense
-  storage every entry. Sparse storage keeps zeros like any other value at or
-  below its cutoff, and `.sparse` returns every stored entry, superseded
-  duplicates of a pair included; on dense or memory-mapped storage it returns
-  only the upper-triangle pairs whose value is not 0.0.
+- Documentation only: `SymmetricDistanceMatrix.sparse` and `SparseStorage`
+  now say what they hold, and the API reference page was regenerated.
 
 ## [5.28.0] - 2026-10-26
 
