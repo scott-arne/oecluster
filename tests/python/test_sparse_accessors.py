@@ -6,7 +6,7 @@ import tracemalloc
 import numpy as np
 import oecluster
 import pytest
-from oecluster import _cli_input, _sparse_columns, _sparse_dense, _stability
+from oecluster import _cli_input, _gate, _sparse_columns, _sparse_dense, _stability
 
 
 def _storage(n, cutoff, entries):
@@ -64,7 +64,6 @@ def test_the_accessors_return_bytearrays_and_writable_arrays():
     columns = storage._entry_columns()
     assert isinstance(columns, tuple) and len(columns) == 3
     assert all(isinstance(column, bytearray) for column in columns)
-    assert isinstance(storage._densify(), bytearray)
     assert all(array.flags.writeable for array in _sparse_columns(storage))
     assert _sparse_dense(storage).flags.writeable
 
@@ -78,11 +77,26 @@ def test_entry_columns_carry_an_index_above_32_bits():
     assert storage._entries() == [(0, n - 1, 0.5)]
 
 
-def test_densify_refuses_a_pair_count_no_bytearray_can_hold():
+def test_densify_refuses_a_pair_count_no_array_can_hold():
     storage = oecluster.SparseStorage(2**32, 0.9)
     storage.Finalize()
-    with pytest.raises(MemoryError):
-        storage._densify()
+    with pytest.raises(Exception) as expected:
+        np.zeros(storage.NumPairs(), dtype=np.float64)
+    with pytest.raises(type(expected.value)):
+        _sparse_dense(storage)
+
+
+@pytest.mark.parametrize("chunk", [2, 1024])
+def test_densify_keeps_the_last_entry_for_a_pair(chunk, monkeypatch):
+    # With a chunk of 2 the duplicates of each pair fall in different
+    # chunks; with 1024 they share one.
+    monkeypatch.setattr(_gate, "_FINITE_SCAN_CHUNK", chunk)
+    storage = _storage(4, 0.9, [(0, 1, math.nan), (2, 3, 0.2), (0, 1, 0.3),
+                                (1, 3, 0.4), (3, 2, 0.5)])
+    dense = _sparse_dense(storage)
+    np.testing.assert_array_equal(dense, _old_densify(storage))
+    assert dense[0] == 0.3  # pair (0, 1)
+    assert dense[5] == 0.5  # pair (2, 3)
 
 
 def _refuse_entry_list(monkeypatch):
@@ -159,7 +173,14 @@ def test_stability_scans_a_sparse_subset_without_the_entry_list(monkeypatch):
     assert _stability._data_facts(clean, source)["data_integrity"] == "complete"
 
 
-def test_densifying_a_sparse_matrix_allocates_only_its_output():
+def test_densifying_a_sparse_matrix_allocates_its_output_columns_and_a_chunk(
+        monkeypatch):
+    # The default chunk holds more entries than this test stores, so the
+    # whole scatter would be one chunk and the bound could not tell a
+    # chunked scatter from an unchunked one. With 1024 entries, as in
+    # test_bounded_scans.py, a chunk's scratch of about 65 bytes an entry
+    # stays inside the 256 KiB allowance.
+    monkeypatch.setattr(_gate, "_FINITE_SCAN_CHUNK", 1024)
     n = 600
     rng = np.random.default_rng(0)
     pairs = set()
@@ -169,7 +190,10 @@ def test_densifying_a_sparse_matrix_allocates_only_its_output():
             pairs.add((i, j))
     storage = _storage(n, 0.9, [(i, j, 0.5) for i, j in sorted(pairs)])
     output = storage.NumPairs() * 8
-    bound = output + 256 * 1024
+    # The output, the int64 row and column and float64 value columns
+    # _entry_columns() returns, and the scratch of one chunk.
+    columns = len(pairs) * 24
+    bound = output + columns + 256 * 1024
 
     def overhead(call):
         tracemalloc.start()

@@ -158,8 +158,8 @@ def _has_nonfinite(distance_matrix):
     # no Python list is built, and not through ``.condensed``:
     # for a sparse matrix ``.condensed`` is a densified copy cached on first
     # access, so it answers for a snapshot the algorithms never read, while
-    # costing a Python loop over every pair and seeding a cache that then
-    # silently diverges from the storage. The entry list is deliberately left
+    # allocating n(n-1)/2 floats and seeding a cache that then silently
+    # diverges from the storage. The entry list is deliberately left
     # un-deduplicated -- ``ThresholdGraph`` tests every tuple ``Entries()``
     # returns against the threshold, superseded duplicates included, so the raw
     # list is exactly what the algorithms see, while ``Get`` reports only the

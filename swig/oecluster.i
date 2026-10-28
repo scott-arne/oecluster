@@ -2241,35 +2241,6 @@ public:
         PyTuple_SetItem(columns, 2, values);
         return columns;
     }
-
-    /** Return NumPairs() float64 values as a bytearray: zero-filled, then each entry written in order. */
-    PyObject* _densify() const {
-        const size_t num_pairs = $self->NumPairs();
-        // SparseStorage performs no byte check of its own, and NumPairs()
-        // can approach 2^63, so the product is never formed unchecked.
-        if (num_pairs > static_cast<size_t>(PY_SSIZE_T_MAX) / sizeof(double)) {
-            return PyErr_NoMemory();
-        }
-        PyObject* dense = PyByteArray_FromStringAndSize(
-            nullptr, static_cast<Py_ssize_t>(num_pairs * sizeof(double)));
-        if (dense == nullptr) {
-            return nullptr;
-        }
-        char* data = PyByteArray_AsString(dense);
-        std::memset(data, 0, num_pairs * sizeof(double));
-        const size_t n = $self->NumSamples();
-        try {
-            // In order, so a later write to the same pair wins.
-            for (const auto& [row, col, value] : $self->Entries()) {
-                const size_t offset = OECluster::pair_to_condensed(row, col, n);
-                std::memcpy(data + offset * sizeof(double), &value, sizeof(double));
-            }
-        } catch (...) {
-            Py_DECREF(dense);
-            throw;
-        }
-        return dense;
-    }
 }
 
 // ============================================================================

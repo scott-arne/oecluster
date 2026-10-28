@@ -880,13 +880,37 @@ def _sparse_dense(storage):
     Return a sparse storage densified to its condensed float64 array.
 
     Pairs it does not store are 0.0, and a later entry for a pair overwrites
-    an earlier one.
+    an earlier one. The output comes from ``np.zeros``, which the operating
+    system zeroes lazily, so only the pages an entry lands on are touched;
+    the scratch beyond it is the entry columns plus one chunk.
 
     :param storage: A :class:`SparseStorage`.
     :returns: Writable float64 array of ``NumPairs()`` values.
-    :raises MemoryError: If the dense array cannot be allocated.
+    :raises ValueError: If ``NumPairs()`` float64 values exceed numpy's
+        maximum array size.
+    :raises MemoryError: If the dense array, the entry columns or a chunk's
+        scratch cannot be allocated.
     """
-    return np.frombuffer(storage._densify(), dtype=np.float64)
+    n = storage.NumSamples()
+    dense = np.zeros(storage.NumPairs(), dtype=np.float64)
+    rows, cols, values = _sparse_columns(storage)
+    for offset, chunk_rows in _gate._chunks(rows):
+        stop = offset + chunk_rows.size
+        lo = np.minimum(chunk_rows, cols[offset:stop])
+        hi = np.maximum(chunk_rows, cols[offset:stop])
+        # int64 arithmetic wraps silently, but it cannot here: the dense
+        # array was allocated, so 8 * n * (n - 1) / 2 fits in an int64, and
+        # with lo < hi < n no intermediate below exceeds n * (n - 1).
+        index = n * lo + hi - ((lo + 2) * (lo + 1)) // 2
+        # numpy does not promise which of two writes to one element lands in
+        # a single fancy-index assignment, so keep only the last entry for a
+        # pair within the chunk; chunks are written in entry order.
+        last, position = np.unique(index[::-1], return_index=True)
+        dense[last] = values[offset:stop][::-1][position]
+        # Released here, or they would stay alive while the next chunk's
+        # arrays are built.
+        del lo, hi, index, last, position
+    return dense
 
 
 def _fill_dense_storage(storage, condensed):
