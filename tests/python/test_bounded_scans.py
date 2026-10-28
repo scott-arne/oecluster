@@ -8,12 +8,19 @@ The C- and F-order ``_all_finite`` cases have no control: they guard layouts
 the replaced scan already met.
 """
 
+import re
 import tracemalloc
 
 import numpy as np
 import oecluster
 import pytest
-from oecluster import SymmetricDistanceMatrix, _gate, _stability, _upper_triangle
+from oecluster import (
+    SymmetricDistanceMatrix,
+    _gate,
+    _require_kernel_distances,
+    _stability,
+    _upper_triangle,
+)
 
 _BOUND = 256 * 1024
 _CHUNK = 1024
@@ -278,3 +285,112 @@ def test_from_condensed_reads_a_strided_square_as_before():
     expected = SymmetricDistanceMatrix.from_condensed(square.copy())
     got = SymmetricDistanceMatrix.from_condensed(strided)
     np.testing.assert_array_equal(got.condensed, expected.condensed)
+
+
+_ENTRIES = 1_048_576
+
+
+def _valid_entries(n=2048, count=_ENTRIES, seed=3):
+    rng = np.random.default_rng(seed)
+    rows = rng.integers(0, n - 1, size=count).astype(np.int64)
+    cols = rows + 1
+    values = rng.random(count) * 0.5
+    return rows, cols, values, n
+
+
+def test_sparse_entry_validation_stays_within_the_bound(monkeypatch):
+    monkeypatch.setattr(_gate, "_FINITE_SCAN_CHUNK", _CHUNK)
+    rows, cols, values, n = _valid_entries()
+
+    def old():
+        np.flatnonzero(values > 0.9)
+        np.flatnonzero((rows < 0) | (cols < 0) | (rows >= n) | (cols >= n)
+                       | (rows == cols))
+
+    assert _overhead(old) > _BOUND
+    assert _overhead(lambda: SymmetricDistanceMatrix._validate_sparse_entries(
+        rows, cols, values, n, 0.9, "test")) <= _BOUND
+
+
+@pytest.mark.parametrize("chunk", [1, 3, 1024])
+def test_sparse_entry_validation_reports_the_same_first_offender(
+        chunk, monkeypatch):
+    monkeypatch.setattr(_gate, "_FINITE_SCAN_CHUNK", chunk)
+    rows = np.array([0, 1, 2, 3, 3], dtype=np.int64)
+    cols = np.array([1, 2, 3, 3, 4], dtype=np.int64)
+    # Entry 3 is a bad pair; entry 4 is over the cutoff. The cutoff pass runs
+    # first, so entry 4 is reported, as before.
+    values = np.array([0.1, 0.2, 0.3, 0.4, 0.95])
+    with pytest.raises(ValueError, match="sparse entry 4 has value 0.95"):
+        SymmetricDistanceMatrix._validate_sparse_entries(
+            rows, cols, values, 5, 0.9, "test")
+    values[4] = 0.5
+    with pytest.raises(ValueError, match=r"sparse entry 3 is \(3, 3\)"):
+        SymmetricDistanceMatrix._validate_sparse_entries(
+            rows, cols, values, 5, 0.9, "test")
+
+
+def _kernel_matrix(n=2049, seed=4):
+    values = np.random.default_rng(seed).random(n * (n - 1) // 2) * 0.9
+    return SymmetricDistanceMatrix.from_condensed(values, check=False)
+
+
+@pytest.mark.parametrize("kernel", ["complement", "laplacian"])
+def test_the_kernel_range_check_stays_within_the_bound(kernel, monkeypatch):
+    monkeypatch.setattr(_gate, "_FINITE_SCAN_CHUNK", _CHUNK)
+    matrix = _kernel_matrix()
+    condensed = matrix.condensed
+
+    def old():
+        mask = condensed < 0.0
+        if kernel == "complement":
+            mask |= condensed > 1.0
+        mask.any()
+
+    assert _overhead(old) > _BOUND
+    assert _overhead(lambda: _require_kernel_distances(
+        matrix, kernel, "vendi_score")) <= _BOUND
+
+
+@pytest.mark.parametrize("chunk", [1, 3, 1024])
+@pytest.mark.parametrize("position, value, kernel", [
+    (0, -0.1, "laplacian"), (2, 1.5, "complement"), (5, -0.2, "complement"),
+])
+def test_the_kernel_range_check_names_the_same_first_pair(
+        chunk, position, value, kernel, monkeypatch):
+    monkeypatch.setattr(_gate, "_FINITE_SCAN_CHUNK", chunk)
+    values = np.full(6, 0.5)
+    values[position] = value
+    if position != 5:
+        values[5] = -0.3  # a later offender must not be the one reported
+    matrix = SymmetricDistanceMatrix.from_condensed(values, check=False)
+    pairs = {0: "d(0, 1)", 2: "d(0, 3)", 5: "d(2, 3)"}
+    with pytest.raises(ValueError, match=re.escape(f"{pairs[position]} = {value!r}")):
+        _require_kernel_distances(matrix, kernel, "vendi_score")
+
+
+def _spy_on_chunks(monkeypatch):
+    calls = []
+    real = _gate._chunks
+
+    def spy(values):
+        calls.append(values.shape)
+        return real(values)
+
+    monkeypatch.setattr(_gate, "_chunks", spy)
+    return calls
+
+
+def test_sparse_entry_validation_scans_through_chunks(monkeypatch):
+    rows, cols, values, n = _valid_entries(count=10)
+    calls = _spy_on_chunks(monkeypatch)
+    SymmetricDistanceMatrix._validate_sparse_entries(
+        rows, cols, values, n, 0.9, "test")
+    assert calls
+
+
+def test_the_kernel_range_check_scans_through_chunks(monkeypatch):
+    matrix = _kernel_matrix(n=10)
+    calls = _spy_on_chunks(monkeypatch)
+    _require_kernel_distances(matrix, "complement", "vendi_score")
+    assert calls

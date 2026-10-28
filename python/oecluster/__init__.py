@@ -1737,22 +1737,29 @@ class SymmetricDistanceMatrix(DistanceMatrix):
         # ``nan > cutoff`` is False, so one NaN entry switched the whole check
         # off and every genuinely over-cutoff value was then silently dropped
         # by Set -- the exact reload-a-different-matrix failure this prevents.
-        above = np.flatnonzero(values > cutoff)
-        if above.size:
-            first = int(above[0])
-            raise ValueError(
-                f"{subject}: sparse entry {first} has value "
-                f"{float(values[first])}, above the cutoff {cutoff}")
+        #
+        # Two chunked passes in the old order, so an over-cutoff entry is
+        # still reported ahead of a bad pair anywhere in the file.
+        for offset, chunk in _gate._chunks(values):
+            above = np.flatnonzero(chunk > cutoff)
+            if above.size:
+                first = offset + int(above[0])
+                raise ValueError(
+                    f"{subject}: sparse entry {first} has value "
+                    f"{float(values[first])}, above the cutoff {cutoff}")
 
-        bad = np.flatnonzero(
-            (rows < 0) | (cols < 0) | (rows >= num_samples)
-            | (cols >= num_samples) | (rows == cols))
-        if bad.size:
-            first = int(bad[0])
-            raise ValueError(
-                f"{subject}: sparse entry {first} is "
-                f"({int(rows[first])}, {int(cols[first])}), not a pair of "
-                f"distinct indices below {num_samples}")
+        for offset, chunk_rows in _gate._chunks(rows):
+            chunk_cols = cols[offset:offset + chunk_rows.size]
+            bad = np.flatnonzero(
+                (chunk_rows < 0) | (chunk_cols < 0)
+                | (chunk_rows >= num_samples) | (chunk_cols >= num_samples)
+                | (chunk_rows == chunk_cols))
+            if bad.size:
+                first = offset + int(bad[0])
+                raise ValueError(
+                    f"{subject}: sparse entry {first} is "
+                    f"({int(rows[first])}, {int(cols[first])}), not a pair of "
+                    f"distinct indices below {num_samples}")
 
     @staticmethod
     def _sparse_storage_from_file(data, num_samples):
@@ -7433,25 +7440,27 @@ def _require_kernel_distances(matrix, kernel_key, caller):
         Laplacian distance, naming the first such pair.
     """
     condensed = np.asarray(matrix.condensed)
-    # A boolean mask and argmax, not flatnonzero: an input that is wrong
-    # throughout (distances above 1 under the complement kernel) would
-    # otherwise allocate an int64 index for every entry.
-    mask = condensed < 0.0
-    if kernel_key == "complement":
-        mask |= condensed > 1.0
-    if not mask.any():
-        return
-    index = int(np.argmax(mask))
-    row, column = _condensed_pair(matrix.num_samples, index)
-    value = float(condensed[index])
-    if kernel_key == "complement":
+    upper_bound = kernel_key == "complement"
+    for offset, chunk in _gate._chunks(condensed):
+        # A boolean mask and argmax per chunk, not flatnonzero: a chunk that
+        # is wrong throughout (distances above 1 under the complement kernel)
+        # would otherwise allocate an int64 index for every entry in it.
+        mask = chunk < 0.0
+        if upper_bound:
+            mask |= chunk > 1.0
+        if not mask.any():
+            continue
+        index = offset + int(np.argmax(mask))
+        row, column = _condensed_pair(matrix.num_samples, index)
+        value = float(condensed[index])
+        if upper_bound:
+            raise ValueError(
+                f"{caller}() kernel='complement' requires distances in "
+                f"[0, 1], but d({row}, {column}) = {value!r}; use "
+                "kernel='laplacian' for other distances")
         raise ValueError(
-            f"{caller}() kernel='complement' requires distances in [0, 1], "
-            f"but d({row}, {column}) = {value!r}; use kernel='laplacian' for "
-            "other distances")
-    raise ValueError(
-        f"{caller}() kernel='laplacian' requires non-negative distances, "
-        f"but d({row}, {column}) = {value!r}")
+            f"{caller}() kernel='laplacian' requires non-negative distances, "
+            f"but d({row}, {column}) = {value!r}")
 
 
 def _require_exact_size(size, max_exact, caller):

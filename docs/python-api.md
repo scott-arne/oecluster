@@ -3021,12 +3021,13 @@ its items (`mcs`) costs O(n) per clone.
 
 The table's figures are for the native scoring pass. On the
 `SymmetricDistanceMatrix` path, the Python wrapper first validates the stored
-distances in two full passes over the n(n-1)/2 entries: the gate's non-finite
-check and the kernel range check. The non-finite check scans in fixed-size
-chunks, but the range check allocates a temporary boolean array of n(n-1)/2
-bytes, two at once under the complement kernel, so order 2 on a matrix still
-uses O(n^2) transient memory even though its scoring pass is O(n). The
-comparison and named-item paths do not have this cost.
+distances in two passes over the n(n-1)/2 entries: the gate's non-finite
+check and the kernel range check. Both scan in fixed-size chunks, so their
+temporaries do not grow with n, and both read a view of the matrix's storage
+rather than a copy (sparse storage is refused before either runs). Order 2 on
+a matrix therefore stays within the table's O(n) working memory. The
+comparison and named-item paths do not run these passes; native code checks
+each distance as it reads it.
 
 ### Which exception you get
 
